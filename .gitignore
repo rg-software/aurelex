@@ -1,0 +1,33 @@
+# Gradle / Android
+.gradle/
+build/
+local.properties
+captures/
+.externalNativeBuild/
+.cxx/
+*.apk
+*.aab
+*.keystore
+!debug.keystore
+*.jks
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Native / Qt
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+*.so
+*.o
+*.a
+
+# Vcpkg / toolchain cache
+vcpkg_installed/
