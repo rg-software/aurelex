@@ -1,0 +1,19 @@
+NOTICE
+======
+
+Aurelex is an Android port of goldendict-ng.
+
+- Upstream project: https://github.com/xiaoyifang/goldendict-ng
+- Upstream license: GPLv3 (see `LICENSE`, which is the unmodified GPLv3 text)
+  as required by the upstream copyright holders.
+
+Aurelex is distributed under the GNU General Public License, version 3
+(or, at your option, any later version). It incorporates the goldendict-ng
+dictionary engine in modified/native-build form; therefore the combined
+work is licensed under GPLv3.
+
+Documentation, planning artifacts, and project metadata in this repository
+are also licensed under GPLv3, unless a file states otherwise.
+
+Dictionary files you bring (e.g. `.mdx`, `.dsl`, `.ifo`) are your own data;
+Aurelex never uploads them.

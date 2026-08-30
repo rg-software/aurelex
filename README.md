@@ -54,4 +54,5 @@ build to install yet.
 
 ## License
 
-GPLv3, mirroring upstream. Dictionary files you bring are your own and are never uploaded.
+GPLv3, mirroring upstream. See `LICENSE` and `NOTICE`.
+Dictionary files you bring are your own and are never uploaded.
