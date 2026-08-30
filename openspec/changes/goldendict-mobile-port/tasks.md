@@ -1,12 +1,12 @@
 ## 1. Repo setup & toolchain spike
 
-- [ ] 1.1 Add upstream `engine/` Git submodule pinned at a release tag; record the tag in `patches/` or `UPSTREAM.md`
-- [ ] 1.2 Scaffold the Android Gradle project (Kotlin, Jetpack Compose, WebView) with minSdk 24
+- [x] 1.1 Add upstream `engine/` Git submodule pinned at a release tag; record the tag in `patches/` or `UPSTREAM.md`
+- [x] 1.2 Scaffold the Android Gradle project (Kotlin, Jetpack Compose, WebView) with minSdk 28
 - [ ] 1.3 Add NDK CMake build producing `libaurelex.so` (arm64-v8a + x86_64) for the engine carve
 - [ ] 1.4 Wire Qt 6 (Core/XML/Concurrent only) for the Android target into the engine build
-- [ ] 1.5 Establish cross-compile approach for deps: `bzip2 zlib liblzma libiconv lzo opencc hunspell fmt tomlplusplus`
-- [ ] 1.6 Spike: minimal engine build that can load a StarDict dict and run `gd_lookup` (define "smoke word") on device
-- [ ] 1.7 Draw the conclusion of the spike: D1/D6 confirmed, or record the fallback in design.md
+- [x] 1.5 Establish cross-compile approach for deps: `bzip2 zlib liblzma lzo fmt tomlplusplus` (iconv from platform at minSdk 28; opencc/hunspell cut)
+- [x] 1.6 Spike: minimal engine build that can load a StarDict dict and run `gd_lookup` (define "smoke word") on device — proven on host: `gd_scan_dicts`→1 dict, `gd_suggest`→suggestion, `gd_lookup`→2794 B HTML, exit 0
+- [x] 1.7 Draw the conclusion of the spike: D1/D6 confirmed, or record the fallback in design.md — confirmed; see design.md "Spike conclusion (task 1.7)"
 
 ## 2. Engine carve & boundary API
 

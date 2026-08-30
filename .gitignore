@@ -10,8 +10,6 @@ captures/
 *.keystore
 !debug.keystore
 *.jks
-
-# IDE
 .idea/
 *.iml
 .vscode/
