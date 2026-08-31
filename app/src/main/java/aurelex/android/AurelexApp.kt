@@ -5,9 +5,9 @@ import android.app.Application
 class AurelexApp : Application() {
     override fun onCreate() {
         super.onCreate()
-        // Engine init runs on the dedicated native thread (queued): sets HOME,
-        // builds the QGuiApplication, and creates the ArticleMaker seam. It is
-        // idempotent on the C side, so a later explicit init is harmless.
+        // Engine init (gd_init, which builds Qt's QCoreApplication). Qt on
+        // Android requires its application object on the MAIN thread, so this
+        // runs synchronously on the main looper and blocks until done.
         NativeEngine.init(this)
     }
 

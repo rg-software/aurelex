@@ -45,7 +45,9 @@ android {
                 // See src/main/cpp/engine/CMakeLists.txt for the carve.
                 // Machine-local Qt/vcpkg paths come from local.properties.
                 arguments += listOf(
-                    "-DANDROID_STL=c++_static",
+                    // Qt 6 android libs have NEEDED libc++_shared.so, so the
+                    // app must use the shared STL (AGP then bundles it).
+                    "-DANDROID_STL=c++_shared",
                     "-DQT_BASE=${qtBase}",
                     "-DQT_HOST_PATH=${qtHost}",
                     "-DVCPKG_BASE=${vcpkgRoot}"

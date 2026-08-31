@@ -90,17 +90,20 @@ int gd_init( const char * config_dir, const char * index_dir )
     qputenv( "HOME", QByteArray( config_dir ) );
   }
 
-  // The engine is event-driven AND touches QGuiApplication symbols while
-  // rendering articles (getOptimalIconSize reads qGuiApp->devicePixelRatio()).
-  // A QCoreApplication would leave qGuiApp null and crash. Use QGuiApplication
-  // (works headless; on Android the app owns the GUI anyway).
-  if ( !QGuiApplication::instance() ) {
-    if ( !qEnvironmentVariableIsSet( "QT_QPA_PLATFORM" ) ) {
-      qputenv( "QT_QPA_PLATFORM", "offscreen" );
-    }
+  // The engine is event-driven; the carve links QtGui, but the Android Qt kit
+  // ships no offscreen platform plugin (only the QtActivity-bound qtforandroid
+  // one), so a QGuiApplication here would fatal "no platform plugin". The GUI
+  // symbols the carve needs are stubbed in patches/ (getOptimalIconSize and
+  // tiff's primaryScreen). On Android a plain QCoreApplication (created on the
+  // main thread by the JNI layer) is created for the engine's event loops; on
+  // host (Windows) the smoke tool still uses QGuiApplication/offscreen.
+  if ( !QCoreApplication::instance() ) {
+#ifndef Q_OS_ANDROID
     new QGuiApplication( g_argc_dummy, g_argv_dummy );
+#else
+    new QCoreApplication( g_argc_dummy, g_argv_dummy );
+#endif
   }
-
   QCoreApplication::setOrganizationName( "aurelex" );
   QCoreApplication::setApplicationName( "aurelex" );
 

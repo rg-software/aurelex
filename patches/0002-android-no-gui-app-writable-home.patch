@@ -1,0 +1,92 @@
+From: aurelex <aurelex@localhost>
+Date: Sun, 31 Aug 2026 00:00:00 +0000
+Subject: [PATCH] android carve: no QGuiApplication; writable config home
+
+Three related carve fixes so the engine runs in a plain Android app (no
+QtActivity, no QGuiApplication / platform plugin):
+
+- dictionary.cc getOptimalIconSize(): it read qGuiApp->devicePixelRatio(),
+  which required a GUI application. Return the fixed 64 base (icon
+  rendering is cosmetic).
+- tiff.cc tiff2img(): called QApplication::primaryScreen(), which crashes
+  with only a QCoreApplication. Guard on a null screen and fall back to the
+  image's own size (the TIFF path is rare; it must not crash).
+- config.cc getHomeDir(): on Android the XDG branch resolves via
+  QStandardPaths, which needs a QtApplication to guarantee a writable dir,
+  and aborted with "Can't use home directory to store GoldenDict
+  preferences". Use the HOME env var (the boundary sets it to the app's
+  private files dir) on Android and keep .goldendict there.
+
+With these, gd_init constructs a plain QCoreApplication on Android (design
+D2's original "stub the GUI code" intent), no Qt platform plugin needed.
+
+---
+ src/config.cc          | 14 ++++++++++++++
+ src/dict/dictionary.cc |  2 +-
+ src/tiff.cc            |  5 +++--
+ 3 files changed, 17 insertions(+), 4 deletions(-)
+
+diff --git a/src/config.cc b/src/config.cc
+index 29e62f54..b4272739 100644
+--- a/src/config.cc
++++ b/src/config.cc
+@@ -2225,6 +2225,19 @@ QDir getHomeDir()
+ 
+   QDir result;
+ 
++#ifdef Q_OS_ANDROID
++  // On Android there is no conventional HOME and QStandardPaths (via XDG)
++  // needs a QtApplication to resolve to a guaranteed-writable dir. The
++  // boundary sets HOME to the app-private files dir; use it directly.
++  const QByteArray home = qgetenv( "HOME" );
++  if ( !home.isEmpty() ) {
++    result = QDir( QString::fromLocal8Bit( home ) );
++  }
++  else {
++    result = QDir::home();
++  }
++  const char * pathInHome = ".goldendict";
++#else
+   result = QDir::home();
+ #ifdef Q_OS_WIN32
+   if ( result.cd( "Application Data/GoldenDict" ) )
+@@ -2240,6 +2253,7 @@ QDir getHomeDir()
+     pathInHome = xdgSubdirName;
+   }
+   #endif
++#endif
+ #endif
+ 
+   result.mkpath( pathInHome );
+diff --git a/src/dict/dictionary.cc b/src/dict/dictionary.cc
+index e18b43b3..8c2292cc 100644
+--- a/src/dict/dictionary.cc
++++ b/src/dict/dictionary.cc
+@@ -255,7 +255,7 @@ void Class::loadIcon() noexcept
+ 
+ int Class::getOptimalIconSize()
+ {
+-  return 64 * qGuiApp->devicePixelRatio();
++  return 64;
+ }
+ 
+ bool Class::loadIconFromFileName( const QString & mainDictFileName )
+diff --git a/src/tiff.cc b/src/tiff.cc
+index d483af6e..2dec11c2 100644
+--- a/src/tiff.cc
++++ b/src/tiff.cc
+@@ -18,9 +18,10 @@ void tiff2img( std::vector< char > & data )
+     QBuffer buffer( &ba ); // buffer doesn't own ba
+     buffer.open( QIODevice::WriteOnly );
+ 
+-    QSize screenSize = QApplication::primaryScreen()->availableSize();
+     QSize imgSize    = img.size();
+-    int scaleSize    = qMin( imgSize.width(), screenSize.width() );
++    QScreen * scr     = QApplication::primaryScreen();
++    QSize screenSize  = scr ? scr->availableSize() : imgSize;
++    int scaleSize     = qMin( imgSize.width(), screenSize.width() );
+     img.scaledToWidth( scaleSize ).save( &buffer, "webp" );
+ 
+     data.resize( ba.size() );
+--
+2.30.0

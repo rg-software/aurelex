@@ -11,7 +11,31 @@
 #include <string>
 #include <vector>
 
+// QtCore declares QtAndroidPrivate::initJNI in a private header; we call it in
+// JNI_OnLoad below so QJniEnvironment::javaVM() is non-null when gd_init
+// constructs QCoreApplication on the main thread (QCoreApplicationPrivate::init
+// reads the app version via QJniEnvironment). Without it, that init segfaults.
+#include "private/qjnihelpers_p.h"
+
 extern "C" {
+
+// libaurelex.so is linked against Qt6Core, which exports its own JNI_OnLoad
+// (Qt-Android specific: it looks up org.qtproject.qt.android.QtActivity and
+// returns JNI_ERR in a plain Android app that has no QtActivity). ART resolves
+// JNI_OnLoad for System.loadLibrary("aurelex") across the library's DT_NEEDED
+// chain when the loaded library does not export it — so we MUST define our own
+// here to shadow Qt's and return a version ART accepts. We register Qt's JavaVM
+// via QtAndroidPrivate::initJNI (needed for QCoreApplication's QJniEnvironment).
+
+JNIEXPORT jint JNICALL JNI_OnLoad( JavaVM * vm, void * reserved )
+{
+  (void)reserved;
+  JNIEnv * env = nullptr;
+  if ( vm->GetEnv( reinterpret_cast< void ** >( &env ), JNI_VERSION_1_6 ) == JNI_OK && env ) {
+    QtAndroidPrivate::initJNI( vm, env );
+  }
+  return JNI_VERSION_1_6;
+}
 
 JNIEXPORT void JNICALL
 Java_aurelex_android_NativeEngine_nativeInit( JNIEnv * env, jobject /*thiz*/, jstring configDir, jstring indexDir )

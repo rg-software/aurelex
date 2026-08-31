@@ -1,6 +1,8 @@
 package aurelex.android
 
 import android.content.Context
+import android.os.Handler
+import android.os.Looper
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.Future
@@ -8,17 +10,20 @@ import java.util.concurrent.Future
 /**
  * Kotlin-facing facade over the gd_* C API (design D2), loaded as libaurelex.so.
  *
- * Every native call — including init and cleanup — is submitted to a single
- * dedicated engine thread. This is required, not just nice: gd_init constructs
- * a QGuiApplication and Qt objects are thread-affine, so all engine work (and
- * the event loops the C boundary pumps) must live on one thread.
+ * Qt on Android requires its application object (QCoreApplication, built inside
+ * gd_init) to be constructed on the MAIN thread — building it on a background
+ * thread corrupts the Android framework integration and breaks Compose
+ * rendering. So gd_init is run synchronously on the main thread, while the
+ * blocking lookup/scan/suggest calls run on a dedicated engine thread (Qt
+ * objects created on main are used from that thread; the C boundary serializes
+ * them with a mutex).
  */
 object NativeEngine {
     init {
         System.loadLibrary("aurelex")
     }
 
-    /** Single thread that owns the engine. All native calls run here, in order. */
+    /** Single thread that owns the engine. Blocking native calls run here, in order. */
     private val engine: ExecutorService = Executors.newSingleThreadExecutor { r ->
         Thread(r, "aurelex-engine").apply { isDaemon = true }
     }
@@ -39,15 +44,32 @@ object NativeEngine {
     private external fun nativeCleanup()
 
     /**
-     * Queues engine init (idempotent at the C boundary). Must be called at
-     * app start with the app Context.
+     * Initializes the engine (idempotent at the C boundary). Runs gd_init on
+     * the MAIN thread; when already on main it runs inline, otherwise it is
+     * posted to the main looper and we block until done. Call at app start.
      */
     fun init(context: Context) {
-        submit {
-            if (!initialized) {
-                val files = context.filesDir.absolutePath
-                nativeInit(files, files)
-                initialized = true
+        if (initialized) return
+        val files = context.filesDir.absolutePath
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            nativeInit(files, files)
+            initialized = true
+        } else {
+            val lock = Object()
+            var done = false
+            Handler(Looper.getMainLooper()).post {
+                try {
+                    nativeInit(files, files)
+                    initialized = true
+                } finally {
+                    synchronized(lock) {
+                        done = true
+                        lock.notifyAll()
+                    }
+                }
+            }
+            synchronized(lock) {
+                while (!done) lock.wait()
             }
         }
     }
@@ -100,5 +122,5 @@ object NativeEngine {
     }
 
     private fun <T> submit(block: () -> T): Future<T> =
-        engine.submit(block as java.util.concurrent.Callable<T>)
+        engine.submit(java.util.concurrent.Callable<T> { block() })
 }

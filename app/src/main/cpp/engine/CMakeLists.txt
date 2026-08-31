@@ -168,6 +168,14 @@ add_library(aurelex SHARED
 )
 set_target_properties(aurelex PROPERTIES OUTPUT_NAME aurelex)
 target_include_directories(aurelex PRIVATE ${AURELEX_CARVE_INCLUDES})
+# The JNI bridge includes QtCore private headers (qjnihelpers_p.h for
+# QtAndroidPrivate::initJNI); add the versioned QtCore include root so both
+# "private/qjnihelpers_p.h" and "QtCore/private/qglobal_p.h" resolve.
+if(QT_ANDROID_ROOT AND Qt6Core_VERSION)
+    target_include_directories(aurelex PRIVATE
+        "${QT_ANDROID_ROOT}/include/QtCore/${Qt6Core_VERSION}/QtCore"
+        "${QT_ANDROID_ROOT}/include/QtCore/${Qt6Core_VERSION}")
+endif()
 target_link_libraries(aurelex PRIVATE aurelex_carve ${AURELEX_CARVE_LIBS})
 
 # Host smoke tool (task 1.6 spike): only built when requested.
