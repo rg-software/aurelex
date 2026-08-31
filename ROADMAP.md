@@ -16,7 +16,7 @@ Status legend: 🟢 planned · 🔵 in progress · ✅ done · ⏸ parked
 
 ## Next milestone (chosen)
 
-- 🔵 **Everyday usability (utilities)** — pure Kotlin, no engine changes:
+- ✅ **Everyday usability (utilities)** — pure Kotlin, no engine changes:
   - Share-sheet / intent lookup ("Look up in Aurelex" from other apps)
   - Clipboard lookup shortcut
   - History / recent-lookups screen
@@ -24,8 +24,8 @@ Status legend: 🟢 planned · 🔵 in progress · ✅ done · ⏸ parked
   - Text-to-speech pronunciation
   - Settings persistence for the above + existing toggles
   - Rationale: high value per effort, low risk (no boundary/engine changes).
-  - Planning: OpenSpec change `everyday-usability-utilities` (proposal/design/
-    specs/tasks complete).
+  - Done: OpenSpec change `everyday-usability-utilities` archived 2026-08-31
+    (14/14 tasks, verified on Motorola ThinkPhone).
 
 ## Candidate future milestones
 
