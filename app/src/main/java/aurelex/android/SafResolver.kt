@@ -31,6 +31,7 @@ object SafResolver {
         } catch (e: IllegalArgumentException) {
             return null
         }
+        android.util.Log.i("SafResolver", "docId=$docId treeUri=$treeUri")
 
         // "primary:<relative>" → /storage/emulated/0/<relative>
         if (docId.startsWith("primary:")) {
@@ -61,7 +62,9 @@ object SafResolver {
         val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(
             treeUri, DocumentsContract.getTreeDocumentId(treeUri)
         )
+        android.util.Log.i("SafResolver", "stage childrenUri=$childrenUri dest=$destDir")
 
+        var stagedCount = 0
         resolver.query(
             childrenUri,
             arrayOf(DocumentsContract.Document.COLUMN_DOCUMENT_ID, DocumentsContract.Document.COLUMN_DISPLAY_NAME),
@@ -79,9 +82,11 @@ object SafResolver {
                     resolver.openInputStream(srcUri)?.use { input ->
                         out.outputStream().use { input.copyTo(it) }
                     }
+                    stagedCount++
                 }
             }
         }
+        android.util.Log.i("SafResolver", "staged $stagedCount files into $destDir")
         return destDir
     }
 

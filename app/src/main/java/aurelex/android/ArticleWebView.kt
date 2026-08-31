@@ -122,7 +122,7 @@ class ArticleWebView(
     /** Fetches a bres:// (or gdau:// used as an <img> subresource) via the engine. */
     private fun serveEngineResource(url: String): WebResourceResponse? {
         val bytes = try {
-            NativeEngine.getResource(url).get()
+            EngineClient.getResource(url).get()
         } catch (e: ExecutionException) {
             null
         } catch (e: InterruptedException) {

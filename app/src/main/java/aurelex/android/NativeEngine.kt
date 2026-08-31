@@ -75,10 +75,11 @@ object NativeEngine {
     }
 
     /** Scan [folder] for supported dictionaries, building/validating indexes. */
-    fun scanDicts(folder: String): Future<Int> = submit { nativeScanDicts(folder) }
+    fun scanDicts(folder: String): Future<Int> = submit { awaitInit(); nativeScanDicts(folder) }
 
     /** Prefix/fuzzy headword suggestions, newline-separated from native. */
     fun suggest(word: String): Future<List<String>> = submit {
+        awaitInit()
         nativeSuggest(word)
             .split('\n')
             .filter { it.isNotBlank() }
@@ -86,30 +87,32 @@ object NativeEngine {
 
     /** Full article HTML for [word], or null if not found / engine error. */
     fun lookup(word: String): Future<String?> = submit {
+        awaitInit()
         nativeLookup(word)?.let { it.toString(Charsets.UTF_8) }
     }
 
     /** Embedded resource bytes (image/audio) for a bres:// or gdau:// URL. */
-    fun getResource(url: String): Future<ByteArray?> = submit { nativeGetResource(url) }
+    fun getResource(url: String): Future<ByteArray?> = submit { awaitInit(); nativeGetResource(url) }
 
     /** Audio bytes for a gdau:// URL. */
-    fun getAudio(url: String): Future<ByteArray?> = submit { nativeGetAudio(url) }
+    fun getAudio(url: String): Future<ByteArray?> = submit { awaitInit(); nativeGetAudio(url) }
 
     /** Number of loaded dictionaries. */
-    fun dictCount(): Future<Int> = submit { nativeDictCount() }
+    fun dictCount(): Future<Int> = submit { awaitInit(); nativeDictCount() }
 
     /** Metadata ([name, source file]) for each loaded dictionary, in order. */
     fun dictInfo(): Future<List<Pair<String, String>>> = submit {
+        awaitInit()
         nativeDictInfo().mapNotNull { pair ->
             if (pair.size >= 2) pair[0] to pair[1] else null
         }
     }
 
     /** Move a dictionary in the single-group order; returns 0 on success. */
-    fun moveDict(from: Int, to: Int): Future<Int> = submit { nativeMoveDict(from, to) }
+    fun moveDict(from: Int, to: Int): Future<Int> = submit { awaitInit(); nativeMoveDict(from, to) }
 
     /** Toggle article dark mode (engine-emitted CSS); returns 0 on success. */
-    fun setDarkMode(on: Boolean): Future<Int> = submit { nativeSetDarkMode(on) }
+    fun setDarkMode(on: Boolean): Future<Int> = submit { awaitInit(); nativeSetDarkMode(on) }
 
     /** Queues engine teardown. Safe to call once at process exit. */
     fun cleanup() {
@@ -117,6 +120,20 @@ object NativeEngine {
             if (initialized) {
                 nativeCleanup()
                 initialized = false
+            }
+        }
+    }
+
+    /** Blocks (bounded) until gd_init on the main thread has completed. */
+    private fun awaitInit() {
+        if (initialized) return
+        val deadline = System.currentTimeMillis() + 30_000
+        while (!initialized && System.currentTimeMillis() < deadline) {
+            try {
+                Thread.sleep(50)
+            } catch (_: InterruptedException) {
+                Thread.currentThread().interrupt()
+                return
             }
         }
     }

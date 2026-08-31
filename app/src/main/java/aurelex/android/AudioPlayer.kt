@@ -43,7 +43,7 @@ class AudioPlayer(context: Context) {
         // Fetch happens on the engine thread; run it synchronously here (caller
         // is expected to be on a background dispatcher).
         val bytes = try {
-            NativeEngine.getAudio(url).get()
+            EngineClient.getAudio(url).get()
         } catch (e: Exception) {
             null
         }

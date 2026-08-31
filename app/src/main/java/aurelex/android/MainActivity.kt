@@ -35,19 +35,30 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.activity.viewModels
 
 class MainActivity : ComponentActivity() {
+    private val mainViewModel: MainViewModel by viewModels()
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
-            AurelexApp()
+            AurelexApp(mainViewModel)
         }
-    }
+        // Re-scan the previously staged dictionaries after an engine-process
+        // restart so lookups work without re-picking the folder.
+        AurelexApp.onEngineDied = { ctx ->
+            android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                mainViewModel.resumeScan(ctx)
+            }, 1500)
+        }
+        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+            mainViewModel.resumeScan(applicationContext)
+        }, 1500)    }
 }
 
 @Composable
-fun AurelexApp(viewModel: MainViewModel = viewModel()) {
+fun AurelexApp(viewModel: MainViewModel) {
     val backStack by viewModel.backStack.collectAsState()
     val darkMode by viewModel.darkMode.collectAsState()
     val current = backStack.lastOrNull() ?: Dest.SEARCH
@@ -73,16 +84,16 @@ fun SearchScreen(viewModel: MainViewModel) {
     val suggestions by viewModel.suggestions.collectAsState()
 
     LaunchedEffect(query) {
-        viewModel.suggest(query)
-    }
+            viewModel.suggest(query)
+        }
 
     Column(modifier = Modifier.fillMaxSize()) {
-        Text(
+            Text(
             text = "Aurelex",
             style = MaterialTheme.typography.titleLarge,
             modifier = Modifier.padding(16.dp)
         )
-        TextField(
+            TextField(
             value = query,
             onValueChange = { query = it },
             modifier = Modifier
@@ -102,13 +113,13 @@ fun SearchScreen(viewModel: MainViewModel) {
         }
 
         LazyColumn(modifier = Modifier.fillMaxSize()) {
-            items(suggestions) { w ->
+                    items(suggestions) { w ->
                 TextButton(onClick = { viewModel.lookup(w) }) {
                     Text(w)
                 }
             }
         }
-    }
+        }
 }
 
 @Composable

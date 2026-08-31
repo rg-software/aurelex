@@ -40,7 +40,12 @@ class MainViewModel : ViewModel() {
     val dictionaries: StateFlow<List<DictEntry>> = _dictionaries
 
     private fun refreshDictionaries() {
-        _dictionaries.value = NativeEngine.dictInfo().get().map { DictEntry(it.first, it.second) }
+        _dictionaries.value = try {
+            EngineClient.dictInfo().get().map { DictEntry(it.first, it.second) }
+        } catch (e: Exception) {
+            android.util.Log.e("MainViewModel", "dictInfo failed", e)
+            emptyList()
+        }
     }
 
     /** Simple back-stack of destinations (back navigates within it). */
@@ -58,13 +63,15 @@ class MainViewModel : ViewModel() {
         return true
     }
 
-    /** Queues engine init on the engine thread (idempotent). Call from the app. */
-    fun init(context: android.content.Context) = NativeEngine.init(context)
+    /** Engine init happens in the separate EngineService process on startup. */
+    fun init(context: android.content.Context) {
+        // Nothing to do in the UI process; kept for API compatibility.
+    }
 
     /** Scans [folder] for dictionaries; [onDone] runs with the load count. */
     fun scanDicts(folder: String, onDone: (Int) -> Unit) {
         viewModelScope.launch(Dispatchers.IO) {
-            val n = NativeEngine.scanDicts(folder).get()
+            val n = EngineClient.scanDicts(folder).get()
             _dictCount.value += n
             refreshDictionaries()
             onDone(n)
@@ -74,8 +81,12 @@ class MainViewModel : ViewModel() {
     /** Moves dictionary at [from] to [to] in the single group; refreshes list. */
     fun moveDict(from: Int, to: Int) {
         viewModelScope.launch(Dispatchers.IO) {
-            if (NativeEngine.moveDict(from, to).get() == 0) {
-                refreshDictionaries()
+            try {
+                if (EngineClient.moveDict(from, to).get() == 0) {
+                    refreshDictionaries()
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("MainViewModel", "moveDict failed", e)
             }
         }
     }
@@ -83,10 +94,14 @@ class MainViewModel : ViewModel() {
     /** Toggles article dark mode (task 7.1); re-looks-up so the CSS is re-emitted. */
     fun toggleDarkMode(word: String?) {
         viewModelScope.launch(Dispatchers.IO) {
-            val next = !_darkMode.value
-            NativeEngine.setDarkMode(next).get()
-            _darkMode.value = next
-            word?.let { lookup(it) }
+            try {
+                val next = !_darkMode.value
+                EngineClient.setDarkMode(next).get()
+                _darkMode.value = next
+                word?.let { lookup(it) }
+            } catch (e: Exception) {
+                android.util.Log.e("MainViewModel", "setDarkMode failed", e)
+            }
         }
     }
 
@@ -102,27 +117,43 @@ class MainViewModel : ViewModel() {
         viewModelScope.launch(Dispatchers.IO) {
             _isIndexing.value = true
             _indexMessage.value = null
-
-            if (!IndexVersion.isCurrent(context)) {
-                IndexVersion.invalidate(context)
-                _indexMessage.value = "Reindexing dictionaries (engine version changed)…"
-            }
-
+            var n = 0
             try {
-                val resolvedPath = SafResolver.resolveTreePath(treeUri)
-                val scanPath = if (resolvedPath != null) {
-                    resolvedPath
-                } else {
-                    val dest = java.io.File(context.filesDir, "staged").apply { mkdirs() }
-                    SafResolver.stageDictionaryFiles(context, treeUri, dest).absolutePath
+                if (!IndexVersion.isCurrent(context)) {
+                    IndexVersion.invalidate(context)
+                    _indexMessage.value = "Reindexing dictionaries (engine version changed)…"
                 }
-                val n = NativeEngine.scanDicts(scanPath).get()
+
+                // On Android the engine process cannot read /storage/emulated/0
+                // paths via QDir (scoped storage) even after a SAF grant, and the
+                // content-URI grant only covers the UI process's access. So we
+                // ALWAYS stage supported files into app-private storage and scan
+                // the copy — the engine (same package) can read its own data dir.
+                val dest = java.io.File(context.filesDir, "staged").apply { mkdirs() }
+                dest.listFiles()?.forEach { it.delete() }
+                n = try {
+                    val scanPath = SafResolver.stageDictionaryFiles(context, treeUri, dest).absolutePath
+                    android.util.Log.i("MainViewModel", "scanPath=$scanPath")
+                    // Remember the staged dir so a later engine restart can
+                    // re-scan it (the engine's in-memory dicts die with the process).
+                    context.getSharedPreferences("aurelex", 0).edit().putString("scanPath", scanPath).apply()
+                    EngineClient.scanDicts(scanPath).get()
+                } catch (e: Exception) {
+                    // Engine process not reachable yet (starting/restarting).
+                    android.util.Log.e("MainViewModel", "scan engine call failed", e)
+                    _indexMessage.value = "Engine not ready — try again in a moment."
+                    0
+                }
                 _dictCount.value += n
                 if (n > 0) IndexVersion.markCurrent(context)
                 refreshDictionaries()
-                onDone(n)
+            } catch (e: Exception) {
+                android.util.Log.e("MainViewModel", "pickAndScan failed", e)
+                _indexMessage.value = "Scanning failed: ${e.message}"
+                n = 0
             } finally {
                 _isIndexing.value = false
+                onDone(n)
             }
         }
     }
@@ -134,7 +165,7 @@ class MainViewModel : ViewModel() {
         }
         viewModelScope.launch(Dispatchers.IO) {
             _suggestions.value = try {
-                NativeEngine.suggest(word).get()
+                EngineClient.suggest(word).get()
             } catch (e: Exception) {
                 emptyList()
             }
@@ -145,7 +176,7 @@ class MainViewModel : ViewModel() {
     fun lookup(word: String, onDone: ((Dest?) -> Unit)? = null) {
         viewModelScope.launch(Dispatchers.IO) {
             val html = try {
-                NativeEngine.lookup(word).get()
+                EngineClient.lookup(word).get()
             } catch (e: Exception) {
                 null
             }
@@ -172,10 +203,29 @@ class MainViewModel : ViewModel() {
     }
 
     /** Fetches an embedded resource (bres://) or audio (gdau://) URL. */
-    fun fetchResource(url: String): Future<ByteArray?> = NativeEngine.getResource(url)
+    fun fetchResource(url: String): Future<ByteArray?> = EngineClient.getResource(url)
+
+    /**
+     * Re-scans the folder staged into app-private storage on a previous
+     * pickAndScan. The engine's in-memory dictionaries die with its process,
+     * so after an engine restart the app re-runs the scan to restore state.
+     */
+    fun resumeScan(context: android.content.Context) {
+        val prefs = context.getSharedPreferences("aurelex", 0)
+        val savePath = prefs.getString("scanPath", null) ?: return
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val n = EngineClient.scanDicts(savePath).get()
+                _dictCount.value = n
+                refreshDictionaries()
+                android.util.Log.i("MainViewModel", "resumeScan($savePath) -> $n")
+            } catch (e: Exception) {
+                android.util.Log.e("MainViewModel", "resumeScan failed", e)
+            }
+        }
+    }
 
     override fun onCleared() {
-        NativeEngine.cleanup()
         super.onCleared()
     }
 }

@@ -139,21 +139,55 @@ Java_aurelex_android_NativeEngine_nativeDictInfo( JNIEnv * env, jobject /*thiz*/
 {
   const jint n = gd_dict_count();
   jclass strCls = env->FindClass( "java/lang/String" );
-  jobjectArray out = env->NewObjectArray( n, strCls, nullptr );
+  if ( !strCls || env->ExceptionCheck() ) {
+    env->ExceptionClear();
+    return nullptr;
+  }
+  // Outer array must be an array OF String[] (jobjectArray whose elements are
+  // String[] pairs). NewObjectArray needs the element class = String[].class.
+  jclass arrStrCls = env->FindClass( "[Ljava/lang/String;" );
+  if ( !arrStrCls || env->ExceptionCheck() ) {
+    env->ExceptionClear();
+    return nullptr;
+  }
+  jobjectArray out = env->NewObjectArray( n, arrStrCls, nullptr );
+  if ( !out || env->ExceptionCheck() ) {
+    env->ExceptionClear();
+    return nullptr;
+  }
 
-  // Each entry: [0]=name, [1]=source file.
+  // Each entry: [0]=name, [1]=source file. Guard each element against JNI
+  // exceptions (e.g. invalid UTF-8 in a dictionary header) so we never abort
+  // the engine process; unparseable entries are left empty.
   for ( jint i = 0; i < n; ++i ) {
     char name[ 1024 ]  = { 0 };
     char file[ 4096 ]  = { 0 };
     if ( gd_dict_info( i, name, sizeof( name ), file, sizeof( file ) ) == 0 ) {
       jobjectArray pair = env->NewObjectArray( 2, strCls, nullptr );
-      env->SetObjectArrayElement( pair, 0, env->NewStringUTF( name ) );
-      env->SetObjectArrayElement( pair, 1, env->NewStringUTF( file ) );
+      if ( !pair || env->ExceptionCheck() ) {
+        env->ExceptionClear();
+        continue;
+      }
+      jstring jn = env->NewStringUTF( name );
+      if ( env->ExceptionCheck() ) {
+        env->ExceptionClear();
+        jn = nullptr;
+      }
+      jstring jf = env->NewStringUTF( file );
+      if ( env->ExceptionCheck() ) {
+        env->ExceptionClear();
+        jf = nullptr;
+      }
+      if ( jn ) env->SetObjectArrayElement( pair, 0, jn );
+      if ( jf ) env->SetObjectArrayElement( pair, 1, jf );
       env->SetObjectArrayElement( out, i, pair );
+      env->DeleteLocalRef( jn );
+      env->DeleteLocalRef( jf );
       env->DeleteLocalRef( pair );
     }
   }
   env->DeleteLocalRef( strCls );
+  env->DeleteLocalRef( arrStrCls );
   return out;
 }
 
