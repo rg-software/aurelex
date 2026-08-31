@@ -41,6 +41,17 @@ object NativeEngine {
     private external fun nativeDictInfo(): Array<Array<String>>
     private external fun nativeMoveDict(from: Int, to: Int): Int
     private external fun nativeSetDarkMode(on: Boolean): Int
+    private external fun nativeGroupCount(): Int
+    private external fun nativeGroupInfo(): Array<Array<String>>
+    private external fun nativeGroupCreate(name: String): Int
+    private external fun nativeGroupRename(id: Int, name: String): Int
+    private external fun nativeGroupDelete(id: Int): Int
+    private external fun nativeGroupAddDict(id: Int, dictIndex: Int): Int
+    private external fun nativeGroupRemoveDict(id: Int, dictIndex: Int): Int
+    private external fun nativeGroupMoveDict(id: Int, from: Int, to: Int): Int
+    private external fun nativeGroupDicts(id: Int): IntArray?
+    private external fun nativeGroupActive(): Int
+    private external fun nativeGroupSetActive(id: Int): Int
     private external fun nativeCleanup()
 
     /**
@@ -113,6 +124,33 @@ object NativeEngine {
 
     /** Toggle article dark mode (engine-emitted CSS); returns 0 on success. */
     fun setDarkMode(on: Boolean): Future<Int> = submit { awaitInit(); nativeSetDarkMode(on) }
+
+    // --- groups (multi-group-management) ---
+
+    /** Number of groups (>= 1; group 0 is the implicit "All"). */
+    fun groupCount(): Future<Int> = submit { awaitInit(); nativeGroupCount() }
+
+    /** Group metadata: list of (id, name, dictCount), starting with "All" (id 0). */
+    fun groupInfo(): Future<List<Triple<Int, String, Int>>> = submit {
+        awaitInit()
+        nativeGroupInfo().mapNotNull { row ->
+            if (row.size >= 3) Triple(row[0].toIntOrNull() ?: 0, row[1], row[2].toIntOrNull() ?: 0) else null
+        }
+    }
+
+    /** Create a group with [name]; returns its id, or -1 on error. */
+    fun groupCreate(name: String): Future<Int> = submit { awaitInit(); nativeGroupCreate(name) }
+    fun groupRename(id: Int, name: String): Future<Int> = submit { awaitInit(); nativeGroupRename(id, name) }
+    fun groupDelete(id: Int): Future<Int> = submit { awaitInit(); nativeGroupDelete(id) }
+    fun groupAddDict(id: Int, dictIndex: Int): Future<Int> = submit { awaitInit(); nativeGroupAddDict(id, dictIndex) }
+    fun groupRemoveDict(id: Int, dictIndex: Int): Future<Int> = submit { awaitInit(); nativeGroupRemoveDict(id, dictIndex) }
+    fun groupMoveDict(id: Int, from: Int, to: Int): Future<Int> = submit { awaitInit(); nativeGroupMoveDict(id, from, to) }
+    /** Ordered dict indices of group [id] (id 0 = all loaded). */
+    fun groupDicts(id: Int): Future<List<Int>> = submit { awaitInit(); (nativeGroupDicts(id) ?: intArrayOf()).toList() }
+    /** Current active group id. */
+    fun groupActive(): Future<Int> = submit { awaitInit(); nativeGroupActive() }
+    /** Set the active group id; returns 0 on success. */
+    fun groupSetActive(id: Int): Future<Int> = submit { awaitInit(); nativeGroupSetActive(id) }
 
     /** Queues engine teardown. Safe to call once at process exit. */
     fun cleanup() {

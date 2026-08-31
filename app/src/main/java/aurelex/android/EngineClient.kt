@@ -117,6 +117,30 @@ object EngineClient {
         callInt(EngineService.OP_SET_DARK) { it.putBoolean("on", on) }
     }
 
+    // --- groups (multi-group-management) ---
+
+    fun groupCount(): Future<Int> = submit { callInt(EngineService.OP_GROUP_COUNT) {} }
+
+    fun groupInfo(): Future<List<Triple<Int, String, Int>>> = submit {
+        val raw = callBytes(EngineService.OP_GROUP_INFO) {} ?: return@submit emptyList()
+        val parts = raw.toString(Charsets.UTF_8).split('\n')
+        parts.filter { it.isNotBlank() }.chunked(3).mapNotNull {
+            if (it.size >= 3) Triple(it[0].toIntOrNull() ?: 0, it[1], it[2].toIntOrNull() ?: 0) else null
+        }
+    }
+
+    fun groupCreate(name: String): Future<Int> = submit { callInt(EngineService.OP_GROUP_CREATE) { it.putString("name", name) } }
+    fun groupRename(id: Int, name: String): Future<Int> = submit { callInt(EngineService.OP_GROUP_RENAME) { it.putInt("id", id); it.putString("name", name) } }
+    fun groupDelete(id: Int): Future<Int> = submit { callInt(EngineService.OP_GROUP_DELETE) { it.putInt("id", id) } }
+    fun groupAddDict(id: Int, dictIndex: Int): Future<Int> = submit { callInt(EngineService.OP_GROUP_ADD_DICT) { it.putInt("id", id); it.putInt("idx", dictIndex) } }
+    fun groupRemoveDict(id: Int, dictIndex: Int): Future<Int> = submit { callInt(EngineService.OP_GROUP_REMOVE_DICT) { it.putInt("id", id); it.putInt("idx", dictIndex) } }
+    fun groupMoveDict(id: Int, from: Int, to: Int): Future<Int> = submit { callInt(EngineService.OP_GROUP_MOVE_DICT) { it.putInt("id", id); it.putInt("from", from); it.putInt("to", to) } }
+    fun groupDicts(id: Int): Future<List<Int>> = submit {
+        callIntArray(EngineService.OP_GROUP_DICTS) { it.putInt("id", id) }?.toList() ?: emptyList()
+    }
+    fun groupActive(): Future<Int> = submit { callInt(EngineService.OP_GROUP_ACTIVE) {} }
+    fun groupSetActive(id: Int): Future<Int> = submit { callInt(EngineService.OP_GROUP_SET_ACTIVE) { it.putInt("id", id) } }
+
     // --- low-level blocking call ---
 
     private fun <T> submit(block: () -> T): Future<T> = io.submit(Callable<T> { block() })
@@ -160,6 +184,9 @@ object EngineClient {
 
     private fun callInt(op: Int, build: (Bundle) -> Unit): Int =
         request(op, build) { it.getIntArray("value")?.firstOrNull() ?: -1 }
+
+    private fun callIntArray(op: Int, build: (Bundle) -> Unit): IntArray? =
+        request(op, build) { it.getIntArray("value") }
 
     private fun callBytes(op: Int, build: (Bundle) -> Unit): ByteArray? =
         request(op, build) { it.getByteArray("bytes") }

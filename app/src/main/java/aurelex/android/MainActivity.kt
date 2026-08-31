@@ -107,6 +107,7 @@ fun AurelexApp(viewModel: MainViewModel) {
                     Dest.DICTIONARIES -> DictionariesScreen(viewModel, onBack = { viewModel.pop() })
                     Dest.HISTORY -> HistoryScreen(viewModel, onBack = { viewModel.pop() })
                     Dest.FAVORITES -> FavoritesScreen(viewModel, onBack = { viewModel.pop() })
+                    Dest.GROUPS -> GroupsScreen(viewModel, onBack = { viewModel.pop() })
                 }
             }
         }
@@ -117,7 +118,10 @@ fun AurelexApp(viewModel: MainViewModel) {
 fun SearchScreen(viewModel: MainViewModel) {
     var query by remember { mutableStateOf("") }
     val suggestions by viewModel.suggestions.collectAsState()
+    val groups by viewModel.groups.collectAsState()
+    val activeGroup by viewModel.activeGroupId.collectAsState()
     val context = LocalContext.current
+    val activeName = groups.firstOrNull { it.id == activeGroup }?.name ?: "All"
 
     LaunchedEffect(query) {
             viewModel.suggest(query)
@@ -129,6 +133,9 @@ fun SearchScreen(viewModel: MainViewModel) {
             style = MaterialTheme.typography.titleLarge,
             modifier = Modifier.padding(16.dp)
         )
+            TextButton(onClick = { viewModel.push(Dest.GROUPS) }) {
+                Text("Group: $activeName")
+            }
             TextField(
             value = query,
             onValueChange = { query = it },
@@ -158,6 +165,7 @@ fun SearchScreen(viewModel: MainViewModel) {
                 val cm = viewModel.clipboardText(context.applicationContext)
                 if (cm != null && cm.isNotBlank()) viewModel.lookup(cm)
             }) { Text("Clipboard") }
+            TextButton(onClick = { viewModel.push(Dest.GROUPS) }) { Text("Groups") }
         }
 
         LazyColumn(modifier = Modifier.fillMaxSize()) {
@@ -300,6 +308,111 @@ fun FavoritesScreen(viewModel: MainViewModel, onBack: () -> Unit) {
                 ) {
                     TextButton(onClick = { viewModel.lookup(word) }) { Text(word) }
                     TextButton(onClick = { viewModel.removeFavorite(word) }) { Text("✕") }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun GroupsScreen(viewModel: MainViewModel, onBack: () -> Unit) {
+    var editing by remember { mutableStateOf<Int?>(null) }
+    val g = editing
+    if (g == null) {
+        GroupsList(viewModel, onBack = onBack, onEdit = { editing = it })
+    } else {
+        GroupDetailScreen(viewModel, groupId = g, onBack = { editing = null })
+    }
+}
+
+@Composable
+private fun GroupsList(viewModel: MainViewModel, onBack: () -> Unit, onEdit: (Int) -> Unit) {
+    val groups by viewModel.groups.collectAsState()
+    val active by viewModel.activeGroupId.collectAsState()
+    var showCreate by remember { mutableStateOf(false) }
+
+    Column(modifier = Modifier.fillMaxSize()) {
+        TextButton(onClick = onBack) { Text("← Back") }
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Text("Groups", style = MaterialTheme.typography.titleMedium)
+            TextButton(onClick = { showCreate = true }) { Text("+ New") }
+        }
+        if (groups.isEmpty()) {
+            Text("No groups yet. 'All' is the default.", modifier = Modifier.padding(16.dp))
+        }
+        LazyColumn(modifier = Modifier.fillMaxSize()) {
+            items(groups) { grp ->
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                    verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        TextButton(onClick = { viewModel.applyActiveGroup(grp.id) }) {
+                            Text(if (active == grp.id) "● ${grp.name} (${grp.dictCount})" else "${grp.name} (${grp.dictCount})")
+                        }
+                    }
+                    TextButton(onClick = { onEdit(grp.id) }) { Text("Edit") }
+                    if (grp.id != 0) {
+                        TextButton(onClick = { viewModel.deleteGroup(grp.id) }) { Text("✕") }
+                    }
+                }
+            }
+        }
+    }
+    if (showCreate) {
+        var newName by remember { mutableStateOf("") }
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { showCreate = false },
+            title = { Text("New group") },
+            text = { TextField(value = newName, onValueChange = { newName = it }, placeholder = { Text("Name") }) },
+            confirmButton = {
+                TextButton(onClick = {
+                    if (newName.isNotBlank()) viewModel.createGroup(newName.trim())
+                    showCreate = false
+                }) { Text("Create") }
+            },
+            dismissButton = { TextButton(onClick = { showCreate = false }) { Text("Cancel") } }
+        )
+    }
+}
+
+@Composable
+fun GroupDetailScreen(viewModel: MainViewModel, groupId: Int, onBack: () -> Unit) {
+    val dictionaries by viewModel.dictionaries.collectAsState()
+    var members by remember(groupId) { mutableStateOf<List<Int>?>(null) }
+    LaunchedEffect(groupId) {
+        members = try { viewModel.groupDicts(groupId).get() } catch (e: Exception) { emptyList() }
+    }
+    val memberSet = (members ?: emptyList()).toSet()
+
+    Column(modifier = Modifier.fillMaxSize()) {
+        TextButton(onClick = onBack) { Text("← Back") }
+        Text("Membership", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(16.dp))
+        if (dictionaries.isEmpty()) {
+            Text("No dictionaries loaded.", modifier = Modifier.padding(16.dp))
+        }
+        LazyColumn(modifier = Modifier.fillMaxSize()) {
+            items(dictionaries) { entry ->
+                val idx = dictionaries.indexOf(entry)
+                val checked = memberSet.contains(idx)
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                    verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
+                ) {
+                    androidx.compose.material3.Checkbox(
+                        checked = checked,
+                        onCheckedChange = { on ->
+                            if (on) viewModel.groupAddDict(groupId, idx)
+                            else viewModel.groupRemoveDict(groupId, idx)
+                            val m = members ?: emptyList()
+                            members = if (on) (m + idx).distinct() else m.filter { it != idx }
+                        }
+                    )
+                    Text(entry.name, modifier = Modifier.weight(1f))
                 }
             }
         }

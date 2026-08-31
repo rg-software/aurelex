@@ -85,6 +85,36 @@ int main( int argc, char ** argv )
     break;
   }
 
+  // ---- groups smoke (multi-group-management) ----
+  // CI folder has: dict 0 = StarDict ("smoke"), dict 1 = .dsl.dz (no "smoke").
+  {
+    const int gc = gd_group_count();
+    std::printf( "gd_group_count -> %d\n", gc );
+    int gid = -1;
+    if ( gd_group_create( "OnlyDSL", &gid ) == 0 ) {
+      std::printf( "gd_group_create -> %d\n", gid );
+    }
+    if ( gid > 0 && gd_group_add_dict( gid, 1 ) == 0 ) {
+      std::printf( "gd_group_add_dict(1) -> 0\n" );
+    }
+    if ( gid > 0 && gd_group_set_active( gid ) == 0 ) {
+      std::printf( "gd_group_set_active -> 0\n" );
+    }
+    if ( gid > 0 ) {
+      std::vector< char > out( 1 << 20 );
+      const int sz = gd_lookup( "smoke", out.data(), static_cast< int >( out.size() ) );
+      std::printf( "group-only-DSL gd_lookup(\"smoke\") -> %d bytes\n", sz );
+      const std::string html( out.data(), sz > 0 ? sz : 0 );
+      const bool found = html.find( "gdarticlebody" ) != std::string::npos;
+      std::printf( "GROUP_NARROW=%s\n", found ? "FAIL" : "OK" );
+      // Back to All: "smoke" found again.
+      gd_group_set_active( 0 );
+      const int sz2 = gd_lookup( "smoke", out.data(), static_cast< int >( out.size() ) );
+      const std::string html2( out.data(), sz2 > 0 ? sz2 : 0 );
+      std::printf( "GROUP_ALL=%s\n", html2.find( "gdarticlebody" ) != std::string::npos ? "OK" : "FAIL" );
+    }
+  }
+
   gd_cleanup();
   return ( lookSz > 0 && sugN > 0 ) ? 0 : 1;
 }

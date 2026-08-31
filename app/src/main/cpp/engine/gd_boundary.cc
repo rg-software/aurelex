@@ -39,6 +39,15 @@ int g_argc_dummy = 1;
 char g_argv0_dummy[] = "aurelex";
 char * g_argv_dummy[ 2 ] = { g_argv0_dummy, nullptr };
 
+// Boundary-side group definition (id/name/ordered dict indices). Materialized
+// into Instances::Group (which holds sptr references to the dictionaries).
+struct GroupDef
+{
+  unsigned id   = 0;
+  QString name;
+  vector< unsigned > dictIndices; // indices into EngineState::dictionaries
+};
+
 struct EngineState
 {
   Config::Class cfg;
@@ -48,6 +57,14 @@ struct EngineState
   vector< Instances::Group > groups;
   std::unique_ptr< ArticleMaker > articleMaker;
   QString indexDir;
+
+  // --- groups model (task 2.x) ---
+  // id 0 is the implicit "All" group (every dictionary, in global order).
+  // Additional groups are defined here (id/name/ordered dict indices) and
+  // materialized into Instances::Group (which references sptr dictionaries).
+  unsigned activeGroupId   = 0;
+  unsigned nextGroupId     = 1;
+  vector< GroupDef > groupDefs;
 };
 
 // Minimal Dictionary::Initializing — indexing progress is surfaced by the
@@ -74,6 +91,48 @@ vector< string > collectFiles( const QString & dirPath, const QStringList & filt
     out.push_back( QDir::toNativeSeparators( i.absoluteFilePath() ).toStdString() );
   }
   return out;
+}
+
+// Materialize EngineState::groupDefs + dictionaries into EngineState::groups
+// (Instances::Group holding sptr refs) and rebuild ArticleMaker, whose group
+// vector it holds BY REFERENCE. Must be called with g_engineMutex held and
+// after any change to groups or dictionaries.
+void rebuildGroups()
+{
+  const auto & st  = *g_state;
+  vector< Instances::Group > built;
+  built.reserve( st.groupDefs.size() );
+
+  // Group 0 = "All": every dictionary in global order.
+  {
+    Instances::Group all( 0, QStringLiteral( "All" ) );
+    all.dictionaries = st.dictionaries;
+    built.push_back( std::move( all ) );
+  }
+  for ( const auto & def : st.groupDefs ) {
+    Instances::Group g( def.id, def.name );
+    for ( unsigned idx : def.dictIndices ) {
+      if ( idx < st.dictionaries.size() ) {
+        g.dictionaries.push_back( st.dictionaries[ idx ] );
+      }
+    }
+    built.push_back( std::move( g ) );
+  }
+
+  g_state->groups = std::move( built );
+  g_state->articleMaker =
+    std::make_unique< ArticleMaker >( g_state->dictionaries, g_state->groups, g_state->cfg.preferences );
+}
+
+// Find the boundary GroupDef with the given id, or nullptr (0 = "All" is
+// implicit and has no GroupDef).
+GroupDef * findGroupDef( unsigned id )
+{
+  for ( auto & d : g_state->groupDefs ) {
+    if ( d.id == id )
+      return &d;
+  }
+  return nullptr;
 }
 
 } // namespace
@@ -206,8 +265,9 @@ int gd_lookup( const char * word, char * out, int out_size )
     return -1;
 
   const QString w = QString::fromUtf8( word );
+  // Use the active group (0 = "All"); article_maker filters to its dictionaries.
   auto req = g_state->articleMaker->makeDefinitionFor(
-    w, 0, QMap< QString, QString >(), QSet< QString >(), QStringList(), false );
+    w, g_state->activeGroupId, QMap< QString, QString >(), QSet< QString >(), QStringList(), false );
 
   // ArticleRequest delivers via queued signals; pump a real event loop
   // (bounded). Keep req alive until it is truly finished.
@@ -340,12 +400,203 @@ int gd_move_dict( int from, int to )
   v.erase( it );
   v.insert( v.begin() + to, std::move( item ) );
 
-  // ArticleMaker holds a const ref to the vector; the vector object itself is
-  // stable (only order changed), but rebuild anyway so group order is applied
-  // on the next lookup.
-  g_state->articleMaker =
-    std::make_unique< ArticleMaker >( g_state->dictionaries, g_state->groups, g_state->cfg.preferences );
+  // ArticleMaker holds a const ref to the vector; rebuild so the "All" group
+  // (and any group referencing dictionaries by index) reflects the new order.
+  rebuildGroups();
   return 0;
+}
+
+// --- groups API (milestone multi-group-management) ---
+
+int gd_group_count()
+{
+  std::lock_guard< std::mutex > lock( g_engineMutex );
+  if ( !g_state )
+    return 0;
+  // 1 (the implicit "All") + user groups.
+  return 1 + static_cast< int >( g_state->groupDefs.size() );
+}
+
+int gd_group_info( int index, int * id_out, char * name, int name_size, int * dict_count_out )
+{
+  std::lock_guard< std::mutex > lock( g_engineMutex );
+  if ( !g_state || !id_out || !name || name_size <= 0 || !dict_count_out )
+    return -1;
+  if ( index < 0 || index > static_cast< int >( g_state->groupDefs.size() ) )
+    return -1;
+
+  if ( index == 0 ) {
+    // "All" group
+    *id_out = 0;
+    const string n = "All";
+    if ( static_cast< int >( n.size() ) + 1 > name_size )
+      return -1;
+    std::memcpy( name, n.c_str(), n.size() + 1 );
+    *dict_count_out = static_cast< int >( g_state->dictionaries.size() );
+    return 0;
+  }
+
+  const GroupDef & def = g_state->groupDefs[ index - 1 ];
+  *id_out              = static_cast< int >( def.id );
+  const QByteArray nb  = def.name.toUtf8();
+  if ( nb.size() + 1 > name_size )
+    return -1;
+  std::memcpy( name, nb.constData(), nb.size() + 1 );
+  *dict_count_out = static_cast< int >( def.dictIndices.size() );
+  return 0;
+}
+
+int gd_group_create( const char * name, int * id_out )
+{
+  std::lock_guard< std::mutex > lock( g_engineMutex );
+  if ( !g_state || !id_out || !name || !*name )
+    return -1;
+  GroupDef def;
+  def.id   = g_state->nextGroupId++;
+  def.name = QString::fromUtf8( name );
+  g_state->groupDefs.push_back( std::move( def ) );
+  *id_out = static_cast< int >( g_state->groupDefs.back().id );
+  rebuildGroups();
+  return 0;
+}
+
+int gd_group_rename( int id, const char * name )
+{
+  std::lock_guard< std::mutex > lock( g_engineMutex );
+  if ( !g_state || !name || !*name )
+    return -1;
+  if ( id == 0 )
+    return -1; // "All" cannot be renamed
+  GroupDef * def = findGroupDef( static_cast< unsigned >( id ) );
+  if ( !def )
+    return -1;
+  def->name = QString::fromUtf8( name );
+  rebuildGroups();
+  return 0;
+}
+
+int gd_group_delete( int id )
+{
+  std::lock_guard< std::mutex > lock( g_engineMutex );
+  if ( !g_state )
+    return -1;
+  if ( id == 0 )
+    return -1; // "All" cannot be deleted
+  auto it = std::find_if( g_state->groupDefs.begin(), g_state->groupDefs.end(),
+                          [ id ]( const GroupDef & d ) { return d.id == static_cast< unsigned >( id ); } );
+  if ( it == g_state->groupDefs.end() )
+    return -1;
+  g_state->groupDefs.erase( it );
+  // If the active group was deleted, revert to "All" (task 1.3).
+  if ( g_state->activeGroupId == static_cast< unsigned >( id ) ) {
+    g_state->activeGroupId = 0;
+  }
+  rebuildGroups();
+  return 0;
+}
+
+int gd_group_add_dict( int id, int dict_index )
+{
+  std::lock_guard< std::mutex > lock( g_engineMutex );
+  if ( !g_state )
+    return -1;
+  if ( id == 0 || dict_index < 0 || dict_index >= static_cast< int >( g_state->dictionaries.size() ) )
+    return -1;
+  GroupDef * def = findGroupDef( static_cast< unsigned >( id ) );
+  if ( !def )
+    return -1;
+  const unsigned u = static_cast< unsigned >( dict_index );
+  if ( std::find( def->dictIndices.begin(), def->dictIndices.end(), u ) == def->dictIndices.end() ) {
+    def->dictIndices.push_back( u );
+    rebuildGroups();
+  }
+  return 0;
+}
+
+int gd_group_remove_dict( int id, int dict_index )
+{
+  std::lock_guard< std::mutex > lock( g_engineMutex );
+  if ( !g_state )
+    return -1;
+  if ( id == 0 || dict_index < 0 )
+    return -1;
+  GroupDef * def = findGroupDef( static_cast< unsigned >( id ) );
+  if ( !def )
+    return -1;
+  auto & v = def->dictIndices;
+  auto it  = std::find( v.begin(), v.end(), static_cast< unsigned >( dict_index ) );
+  if ( it != v.end() ) {
+    v.erase( it );
+    rebuildGroups();
+  }
+  return 0;
+}
+
+int gd_group_move_dict( int id, int from, int to )
+{
+  std::lock_guard< std::mutex > lock( g_engineMutex );
+  if ( !g_state )
+    return -1;
+  if ( id == 0 )
+    return -1; // "All" order is the global dictionary order (gd_move_dict)
+  GroupDef * def = findGroupDef( static_cast< unsigned >( id ) );
+  if ( !def )
+    return -1;
+  auto & v = def->dictIndices;
+  const int n = static_cast< int >( v.size() );
+  if ( from < 0 || to < 0 || from >= n || to >= n )
+    return -1;
+  auto it = v.begin() + from;
+  unsigned item = *it;
+  v.erase( it );
+  v.insert( v.begin() + to, item );
+  rebuildGroups();
+  return 0;
+}
+
+int gd_group_active( int * id_out )
+{
+  std::lock_guard< std::mutex > lock( g_engineMutex );
+  if ( !g_state || !id_out )
+    return -1;
+  *id_out = static_cast< int >( g_state->activeGroupId );
+  return 0;
+}
+
+int gd_group_set_active( int id )
+{
+  std::lock_guard< std::mutex > lock( g_engineMutex );
+  if ( !g_state )
+    return -1;
+  if ( id != 0 && !findGroupDef( static_cast< unsigned >( id ) ) )
+    return -1;
+  g_state->activeGroupId = static_cast< unsigned >( id );
+  return 0;
+}
+
+int gd_group_dicts( int id, int * out, int out_capacity )
+{
+  std::lock_guard< std::mutex > lock( g_engineMutex );
+  if ( !g_state || !out || out_capacity <= 0 )
+    return -1;
+
+  if ( id == 0 ) {
+    const int n = static_cast< int >( g_state->dictionaries.size() );
+    if ( n > out_capacity )
+      return -1;
+    for ( int i = 0; i < n; ++i )
+      out[ i ] = i;
+    return n;
+  }
+
+  GroupDef * def = findGroupDef( static_cast< unsigned >( id ) );
+  if ( !def )
+    return -1;
+  if ( static_cast< int >( def->dictIndices.size() ) > out_capacity )
+    return -1;
+  for ( size_t i = 0; i < def->dictIndices.size(); ++i )
+    out[ i ] = static_cast< int >( def->dictIndices[ i ] );
+  return static_cast< int >( def->dictIndices.size() );
 }
 
 int gd_set_dark_mode( int on )

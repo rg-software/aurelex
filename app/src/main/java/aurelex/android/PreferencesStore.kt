@@ -24,6 +24,11 @@ class PreferencesStore(context: Context) {
         get() = prefs.getBoolean(KEY_TTS, true)
         set(value) = prefs.edit { putBoolean(KEY_TTS, value) }
 
+    // --- active group id (0 = "All") ---
+    var activeGroupId: Int
+        get() = prefs.getInt(KEY_ACTIVE_GROUP, 0)
+        set(value) = prefs.edit { putInt(KEY_ACTIVE_GROUP, value) }
+
     // --- history ---
     val history: List<String>
         get() = prefs.getString(KEY_HISTORY, null)
@@ -70,6 +75,7 @@ class PreferencesStore(context: Context) {
     companion object {
         private const val KEY_DARK = "darkMode"
         private const val KEY_TTS = "ttsEnabled"
+        private const val KEY_ACTIVE_GROUP = "activeGroupId"
         private const val KEY_HISTORY = "history"
         private const val KEY_FAVORITES = "favorites"
         private const val HISTORY_SEP = "\u0001"

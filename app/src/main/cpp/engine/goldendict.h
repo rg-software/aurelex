@@ -31,6 +31,21 @@
 // - gd_move_dict:  move a dictionary in the single (unfiltered) group order;
 //                 the combined article respects this order. Returns 0 on
 //                 success, -1 on invalid indices.
+// - gd_group_count: number of groups (always >= 1; group 0 is the implicit
+//                 "All" group). Returns 0 if the engine is not initialized.
+// - gd_group_info:  group `index` (0..count-1): its id, name, and dictionary
+//                 count. Returns 0 on success, -1 on invalid index/buffer.
+// - gd_group_create: create a named group; stores its id in *id_out.
+//                 Returns 0 on success, -1 on error / if the engine is not
+//                 initialized.
+// - gd_group_rename/delete: rename or delete a group by id (0 = "All" cannot
+//                 be deleted; deleting clears its name only). Deleting the
+//                 active group reverts the active id to 0. Returns 0/-1.
+// - gd_group_add_dict / remove_dict / move_dict: edit a group's membership and
+//                 order. The dictionary is referenced by its index in the
+//                 global loaded set. Returns 0 on success, -1 on error.
+// - gd_group_active: query (store into *id_out) or set the active group id for
+//                 lookups. Returns 0/-1.
 // - gd_set_dark_mode: toggle article dark mode (task 7.1). on=1 → the engine
 //                 emits article-style-darkmode.css + darkreader for subsequent
 //                 lookups; on=0 → light. Returns 0 on success, -1 if the
@@ -58,6 +73,20 @@ int gd_get_audio( const char * url, char * out, int out_size );
 int gd_dict_count();
 int gd_dict_info( int index, char * name, int name_size, char * file, int file_size );
 int gd_move_dict( int from, int to );
+int gd_group_count();
+int gd_group_info( int index, int * id_out, char * name, int name_size, int * dict_count_out );
+int gd_group_create( const char * name, int * id_out );
+int gd_group_rename( int id, const char * name );
+int gd_group_delete( int id );
+int gd_group_add_dict( int id, int dict_index );
+int gd_group_remove_dict( int id, int dict_index );
+int gd_group_move_dict( int id, int from, int to );
+// Fill `out` (capacity out_capacity) with the dict indices of group `id`
+// (0 = "All" returns every loaded index). Returns the number written, or -1 on
+// error / buffer too small.
+int gd_group_dicts( int id, int * out, int out_capacity );
+int gd_group_active( int * id_out );
+int gd_group_set_active( int id );
 int gd_set_dark_mode( int on );
 void gd_cleanup();
 

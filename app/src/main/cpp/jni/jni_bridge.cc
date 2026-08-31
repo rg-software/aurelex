@@ -198,4 +198,127 @@ Java_aurelex_android_NativeEngine_nativeMoveDict( JNIEnv * env, jobject /*thiz*/
   return gd_move_dict( from, to );
 }
 
+// --- groups (multi-group-management) ---
+
+JNIEXPORT jint JNICALL
+Java_aurelex_android_NativeEngine_nativeGroupCount( JNIEnv * env, jobject /*thiz*/ )
+{
+  (void)env;
+  return gd_group_count();
+}
+
+// Returns a String[] per group: [id, name, dictCount]. Outer array is String[][].
+JNIEXPORT jobjectArray JNICALL
+Java_aurelex_android_NativeEngine_nativeGroupInfo( JNIEnv * env, jobject /*thiz*/ )
+{
+  const jint n = gd_group_count();
+  jclass strCls = env->FindClass( "java/lang/String" );
+  if ( !strCls || env->ExceptionCheck() ) { env->ExceptionClear(); return nullptr; }
+  jclass arrStrCls = env->FindClass( "[Ljava/lang/String;" );
+  if ( !arrStrCls || env->ExceptionCheck() ) { env->ExceptionClear(); return nullptr; }
+  jobjectArray out = env->NewObjectArray( n, arrStrCls, nullptr );
+  if ( !out || env->ExceptionCheck() ) { env->ExceptionClear(); return nullptr; }
+
+  for ( jint i = 0; i < n; ++i ) {
+    char name[ 1024 ] = { 0 };
+    jint id = -1, cnt = 0;
+    if ( gd_group_info( i, &id, name, sizeof( name ), &cnt ) != 0 )
+      continue;
+    jobjectArray row = env->NewObjectArray( 3, strCls, nullptr );
+    if ( !row || env->ExceptionCheck() ) { env->ExceptionClear(); continue; }
+    jstring jid = env->NewStringUTF( std::to_string( id ).c_str() );
+    jstring jnm = env->NewStringUTF( name );
+    jstring jct = env->NewStringUTF( std::to_string( cnt ).c_str() );
+    for ( auto * s : { jid, jnm, jct } ) {
+      if ( env->ExceptionCheck() ) { env->ExceptionClear(); s = nullptr; }
+      (void)s;
+    }
+    env->SetObjectArrayElement( row, 0, jid );
+    env->SetObjectArrayElement( row, 1, jnm );
+    env->SetObjectArrayElement( row, 2, jct );
+    env->SetObjectArrayElement( out, i, row );
+    env->DeleteLocalRef( jid ); env->DeleteLocalRef( jnm ); env->DeleteLocalRef( jct ); env->DeleteLocalRef( row );
+  }
+  env->DeleteLocalRef( strCls );
+  env->DeleteLocalRef( arrStrCls );
+  return out;
+}
+
+JNIEXPORT jint JNICALL
+Java_aurelex_android_NativeEngine_nativeGroupCreate( JNIEnv * env, jobject /*thiz*/, jstring name )
+{
+  const char * n = env->GetStringUTFChars( name, nullptr );
+  int id = -1;
+  const jint rc = gd_group_create( n, &id );
+  env->ReleaseStringUTFChars( name, n );
+  return rc == 0 ? id : -1;
+}
+
+JNIEXPORT jint JNICALL
+Java_aurelex_android_NativeEngine_nativeGroupRename( JNIEnv * env, jobject /*thiz*/, jint id, jstring name )
+{
+  const char * n = env->GetStringUTFChars( name, nullptr );
+  const jint rc = gd_group_rename( id, n );
+  env->ReleaseStringUTFChars( name, n );
+  return rc;
+}
+
+JNIEXPORT jint JNICALL
+Java_aurelex_android_NativeEngine_nativeGroupDelete( JNIEnv * env, jobject /*thiz*/, jint id )
+{
+  (void)env;
+  return gd_group_delete( id );
+}
+
+JNIEXPORT jint JNICALL
+Java_aurelex_android_NativeEngine_nativeGroupAddDict( JNIEnv * env, jobject /*thiz*/, jint id, jint dictIndex )
+{
+  (void)env;
+  return gd_group_add_dict( id, dictIndex );
+}
+
+JNIEXPORT jint JNICALL
+Java_aurelex_android_NativeEngine_nativeGroupRemoveDict( JNIEnv * env, jobject /*thiz*/, jint id, jint dictIndex )
+{
+  (void)env;
+  return gd_group_remove_dict( id, dictIndex );
+}
+
+JNIEXPORT jint JNICALL
+Java_aurelex_android_NativeEngine_nativeGroupMoveDict( JNIEnv * env, jobject /*thiz*/, jint id, jint from, jint to )
+{
+  (void)env;
+  return gd_group_move_dict( id, from, to );
+}
+
+// Returns an int[] of the dict indices in group `id`.
+JNIEXPORT jintArray JNICALL
+Java_aurelex_android_NativeEngine_nativeGroupDicts( JNIEnv * env, jobject /*thiz*/, jint id )
+{
+  const jint cap = 1 << 12;
+  std::vector< jint > buf( cap );
+  const jint n = gd_group_dicts( id, buf.data(), cap );
+  if ( n < 0 )
+    return nullptr;
+  jintArray out = env->NewIntArray( n );
+  env->SetIntArrayRegion( out, 0, n, buf.data() );
+  return out;
+}
+
+JNIEXPORT jint JNICALL
+Java_aurelex_android_NativeEngine_nativeGroupActive( JNIEnv * env, jobject /*thiz*/ )
+{
+  (void)env;
+  int id = 0;
+  gd_group_active( &id );
+  return id;
+}
+
+JNIEXPORT jint JNICALL
+Java_aurelex_android_NativeEngine_nativeGroupSetActive( JNIEnv * env, jobject /*thiz*/, jint id )
+{
+  (void)env;
+  return gd_group_set_active( id );
+}
+
 } // extern "C"

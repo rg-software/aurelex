@@ -9,7 +9,7 @@ import kotlinx.coroutines.launch
 import java.util.concurrent.Future
 
 /** Single-activity navigation destinations (task 3.2). */
-enum class Dest { SEARCH, ARTICLE, DICTIONARIES, HISTORY, FAVORITES }
+enum class Dest { SEARCH, ARTICLE, DICTIONARIES, HISTORY, FAVORITES, GROUPS }
 
 class MainViewModel : ViewModel() {
 
@@ -43,6 +43,19 @@ class MainViewModel : ViewModel() {
     private val _ttsEnabled = MutableStateFlow(true)
     val ttsEnabled: StateFlow<Boolean> = _ttsEnabled
 
+    // --- groups (multi-group-management) ---
+    data class GroupInfo(val id: Int, val name: String, val dictCount: Int)
+
+    private val _groups = MutableStateFlow<List<GroupInfo>>(emptyList())
+    val groups: StateFlow<List<GroupInfo>> = _groups
+
+    private val _activeGroupId = MutableStateFlow(0)
+    val activeGroupId: StateFlow<Int> = _activeGroupId
+
+    /** Group membership: groupId -> ordered dict indices. */
+    private val _groupMembers = MutableStateFlow<Map<Int, List<Int>>>(emptyMap())
+    val groupMembers: StateFlow<Map<Int, List<Int>>> = _groupMembers
+
     @Volatile
     private var prefs: PreferencesStore? = null
 
@@ -53,6 +66,109 @@ class MainViewModel : ViewModel() {
         _ttsEnabled.value = store.ttsEnabled
         _history.value = store.history
         _favorites.value = store.favorites
+        _activeGroupId.value = store.activeGroupId
+        refreshGroups()
+    }
+
+    /** Pulls group list + active id from the engine; used on startup and after changes. */
+    fun refreshGroups() {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val info = EngineClient.groupInfo().get()
+                _groups.value = info.map { GroupInfo(it.first, it.second, it.third) }
+                val active = EngineClient.groupActive().get()
+                _activeGroupId.value = active
+                prefs?.activeGroupId = active
+            } catch (e: Exception) {
+                android.util.Log.e("MainViewModel", "refreshGroups failed", e)
+            }
+        }
+    }
+
+    fun applyActiveGroup(id: Int) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                if (EngineClient.groupSetActive(id).get() == 0) {
+                    _activeGroupId.value = id
+                    prefs?.activeGroupId = id
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("MainViewModel", "applyActiveGroup failed", e)
+            }
+        }
+    }
+
+    fun createGroup(name: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val id = EngineClient.groupCreate(name).get()
+                if (id >= 0) refreshGroups()
+            } catch (e: Exception) {
+                android.util.Log.e("MainViewModel", "createGroup failed", e)
+            }
+        }
+    }
+
+    fun renameGroup(id: Int, name: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                if (EngineClient.groupRename(id, name).get() == 0) refreshGroups()
+            } catch (e: Exception) {
+                android.util.Log.e("MainViewModel", "renameGroup failed", e)
+            }
+        }
+    }
+
+    fun deleteGroup(id: Int) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                if (EngineClient.groupDelete(id).get() == 0) {
+                    if (_activeGroupId.value == id) _activeGroupId.value = 0
+                    refreshGroups()
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("MainViewModel", "deleteGroup failed", e)
+            }
+        }
+    }
+
+    fun groupAddDict(id: Int, dictIndex: Int) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                if (EngineClient.groupAddDict(id, dictIndex).get() == 0) refreshGroups()
+            } catch (e: Exception) {
+                android.util.Log.e("MainViewModel", "groupAddDict failed", e)
+            }
+        }
+    }
+
+    fun groupRemoveDict(id: Int, dictIndex: Int) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                if (EngineClient.groupRemoveDict(id, dictIndex).get() == 0) refreshGroups()
+            } catch (e: Exception) {
+                android.util.Log.e("MainViewModel", "groupRemoveDict failed", e)
+            }
+        }
+    }
+
+    fun groupMoveDict(id: Int, from: Int, to: Int) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                if (EngineClient.groupMoveDict(id, from, to).get() == 0) refreshGroups()
+            } catch (e: Exception) {
+                android.util.Log.e("MainViewModel", "groupMoveDict failed", e)
+            }
+        }
+    }
+
+    /** Ordered dict indices of group [id] (0 = all). */
+    fun groupDicts(id: Int): Future<List<Int>> = EngineClient.groupDicts(id)
+
+    /** Applies the persisted active group after (re)load. */
+    fun applyPersistedActiveGroup() {
+        val id = prefs?.activeGroupId ?: 0
+        if (id != 0) applyActiveGroup(id)
     }
 
     data class DictEntry(val name: String, val file: String)
@@ -296,6 +412,7 @@ class MainViewModel : ViewModel() {
                 val n = EngineClient.scanDicts(savePath).get()
                 _dictCount.value = n
                 refreshDictionaries()
+                refreshGroups()
                 android.util.Log.i("MainViewModel", "resumeScan($savePath) -> $n")
             } catch (e: Exception) {
                 android.util.Log.e("MainViewModel", "resumeScan failed", e)

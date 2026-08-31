@@ -57,6 +57,25 @@ class EngineService : Service() {
                 }
                 OP_MOVE_DICT -> Runnable { sendInt(replyTarget, NativeEngine.moveDict(bundle.getInt("from"), bundle.getInt("to")).get()) }
                 OP_SET_DARK -> Runnable { sendInt(replyTarget, NativeEngine.setDarkMode(bundle.getBoolean("on")).get()) }
+                OP_GROUP_COUNT -> Runnable { sendInt(replyTarget, NativeEngine.groupCount().get()) }
+                OP_GROUP_INFO -> Runnable {
+                    val info = NativeEngine.groupInfo().get()
+                    val sb = StringBuilder()
+                    info.forEach { (id, name, cnt) -> sb.append(id).append('\n').append(name).append('\n').append(cnt).append('\n') }
+                    sendBytes(replyTarget, sb.toString().toByteArray(Charsets.UTF_8))
+                }
+                OP_GROUP_CREATE -> Runnable { sendInt(replyTarget, NativeEngine.groupCreate(bundle.getString("name", "")).get()) }
+                OP_GROUP_RENAME -> Runnable { sendInt(replyTarget, NativeEngine.groupRename(bundle.getInt("id"), bundle.getString("name", "")).get()) }
+                OP_GROUP_DELETE -> Runnable { sendInt(replyTarget, NativeEngine.groupDelete(bundle.getInt("id")).get()) }
+                OP_GROUP_ADD_DICT -> Runnable { sendInt(replyTarget, NativeEngine.groupAddDict(bundle.getInt("id"), bundle.getInt("idx")).get()) }
+                OP_GROUP_REMOVE_DICT -> Runnable { sendInt(replyTarget, NativeEngine.groupRemoveDict(bundle.getInt("id"), bundle.getInt("idx")).get()) }
+                OP_GROUP_MOVE_DICT -> Runnable { sendInt(replyTarget, NativeEngine.groupMoveDict(bundle.getInt("id"), bundle.getInt("from"), bundle.getInt("to")).get()) }
+                OP_GROUP_DICTS -> Runnable {
+                    val list = NativeEngine.groupDicts(bundle.getInt("id")).get()
+                    sendInts(replyTarget, list.toIntArray())
+                }
+                OP_GROUP_ACTIVE -> Runnable { sendInt(replyTarget, NativeEngine.groupActive().get()) }
+                OP_GROUP_SET_ACTIVE -> Runnable { sendInt(replyTarget, NativeEngine.groupSetActive(bundle.getInt("id")).get()) }
                 else -> return
             }
             engineExecutor.execute {
@@ -77,8 +96,12 @@ class EngineService : Service() {
     private val messenger: Messenger = Messenger(handler)
 
     private fun sendInt(replyTarget: Messenger, value: Int) {
+        sendInts(replyTarget, intArrayOf(value))
+    }
+
+    private fun sendInts(replyTarget: Messenger, values: IntArray) {
         val reply = Message.obtain(null, MSG_RESULT)
-        reply.data = Bundle().apply { putIntArray("value", intArrayOf(value)) }
+        reply.data = Bundle().apply { putIntArray("value", values) }
         try {
             replyTarget.send(reply)
         } catch (_: Exception) {
@@ -135,6 +158,17 @@ class EngineService : Service() {
         const val OP_DICT_INFO = 7
         const val OP_MOVE_DICT = 8
         const val OP_SET_DARK = 9
+        const val OP_GROUP_COUNT = 20
+        const val OP_GROUP_INFO = 21
+        const val OP_GROUP_CREATE = 22
+        const val OP_GROUP_RENAME = 23
+        const val OP_GROUP_DELETE = 24
+        const val OP_GROUP_ADD_DICT = 25
+        const val OP_GROUP_REMOVE_DICT = 26
+        const val OP_GROUP_MOVE_DICT = 27
+        const val OP_GROUP_DICTS = 30
+        const val OP_GROUP_ACTIVE = 28
+        const val OP_GROUP_SET_ACTIVE = 29
 
         const val MSG_RESULT = 100
     }
