@@ -2,18 +2,12 @@
 // Links the carved engine + boundary and exercises the gd_* C API against a
 // synthetic StarDict dictionary, printing results. This validates the whole
 // carve + boundary end-to-end without a device.
+#include "goldendict.h"
+
 #include <cstdio>
 #include <cstdlib>
 #include <string>
 #include <vector>
-
-extern "C" {
-int gd_init( const char * config_dir, const char * index_dir );
-int gd_scan_dicts( const char * folder );
-int gd_suggest( const char * word, char * out, int out_size );
-int gd_lookup( const char * word, char * out, int out_size );
-void gd_cleanup();
-}
 
 int main( int argc, char ** argv )
 {
@@ -52,6 +46,43 @@ int main( int argc, char ** argv )
   std::printf( "gd_lookup(\"%s\") -> %d bytes\n", word, lookSz );
   if ( lookSz > 0 ) {
     std::printf( "BEGIN\\%.*s\nEND\n", lookSz < 800 ? lookSz : 800, out.data() );
+    const std::string html( out.data(), lookSz );
+    std::printf( "MARKERS: gdarticlebody=%s gdarticle=%s\n",
+                 html.find( "gdarticlebody" ) != std::string::npos ? "yes" : "no",
+                 html.find( "gdarticle" ) != std::string::npos ? "yes" : "no" );
+  }
+
+  // Optional dark-mode check: set dark mode and re-lookup, asserting the
+  // darkreader script is emitted (task 7.1).
+  const bool testDark = argc >= 5 && std::string( argv[ 4 ] ) == "dark";
+  if ( testDark ) {
+    const int rc = gd_set_dark_mode( 1 );
+    std::printf( "gd_set_dark_mode(1) -> %d\n", rc );
+    std::vector< char > darkOut( 1 << 20 );
+    const int darkSz = gd_lookup( word, darkOut.data(), static_cast< int >( darkOut.size() ) );
+    const std::string darkHtml( darkOut.data(), darkSz > 0 ? darkSz : 0 );
+    std::printf( "DARK: darkreader=%s\n",
+                 darkHtml.find( "darkreader.js" ) != std::string::npos ? "yes" : "no" );
+  }
+
+  // Exercise the resource/audio fetch: pick the first bres:// or gdau:// URL
+  // the article references (if any) and stream it back through the boundary.
+  const std::string html( out.data(), lookSz > 0 ? lookSz : 0 );
+  for ( const char * scheme : { "bres://", "gdau://" } ) {
+    const size_t pos = html.find( scheme );
+    if ( pos == std::string::npos )
+      continue;
+    size_t end = pos;
+    while ( end < html.size() && html[ end ] != '"' && html[ end ] != '>' && html[ end ] != '\n' )
+      ++end;
+    const std::string url = html.substr( pos, end - pos );
+    std::vector< char > res( 1 << 20 );
+    const int resSz = gd_get_resource( url.c_str(), res.data(), static_cast< int >( res.size() ) );
+    std::printf( "gd_get_resource(\"%s\") -> %d bytes (used as audio: gd_get_audio same path)\n",
+                 url.c_str(),
+                 resSz );
+    (void)res;
+    break;
   }
 
   gd_cleanup();

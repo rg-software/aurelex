@@ -16,8 +16,19 @@ in `patches/` or the boundary layer).
 
 1. Check upstream release tags (`git ls-remote --tags origin`).
 2. Bump the pin in `engine/` and this file.
-3. Apply `patches/`, build, run the CI smoke test (lookup a known word).
+3. Apply `patches/` (see below), build, run the CI smoke test (lookup a known word).
 4. If index format changed, the reindex-on-version rule (see design.md D5) applies.
+
+## Applying the deviation patches
+
+`patches/` holds every deviation from upstream. Before any build/CI run, the
+engine submodule must be patched. The engine working tree starts clean (the
+submodule itself is never committed with edits):
+
+- Windows: `.\scripts\apply-patches.ps1`
+- Unix/CI: `./scripts/apply-patches.sh`
+
+`git -C engine checkout -- .` reverts the working tree back to the pinned tag.
 
 ## Why a tag, not a branch
 

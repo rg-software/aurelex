@@ -103,6 +103,11 @@ set(AURELEX_CARVE_SOURCES
     ${ENGINE_DIR}/src/dict/xdxf2html.cc
     ${ENGINE_DIR}/src/dict/xdxf.cc
 
+    ${ENGINE_DIR}/src/dict/mdx.cc
+    ${ENGINE_DIR}/src/dict/mdictparser.cc
+    ${ENGINE_DIR}/src/dict/dsl.cc
+    ${ENGINE_DIR}/src/dict/dsl_details.cc
+
     # --- boundary layer (ours, not upstream) ---
     fts_stub.cc
     gd_boundary.cc
@@ -157,7 +162,10 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
     target_compile_options(aurelex_carve PRIVATE -Wall -Wextra)
 endif()
 
-add_library(aurelex SHARED $<TARGET_OBJECTS:aurelex_carve>)
+add_library(aurelex SHARED
+    $<TARGET_OBJECTS:aurelex_carve>
+    ${CMAKE_CURRENT_SOURCE_DIR}/../jni/jni_bridge.cc
+)
 set_target_properties(aurelex PROPERTIES OUTPUT_NAME aurelex)
 target_include_directories(aurelex PRIVATE ${AURELEX_CARVE_INCLUDES})
 target_link_libraries(aurelex PRIVATE aurelex_carve ${AURELEX_CARVE_LIBS})

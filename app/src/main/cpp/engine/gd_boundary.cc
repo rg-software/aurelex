@@ -5,22 +5,27 @@
 // ArticleMaker) without touching any upstream file: folder-scan policy,
 // config-home override, and buffer/lifetime handling live here.
 //
-// StarDict-first for the Phase-0 smoke; DSL/MDX added the same way (their
-// makeDictionaries are upstream API). FTS is deliberately not exposed.
+// The public contract is declared in goldendict.h; this file implements it.
+// FTS is deliberately not exposed.
 #include "config.hh"
 #include "globalbroadcaster.hh"
 #include "instances.hh"
 #include "dict/dictionary.hh"
 #include "dict/stardict.hh"
+#include "dict/mdx.hh"
+#include "dict/dsl.hh"
 #include "article_maker.hh"
 #include "wordfinder.hh"
+#include "goldendict.h"
 
 #include <QCoreApplication>
 #include <QGuiApplication>
 #include <QDir>
 #include <QEventLoop>
 #include <QTimer>
+#include <QUrl>
 #include <cstring>
+#include <mutex>
 #include <string>
 #include <vector>
 
@@ -55,6 +60,11 @@ struct ProgressSink : Dictionary::Initializing
 
 EngineState * g_state = nullptr;
 
+// The engine (its dict backends, ArticleMaker, WordFinder) is not thread-safe.
+// Kotlin calls through JNI on a background dispatcher, so serialize every
+// entry point here. All gd_* functions are blocking and share g_state.
+std::mutex g_engineMutex;
+
 vector< string > collectFiles( const QString & dirPath, const QStringList & filters )
 {
   vector< string > out;
@@ -72,6 +82,7 @@ extern "C" {
 
 int gd_init( const char * config_dir, const char * index_dir )
 {
+  std::lock_guard< std::mutex > lock( g_engineMutex );
   if ( g_state )
     return 0;
 
@@ -95,6 +106,10 @@ int gd_init( const char * config_dir, const char * index_dir )
 
   g_state = new EngineState;
   g_state->indexDir = QString::fromUtf8( index_dir );
+  // "modern" display style enables the dark mode stylesheet variant
+  // (article_maker only emits article-style-darkmode.css for displayStyle
+  // "modern"); darkreader.js is emitted for any style when dark mode is on.
+  g_state->cfg.preferences.displayStyle = QStringLiteral( "modern" );
   // ArticleMaker holds const refs to dictionaries/groups; keep them stable and
   // empty groups -> makeDefinitionFor falls back to ALL dictionaries (the v1
   // single "unfiltered" group, design D-specs).
@@ -109,6 +124,7 @@ int gd_init( const char * config_dir, const char * index_dir )
 
 int gd_scan_dicts( const char * folder )
 {
+  std::lock_guard< std::mutex > lock( g_engineMutex );
   if ( !g_state )
     return -1;
 
@@ -121,20 +137,33 @@ int gd_scan_dicts( const char * folder )
   const QString indexDir       = g_state->indexDir;
 
   ProgressSink sink;
-  auto stardicts = Stardict::makeDictionaries( files, indexDir.toStdString(), sink, 500000 );
+  const string idxPath = indexDir.toStdString();
+
+  const size_t before = g_state->dictionaries.size();
+
+  auto stardicts = Stardict::makeDictionaries( files, idxPath, sink, 500000 );
+  auto mdxs      = Mdx::makeDictionaries( files, idxPath, sink );
+  auto dsls      = Dsl::makeDictionaries( files, idxPath, sink, 500000 );
 
   for ( auto & d : stardicts ) {
+    g_state->dictionaries.push_back( std::move( d ) );
+  }
+  for ( auto & d : mdxs ) {
+    g_state->dictionaries.push_back( std::move( d ) );
+  }
+  for ( auto & d : dsls ) {
     g_state->dictionaries.push_back( std::move( d ) );
   }
 
   g_state->articleMaker =
     std::make_unique< ArticleMaker >( g_state->dictionaries, g_state->groups, g_state->cfg.preferences );
 
-  return static_cast< int >( stardicts.size() );
+  return static_cast< int >( g_state->dictionaries.size() - before );
 }
 
 int gd_suggest( const char * word, char * out, int out_size )
 {
+  std::lock_guard< std::mutex > lock( g_engineMutex );
   if ( !g_state || !out || out_size <= 0 )
     return -1;
 
@@ -169,6 +198,7 @@ int gd_suggest( const char * word, char * out, int out_size )
 
 int gd_lookup( const char * word, char * out, int out_size )
 {
+  std::lock_guard< std::mutex > lock( g_engineMutex );
   if ( !g_state || !out || out_size <= 0 )
     return -1;
 
@@ -196,8 +226,142 @@ int gd_lookup( const char * word, char * out, int out_size )
   return static_cast< int >( data.size() );
 }
 
+// Fetch an embedded resource (image/audio) by bres:// or gdau:// URL, the same
+// way upstream ArticleNetworkAccessManager::handleDictionaryResource resolves
+// it: url.host() = dictionary id, url.path() = resource path.
+static int fetchResource( const QString & urlString, char * out, int out_size )
+{
+  if ( !g_state || !out || out_size <= 0 )
+    return -1;
+
+  const QUrl url( urlString );
+  const string id = url.host().toStdString();
+
+  std::lock_guard< std::mutex > lock( g_engineMutex );
+
+  Dictionary::Class * found = nullptr;
+  for ( const auto & d : g_state->dictionaries ) {
+    if ( d->getId() == id ) {
+      found = d.get();
+      break;
+    }
+  }
+  if ( !found )
+    return -2;
+
+  sptr< Dictionary::DataRequest > req;
+  try {
+    req = found->getResource( Utils::Url::path( url ).mid( 1 ).toUtf8().data() );
+  }
+  catch ( std::exception & e ) {
+    qWarning( "getResource request error (%s) in \"%s\"", e.what(), found->getName().c_str() );
+    return -2;
+  }
+  if ( !req.get() )
+    return -2;
+
+  QEventLoop loop;
+  QTimer::singleShot( 15000, &loop, &QEventLoop::quit );
+  QObject::connect( req.get(), &Dictionary::Request::finished, &loop, &QEventLoop::quit );
+  if ( !req->isFinished() )
+    loop.exec();
+
+  if ( !req->isFinished() )
+    return -3;
+
+  const auto & data = req->getFullData();
+  if ( out_size <= static_cast< int >( data.size() ) )
+    return -4;
+
+  std::memcpy( out, data.data(), data.size() );
+  out[ data.size() ] = '\0';
+  return static_cast< int >( data.size() );
+}
+
+int gd_get_resource( const char * url, char * out, int out_size )
+{
+  return fetchResource( QString::fromUtf8( url ), out, out_size );
+}
+
+int gd_get_audio( const char * url, char * out, int out_size )
+{
+  return fetchResource( QString::fromUtf8( url ), out, out_size );
+}
+
+int gd_dict_count()
+{
+  std::lock_guard< std::mutex > lock( g_engineMutex );
+  return g_state ? static_cast< int >( g_state->dictionaries.size() ) : 0;
+}
+
+int gd_dict_info( int index, char * name, int name_size, char * file, int file_size )
+{
+  if ( !g_state || !name || name_size <= 0 || !file || file_size <= 0 )
+    return -1;
+  std::lock_guard< std::mutex > lock( g_engineMutex );
+
+  if ( index < 0 || index >= static_cast< int >( g_state->dictionaries.size() ) )
+    return -1;
+
+  Dictionary::Class & d = *g_state->dictionaries[ index ];
+
+  const string n = d.getName();
+  if ( static_cast< int >( n.size() ) + 1 > name_size )
+    return -1;
+  std::memcpy( name, n.c_str(), n.size() + 1 );
+
+  string f;
+  const auto & filenames = d.getDictionaryFilenames();
+  if ( !filenames.empty() )
+    f = filenames.front();
+  if ( static_cast< int >( f.size() ) + 1 > file_size )
+    return -1;
+  std::memcpy( file, f.c_str(), f.size() + 1 );
+
+  return 0;
+}
+
+int gd_move_dict( int from, int to )
+{
+  if ( !g_state )
+    return -1;
+  std::lock_guard< std::mutex > lock( g_engineMutex );
+
+  const int n = static_cast< int >( g_state->dictionaries.size() );
+  if ( from < 0 || to < 0 || from >= n || to >= n )
+    return -1;
+
+  auto & v = g_state->dictionaries;
+  auto it = v.begin() + from;
+  sptr< Dictionary::Class > item = std::move( *it );
+  v.erase( it );
+  v.insert( v.begin() + to, std::move( item ) );
+
+  // ArticleMaker holds a const ref to the vector; the vector object itself is
+  // stable (only order changed), but rebuild anyway so group order is applied
+  // on the next lookup.
+  g_state->articleMaker =
+    std::make_unique< ArticleMaker >( g_state->dictionaries, g_state->groups, g_state->cfg.preferences );
+  return 0;
+}
+
+int gd_set_dark_mode( int on )
+{
+  if ( !g_state )
+    return -1;
+  std::lock_guard< std::mutex > lock( g_engineMutex );
+
+  g_state->cfg.preferences.darkReaderMode =
+    on ? Config::Dark::On : Config::Dark::Off;
+
+  // ArticleMaker reads the preference via GlobalBroadcaster for the header.
+  GlobalBroadcaster::instance()->setConfig( &g_state->cfg );
+  return 0;
+}
+
 void gd_cleanup()
 {
+  std::lock_guard< std::mutex > lock( g_engineMutex );
   delete g_state;
   g_state = nullptr;
 }

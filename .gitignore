@@ -26,6 +26,7 @@ Makefile
 *.so
 *.o
 *.a
+build-host/
 
 # Vcpkg / toolchain cache
 vcpkg_installed/

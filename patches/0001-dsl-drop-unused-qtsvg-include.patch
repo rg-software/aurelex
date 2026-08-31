@@ -1,0 +1,28 @@
+From: aurelex <aurelex@localhost>
+Date: Sun, 31 Aug 2026 00:00:00 +0000
+Subject: [PATCH] dsl: drop unused QSvgRenderer include
+
+The LTE/DSL reader never uses QSvgRenderer (the include is dead code; the
+only Svg references are qrc:/// icon URLs, not symbols). Upstream compiles
+with QtSvg available, but our Android carve links Core/Xml/Concurrent/Gui
+only (design D1), so this include was failing to find <QSvgRenderer>.
+Removing an unused include is behavior-neutral.
+
+---
+ src/dict/dsl.cc | 1 -
+ 1 file changed, 1 deletion(-)
+
+diff --git a/src/dict/dsl.cc b/src/dict/dsl.cc
+index eb514e68..55cf0ae5 100644
+--- a/src/dict/dsl.cc
++++ b/src/dict/dsl.cc
+@@ -30,7 +30,6 @@
+ #include <QPainter>
+ #include <QRegularExpression>
+ #include <QByteArray>
+-#include <QSvgRenderer>
+ #include <QtConcurrentRun>
+ #include "utils.hh"
+ #include "common/globalbroadcaster.hh"
+--
+2.30.0
