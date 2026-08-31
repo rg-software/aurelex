@@ -32,11 +32,13 @@ Status legend: 🟢 planned · 🔵 in progress · ✅ done · ⏸ parked
 Set sourced from the design's cut-scope register (design.md "(b) Make sense on
 mobile") plus later proposals.
 
+- 🔵 **Multi-group management** — engine already supports groups; expose group
+  CRUD + reorder via the boundary, add a groups UI (v1 is single-group).
+  Planning: OpenSpec change `multi-group-management` (proposal/design/specs/
+  tasks complete).
 - 🟢 **Full-text search (xapian)** — re-enable FTS in the carve: cross-compile
   xapian for Android, add `gd_fts_*` boundary calls, FTS UI. Highest
   power-user value; touches the merge contract (new dep + boundary API).
-- 🟢 **Multi-group management** — engine already supports groups; expose group
-  CRUD + reorder via the boundary, add a groups UI (v1 is single-group).
 - 🟢 **Quick-settings tile / home-screen widget** — instant lookup from the
   shelf.
 - 🟢 **Pre-built desktop-generated index caches** — copy indexes along with
