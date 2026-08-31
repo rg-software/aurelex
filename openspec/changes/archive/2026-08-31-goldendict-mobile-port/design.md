@@ -33,7 +33,7 @@ The engine keeps its own internal seams; the JNI layer exposes the C API
 (`gd_init`, `gd_scan_dicts`, `gd_lookup`, `gd_suggest`, `gd_get_resource`, `gd_get_audio`, `gd_cleanup`) and nothing else. Upstream's `GlobalBroadcaster`/config singletons already decouple dict backends from frontend code — the Android frontend plugs into that seam instead of a Qt widget tree.
 
 The only carved source needing handling:
-- Icon code in `dict/dictionary.cc` uses QtGui (`QIcon`/`QImage`/`QPainter`). Stub those few icon methods under the boundary so the carve stays QtCore-only (tree differs from upstream by a handful of lines, kept in `patches/`).
+- Icon code in `dict/dictionary.cc` uses QtGui (`QIcon`/`QImage`/`QPainter`). **Resolved by the spike: the carve links `Qt6::Gui`** (article rendering needs `qGuiApp->devicePixelRatio()` via `getOptimalIconSize`), so the icon code compiles as-is and nothing is stubbed there. The earlier "keep carve QtCore-only" goal was superseded by the D1 refinement recorded in Open Questions.
 
 ### D3. Merge contract: tag-pinned submodule + small patch set + CI smoke
 - `engine/` points at an upstream **release tag** (not rolling master), so index format + code are versioned together and bumps are batched.
@@ -148,7 +148,7 @@ Remaining on-device validation (real device/emulator) is task-gated: the smoke n
 ## Open Questions
 
 - Exact Qt-version and dep-version pairs for the Android toolchain — resolved by the Phase 0 spike, not by this design.
-- Storage-selection UX: SAF document tree vs `MANAGE_EXTERNAL_STORAGE` — an implementation choice under the "select a folder" requirement; decide at task time.
+- Storage-selection UX: SAF document tree vs `MANAGE_EXTERNAL_STORAGE` — **resolved: SAF `OpenDocumentTree`** (no broad storage permission). The engine's `gd_scan_dicts` needs a real path, so the app resolves the tree's physical path (`primary:` → `/storage/emulated/0/...`) and scans in place (critical for large `.mdd`); when the provider is unresolvable it stages copies into app-private storage first (see `SafResolver.kt`, task 4.1).
 - Whether desktop-side index generation (pre-built caches copied along with dictionaries) ever becomes worth supporting — a future enhancement, not a blocker; D5 already keeps the index format honest.
 - Dark-mode/theming approach for the article WebView — deferred polish, additive.
 - Scope of "QtCore-only": **resolved by the spike — link `Qt6::Gui`** (article rendering needs `qGuiApp->devicePixelRatio()` via `getOptimalIconSize`). The carve instantiates a `QGuiApplication` (works headless with the offscreen platform; on Android the host app owns the GUI).
