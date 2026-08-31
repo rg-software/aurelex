@@ -46,7 +46,7 @@ jobs:
           pip install aqtinstall
           python -m aqt install-qt linux desktop 6.6.3 gcc_64 -O "${{ github.workspace }}/qt" \
             || true
-          git clone --depth 1 --branch 2024.05.24 https://github.com/microsoft/vcpkg.git "${{ github.workspace }}/vcpkg" || true
+          git clone --depth 1 --branch 2026.07.29 https://github.com/microsoft/vcpkg.git "${{ github.workspace }}/vcpkg" || true
 
       - name: Configure local.properties for the Android native build
         shell: bash

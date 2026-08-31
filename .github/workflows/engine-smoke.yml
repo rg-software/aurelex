@@ -56,7 +56,10 @@ jobs:
       - name: Setup vcpkg (cross-compiled deps mimicked on host)
         shell: bash
         run: |
-          git clone --depth 1 --branch 2024.05.24 https://github.com/microsoft/vcpkg.git "${{ env.VCPKG_ROOT }}" || true
+          # Baseline matches local dev (C:\vcpkg @ 2026.07.29). Older baselines
+          # (e.g. 2024.05.24) reference a pkgconf package that has since been
+          # removed from the MSYS2 mirrors, breaking the bzip2 port build.
+          git clone --depth 1 --branch 2026.07.29 https://github.com/microsoft/vcpkg.git "${{ env.VCPKG_ROOT }}" || true
           "${{ env.VCPKG_ROOT }}/bootstrap-vcpkg.bat" -disableMetrics
           "${{ env.VCPKG_ROOT }}/vcpkg.exe" install zlib bzip2 liblzma lzo fmt libiconv --triplet x64-windows
 
