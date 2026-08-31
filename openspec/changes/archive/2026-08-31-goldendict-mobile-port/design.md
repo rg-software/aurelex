@@ -145,10 +145,62 @@ The toolchain spike **passed**; D1/D6 confirmed with refinements. Evidence:
 
 Remaining on-device validation (real device/emulator) is task-gated: the smoke now runs on host; Android APK loads `libaurelex.so` and will be exercised in task 3 (JNI boundary).
 
+## On-device revision (post-archive, commit 2b106f2)
+
+Real-device testing (Xiaomi Android 16, then Motorola ThinkPhone Android 15)
+overturned part of D1/D4 and revealed the actual blank-screen root causes.
+Recorded here so the next change (the OpenSpec `engine-architecture-revision`
+change) starts from the truth, not the spike assumptions.
+
+### What actually happened on-device
+
+1. **Compose blank screen, root cause #1: `viewModel()` default-param silently
+   aborted composition.** The diagnostic `setContentView(TextView)` and a
+   trivial Compose `Text` both rendered; the real app (AurelexApp with
+   `viewModel()` default) composed nothing (no body logs). Switching to an
+   Activity-delegated `by viewModels()` passed into the composable fixed it.
+   This was the *original* blank-app cause, independent of Qt.
+2. **Compose blank, root cause #2: dlopen-ing the Qt android libs
+   (libQt6Gui/Widgets) in the Compose process broke HWUI frame production.**
+   Even with no Qt bootstrap, merely loading `libaurelex.so` (which links them)
+   froze rendering after ~1-2 frames. Separate-process engine fixed it.
+3. **Engine process kept dying: a JNI `ArrayStoreException` in
+   `nativeDictInfo`.** The outer `NewObjectArray` was created with element
+   class `String` (making a `String[]`) but stored `String[]` pairs → ART
+   aborted the process at startup and after every scan, wiping in-memory dict
+   state (the repeated "engine not ready"/restart churn). Fixed by using
+   element class `'[Ljava/lang/String;'` and adding `ExceptionCheck` guards.
+
+### Architectural change: engine in a separate process (D1/D2 revision)
+
+The carve still compiles Qt Core/Gui/Widgets into `libaurelex.so`, but the
+`.so` is loaded ONLY in a dedicated `:engine` process (`EngineService`, a
+foreground `dataSync` service, `android:process=":engine"`). The Compose UI
+process never dlopens Qt, so Compose/HWUI rendering is unaffected. The UI talks
+to the engine over **Binder (Messenger)** (`EngineClient` ↔ `EngineService`),
+which is reliable same-app multi-process IPC (abstract local sockets proved
+unreliable on-device). This is the standard pattern (cf. ffmpeg/libvpx in
+separate processes).
+
+Consequences vs D1:
+- D1's "link QtGui in-process into an ordinary Android app" is **disproved**:
+  that process model blanks the UI. QtGui is still linked, but only in the
+  `:engine` process.
+- `QCoreApplication` is constructed on the `:engine` process main thread
+  (`gd_init`); `NativeEngine` methods `awaitInit()` before touching native.
+- SAF folder grants restart the whole package (including `:engine`), so
+  dictionaries are **always staged into app-private storage** before scanning
+  (the engine can't read `/storage/emulated/0` via QDir under scoped storage
+  anyway) and the staged path is persisted; on `onServiceDisconnected` the app
+  calls `resumeScan()` to restore state after an engine restart.
+
+Verified end-to-end on the Motorola: search UI renders, 6 dictionaries load
+(3 `.dsl` + 3 `.dsl.dz` variants), article lookup renders in the WebView.
+
 ## Open Questions
 
 - Exact Qt-version and dep-version pairs for the Android toolchain — resolved by the Phase 0 spike, not by this design.
-- Storage-selection UX: SAF document tree vs `MANAGE_EXTERNAL_STORAGE` — **resolved: SAF `OpenDocumentTree`** (no broad storage permission). The engine's `gd_scan_dicts` needs a real path, so the app resolves the tree's physical path (`primary:` → `/storage/emulated/0/...`) and scans in place (critical for large `.mdd`); when the provider is unresolvable it stages copies into app-private storage first (see `SafResolver.kt`, task 4.1).
+- Storage-selection UX: SAF document tree vs `MANAGE_EXTERNAL_STORAGE` — **resolved: SAF `OpenDocumentTree`** (no broad storage permission). Post-archive revision: dictionaries are **always staged into app-private storage** before scanning (the engine can't read `/storage/emulated/0` via QDir under scoped storage, and the `:engine` process doesn't hold the content-URI grant); see the "On-device revision" section.
 - Whether desktop-side index generation (pre-built caches copied along with dictionaries) ever becomes worth supporting — a future enhancement, not a blocker; D5 already keeps the index format honest.
 - Dark-mode/theming approach for the article WebView — deferred polish, additive.
 - Scope of "QtCore-only": **resolved by the spike — link `Qt6::Gui`** (article rendering needs `qGuiApp->devicePixelRatio()` via `getOptimalIconSize`). The carve instantiates a `QGuiApplication` (works headless with the offscreen platform; on Android the host app owns the GUI).
