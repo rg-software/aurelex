@@ -7,6 +7,11 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
+// Signing comes from env vars so CI can sign without committing the keystore:
+//   AURELEX_KEYSTORE_PATH, AURELEX_KEYSTORE_PASSWORD,
+//   AURELEX_KEY_ALIAS, AURELEX_KEY_PASSWORD
+val hasSigningConfig = !System.getenv("AURELEX_KEYSTORE_PATH").isNullOrBlank()
+
 val localProps = Properties().apply {
     val f = rootProject.file("local.properties")
     if (f.exists()) FileInputStream(f).use(::load)
@@ -14,6 +19,11 @@ val localProps = Properties().apply {
 val qtBase = localProps.getProperty("aurelex.qt.base") ?: ""
 val qtHost = localProps.getProperty("aurelex.qt.host") ?: ""
 val vcpkgRoot = localProps.getProperty("aurelex.vcpkg.root") ?: ""
+
+// The engine submodule is pinned at a release tag; its VERSION is the index
+// format version (design D5, task 6.3): an engine bump changes this string and
+// therefore reindexes all indexes on the next scan.
+val engineVersion = file("engine/VERSION").takeIf { it.exists() }?.readText()?.trim() ?: "unknown"
 
 android {
     namespace = "aurelex.android"
@@ -51,10 +61,26 @@ android {
         }
     }
 
+    signingConfigs {
+        if (hasSigningConfig) {
+            create("release") {
+                storeFile = file(System.getenv("AURELEX_KEYSTORE_PATH"))
+                storePassword = System.getenv("AURELEX_KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("AURELEX_KEY_ALIAS")
+                keyPassword = System.getenv("AURELEX_KEY_PASSWORD")
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            // Signed only when CI secrets provide a keystore (task 7.2);
+            // local release builds remain unsigned so debug remains usable.
+            if (hasSigningConfig) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
     }
 
@@ -69,6 +95,12 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true
+    }
+
+    defaultConfig {
+        // Injected on every build from the pinned engine submodule (D5/6.3).
+        buildConfigField("String", "ENGINE_VERSION", "\"$engineVersion\"")
     }
 
     packaging {
@@ -88,6 +120,7 @@ dependencies {
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
+    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
     implementation("androidx.core:core-ktx:1.15.0")
     debugImplementation("androidx.compose.ui:ui-tooling")
 }

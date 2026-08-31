@@ -1,0 +1,94 @@
+name: build release apk
+
+# Builds a signed release APK (task 7.2) and, on tag pushes, drafts a GitHub
+# release with the APK attached (task 7.3). Signing secrets must be configured
+# as repository Actions secrets.
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+jobs:
+  sign:
+    runs-on: ubuntu-latest
+    env:
+      # Android SDK/NDK for the JNI + Qt carve. NDK 23.2 matches local dev
+      # (app/build.gradle.kts); the ndk.dir in local.properties is not used.
+      ANDROID_NDK_HOME: ${{ github.workspace }}/ndk
+    steps:
+      - name: Checkout with submodules
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Apply engine patches
+        shell: bash
+        run: ./scripts/apply-patches.sh
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: "temurin"
+          java-version: "21"
+
+      - name: Install NDK (r23c for the carve)
+        shell: bash
+        run: |
+          wget -q https://dl.google.com/android/repository/android-ndk-r23c-linux.zip
+          unzip -q android-ndk-r23c-linux.zip
+          mv android-ndk-r23c "$ANDROID_NDK_HOME"
+
+      - name: Qt + vcpkg for Android (host tools + android kits)
+        shell: bash
+        run: |
+          pip install aqtinstall
+          python -m aqt install-qt linux desktop 6.6.3 gcc_64 -O "${{ github.workspace }}/qt" \
+            || true
+          git clone --depth 1 --branch 2024.05.24 https://github.com/microsoft/vcpkg.git "${{ github.workspace }}/vcpkg" || true
+
+      - name: Configure local.properties for the Android native build
+        shell: bash
+        run: |
+          cat > local.properties <<EOF
+          sdk.dir=$ANDROID_HOME
+          ndk.dir=$ANDROID_NDK_HOME
+          aurelex.qt.base=${{ github.workspace }}/qt/6.6.3
+          aurelex.qt.host=${{ github.workspace }}/qt/6.6.3/gcc_64
+          aurelex.vcpkg.root=${{ github.workspace }}/vcpkg
+          EOF
+
+      - name: Write release keystore
+        shell: bash
+        env:
+          KEYSTORE_B64: ${{ secrets.AURELEX_KEYSTORE_BASE64 }}
+        run: |
+          if [ -n "$KEYSTORE_B64" ]; then
+            echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.jks"
+            chmod 600 "$RUNNER_TEMP/release.jks"
+          fi
+
+      - name: Build signed release APK
+        shell: bash
+        env:
+          AURELEX_KEYSTORE_PATH: ${{ runner.temp }}/release.jks
+          AURELEX_KEYSTORE_PASSWORD: ${{ secrets.AURELEX_KEYSTORE_PASSWORD }}
+          AURELEX_KEY_ALIAS: ${{ secrets.AURELEX_KEY_ALIAS }}
+          AURELEX_KEY_PASSWORD: ${{ secrets.AURELEX_KEY_PASSWORD }}
+        run: |
+          ./gradlew :app:assembleRelease --no-daemon --stacktrace
+
+      - name: Upload signed APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: aurelex-release
+          path: app/build/outputs/apk/release/app-release.apk
+          if-no-files-found: error
+
+      - name: Create GitHub release (tag pushes)
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: app/build/outputs/apk/release/app-release.apk
+          generate_release_notes: true
