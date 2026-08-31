@@ -21,5 +21,5 @@
 
 ## 5. On-device verification
 
-- [ ] 5.1 Verify on a real device: search UI renders, 3 dictionaries (6 entries incl. .dsl.dz) load via Dictionaries → Add, and a lookup ("apple") renders the article in the WebView. (Achieved on Motorola ThinkPhone Android 15; re-verify after a clean install + re-add.)
-- [ ] 5.2 Verify the engine survives a SAF folder-grant package restart and dictionaries are auto-restored (resumeScan) without re-picking the folder.
+- [x] 5.1 Verify on a real device: search UI renders, 3 dictionaries (6 entries incl. .dsl.dz) load via Dictionaries → Add, and a lookup ("apple") renders the article in the WebView. (Verified on Motorola ThinkPhone Android 15 after a clean install + re-add: search UI (Aurelex/Search field/Look up/Dictionaries), "Dictionaries (6 loaded)", article content present in the WebView screenshot.)
+- [x] 5.2 Verify the engine survives a SAF folder-grant package restart and dictionaries are auto-restored (resumeScan) without re-picking the folder. (Verified: the `:engine` PID was unchanged across the grant — foreground service kept it alive; startup `resumeScan(/.../staged) -> 3` restored dictionaries, then the re-scan confirmed 6 loaded.)

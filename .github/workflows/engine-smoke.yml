@@ -80,6 +80,14 @@ jobs:
           python scripts/make-smoke-stardict.py "$RUNNER_TEMP/dic"
           mkdir -p "$RUNNER_TEMP/cfg"
 
+      - name: Generate DSL + .dsl.dz fixture (compressed DSL path)
+        shell: bash
+        run: |
+          python scripts/make-example-dicts.py "$RUNNER_TEMP/dsl"
+          # Copy the compressed variant into the smoke dict folder so the scan
+          # also exercises the dictzip (.dsl.dz) reader.
+          cp "$RUNNER_TEMP/dsl/aurelex-basic.dsl.dz" "$RUNNER_TEMP/dic/"
+
       - name: Run smoke and assert non-empty HTML
         shell: bash
         run: |
@@ -88,4 +96,8 @@ jobs:
           echo "$out"
           printf '%s' "$out" | grep -q "gd_lookup(\"smoke\") -> [1-9]" \
             || { echo "SMOKE FAILED: gd_lookup returned no HTML"; exit 1; }
+          # The folder now contains the StarDict fixture + a .dsl.dz; the scan
+          # must report both (2 dictionaries).
+          printf '%s' "$out" | grep -q "gd_scan_dicts -> 2" \
+            || { echo "SMOKE FAILED: expected 2 dictionaries (stardict + dsl.dz)"; exit 1; }
           echo "SMOKE OK"
