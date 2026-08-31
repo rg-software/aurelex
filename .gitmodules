@@ -1,3 +1,7 @@
 [submodule "engine"]
 	path = engine
 	url = https://github.com/xiaoyifang/goldendict-ng.git
+	# The engine working tree always carries the applied patches/ (merge
+	# contract D3); ignore that expected dirtiness so `git status` stays clean.
+	# A real pin change (gitlink bump) is still reported.
+	ignore = dirty
