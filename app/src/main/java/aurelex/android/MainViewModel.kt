@@ -9,7 +9,7 @@ import kotlinx.coroutines.launch
 import java.util.concurrent.Future
 
 /** Single-activity navigation destinations (task 3.2). */
-enum class Dest { SEARCH, ARTICLE, DICTIONARIES }
+enum class Dest { SEARCH, ARTICLE, DICTIONARIES, HISTORY, FAVORITES }
 
 class MainViewModel : ViewModel() {
 
@@ -33,6 +33,27 @@ class MainViewModel : ViewModel() {
 
     private val _darkMode = MutableStateFlow(false)
     val darkMode: StateFlow<Boolean> = _darkMode
+
+    private val _history = MutableStateFlow<List<String>>(emptyList())
+    val history: StateFlow<List<String>> = _history
+
+    private val _favorites = MutableStateFlow<List<String>>(emptyList())
+    val favorites: StateFlow<List<String>> = _favorites
+
+    private val _ttsEnabled = MutableStateFlow(true)
+    val ttsEnabled: StateFlow<Boolean> = _ttsEnabled
+
+    @Volatile
+    private var prefs: PreferencesStore? = null
+
+    /** Initializes app state from the persisted preferences (task 5.1). */
+    fun loadPreferences(store: PreferencesStore) {
+        prefs = store
+        _darkMode.value = store.darkMode
+        _ttsEnabled.value = store.ttsEnabled
+        _history.value = store.history
+        _favorites.value = store.favorites
+    }
 
     data class DictEntry(val name: String, val file: String)
 
@@ -91,18 +112,62 @@ class MainViewModel : ViewModel() {
         }
     }
 
-    /** Toggles article dark mode (task 7.1); re-looks-up so the CSS is re-emitted. */
+    /** Toggles article dark mode (task 7.1); persists + re-looks-up so CSS re-emits. */
     fun toggleDarkMode(word: String?) {
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 val next = !_darkMode.value
                 EngineClient.setDarkMode(next).get()
                 _darkMode.value = next
+                prefs?.darkMode = next
                 word?.let { lookup(it) }
             } catch (e: Exception) {
                 android.util.Log.e("MainViewModel", "setDarkMode failed", e)
             }
         }
+    }
+
+    /** Toggles the TTS pronunciation preference (task 4.2). */
+    fun toggleTts() {
+        val next = !_ttsEnabled.value
+        _ttsEnabled.value = next
+        prefs?.ttsEnabled = next
+    }
+
+    // --- History (tasks 2.1/2.3) ---
+
+    fun recordHistory(word: String) {
+        prefs?.addHistory(word)
+        _history.value = prefs?.history ?: emptyList()
+    }
+
+    fun removeHistory(word: String) {
+        prefs?.removeHistory(word)
+        _history.value = prefs?.history ?: emptyList()
+    }
+
+    fun clearHistory() {
+        prefs?.clearHistory()
+        _history.value = emptyList()
+    }
+
+    // --- Favorites (tasks 3.1/3.3) ---
+
+    fun toggleFavorite(word: String) {
+        val p = prefs ?: return
+        if (p.isFavorite(word)) {
+            p.removeFavorite(word)
+        } else {
+            p.addFavorite(word)
+        }
+        _favorites.value = p.favorites
+    }
+
+    fun isFavorite(word: String): Boolean = prefs?.isFavorite(word) == true
+
+    fun removeFavorite(word: String) {
+        prefs?.removeFavorite(word)
+        _favorites.value = prefs?.favorites ?: emptyList()
     }
 
     /**
@@ -172,6 +237,18 @@ class MainViewModel : ViewModel() {
         }
     }
 
+    /** Reads the current clipboard primary clip text (task 1.2), or null. */
+    fun clipboardText(context: android.content.Context): String? {
+        return try {
+            val cm = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
+                    as android.content.ClipboardManager
+            cm.primaryClip?.takeIf { it.itemCount > 0 }
+                ?.getItemAt(0)?.text?.toString()
+        } catch (e: Exception) {
+            null
+        }
+    }
+
     /** Looks up [word], publishes the article and navigates to the article screen. */
     fun lookup(word: String, onDone: ((Dest?) -> Unit)? = null) {
         viewModelScope.launch(Dispatchers.IO) {
@@ -187,6 +264,7 @@ class MainViewModel : ViewModel() {
             val found = html != null && html.contains("gdarticlebody")
             if (found) {
                 _article.value = ArticleState(word, html)
+                recordHistory(word) // only successful lookups are recorded
             } else {
                 _article.value = null
             }
