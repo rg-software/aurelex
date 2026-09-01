@@ -1,0 +1,5 @@
+# Patches must stay LF on every platform. They are applied with `git apply`
+# against the engine/ submodule, whose own .gitattributes forces LF; a CRLF
+# patch (from core.autocrlf=true on Windows) fails the context match.
+patches/*.patch text eol=lf
+scripts/*.sh text eol=lf
