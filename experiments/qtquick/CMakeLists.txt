@@ -1,0 +1,84 @@
+cmake_minimum_required(VERSION 3.18)
+project(aurelex_exp_qtquick LANGUAGES C CXX)
+
+# Experiment: an all-Qt (Qt Quick/WebView) Android app that drives the carve
+# IN-PROCESS (no :engine process, no JNI bridge). Opt-in; never wired into the
+# shipped Gradle build. See OpenSpec change `qt-quick-frontend`.
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_AUTOMOC ON)
+set(CMAKE_AUTORCC ON)
+
+if(NOT QT_BASE)
+    message(FATAL_ERROR "QT_BASE must be set (C:/Qt/6.6.3)")
+endif()
+if(NOT QT_HOST_PATH)
+    message(FATAL_ERROR "QT_HOST_PATH must be set (host desktop kit)")
+endif()
+if(NOT VCPKG_BASE)
+    message(FATAL_ERROR "VCPKG_BASE must be set (C:/vcpkg)")
+endif()
+
+if(ANDROID_ABI STREQUAL "arm64-v8a")
+    set(QT_ANDROID_ROOT "${QT_BASE}/android_arm64_v8a")
+    set(VCPKG_TRIPLET "arm64-android")
+elseif(ANDROID_ABI STREQUAL "x86_64")
+    set(QT_ANDROID_ROOT "${QT_BASE}/android_x86_64")
+    set(VCPKG_TRIPLET "x64-android")
+else()
+    message(FATAL_ERROR "experiment builds for android ABIs only")
+endif()
+
+set(Qt6_DIR           "${QT_ANDROID_ROOT}/lib/cmake/Qt6"           CACHE PATH "" FORCE)
+set(Qt6Core_DIR       "${QT_ANDROID_ROOT}/lib/cmake/Qt6Core"       CACHE PATH "" FORCE)
+set(Qt6Gui_DIR        "${QT_ANDROID_ROOT}/lib/cmake/Qt6Gui"        CACHE PATH "" FORCE)
+set(Qt6Xml_DIR        "${QT_ANDROID_ROOT}/lib/cmake/Qt6Xml"        CACHE PATH "" FORCE)
+set(Qt6Concurrent_DIR "${QT_ANDROID_ROOT}/lib/cmake/Qt6Concurrent" CACHE PATH "" FORCE)
+set(Qt6Qml_DIR        "${QT_ANDROID_ROOT}/lib/cmake/Qt6Qml"        CACHE PATH "" FORCE)
+set(Qt6Quick_DIR      "${QT_ANDROID_ROOT}/lib/cmake/Qt6Quick"      CACHE PATH "" FORCE)
+set(Qt6WebView_DIR    "${QT_ANDROID_ROOT}/lib/cmake/Qt6WebView"    CACHE PATH "" FORCE)
+
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Xml Concurrent Qml Quick WebView)
+
+set(VCPKG_ANDROID_ROOT "${VCPKG_BASE}/installed/${VCPKG_TRIPLET}")
+link_directories("${VCPKG_ANDROID_ROOT}/lib")
+
+# Reuse the carve object library (real Qt engine). Its CMake requires the same
+# -D QT_BASE/QT_HOST_PATH/VCPKG_BASE and the android ABI it already handles.
+set(CARVE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../app/src/main/cpp/engine")
+add_subdirectory("${CARVE_DIR}" carve)
+
+set(ENGINE_SRC "${CMAKE_CURRENT_SOURCE_DIR}/../../../../engine")
+
+qt_add_executable(aurelex_exp
+    main.cpp
+    "${CARVE_DIR}/gd_boundary.cc"
+    $<TARGET_OBJECTS:aurelex_carve>
+)
+target_include_directories(aurelex_exp PRIVATE
+    "${CARVE_DIR}"
+    "${ENGINE_SRC}/src"
+    "${ENGINE_SRC}/src/common"
+    "${ENGINE_SRC}/src/dict"
+    "${ENGINE_SRC}/src/dict/utils"
+    "${ENGINE_SRC}/src/audio"
+    "${VCPKG_ANDROID_ROOT}/include"
+)
+# In-process engine deps: the carve's own private deps must be re-listed for the
+# final link (they are not propagated from an OBJECT library).
+target_link_libraries(aurelex_exp PRIVATE
+    Qt6::Core Qt6::Gui Qt6::Xml Qt6::Concurrent
+    Qt6::Qml Qt6::Quick Qt6::WebView
+    xapian z bz2 lzma lzo2 fmt
+)
+
+qt_add_qml_module(aurelex_exp
+    URI AurelexExp
+    VERSION 1.0
+    QML_FILES main.qml
+)
+
+set_target_properties(aurelex_exp PROPERTIES
+    QT_ANDROID_PACKAGE_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/android"
+)
+qt_add_apk_target(aurelex_exp)
