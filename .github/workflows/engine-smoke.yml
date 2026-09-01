@@ -11,6 +11,7 @@ on:
       - "engine/**"
       - "patches/**"
       - "app/src/main/cpp/**"
+      - ".github/workflows/**"
   workflow_dispatch:
     inputs:
       engine_tag:
