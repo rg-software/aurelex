@@ -6,8 +6,9 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <!-- Offline dictionary folders can live anywhere on device storage (mdx/dsl/ifo
-         are not media types, so READ_MEDIA_* does not cover them). The SAF folder
-         picker otherwise shows empty folders for an ungranted package. -->
+         are not media types, so READ_MEDIA_* does not cover them). Declared so the
+         All-Files-Access grant can be issued; the SAF folder picker otherwise shows
+         empty folders for an ungranted package. -->
     <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
 
     <application
