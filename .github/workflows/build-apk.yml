@@ -59,6 +59,8 @@ jobs:
       - name: vcpkg deps for Android triplets
         shell: bash
         run: |
+          # vcpkg ships no prebuilt binary in the clone; bootstrap it first.
+          "${{ github.workspace }}/vcpkg/bootstrap-vcpkg.sh" -disableMetrics
           # Same deps the carve needs on-device as on the host build
           # (z bz2 lzma lzo2 fmt; xapian is built by the script below).
           "${{ github.workspace }}/vcpkg/vcpkg" install zlib bzip2 liblzma lzo fmt \
