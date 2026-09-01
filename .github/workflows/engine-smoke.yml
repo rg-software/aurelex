@@ -61,7 +61,7 @@ jobs:
           # removed from the MSYS2 mirrors, breaking the bzip2 port build.
           git clone --depth 1 --branch 2026.07.29 https://github.com/microsoft/vcpkg.git "${{ env.VCPKG_ROOT }}" || true
           "${{ env.VCPKG_ROOT }}/bootstrap-vcpkg.bat" -disableMetrics
-          "${{ env.VCPKG_ROOT }}/vcpkg.exe" install zlib bzip2 liblzma lzo fmt libiconv --triplet x64-windows
+          "${{ env.VCPKG_ROOT }}/vcpkg.exe" install zlib bzip2 liblzma lzo fmt libiconv xapian --triplet x64-windows
 
       - name: Configure host smoke build
         shell: bash
@@ -103,4 +103,12 @@ jobs:
           # must report both (2 dictionaries).
           printf '%s' "$out" | grep -q "gd_scan_dicts -> 2" \
             || { echo "SMOKE FAILED: expected 2 dictionaries (stardict + dsl.dz)"; exit 1; }
+          # Full-text search must work end-to-end: index the StarDict fixture,
+          # search a term that lives in an article BODY ("mdx"), get the
+          # article's headword ("smoke") back.
+          printf '%s' "$out" | grep -q "FTS_BODY=OK" \
+            || { echo "SMOKE FAILED: full-text search assertion"; exit 1; }
+          # Wildcard mode must expand multi-term prefixes (pins patch 0003).
+          printf '%s' "$out" | grep -q "FTS_WILD=OK" \
+            || { echo "SMOKE FAILED: full-text wildcard assertion"; exit 1; }
           echo "SMOKE OK"

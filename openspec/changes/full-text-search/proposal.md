@@ -24,11 +24,15 @@ change reinstates it on Android.
   maps to a normal article lookup). Drives the same `FtsHelpers` surface the
   upstream dialog uses.
 - **FTS UI (Kotlin/Compose)**: a full-text search screen with a query box,
-  the four upstream search modes (whole words / plain text / wildcards /
-  regexp), a per-dictionary index-status + progress surface, and a results
-  list whose taps open the standard article.
-- **Search modes** mirror upstream `FTS::SearchMode` (Xapian query syntax,
-  plain text, wildcards, regexp).
+  per-dictionary index-status + progress surface, and a results list whose
+  taps open the standard article. Single input: a trailing `*` gives prefix
+  (wildcard) matching, otherwise exact-term matching.
+- **Search modes** are deliberately collapsed to one: upstream's engine has no
+  distinct plain-text or regexp behavior (all non-wildcard modes parse
+  identically), and the wildcard mode is a superset — adding `*` turns on
+  prefix expansion, plain queries behave identically. Wildcard prefix
+  expansion needs a small upstream patch (`patches/0003`): upstream caps it at
+  one term, which throws for any common prefix. See design D5.
 
 ## Capabilities
 

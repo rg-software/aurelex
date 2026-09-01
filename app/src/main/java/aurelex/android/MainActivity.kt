@@ -16,9 +16,11 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
@@ -169,6 +171,7 @@ fun AurelexApp(viewModel: MainViewModel) {
                     Dest.FAVORITES -> FavoritesScreen(viewModel, onBack = { viewModel.pop() })
                     Dest.GROUPS -> GroupsScreen(viewModel, onBack = { viewModel.pop() })
                     Dest.GROUP_DETAIL -> GroupDetailScreen(viewModel, groupId = viewModel.detailGroupId, onBack = { viewModel.pop() })
+                    Dest.FTS -> FtsScreen(viewModel, onBack = { viewModel.pop() })
                 }
             }
         }
@@ -225,7 +228,10 @@ fun SearchScreen(viewModel: MainViewModel) {
             TextButton(onClick = { viewModel.push(Dest.DICTIONARIES) }) { Text("Dictionaries") }
         }
         Row(
-            modifier = Modifier.padding(horizontal = 16.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp)
+                .horizontalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             TextButton(onClick = { viewModel.push(Dest.HISTORY) }) { Text("History") }
@@ -236,6 +242,7 @@ fun SearchScreen(viewModel: MainViewModel) {
                 if (cm != null && cm.isNotBlank()) viewModel.lookup(cm)
             }) { Text("Clipboard") }
             TextButton(onClick = { viewModel.push(Dest.GROUPS) }) { Text("Groups") }
+            TextButton(onClick = { viewModel.push(Dest.FTS) }) { Text("Full text") }
         }
 
         LazyColumn(modifier = Modifier.fillMaxSize()) {
@@ -554,6 +561,119 @@ fun DictionariesScreen(viewModel: MainViewModel, onBack: () -> Unit) {
                             enabled = index < dictionaries.lastIndex
                         ) { Text("↓") }
                     }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun FtsScreen(viewModel: MainViewModel, onBack: () -> Unit) {
+    val queryState by viewModel.ftsQuery.collectAsState()
+    val results by viewModel.ftsResults.collectAsState()
+    val dictionaries by viewModel.dictionaries.collectAsState()
+    val indexStates by viewModel.ftsIndexStates.collectAsState()
+    val building by viewModel.ftsBuilding.collectAsState()
+    val activeGroup by viewModel.activeGroupId.collectAsState()
+    val groups by viewModel.groups.collectAsState()
+    val activeName = groups.firstOrNull { it.id == activeGroup }?.name ?: "All"
+
+    LaunchedEffect(Unit) {
+        if (indexStates.isEmpty()) viewModel.refreshFtsStates()
+    }
+
+    Column(modifier = Modifier.fillMaxSize()) {
+        TextButton(onClick = onBack) { Text("← Back") }
+        Text(
+            text = "Full-text search ($activeName)",
+            style = MaterialTheme.typography.titleMedium,
+            modifier = Modifier.padding(16.dp)
+        )
+        TextField(
+            value = queryState,
+            onValueChange = { viewModel.setFtsQuery(it) },
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp),
+            placeholder = { Text("Search article bodies… (ends with *)") },
+            singleLine = true
+        )
+        Row(
+            modifier = Modifier.padding(horizontal = 16.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Button(
+                onClick = { viewModel.ftsSearch(queryState) },
+                enabled = queryState.isNotBlank()
+            ) { Text("Search") }
+        }
+        Text(
+            text = "Tip: append * to match word prefixes, e.g. read*",
+            style = MaterialTheme.typography.bodySmall,
+            modifier = Modifier.padding(horizontal = 16.dp)
+        )
+
+        // Per-dictionary index state (spec: built / building / missing).
+        LazyColumn(modifier = Modifier.weight(1f)) {
+            item {
+                Text(
+                    text = "Indexes",
+                    style = MaterialTheme.typography.titleSmall,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                )
+            }
+            itemsIndexed(dictionaries) { index, entry ->
+                val state = indexStates[index]
+                val label = when {
+                    building.contains(index) -> "building…"
+                    state == 0 -> "built"
+                    state == 1 -> "missing"
+                    state == null -> ""
+                    else -> "not supported"
+                }
+                val showBuild = state == 1 && !building.contains(index)
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 2.dp),
+                    verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(entry.name, style = MaterialTheme.typography.bodyLarge)
+                        Text(label, style = MaterialTheme.typography.bodySmall)
+                    }
+                    if (showBuild) {
+                        TextButton(onClick = { viewModel.ftsIndex(index) }) { Text("Build") }
+                    }
+                }
+            }
+        }
+
+        // Results → reuse the normal article flow (spec "Results lead to
+        // articles": a tap runs the standard active-group lookup).
+        Text(
+            text = "Results (${results.size})",
+            style = MaterialTheme.typography.titleSmall,
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+        )
+        LazyColumn(modifier = Modifier.weight(1f)) {
+            if (results.isEmpty()) {
+                item { Text("No results.", modifier = Modifier.padding(16.dp)) }
+            }
+            items(results) { r ->
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                    verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
+                ) {
+                    TextButton(onClick = { viewModel.lookup(r.headword) }) {
+                        Text(r.headword)
+                    }
+                    Text(
+                        text = r.dictName,
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.weight(1f)
+                    )
                 }
             }
         }

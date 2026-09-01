@@ -87,9 +87,33 @@ boundary simple.
 
 ### D5: Search modes map 1:1 to `FTS::SearchMode`
 Expose `mode` as an int on `gd_fts_search` (0 whole-words/Xapian syntax,
-1 plain text, 2 wildcards, 3 regexp) matching `FTS::SearchMode`, with a small
-enum on the Kotlin side. Upstream's parser handles mode inside
-`FTSResultsRequest::run()`; the boundary just forwards the int.
+1 plain text, 2 wildcards, 3 regexp) matching `FTS::SearchMode`. The Android
+UI exposes a **single** input, not a mode selector: mode 2 (Wildcards) is a
+strict superset of the others — it adds only `FLAG_WILDCARD` +
+`set_max_expansion`, and without a `*` in the query FLAG_WILDCARD has no
+effect, so plain/multi-term/operator queries behave identically in every mode
+(the engine always sets default op AND and the same query-parser flags).
+Efficiency is not a factor: wildcard expansion only runs when a `*` is
+present and is bounded by the cap. The UI hints at `*`-suffix usage.
+
+Upstream's modes 0/1/3 build the identical query
+(`FLAG_DEFAULT | FLAG_PURE_NOT | FLAG_CJK_NGRAM`), and upstream offers no
+plain-text or regexp distinction (verified in the host smoke: every
+non-wildcard query returns the same hits through modes 1 and 3), so regexp is
+explicitly out of scope for v1; re-adding it would require post-filtering
+article bodies in the boundary (see risks).
+
+**Wildcard expansion cap (patch 0003):** upstream sets
+`qp.set_max_expansion( 1 )` in `ftshelpers.cc`, which makes Xapian throw
+`WildcardError: Wildcard <prefix>* expands to more than 1 terms` for ANY
+prefix matching more than one indexed term — `FTSResultsRequest::run()` swallows
+it and silently returns nothing. `read*` on a real dictionary (terms
+read/reading/readable/...) therefore returned zero results, while a
+single-term prefix like `smok*` worked. Aurelex raises the cap to 100 via
+`patches/0003-fts-wildcards-expansion-cap.patch` so prefix search actually
+works; the CI smoke pins it with a multi-term wildcard assertion (`t*` →
+{test, the}, previously an error). Deviation lives in `patches/` per the
+merge-contract rule; results are still capped at 100 (`get_mset(0,100)`).
 
 ### D6: Results → existing article flow
 `gd_fts_search` returns **headwords**; the Kotlin screen builds a results list
@@ -106,14 +130,22 @@ articles") fall out of that reuse.
   xapian-core build fallback; CI smoke (host tool) needs only the host xapian
   (vcpkg `xapian` on x64-windows already available), so the CI gate can pass
   while the android build is nailed, but the on-device APK depends on it.
+  Verified during implementation (task 1.1): the stock port fails on the pinned
+  baseline for `arm64-android`/`x64-android` when the NDK lives under a path
+  with spaces (`C:\Program Files (x86)\...`): its autoconf configure
+  word-splits `CC="C:/Program Files/.../clang.exe"` ("C:/Program: No such file
+  or directory"). `scripts/build-xapian-android.sh` drives xapian's own
+  configure via spaces-free wrapper scripts and builds/installs
+  `libxapian.a` (+ `xapian.h`) into `${VCPKG_ANDROID_ROOT}` for both ABIs;
+  it must be built with `-fPIC` (the archive links into `libaurelex.so`).
 - [Per-dict lazy indexing means a first search on a large dictionary visibly
   stalls the engine worker (UI stays responsive via IPC, but the request
   blocks).] → Mitigation: surface index state (D4) so the user sees "Building…"
   and only queries after state is ready; the spec's "Large dictionary" scenario
   only requires responsiveness, not results.
 - [Xapian query syntax on the whole-words mode can surprise users (AND/OR etc.).]
-  → Mitigation: default the UI to the plain-text mode (mode 1) like upstream's
-  safest default; expose the mode selector for power use.
+  → Mitigation: default the UI to a single keyword term (mode 0, which
+  upstream also defaults to), and expose the mode selector for power use.
 - [Index storage: per-dict xapian DBs live next to the staged dictionary files
   (as upstream `ftsIndexName()` dictates); rescan/re-stage deletes them with the
   source.] → Mitigation: index state recomputed on scan (`ftsIndexIsOldOrBad`),

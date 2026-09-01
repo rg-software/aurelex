@@ -141,6 +141,42 @@ object EngineClient {
     fun groupActive(): Future<Int> = submit { callInt(EngineService.OP_GROUP_ACTIVE) {} }
     fun groupSetActive(id: Int): Future<Int> = submit { callInt(EngineService.OP_GROUP_SET_ACTIVE) { it.putInt("id", id) } }
 
+    // --- full-text search (xapian) ---
+
+    /** Full-text search modes, mirroring NativeEngine.FtsMode. */
+    object FtsMode {
+        const val WHOLE_WORDS = 0
+        const val PLAIN_TEXT = 1
+        const val WILDCARDS = 2
+        const val REGEXP = 3
+    }
+
+    /** Index availability for dictionary [dictIndex]: 0 built, 1 missing, -1 unsupported. */
+    fun ftsIndexState(dictIndex: Int): Future<Int> = submit {
+        callInt(EngineService.OP_FTS_INDEX_STATE) { it.putInt("dictIndex", dictIndex) }
+    }
+
+    /** Build/refresh dictionary [dictIndex]'s full-text index; 0 on success. */
+    fun ftsIndex(dictIndex: Int): Future<Int> = submit {
+        callInt(EngineService.OP_FTS_INDEX) { it.putInt("dictIndex", dictIndex) }
+    }
+
+    /** Full-text search across group [groupId] (0 = "All"); returns (headword, dictId). */
+    fun ftsSearch(query: String, mode: Int, groupId: Int): Future<List<Pair<String, String>>> = submit {
+        val raw = callBytes(EngineService.OP_FTS_SEARCH) {
+            it.putString("query", query)
+            it.putInt("mode", mode)
+            it.putInt("groupId", groupId)
+        } ?: return@submit emptyList()
+        raw.toString(Charsets.UTF_8)
+            .split('\n')
+            .filter { it.isNotBlank() }
+            .mapNotNull { line ->
+                val parts = line.split('\t')
+                if (parts.size >= 2) parts[0] to parts[1] else null
+            }
+    }
+
     // --- low-level blocking call ---
 
     private fun <T> submit(block: () -> T): Future<T> = io.submit(Callable<T> { block() })

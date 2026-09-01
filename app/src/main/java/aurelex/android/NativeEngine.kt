@@ -52,6 +52,9 @@ object NativeEngine {
     private external fun nativeGroupDicts(id: Int): IntArray?
     private external fun nativeGroupActive(): Int
     private external fun nativeGroupSetActive(id: Int): Int
+    private external fun nativeFtsIndex(dictIndex: Int): Int
+    private external fun nativeFtsIndexState(dictIndex: Int): Int
+    private external fun nativeFtsSearch(query: String, mode: Int, groupId: Int): String
     private external fun nativeCleanup()
 
     /**
@@ -151,6 +154,45 @@ object NativeEngine {
     fun groupActive(): Future<Int> = submit { awaitInit(); nativeGroupActive() }
     /** Set the active group id; returns 0 on success. */
     fun groupSetActive(id: Int): Future<Int> = submit { awaitInit(); nativeGroupSetActive(id) }
+
+    // --- full-text search (xapian) ---
+
+    /**
+     * Full-text search modes, mirroring upstream FTS::SearchMode (design D5).
+     * The UI always sends WILDCARDS: it is a superset of the others — with no
+     * `*` in the query the wildcard flag has no effect, so a single mode
+     * covers exact, multi-term, and prefix queries. (The remaining constants
+     * are kept for the boundary/test surface.)
+     */
+    object FtsMode {
+        const val WHOLE_WORDS = 0
+        const val PLAIN_TEXT = 1
+        const val WILDCARDS = 2
+        const val REGEXP = 3
+    }
+
+    /** Index availability for dictionary [dictIndex]: 0 built, 1 missing. */
+    fun ftsIndexState(dictIndex: Int): Future<Int> = submit { awaitInit(); nativeFtsIndexState(dictIndex) }
+
+    /** Build/refresh dictionary [dictIndex]'s full-text index; 0 on success. */
+    fun ftsIndex(dictIndex: Int): Future<Int> = submit { awaitInit(); nativeFtsIndex(dictIndex) }
+
+    /**
+     * Full-text search across group [groupId] (0 = "All"); [mode] is an
+     * [FtsMode]. Returns pairs of (headword, dictId) for matching articles.
+     * Empty result = no matches (or -3 = no index yet, indistinguishable here;
+     * callers check index state first).
+     */
+    fun ftsSearch(query: String, mode: Int, groupId: Int): Future<List<Pair<String, String>>> = submit {
+        awaitInit()
+        nativeFtsSearch(query, mode, groupId)
+            .split('\n')
+            .filter { it.isNotBlank() }
+            .mapNotNull { line ->
+                val parts = line.split('\t')
+                if (parts.size >= 2) parts[0] to parts[1] else null
+            }
+    }
 
     /** Queues engine teardown. Safe to call once at process exit. */
     fun cleanup() {

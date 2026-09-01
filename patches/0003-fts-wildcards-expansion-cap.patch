@@ -1,0 +1,29 @@
+From 5c8093ba794e67f4cc652e568638622446f69de0 Mon Sep 17 00:00:00 2001
+From: Maxim Mozgovoy <mozgovoy@u-aizu.ac.jp>
+Date: Tue, 1 Sep 2026 16:52:49 +0900
+Subject: [PATCH] fts: raise wildcard expansion cap for full-text search
+
+---
+ src/ftshelpers.cc | 6 +++++-
+ 1 file changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/src/ftshelpers.cc b/src/ftshelpers.cc
+index 96f1505a..5f8594e1 100644
+--- a/src/ftshelpers.cc
++++ b/src/ftshelpers.cc
+@@ -216,7 +216,11 @@ void FTSResultsRequest::run()
+         Xapian::QueryParser::FLAG_DEFAULT | Xapian::QueryParser::FLAG_PURE_NOT | Xapian::QueryParser::FLAG_CJK_NGRAM;
+       if ( searchMode == FTS::Wildcards ) {
+         flag = flag | Xapian::QueryParser::FLAG_WILDCARD;
+-        qp.set_max_expansion( 1 );
++        // Aurelex patch (0003): upstream caps the wildcard expansion at 1 term,
++        // which makes Xapian throw WildcardError for ANY prefix matching more
++        // than one indexed term (e.g. `read*`), yielding silent empty results.
++        // Allow a generous bounded expansion instead so prefix search works.
++        qp.set_max_expansion( 100 );
+       }
+       Xapian::Query query = qp.parse_query( query_string, flag );
+       qDebug() << "Parsed query is: " << query.get_description().c_str();
+-- 
+2.51.0.windows.2
+

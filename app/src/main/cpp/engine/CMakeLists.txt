@@ -1,14 +1,16 @@
 # Aurelex engine carve — compiles a subset of upstream goldendict-ng
 # into libaurelex.so. Upstream sources (engine/) are selected, never modified;
-# every deviation lives in the boundary layer (see *_stub* / fts_stub*).
+# every deviation lives in the boundary layer (gd_boundary.cc, shims).
 #
 # Qt:  Core + Xml + Concurrent + Gui + Widgets (prebuilt kit via aqt).
 #      QtGui is linked because article_maker uses QTextDocumentFragment/
 #      QStyleHints and dict backends pull tiff.cc (QApplication/QScreen).
 #      QtWidgets is needed by config.cc/utils.hh headers; linking it is
 #      cheaper than stubbing.
-# Deps: cross-compiled for android via vcpkg (zlib bzip2 liblzma lzo fmt);
-#       opencc/hunspell/libiconv cut for v1 (design D6).
+# Deps: cross-compiled for android via vcpkg (zlib bzip2 liblzma lzo fmt
+#       xapian); xapian for the android triplets is provided by
+#       scripts/build-xapian-android.sh (see design.md D2). opencc/hunspell/
+#       libiconv cut for v1 (design D6).
 cmake_minimum_required(VERSION 3.18)
 project(aurelex_engine LANGUAGES C CXX)
 
@@ -80,6 +82,7 @@ set(AURELEX_CARVE_SOURCES
     ${ENGINE_DIR}/src/common/globalregex.cc
     ${ENGINE_DIR}/src/common/htmlescape.cc
     ${ENGINE_DIR}/src/common/iconv.cc
+    ${ENGINE_DIR}/src/ftshelpers.cc
     ${ENGINE_DIR}/src/common/text.cc
     ${ENGINE_DIR}/src/common/utils.cc
     ${ENGINE_DIR}/src/common/wildcard.cc
@@ -109,12 +112,11 @@ set(AURELEX_CARVE_SOURCES
     ${ENGINE_DIR}/src/dict/dsl_details.cc
 
     # --- boundary layer (ours, not upstream) ---
-    fts_stub.cc
     gd_boundary.cc
 )
 
 set(AURELEX_CARVE_INCLUDES
-    ${CMAKE_CURRENT_SOURCE_DIR}   # boundary first: shadows ftshelpers.hh
+    ${CMAKE_CURRENT_SOURCE_DIR}
     ${ENGINE_DIR}/src
     ${ENGINE_DIR}/src/common
     ${ENGINE_DIR}/src/dict
@@ -129,6 +131,7 @@ set(AURELEX_CARVE_LIBS
     Qt6::Concurrent
     Qt6::Gui
     Qt6::Widgets
+    xapian
     z
     bz2
     lzma

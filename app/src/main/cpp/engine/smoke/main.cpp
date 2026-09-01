@@ -115,6 +115,44 @@ int main( int argc, char ** argv )
     }
   }
 
+  // ---- full-text search smoke (xapian) ----
+  // Index the StarDict fixture (dict 0), then search for a term that appears
+  // in an article BODY but is not a headword ("mdx" only occurs inside the
+  // "smoke" article); expect the article's headword back.
+  bool ftsOk = false;
+  {
+    int st = -1;
+    if ( gd_fts_index_state( 0, &st ) == 0 )
+      std::printf( "gd_fts_index_state(0) -> %d\n", st );
+    const int idxRc = st == 0 ? 0 : gd_fts_index( 0 );
+    std::printf( "gd_fts_index(0) -> %d\n", idxRc );
+    if ( gd_fts_index_state( 0, &st ) == 0 )
+      std::printf( "gd_fts_index_state(0) after -> %d\n", st );
+
+    std::vector< char > fts( 1 << 12 );
+    const int ftsN = gd_fts_search( "mdx", 1, 0, fts.data(), static_cast< int >( fts.size() ) );
+    std::printf( "gd_fts_search(\"mdx\", plain) -> %d results\n", ftsN );
+    if ( ftsN > 0 )
+      std::printf( "FTS_RESULTS: %s\n", fts.data() );
+    const std::string ftsStr( fts.data(), ftsN > 0 ? std::strlen( fts.data() ) : 0 );
+    ftsOk = ftsN > 0 && ftsStr.find( "smoke" ) != std::string::npos;
+    std::printf( "FTS_BODY=%s\n", ftsOk ? "OK" : "FAIL" );
+
+    // A bogus word matches nothing (empty-result path, not an error).
+    const int ftsNone = gd_fts_search( "zzzzqqqq", 1, 0, fts.data(), static_cast< int >( fts.size() ) );
+    std::printf( "gd_fts_search(\"zzzzqqqq\") -> %d results\n", ftsNone );
+
+    // Wildcards mode: "t*" expands to {test, the} — more than one term. This
+    // pins Aurelex patch 0003 (upstream capped the expansion at 1 term and
+    // threw WildcardError, silently returning nothing for any real prefix).
+    const int ftsWild = gd_fts_search( "t*", 2, 0, fts.data(), static_cast< int >( fts.size() ) );
+    std::printf( "gd_fts_search(\"t*\", wildcards) -> %d results [%s]\n", ftsWild, ftsWild > 0 ? fts.data() : "" );
+    const std::string wildStr( fts.data(), ftsWild > 0 ? std::strlen( fts.data() ) : 0 );
+    const bool ftsWildOk = ftsWild > 0 && ( wildStr.find( "smoke" ) != std::string::npos
+                                            || wildStr.find( "blood" ) != std::string::npos );
+    std::printf( "FTS_WILD=%s\n", ftsWildOk ? "OK" : "FAIL" );
+  }
+
   gd_cleanup();
-  return ( lookSz > 0 && sugN > 0 ) ? 0 : 1;
+  return ( lookSz > 0 && sugN > 0 && ftsOk ) ? 0 : 1;
 }

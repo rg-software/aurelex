@@ -50,6 +50,22 @@
 //                 emits article-style-darkmode.css + darkreader for subsequent
 //                 lookups; on=0 → light. Returns 0 on success, -1 if the
 //                 engine is not initialized.
+// - gd_fts_index:  build/refresh the full-text (xapian) index for dictionary
+//                 `dict_index` if it is missing or stale. Blocking; runs on
+//                 the calling thread. Returns 0 on success (or -1 if the dict
+//                 index is out of range / the dictionary cannot be indexed).
+// - gd_fts_index_state: report per-dictionary full-text index availability:
+//                 0 = built, 1 = missing/stale. Returns 0 on success, -1 if
+//                 the dictionary does not exist or does not support FTS.
+// - gd_fts_search: run a full-text search for `query` (interpreted by `mode`,
+//                 see FTS::SearchMode: 0 whole-words/xapian syntax, 1 plain
+//                 text, 2 wildcards, 3 regexp) across the dictionaries of
+//                 group `group_id` (0 = "All"). Fills `out` with matching
+//                 headwords, each line "headword<TAB>dict_name" (dict_name is
+//                 the same display name gd_dict_info returns), NUL-terminated.
+//                 Returns the number of results, -1 invalid args, -2 buffer too
+//                 small, -3 none of the group's dictionaries has a full-text
+//                 index yet (call gd_fts_index first).
 // - gd_cleanup:   tear the engine down. Safe to call when not initialized.
 //
 // All functions block on the calling thread until the engine request completes
@@ -88,6 +104,9 @@ int gd_group_dicts( int id, int * out, int out_capacity );
 int gd_group_active( int * id_out );
 int gd_group_set_active( int id );
 int gd_set_dark_mode( int on );
+int gd_fts_index( int dict_index );
+int gd_fts_index_state( int dict_index, int * out );
+int gd_fts_search( const char * query, int mode, int group_id, char * out, int out_size );
 void gd_cleanup();
 
 #ifdef __cplusplus

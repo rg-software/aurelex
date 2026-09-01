@@ -76,6 +76,18 @@ class EngineService : Service() {
                 }
                 OP_GROUP_ACTIVE -> Runnable { sendInt(replyTarget, NativeEngine.groupActive().get()) }
                 OP_GROUP_SET_ACTIVE -> Runnable { sendInt(replyTarget, NativeEngine.groupSetActive(bundle.getInt("id")).get()) }
+                OP_FTS_INDEX -> Runnable { sendInt(replyTarget, NativeEngine.ftsIndex(bundle.getInt("dictIndex")).get()) }
+                OP_FTS_INDEX_STATE -> Runnable { sendInt(replyTarget, NativeEngine.ftsIndexState(bundle.getInt("dictIndex")).get()) }
+                OP_FTS_SEARCH -> Runnable {
+                    val results = NativeEngine.ftsSearch(
+                        bundle.getString("query", ""),
+                        bundle.getInt("mode"),
+                        bundle.getInt("groupId")
+                    ).get()
+                    val sb = StringBuilder()
+                    results.forEach { (headword, dictId) -> sb.append(headword).append('\t').append(dictId).append('\n') }
+                    sendBytes(replyTarget, sb.toString().toByteArray(Charsets.UTF_8))
+                }
                 else -> return
             }
             engineExecutor.execute {
@@ -169,6 +181,10 @@ class EngineService : Service() {
         const val OP_GROUP_DICTS = 30
         const val OP_GROUP_ACTIVE = 28
         const val OP_GROUP_SET_ACTIVE = 29
+        // full-text search (xapian)
+        const val OP_FTS_INDEX = 40
+        const val OP_FTS_INDEX_STATE = 41
+        const val OP_FTS_SEARCH = 42
 
         const val MSG_RESULT = 100
     }

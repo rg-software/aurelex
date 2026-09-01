@@ -13,6 +13,7 @@ Produces into a target directory (default: examples/dictionaries):
 Usage: make-example-dicts.py [output-dir]
 """
 import os
+import re
 import struct
 import sys
 import zlib
@@ -80,6 +81,13 @@ def _encode_dsl(text: str) -> bytes:
     return b"\xef\xbb\xbf" + text.encode("utf-8")
 
 
+def _dz_named(content: str) -> str:
+    # The .dsl.dz variant is a second, separately-loaded dictionary; give it a
+    # distinct display name so it doesn't collide with the plain .dsl in a scan
+    # of a folder that contains both (e.g. "Aurelex Basic" -> "Aurelex Basic (DZ)").
+    return re.sub(r'(#NAME\s+"[^"]*)"', r'\1 (DZ)"', content, count=1)
+
+
 def make_dictzip(data: bytes, chunk_length: int = 16384) -> bytes:
     """Build a real dictzip (.dz) file from raw DSL bytes.
 
@@ -139,7 +147,7 @@ def write_dictionaries(out_dir: str) -> list:
 
         dz_path = os.path.join(out_dir, name + ".dsl.dz")
         with open(dz_path, "wb") as f:
-            f.write(make_dictzip(raw))
+            f.write(make_dictzip(_encode_dsl(_dz_named(content))))
         written.append(dz_path)
     return written
 

@@ -39,10 +39,14 @@ def write_stardict(out_dir: str) -> str:
     with open(os.path.join(out_dir, "smoke.ifo"), "w", encoding="utf-8") as f:
         # First two lines must be exactly per upstream's parser (stardict.cc):
         # "StarDict's dict ifo file" then "version=…"; the rest are k=v pairs.
+        # sametypesequence=m marks every article body as a plain UTF-8, zero-
+        # terminated entry — without it the parser misreads the leading ASCII
+        # byte of each raw body as an entry-size marker and drops the article.
         f.write(
             "StarDict's dict ifo file\n"
             "version=3.0.0\n"
             "bookname=Smoke\n"
+            "sametypesequence=m\n"
             "wordcount=%d\n"
             "idxfilesize=%d\n"
             "samplingfrequency=0\n" % (len(WORDS), len(idx))

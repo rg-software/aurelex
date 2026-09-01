@@ -321,4 +321,38 @@ Java_aurelex_android_NativeEngine_nativeGroupSetActive( JNIEnv * env, jobject /*
   return gd_group_set_active( id );
 }
 
+// --- full-text search (xapian) ---
+
+JNIEXPORT jint JNICALL
+Java_aurelex_android_NativeEngine_nativeFtsIndex( JNIEnv * env, jobject /*thiz*/, jint dictIndex )
+{
+  (void)env;
+  return gd_fts_index( dictIndex );
+}
+
+JNIEXPORT jint JNICALL
+Java_aurelex_android_NativeEngine_nativeFtsIndexState( JNIEnv * env, jobject /*thiz*/, jint dictIndex )
+{
+  (void)env;
+  int state = -1;
+  if ( gd_fts_index_state( dictIndex, &state ) != 0 )
+    return -1;
+  return state;
+}
+
+// Returns "\n"-separated "headword<TAB>dictId" lines, or null on error
+// (<0 return). Non-zero parse errors (e.g. -3 "no index yet") surface as an
+// empty string so Kotlin distinguishes them from "no matches".
+JNIEXPORT jstring JNICALL
+Java_aurelex_android_NativeEngine_nativeFtsSearch( JNIEnv * env, jobject /*thiz*/, jstring query, jint mode, jint groupId )
+{
+  const char * q = env->GetStringUTFChars( query, nullptr );
+  std::vector< char > buf( 1 << 16, 0 ); // 64 KiB result buffer
+  const int n = gd_fts_search( q, mode, groupId, buf.data(), static_cast< int >( buf.size() ) );
+  env->ReleaseStringUTFChars( query, q );
+  if ( n < 0 )
+    return env->NewStringUTF( "" );
+  return env->NewStringUTF( buf.data() );
+}
+
 } // extern "C"

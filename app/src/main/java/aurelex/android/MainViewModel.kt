@@ -9,7 +9,7 @@ import kotlinx.coroutines.launch
 import java.util.concurrent.Future
 
 /** Single-activity navigation destinations (task 3.2). */
-enum class Dest { SEARCH, ARTICLE, DICTIONARIES, HISTORY, FAVORITES, GROUPS, GROUP_DETAIL }
+enum class Dest { SEARCH, ARTICLE, DICTIONARIES, HISTORY, FAVORITES, GROUPS, GROUP_DETAIL, FTS }
 
 class MainViewModel : ViewModel() {
 
@@ -168,6 +168,123 @@ class MainViewModel : ViewModel() {
 
     /** Ordered dict indices of group [id] (0 = all); off-main via Future. */
     fun groupDicts(id: Int): Future<List<Int>> = EngineClient.groupDicts(id)
+
+    // --- full-text search (xapian, re-enabled for v1) ---
+
+    /** A full-text search result: the matched article headword + source dict. */
+    data class FtsResult(val headword: String, val dictName: String)
+
+    /**
+     * Per-dictionary full-text index state, keyed by dictionary index:
+     * 0 = built, 1 = missing/stale, -1 = dictionary does not support FTS.
+     */
+    private val _ftsIndexStates = MutableStateFlow<Map<Int, Int>>(emptyMap())
+    val ftsIndexStates: StateFlow<Map<Int, Int>> = _ftsIndexStates
+
+    /** Dictionary indices whose full-text index is being built right now. */
+    private val _ftsBuilding = MutableStateFlow<Set<Int>>(emptySet())
+    val ftsBuilding: StateFlow<Set<Int>> = _ftsBuilding
+
+    private val _ftsResults = MutableStateFlow<List<FtsResult>>(emptyList())
+    val ftsResults: StateFlow<List<FtsResult>> = _ftsResults
+
+    /** FTS query survives navigation (spec "Search state survives
+     *  navigation"): kept here, not in a helper-composable `remember`. */
+    private val _ftsQuery = MutableStateFlow("")
+    val ftsQuery: StateFlow<String> = _ftsQuery
+
+    fun setFtsQuery(q: String) {
+        _ftsQuery.value = q
+    }
+
+    /** Loads full-text index states for every loaded dictionary. */
+    fun refreshFtsStates() {
+        viewModelScope.launch(Dispatchers.IO) {
+            val dicts = _dictionaries.value
+            val states = dicts.indices.associateWith { idx ->
+                try {
+                    EngineClient.ftsIndexState(idx).get()
+                } catch (e: Exception) {
+                    android.util.Log.e("MainViewModel", "ftsIndexState($idx) failed", e)
+                    -1
+                }
+            }
+            _ftsIndexStates.value = states
+        }
+    }
+
+    /** Builds dictionary [dictIndex]'s full-text index; updates "building" state. */
+    fun ftsIndex(dictIndex: Int) {
+        viewModelScope.launch(Dispatchers.IO) {
+            _ftsBuilding.value = _ftsBuilding.value + dictIndex
+            try {
+                val rc = EngineClient.ftsIndex(dictIndex).get()
+                if (rc == 0) {
+                    _ftsIndexStates.value = _ftsIndexStates.value + (dictIndex to 0)
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("MainViewModel", "ftsIndex($dictIndex) failed", e)
+            } finally {
+                _ftsBuilding.value = _ftsBuilding.value - dictIndex
+            }
+        }
+    }
+
+    /**
+     * Runs a full-text search for [query] against the active group, always in
+     * the engine's wildcard-capable mode (design D5: modes 0/1/3 parse
+     * identically, mode 2 additionally expands trailing `*` prefixes, so a
+     * single mode covers both plain and wildcard queries).
+     * Dictionaries in the group without a full-text index are indexed first
+     * (spec "No index yet": the app builds the index before returning results).
+     */
+    fun ftsSearch(query: String) {
+        if (query.isBlank()) {
+            _ftsResults.value = emptyList()
+            return
+        }
+        viewModelScope.launch(Dispatchers.IO) {
+            val groupId = _activeGroupId.value
+            val indices = runCatching { EngineClient.groupDicts(groupId).get() }.getOrDefault(emptyList())
+            val supported = indices.filter { it >= 0 }
+            val states = supported.mapNotNull { idx ->
+                try {
+                    val s = EngineClient.ftsIndexState(idx).get()
+                    if (s >= 0) idx to s else null
+                } catch (e: Exception) {
+                    android.util.Log.e("MainViewModel", "ftsIndexState($idx) pre-search failed", e)
+                    null
+                }
+            }
+            _ftsIndexStates.value = _ftsIndexStates.value + states.toMap()
+
+            // Build missing indexes inline (per-dict lazy indexing, design D4),
+            // then re-query state so the search runs against ready indexes.
+            val needBuild = states.filter { it.second == 1 }.map { it.first }
+            if (needBuild.isNotEmpty()) {
+                _ftsBuilding.value = _ftsBuilding.value + needBuild
+                val after = states.toMap().toMutableMap()
+                for (idx in needBuild) {
+                    val rc = try {
+                        EngineClient.ftsIndex(idx).get()
+                    } catch (e: Exception) {
+                        android.util.Log.e("MainViewModel", "ftsIndex($idx) in search failed", e)
+                        -1
+                    }
+                    if (rc == 0) after[idx] = 0
+                }
+                _ftsIndexStates.value = _ftsIndexStates.value + after
+                _ftsBuilding.value = _ftsBuilding.value - needBuild
+            }
+
+            _ftsResults.value = try {
+                EngineClient.ftsSearch(query, EngineClient.FtsMode.WILDCARDS, groupId).get().map { FtsResult(it.first, it.second) }
+            } catch (e: Exception) {
+                android.util.Log.e("MainViewModel", "ftsSearch failed", e)
+                emptyList()
+            }
+        }
+    }
 
     /** Loads group [id] membership into [_groupMembers] for the detail screen. */
     fun loadGroupMembers(id: Int) {

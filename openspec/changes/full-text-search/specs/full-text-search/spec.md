@@ -52,10 +52,10 @@ dictionary articles whose body text contains the queried term.
 - **WHEN** the user submits an empty or malformed query
 - **THEN** the app reports the problem instead of crashing
 
-#### Scenario: Search modes
-- **WHEN** the user switches between plain-text, wildcard, and regular-expression
-  matching modes
-- **THEN** the query is interpreted in that mode and results reflect the match
+#### Scenario: Search with wildcards
+- **WHEN** the user enters a term ending in `*` (e.g. `read*`)
+- **THEN** the app matches all article-body terms sharing that prefix, and a
+  plain term (no wildcard) matches exactly
 
 ### Requirement: Full-text search results
 The system SHALL present full-text search results as a list of matching

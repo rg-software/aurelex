@@ -48,6 +48,17 @@ jobs:
             || true
           git clone --depth 1 --branch 2026.07.29 https://github.com/microsoft/vcpkg.git "${{ github.workspace }}/vcpkg" || true
 
+      - name: Build xapian for Android (full-text search dependency)
+        shell: bash
+        run: |
+          # The vcpkg `xapian` port cannot configure on the pinned baseline for
+          # the android triplets (autoconf + NDK path quirks); scripts/
+          # build-xapian-android.sh builds and installs it directly (design D2).
+          ./scripts/build-xapian-android.sh "$ANDROID_NDK_HOME" arm64-v8a \
+            "${{ github.workspace }}/vcpkg/installed/arm64-android"
+          ./scripts/build-xapian-android.sh "$ANDROID_NDK_HOME" x86_64 \
+            "${{ github.workspace }}/vcpkg/installed/x64-android"
+
       - name: Configure local.properties for the Android native build
         shell: bash
         run: |

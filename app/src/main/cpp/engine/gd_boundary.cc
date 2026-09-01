@@ -16,8 +16,10 @@
 #include "dict/dsl.hh"
 #include "article_maker.hh"
 #include "wordfinder.hh"
+#include "ftshelpers.hh"
 #include "goldendict.h"
 
+#include <QAtomicInt>
 #include <QCoreApplication>
 #include <QGuiApplication>
 #include <QDir>
@@ -172,6 +174,14 @@ int gd_init( const char * config_dir, const char * index_dir )
   // (article_maker only emits article-style-darkmode.css for displayStyle
   // "modern"); darkreader.js is emitted for any style when dark mode is on.
   g_state->cfg.preferences.displayStyle = QStringLiteral( "modern" );
+  // FTS is re-enabled on Android (full-text-search change): every v1 dict
+  // (mdx/dsl/stardict) is full-text searchable by default. Upstream enables
+  // this from cfg.preferences.fts in mainwindow.cc; the boundary must do the
+  // same, otherwise Dictionary::Class::can_FTS stays false and indexing is a
+  // no-op. maxDictionarySize=0 means no size cap.
+  g_state->cfg.preferences.fts.enabled          = true;
+  g_state->cfg.preferences.fts.maxDictionarySize = 0;
+  g_state->cfg.preferences.fts.disabledTypes     = QString();
   // ArticleMaker holds const refs to dictionaries/groups; keep them stable and
   // empty groups -> makeDefinitionFor falls back to ALL dictionaries (the v1
   // single "unfiltered" group, design D-specs).
@@ -208,12 +218,15 @@ int gd_scan_dicts( const char * folder )
   auto dsls      = Dsl::makeDictionaries( files, idxPath, sink, 500000 );
 
   for ( auto & d : stardicts ) {
+    d->setFTSParameters( g_state->cfg.preferences.fts );
     g_state->dictionaries.push_back( std::move( d ) );
   }
   for ( auto & d : mdxs ) {
+    d->setFTSParameters( g_state->cfg.preferences.fts );
     g_state->dictionaries.push_back( std::move( d ) );
   }
   for ( auto & d : dsls ) {
+    d->setFTSParameters( g_state->cfg.preferences.fts );
     g_state->dictionaries.push_back( std::move( d ) );
   }
 
@@ -611,6 +624,144 @@ int gd_set_dark_mode( int on )
   // ArticleMaker reads the preference via GlobalBroadcaster for the header.
   GlobalBroadcaster::instance()->setConfig( &g_state->cfg );
   return 0;
+}
+
+// --- full-text search (xapian, re-enabled for v1) ---
+
+int gd_fts_index( int dict_index )
+{
+  std::lock_guard< std::mutex > lock( g_engineMutex );
+  if ( !g_state || dict_index < 0 || dict_index >= static_cast< int >( g_state->dictionaries.size() ) )
+    return -1;
+
+  Dictionary::Class & d = *g_state->dictionaries[ dict_index ];
+  if ( !d.canFTS() )
+    return -1; // not full-text searchable
+
+  // makeFTSIndex() is the dict backend's virtual override (builds or reuses
+  // the xapian index). Blocking by design (D4): Kotlin drives it on the
+  // engine's single worker thread and shows a "building" state itself.
+  QAtomicInt isCancelled;
+  try {
+    d.makeFTSIndex( isCancelled );
+  }
+  catch ( std::exception & ) {
+    return -1;
+  }
+  return 0;
+}
+
+int gd_fts_index_state( int dict_index, int * out )
+{
+  std::lock_guard< std::mutex > lock( g_engineMutex );
+  if ( !g_state || !out || dict_index < 0 || dict_index >= static_cast< int >( g_state->dictionaries.size() ) )
+    return -1;
+
+  Dictionary::Class & d = *g_state->dictionaries[ dict_index ];
+  if ( !d.canFTS() )
+    return -1;
+
+  *out = d.haveFTSIndex() ? 0 : 1; // 0 built, 1 missing/stale
+  return 0;
+}
+
+int gd_fts_search( const char * query, int mode, int group_id, char * out, int out_size )
+{
+  if ( !query || !out || out_size <= 0 )
+    return -1;
+  std::lock_guard< std::mutex > lock( g_engineMutex );
+  if ( !g_state )
+    return -1;
+
+  // Resolve group 0 ("All") or the named group to its ordered dict indices.
+  vector< unsigned > dictIndices;
+  if ( group_id == 0 ) {
+    dictIndices.reserve( g_state->dictionaries.size() );
+    for ( unsigned i = 0; i < g_state->dictionaries.size(); ++i )
+      dictIndices.push_back( i );
+  }
+  else {
+    GroupDef * def = findGroupDef( static_cast< unsigned >( group_id ) );
+    if ( !def )
+      return -1;
+    dictIndices = def->dictIndices;
+  }
+
+  const QString q = QString::fromUtf8( query );
+
+  string joined;
+  bool anyIndexed = false;
+
+  for ( unsigned idx : dictIndices ) {
+    Dictionary::Class & d = *g_state->dictionaries[ idx ];
+    // Skip dictionaries without an index; the caller builds one first
+    // (gd_fts_index) and gets -3 when no indexed dictionary exists.
+    if ( !d.canFTS() || !d.haveFTSIndex() )
+      continue;
+    anyIndexed = true;
+
+    sptr< Dictionary::DataRequest > req;
+    try {
+      req = d.getSearchResults( q, mode, false, false );
+    }
+    catch ( std::exception & ) {
+      continue;
+    }
+    if ( !req )
+      continue;
+
+    // FTSResultsRequest runs async internally; wait (bounded) like gd_lookup.
+    QEventLoop loop;
+    QTimer::singleShot( 15000, &loop, &QEventLoop::quit );
+    QObject::connect( req.get(), &Dictionary::Request::finished, &loop, &QEventLoop::quit );
+    if ( !req->isFinished() )
+      loop.exec();
+    if ( !req->isFinished() )
+      continue;
+
+    // The request serializes a pointer to its QList<FTS::FtsHeadword> into
+    // the data buffer; copy it out the way upstream fulltextsearch.cc does.
+    if ( req->dataSize() < static_cast< long >( sizeof( QList< FTS::FtsHeadword > * ) ) )
+      continue; // no data: no matches in this dictionary
+
+    QList< FTS::FtsHeadword > * found = nullptr;
+    req->getDataSlice( 0, sizeof( found ), &found );
+    if ( !found )
+      continue;
+
+    QList< FTS::FtsHeadword > headwords;
+    headwords.swap( *found );
+    delete found;
+
+    // Second field is the dictionary's display name (gd_dict_info returns the
+    // same string) so the UI can label the result without an id->name map;
+    // the engine's internal id is opaque and GPL-log-based.
+    const string dictName = d.getName();
+    for ( const FTS::FtsHeadword & h : headwords ) {
+      if ( !joined.empty() )
+        joined += '\n';
+      joined += h.headword.toUtf8().constData();
+      joined += '\t';
+      joined += dictName;
+    }
+  }
+
+  if ( !anyIndexed )
+    return -3; // no dictionary in the group has a full-text index yet
+
+  if ( static_cast< int >( joined.size() ) + 1 > out_size )
+    return -2;
+
+  std::memcpy( out, joined.c_str(), joined.size() + 1 );
+
+  int count = 0;
+  for ( const char c : joined ) {
+    if ( c == '\n' )
+      ++count;
+  }
+  if ( !joined.empty() )
+    ++count;
+  return count;
 }
 
 void gd_cleanup()
