@@ -63,4 +63,38 @@ QML + native WebView coexistence limit, or HWUI/QPainter surface conflict).
 
 ### Decision
 
-*Pending spike.* Not adopted. Updated by the spike's final task.
+### On-device results (2026-09-02, ThinkPhone, branch `qt-quick-frontend`)
+
+- **Gate 1 — in-process coexistence: PASS.** The all-Qt APK (`com.aurelex.experiment`)
+  loads `libaurelex_exp` (carve + Qt Core/Gui/Xml/Concurrent/Qml/Quick/WebView +
+  platform/webview plugins) into **one process** (pid observed; no `:engine`, no
+  Messenger, no FGS). No HWUI blank/crash; Activity displayed.
+- **Gate 2 — article bridge: PASS (core).** In-process pipeline works end-to-end:
+  `gd_init:1`, `gd_scan_dicts(staged) -> 1`, `gd_dict_count -> 1`,
+  `gd_lookup(apple) -> 2892` (real article HTML), rendered through a `QtWebView`
+  (wraps Android WebView 144) with `loadHtml`. QML component loads. `QtWebView`
+  does **not** intercept custom schemes — the spike already rewrites `qrc:///`
+  → `file:///android_asset/` in `qrcToAsset`; `bres://`/`gdau://` still require a
+  WebViewClient-equivalent (recorded as a follow-up for a full port).
+- **Gate 3 — Java-shell coexistence: NOT RUN.** A QS tile / widget / SAF check
+  needs a second Java component beside the Qt Activity; out of scope for this
+  spike's device pass and flagged as a remaining unknown (the real tile/widget live
+  in the shipped app's package anyway).
+- **Tooling notes (for the follow-up port):** `qt_add_apk_target` is absent from
+  the aqt "carve subset" install — package with `androiddeployqt` + a generated
+  `android-aurelex_exp-deployment-settings.json` manually. The Qt android
+  toolchain needs `ANDROID_PLATFORM=android-30` (NDK r23c max 33; carve needs
+  iconv/`__ANDROID_API__`≥28 + pthread_cond_clockwait≥30) and the NDK bionic
+  include added for `iconv.h`. Gradle must run under **JDK 17** (AGP 7.4.1 +
+  JDK 21 → D8 NPE). aapt2 needs compileSdk `android-34` with AGP 7.4.1.
+
+**Assessment:** the all-Qt direction is **viable and low-risk to build on** —
+Gate 1 and the article pipeline are proven on-device, and the tooling friction
+above is mechanical, not architectural. Remaining unknowns before committing a
+full port: Gate 3 (Java shell coexistence) and the real cost estimate of porting
+the Compose feature set to QML (not yet measured).
+
+**Recommendation (tentative):** GO on the all-Qt direction as the eventual
+architecture, pending (a) Gate 3 and (b) a bounded port-cost estimate. The
+`confined-qt-shim` path becomes unnecessary if this holds (Qt is embraced, not
+shimmed).
