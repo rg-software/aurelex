@@ -320,12 +320,16 @@ class MainViewModel : ViewModel() {
     val dictionaries: StateFlow<List<DictEntry>> = _dictionaries
 
     private fun refreshDictionaries() {
-        _dictionaries.value = try {
+        val dicts = try {
             EngineClient.dictInfo().get().map { DictEntry(it.first, it.second) }
         } catch (e: Exception) {
             android.util.Log.e("MainViewModel", "dictInfo failed", e)
             emptyList()
         }
+        _dictionaries.value = dicts
+        // dictCount must mirror the actual loaded set (dedup/remove can change
+        // it without a new scan returning n>0, so never trust += n).
+        _dictCount.value = dicts.size
     }
 
     /** Simple back-stack of destinations (back navigates within it). */
@@ -353,7 +357,6 @@ class MainViewModel : ViewModel() {
     fun scanDicts(folder: String, onDone: (Int) -> Unit) {
         viewModelScope.launch(Dispatchers.IO) {
             val n = EngineClient.scanDicts(folder).get()
-            _dictCount.value += n
             refreshDictionaries()
             onDone(n)
         }
@@ -368,6 +371,28 @@ class MainViewModel : ViewModel() {
                 }
             } catch (e: Exception) {
                 android.util.Log.e("MainViewModel", "moveDict failed", e)
+            }
+        }
+    }
+
+    /**
+     * Removes dictionary at [dictIndex] from the loaded set, then refreshes the
+     * dictionary list, groups, and FTS index states (design D4). Removal is
+     * in-memory only; a re-scan of the same folder re-adds it.
+     */
+    fun removeDict(dictIndex: Int) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                if (EngineClient.removeDict(dictIndex).get() == 0) {
+                    refreshDictionaries()
+                    refreshGroups()
+                    _ftsIndexStates.value = _ftsIndexStates.value
+                        .mapNotNull { (idx, state) -> if (idx == dictIndex) null else idx to state }
+                        .toMap()
+                    _ftsBuilding.value = _ftsBuilding.value - dictIndex
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("MainViewModel", "removeDict($dictIndex) failed", e)
             }
         }
     }
@@ -469,7 +494,6 @@ class MainViewModel : ViewModel() {
                     _indexMessage.value = "Engine not ready — try again in a moment."
                     0
                 }
-                _dictCount.value += n
                 if (n > 0) IndexVersion.markCurrent(context)
                 refreshDictionaries()
             } catch (e: Exception) {
@@ -568,7 +592,6 @@ class MainViewModel : ViewModel() {
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 val n = EngineClient.scanDicts(savePath).get()
-                _dictCount.value = n
                 refreshDictionaries()
                 refreshGroups()
                 android.util.Log.i("MainViewModel", "resumeScan($savePath) -> $n")

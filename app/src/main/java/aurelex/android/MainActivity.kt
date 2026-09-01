@@ -497,6 +497,7 @@ fun DictionariesScreen(viewModel: MainViewModel, onBack: () -> Unit) {
     val indexMessage by viewModel.indexMessage.collectAsState()
     val context = LocalContext.current
     var message by remember { mutableStateOf<String?>(null) }
+    var pendingRemove by remember { mutableStateOf<Int?>(null) }
     val launcher = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocumentTree()
     ) { uri: Uri? ->
@@ -560,10 +561,31 @@ fun DictionariesScreen(viewModel: MainViewModel, onBack: () -> Unit) {
                             onClick = { viewModel.moveDict(index, index + 1) },
                             enabled = index < dictionaries.lastIndex
                         ) { Text("↓") }
+                        TextButton(onClick = { pendingRemove = index }) { Text("Remove") }
                     }
                 }
             }
         }
+    }
+
+    // Confirmation before the destructive removal (design D4 / spec).
+    val toRemove = pendingRemove
+    if (toRemove != null) {
+        val entry = dictionaries.getOrNull(toRemove)
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { pendingRemove = null },
+            title = { Text("Remove dictionary") },
+            text = { Text("Remove \"${entry?.name ?: "dictionary"}\" from the loaded set? This does not delete the files.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    viewModel.removeDict(toRemove)
+                    pendingRemove = null
+                }) { Text("Remove") }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingRemove = null }) { Text("Cancel") }
+            }
+        )
     }
 }
 

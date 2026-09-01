@@ -31,6 +31,13 @@
 // - gd_move_dict:  move a dictionary in the single (unfiltered) group order;
 //                 the combined article respects this order. Returns 0 on
 //                 success, -1 on invalid indices.
+// - gd_remove_dict: remove a loaded dictionary by its index in the global
+//                 loaded set. It is dropped from the set and from every group
+//                 (including the implicit "All"); lookups, groups, and
+//                 full-text search no longer reference it. Returns 0 on
+//                 success, -1 on an invalid index / uninitialized engine.
+//                 Removal is in-memory only: a later gd_scan_dicts of the same
+//                 folder re-adds it.
 // - gd_group_count: number of groups (always >= 1; group 0 is the implicit
 //                 "All" group). Returns 0 if the engine is not initialized.
 // - gd_group_info:  group `index` (0..count-1): its id, name, and dictionary
@@ -89,6 +96,7 @@ int gd_get_audio( const char * url, char * out, int out_size );
 int gd_dict_count();
 int gd_dict_info( int index, char * name, int name_size, char * file, int file_size );
 int gd_move_dict( int from, int to );
+int gd_remove_dict( int dict_index );
 int gd_group_count();
 int gd_group_info( int index, int * id_out, char * name, int name_size, int * dict_count_out );
 int gd_group_create( const char * name, int * id_out );

@@ -113,6 +113,11 @@ object EngineClient {
         callInt(EngineService.OP_MOVE_DICT) { it.putInt("from", from); it.putInt("to", to) }
     }
 
+    /** Remove a loaded dictionary by index; returns 0 on success. */
+    fun removeDict(dictIndex: Int): Future<Int> = submit {
+        callInt(EngineService.OP_REMOVE_DICT) { it.putInt("index", dictIndex) }
+    }
+
     fun setDarkMode(on: Boolean): Future<Int> = submit {
         callInt(EngineService.OP_SET_DARK) { it.putBoolean("on", on) }
     }

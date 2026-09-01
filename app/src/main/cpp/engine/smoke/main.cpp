@@ -39,6 +39,7 @@ int main( int argc, char ** argv )
   const int n2 = gd_scan_dicts( dictDir );
   std::printf( "gd_scan_dicts(again) -> %d new (expect 0)\n", n2 );
   const bool dedupOk = n2 == 0;
+  bool dictOk = true; // refined by the removal block below
 
   std::vector< char > sug( 1 << 12 );
   const int sugN = gd_suggest( "smok", sug.data(), static_cast< int >( sug.size() ) );
@@ -159,6 +160,39 @@ int main( int argc, char ** argv )
     std::printf( "FTS_WILD=%s\n", ftsWildOk ? "OK" : "FAIL" );
   }
 
+  // ---- dictionary removal smoke (remove-dictionary) ----
+  // The DSL (.dsl.dz) is dict 1 and its headword "book" comes from it; remove
+  // it, confirm the count drops and "book" stops resolving, then re-scan
+  // re-adds it (removal is in-memory; dedup does not block a removed id).
+  {
+    std::vector< char > b( 1 << 20 );
+    const int before = gd_dict_count();
+    const int bookBefore = gd_lookup( "book", b.data(), static_cast< int >( b.size() ) );
+    const bool bookFoundBefore = bookBefore > 0
+      && std::string( b.data(), bookBefore ).find( "gdarticlebody" ) != std::string::npos;
+
+    const int rmRc = gd_remove_dict( 1 );
+    const int after = gd_dict_count();
+    std::printf( "gd_remove_dict(1) -> %d (count %d -> %d)\n", rmRc, before, after );
+
+    const int bookAfter = gd_lookup( "book", b.data(), static_cast< int >( b.size() ) );
+    const bool bookFoundAfter = bookAfter > 0
+      && std::string( b.data(), bookAfter ).find( "gdarticlebody" ) != std::string::npos;
+    std::printf( "REMOVE_DICT=%s (book was %s, now %s)\n",
+                 ( rmRc == 0 && after == before - 1 && bookFoundBefore && !bookFoundAfter ) ? "OK" : "FAIL",
+                 bookFoundBefore ? "found" : "absent",
+                 bookFoundAfter ? "found" : "absent" );
+
+    // Re-adding the same folder brings the dictionary back (dedup compares
+    // against loaded ids only).
+    const int reAdd = gd_scan_dicts( dictDir );
+    const int reCount = gd_dict_count();
+    std::printf( "gd_scan_dicts(after remove) -> %d new (count %d)\n", reAdd, reCount );
+    const bool readdOk = reAdd == 1 && reCount == before;
+    std::printf( "REMOVE_READD=%s\n", readdOk ? "OK" : "FAIL" );
+    dictOk = dictOk && rmRc == 0 && after == before - 1 && bookFoundBefore && !bookFoundAfter && readdOk;
+  }
+
   gd_cleanup();
-  return ( lookSz > 0 && sugN > 0 && ftsOk && dedupOk ) ? 0 : 1;
+  return ( lookSz > 0 && sugN > 0 && ftsOk && dedupOk && dictOk ) ? 0 : 1;
 }

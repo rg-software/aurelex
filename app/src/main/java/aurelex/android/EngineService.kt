@@ -56,6 +56,7 @@ class EngineService : Service() {
                     sendBytes(replyTarget, sb.toString().toByteArray(Charsets.UTF_8))
                 }
                 OP_MOVE_DICT -> Runnable { sendInt(replyTarget, NativeEngine.moveDict(bundle.getInt("from"), bundle.getInt("to")).get()) }
+                OP_REMOVE_DICT -> Runnable { sendInt(replyTarget, NativeEngine.removeDict(bundle.getInt("index")).get()) }
                 OP_SET_DARK -> Runnable { sendInt(replyTarget, NativeEngine.setDarkMode(bundle.getBoolean("on")).get()) }
                 OP_GROUP_COUNT -> Runnable { sendInt(replyTarget, NativeEngine.groupCount().get()) }
                 OP_GROUP_INFO -> Runnable {
@@ -169,6 +170,7 @@ class EngineService : Service() {
         const val OP_DICT_COUNT = 6
         const val OP_DICT_INFO = 7
         const val OP_MOVE_DICT = 8
+        const val OP_REMOVE_DICT = 10
         const val OP_SET_DARK = 9
         const val OP_GROUP_COUNT = 20
         const val OP_GROUP_INFO = 21

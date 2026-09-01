@@ -40,6 +40,7 @@ object NativeEngine {
     private external fun nativeDictCount(): Int
     private external fun nativeDictInfo(): Array<Array<String>>
     private external fun nativeMoveDict(from: Int, to: Int): Int
+    private external fun nativeRemoveDict(dictIndex: Int): Int
     private external fun nativeSetDarkMode(on: Boolean): Int
     private external fun nativeGroupCount(): Int
     private external fun nativeGroupInfo(): Array<Array<String>>
@@ -124,6 +125,9 @@ object NativeEngine {
 
     /** Move a dictionary in the single-group order; returns 0 on success. */
     fun moveDict(from: Int, to: Int): Future<Int> = submit { awaitInit(); nativeMoveDict(from, to) }
+
+    /** Remove a loaded dictionary by index; returns 0 on success. */
+    fun removeDict(dictIndex: Int): Future<Int> = submit { awaitInit(); nativeRemoveDict(dictIndex) }
 
     /** Toggle article dark mode (engine-emitted CSS); returns 0 on success. */
     fun setDarkMode(on: Boolean): Future<Int> = submit { awaitInit(); nativeSetDarkMode(on) }

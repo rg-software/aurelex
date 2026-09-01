@@ -198,6 +198,13 @@ Java_aurelex_android_NativeEngine_nativeMoveDict( JNIEnv * env, jobject /*thiz*/
   return gd_move_dict( from, to );
 }
 
+JNIEXPORT jint JNICALL
+Java_aurelex_android_NativeEngine_nativeRemoveDict( JNIEnv * env, jobject /*thiz*/, jint dictIndex )
+{
+  (void)env;
+  return gd_remove_dict( dictIndex );
+}
+
 // --- groups (multi-group-management) ---
 
 JNIEXPORT jint JNICALL

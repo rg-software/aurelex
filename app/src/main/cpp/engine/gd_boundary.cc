@@ -439,6 +439,38 @@ int gd_move_dict( int from, int to )
   return 0;
 }
 
+int gd_remove_dict( int dict_index )
+{
+  if ( !g_state )
+    return -1;
+  std::lock_guard< std::mutex > lock( g_engineMutex );
+
+  const int n = static_cast< int >( g_state->dictionaries.size() );
+  if ( dict_index < 0 || dict_index >= n )
+    return -1;
+
+  const unsigned removed = static_cast< unsigned >( dict_index );
+
+  // Erase from the loaded set; the last sptr ref is released here (or by the
+  // caller holding a temporary), and ArticleMaker is rebuilt so its by-value
+  // group/dict vectors match the new list.
+  g_state->dictionaries.erase( g_state->dictionaries.begin() + dict_index );
+
+  // Drop the dictionary from every group and remap the surviving indices that
+  // pointed past it (they shifted down by one).
+  for ( auto & def : g_state->groupDefs ) {
+    auto & v = def.dictIndices;
+    v.erase( std::remove( v.begin(), v.end(), removed ), v.end() );
+    for ( auto & idx : v ) {
+      if ( idx > removed )
+        --idx;
+    }
+  }
+
+  rebuildGroups();
+  return 0;
+}
+
 // --- groups API (milestone multi-group-management) ---
 
 int gd_group_count()

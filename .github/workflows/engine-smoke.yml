@@ -110,6 +110,12 @@ jobs:
           # Re-scanning the same folder must not duplicate loaded dictionaries.
           printf '%s' "$out" | grep -q "gd_scan_dicts(again) -> 0" \
             || { echo "SMOKE FAILED: dedup on re-scan"; exit 1; }
+          # Removing a dictionary drops it (count shrinks, its headword stops
+          # resolving) and a re-scan re-adds it.
+          printf '%s' "$out" | grep -q "REMOVE_DICT=OK" \
+            || { echo "SMOKE FAILED: dictionary removal"; exit 1; }
+          printf '%s' "$out" | grep -q "REMOVE_READD=OK" \
+            || { echo "SMOKE FAILED: re-add after removal"; exit 1; }
           # Full-text search must work end-to-end: index the StarDict fixture,
           # search a term that lives in an article BODY ("mdx"), get the
           # article's headword ("smoke") back.

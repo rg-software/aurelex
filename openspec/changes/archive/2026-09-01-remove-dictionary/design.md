@@ -64,6 +64,15 @@ groups, and FTS index states (so a removed dict's FTS status row disappears).
   successful removal, and all removal/reorder flows re-read the current list.
 - [Removing from every group is O(groups×dicts), trivial at v1 sizes.] →
   No mitigation needed.
+- [Scanning loads **all** supported dictionaries in the picked folder, not a
+  user-chosen subset.] → Current v1 limitation (known): the folder picker
+  stages+scans every `.mdx`/`.dsl`/`.dsl.dz`/`.ifo` present, so "adding" a
+  folder brings in everything it contains. Removing a single dict works
+  (this change), but there is no per-file multi-select. Mitigation: per-file
+  selection is a plausible later improvement (tracked, not in scope).
+- [Dictionary count is stale after dedup/removal ("Dictionaries (N loaded)").]
+  → Fixed as part of removal: the UI count is now derived from the actual
+  loaded list (`refreshDictionaries`), not from an accumulated `+= n`.
 
 ## Migration Plan
 
