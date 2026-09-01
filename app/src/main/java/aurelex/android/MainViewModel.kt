@@ -9,7 +9,7 @@ import kotlinx.coroutines.launch
 import java.util.concurrent.Future
 
 /** Single-activity navigation destinations (task 3.2). */
-enum class Dest { SEARCH, ARTICLE, DICTIONARIES, HISTORY, FAVORITES, GROUPS }
+enum class Dest { SEARCH, ARTICLE, DICTIONARIES, HISTORY, FAVORITES, GROUPS, GROUP_DETAIL }
 
 class MainViewModel : ViewModel() {
 
@@ -55,6 +55,10 @@ class MainViewModel : ViewModel() {
     /** Group membership: groupId -> ordered dict indices. */
     private val _groupMembers = MutableStateFlow<Map<Int, List<Int>>>(emptyMap())
     val groupMembers: StateFlow<Map<Int, List<Int>>> = _groupMembers
+
+    /** Group id currently shown in the detail screen (via Dest.GROUP_DETAIL). */
+    @Volatile
+    var detailGroupId: Int = 0
 
     @Volatile
     private var prefs: PreferencesStore? = null
@@ -162,8 +166,30 @@ class MainViewModel : ViewModel() {
         }
     }
 
-    /** Ordered dict indices of group [id] (0 = all). */
+    /** Ordered dict indices of group [id] (0 = all); off-main via Future. */
     fun groupDicts(id: Int): Future<List<Int>> = EngineClient.groupDicts(id)
+
+    /** Loads group [id] membership into [_groupMembers] for the detail screen. */
+    fun loadGroupMembers(id: Int) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                _groupMembers.value = _groupMembers.value + (id to EngineClient.groupDicts(id).get())
+            } catch (e: Exception) {
+                android.util.Log.e("MainViewModel", "loadGroupMembers($id) failed", e)
+                _groupMembers.value = _groupMembers.value + (id to emptyList())
+            }
+        }
+    }
+
+    /** Optimistically updates the locally-cached membership for [id]. */
+    fun setGroupMembers(id: Int, new: List<Int>) {
+        _groupMembers.value = _groupMembers.value + (id to new)
+    }
+
+    /** Invalidates the cached membership for [id] so it is re-fetched. */
+    fun invalidateGroupMembers(id: Int) {
+        _groupMembers.value = _groupMembers.value - id
+    }
 
     /** Applies the persisted active group after (re)load. */
     fun applyPersistedActiveGroup() {
@@ -196,7 +222,8 @@ class MainViewModel : ViewModel() {
     fun pop(): Boolean {
         val s = _backStack.value
         if (s.size <= 1) return false
-        _backStack.value = s.dropLast(1)
+        val next = s.dropLast(1)
+        _backStack.value = next
         return true
     }
 

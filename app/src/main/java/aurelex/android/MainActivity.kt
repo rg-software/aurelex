@@ -108,6 +108,7 @@ fun AurelexApp(viewModel: MainViewModel) {
                     Dest.HISTORY -> HistoryScreen(viewModel, onBack = { viewModel.pop() })
                     Dest.FAVORITES -> FavoritesScreen(viewModel, onBack = { viewModel.pop() })
                     Dest.GROUPS -> GroupsScreen(viewModel, onBack = { viewModel.pop() })
+                    Dest.GROUP_DETAIL -> GroupDetailScreen(viewModel, groupId = viewModel.detailGroupId, onBack = { viewModel.pop() })
                 }
             }
         }
@@ -316,17 +317,6 @@ fun FavoritesScreen(viewModel: MainViewModel, onBack: () -> Unit) {
 
 @Composable
 fun GroupsScreen(viewModel: MainViewModel, onBack: () -> Unit) {
-    var editing by remember { mutableStateOf<Int?>(null) }
-    val g = editing
-    if (g == null) {
-        GroupsList(viewModel, onBack = onBack, onEdit = { editing = it })
-    } else {
-        GroupDetailScreen(viewModel, groupId = g, onBack = { editing = null })
-    }
-}
-
-@Composable
-private fun GroupsList(viewModel: MainViewModel, onBack: () -> Unit, onEdit: (Int) -> Unit) {
     val groups by viewModel.groups.collectAsState()
     val active by viewModel.activeGroupId.collectAsState()
     var showCreate by remember { mutableStateOf(false) }
@@ -355,7 +345,10 @@ private fun GroupsList(viewModel: MainViewModel, onBack: () -> Unit, onEdit: (In
                             Text(if (active == grp.id) "● ${grp.name} (${grp.dictCount})" else "${grp.name} (${grp.dictCount})")
                         }
                     }
-                    TextButton(onClick = { onEdit(grp.id) }) { Text("Edit") }
+                    TextButton(onClick = {
+                        viewModel.detailGroupId = grp.id
+                        viewModel.push(Dest.GROUP_DETAIL)
+                    }) { Text("Edit") }
                     if (grp.id != 0) {
                         TextButton(onClick = { viewModel.deleteGroup(grp.id) }) { Text("✕") }
                     }
@@ -383,11 +376,12 @@ private fun GroupsList(viewModel: MainViewModel, onBack: () -> Unit, onEdit: (In
 @Composable
 fun GroupDetailScreen(viewModel: MainViewModel, groupId: Int, onBack: () -> Unit) {
     val dictionaries by viewModel.dictionaries.collectAsState()
-    var members by remember(groupId) { mutableStateOf<List<Int>?>(null) }
+    val memberships by viewModel.groupMembers.collectAsState()
+    val members = memberships[groupId] ?: emptyList()
     LaunchedEffect(groupId) {
-        members = try { viewModel.groupDicts(groupId).get() } catch (e: Exception) { emptyList() }
+        if (!memberships.containsKey(groupId)) viewModel.loadGroupMembers(groupId)
     }
-    val memberSet = (members ?: emptyList()).toSet()
+    val memberSet = members.toSet()
 
     Column(modifier = Modifier.fillMaxSize()) {
         TextButton(onClick = onBack) { Text("← Back") }
@@ -408,8 +402,8 @@ fun GroupDetailScreen(viewModel: MainViewModel, groupId: Int, onBack: () -> Unit
                         onCheckedChange = { on ->
                             if (on) viewModel.groupAddDict(groupId, idx)
                             else viewModel.groupRemoveDict(groupId, idx)
-                            val m = members ?: emptyList()
-                            members = if (on) (m + idx).distinct() else m.filter { it != idx }
+                            val m = members
+                            viewModel.setGroupMembers(groupId, if (on) (m + idx).distinct() else m.filter { it != idx })
                         }
                     )
                     Text(entry.name, modifier = Modifier.weight(1f))
