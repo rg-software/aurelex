@@ -56,6 +56,16 @@ jobs:
           python -m aqt install-qt linux android 6.6.3 android_x86_64 -O "${{ github.workspace }}/qt"
           git clone --depth 1 --branch 2026.07.29 https://github.com/microsoft/vcpkg.git "${{ github.workspace }}/vcpkg" || true
 
+      - name: vcpkg deps for Android triplets
+        shell: bash
+        run: |
+          # Same deps the carve needs on-device as on the host build
+          # (z bz2 lzma lzo2 fmt; xapian is built by the script below).
+          "${{ github.workspace }}/vcpkg/vcpkg" install zlib bzip2 liblzma lzo fmt \
+            --triplet arm64-android
+          "${{ github.workspace }}/vcpkg/vcpkg" install zlib bzip2 liblzma lzo fmt \
+            --triplet x64-android
+
       - name: Build xapian for Android (full-text search dependency)
         shell: bash
         run: |
