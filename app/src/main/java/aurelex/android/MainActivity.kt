@@ -110,6 +110,13 @@ class MainActivity : ComponentActivity() {
                 } ?: ""
                 if (word.isNotBlank()) mainViewModel.lookup(word)
             }
+            Intent.ACTION_PROCESS_TEXT -> {
+                // "Look up in Aurelex" on selected text (long-press selection
+                // toolbar in other apps).
+                val word = intent.getCharSequenceExtra(Intent.EXTRA_PROCESS_TEXT)
+                    ?.toString()?.trim()
+                if (word?.isNotBlank() == true) mainViewModel.lookup(word)
+            }
             QuickLookup.ACTION_LOOKUP_CLIPBOARD -> {
                 // The clipboard is only readable while the window has input
                 // focus, so if it hasn't yet, defer until onWindowFocusChanged
