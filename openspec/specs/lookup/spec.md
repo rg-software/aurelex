@@ -19,21 +19,25 @@ Submitting a suggestion or the typed text SHALL trigger a full article lookup.
 - **THEN** the app renders the combined article for that headword
 
 ### Requirement: Article rendering
-The system SHALL render a lookup as HTML built from all loaded dictionaries that contain the headword, presented in the on-screen web view with the dictionaries ordered per the configured group, whether the lookup is initiated by typing in the search field, selecting a suggestion, or an external entry point (share action, clipboard, history, or favorites).
+The system SHALL render a lookup as HTML built from the dictionaries of the active group that contain the headword, presented in the on-screen web view with the dictionaries ordered per the active group, whether the lookup is initiated by typing in the search field, selecting a suggestion, or an external entry point (share action, clipboard, history, or favorites).
 Successful article lookups SHALL be recorded in the lookup history.
 Unknown words MUST NOT crash the app.
 
 #### Scenario: Word found in multiple dictionaries
-- **WHEN** the user looks up a headword present in several dictionaries
-- **THEN** the article displays each dictionary's entry in the configured group order
+- **WHEN** the user looks up a headword present in several dictionaries of the active group
+- **THEN** the article displays each dictionary's entry in the active group's order
 
 #### Scenario: Word not found
-- **WHEN** the user looks up a headword none of the dictionaries contain
+- **WHEN** the user looks up a headword none of the active group's dictionaries contain
 - **THEN** the app shows a "not found" indication and offers a way to continue searching
 
 #### Scenario: Lookup from an external entry point
 - **WHEN** the user initiates a lookup via a share action, the clipboard, history, or favorites
-- **THEN** the article is rendered the same way as a typed lookup, and the word is added to the lookup history
+- **THEN** the article is rendered against the active group, and the word is added to the lookup history
+
+#### Scenario: Lookup respects the active group
+- **WHEN** a word is only present in dictionaries outside the active group
+- **THEN** the lookup does not show that dictionary's entry (it is treated as not found for that group)
 
 ### Requirement: Embedded dictionary resources
 The system SHALL load resources referenced by an article (for example images and audio stored in mdict `.mdd` archives or referenced from dictionary folders) and display or play them within the article.
