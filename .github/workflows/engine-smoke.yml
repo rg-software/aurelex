@@ -107,6 +107,9 @@ jobs:
           # must report both (2 dictionaries).
           printf '%s' "$out" | grep -q "gd_scan_dicts -> 2" \
             || { echo "SMOKE FAILED: expected 2 dictionaries (stardict + dsl.dz)"; exit 1; }
+          # Re-scanning the same folder must not duplicate loaded dictionaries.
+          printf '%s' "$out" | grep -q "gd_scan_dicts(again) -> 0" \
+            || { echo "SMOKE FAILED: dedup on re-scan"; exit 1; }
           # Full-text search must work end-to-end: index the StarDict fixture,
           # search a term that lives in an article BODY ("mdx"), get the
           # article's headword ("smoke") back.

@@ -213,9 +213,29 @@ int gd_scan_dicts( const char * folder )
 
   const size_t before = g_state->dictionaries.size();
 
+  // Dedup: a dictionary id is an MD5 over its (sorted) source file paths, and
+  // the UI re-stages + re-scans the same folder on every add, so skip anything
+  // whose id is already loaded rather than appending a duplicate.
+  QSet< QString > loadedIds;
+  loadedIds.reserve( static_cast< int >( g_state->dictionaries.size() ) );
+  for ( const auto & d : g_state->dictionaries )
+    loadedIds.insert( QString::fromStdString( d->getId() ) );
+
   auto stardicts = Stardict::makeDictionaries( files, idxPath, sink, 500000 );
   auto mdxs      = Mdx::makeDictionaries( files, idxPath, sink );
   auto dsls      = Dsl::makeDictionaries( files, idxPath, sink, 500000 );
+
+  auto keepIfNew = [ &loadedIds ]( auto & v ) {
+    auto it = std::remove_if( v.begin(), v.end(), [ &loadedIds ]( const auto & d ) {
+      return loadedIds.contains( QString::fromStdString( d->getId() ) );
+    } );
+    v.erase( it, v.end() );
+    for ( auto & d : v )
+      loadedIds.insert( QString::fromStdString( d->getId() ) );
+  };
+  keepIfNew( stardicts );
+  keepIfNew( mdxs );
+  keepIfNew( dsls );
 
   for ( auto & d : stardicts ) {
     d->setFTSParameters( g_state->cfg.preferences.fts );

@@ -34,6 +34,12 @@ int main( int argc, char ** argv )
     return 1;
   }
 
+  // Re-scanning the same folder must not duplicate already-loaded dictionaries
+  // (the UI re-stages + re-scans on every add; id = md5 over the file paths).
+  const int n2 = gd_scan_dicts( dictDir );
+  std::printf( "gd_scan_dicts(again) -> %d new (expect 0)\n", n2 );
+  const bool dedupOk = n2 == 0;
+
   std::vector< char > sug( 1 << 12 );
   const int sugN = gd_suggest( "smok", sug.data(), static_cast< int >( sug.size() ) );
   std::printf( "gd_suggest(\"smok\") -> %d results\n", sugN );
@@ -154,5 +160,5 @@ int main( int argc, char ** argv )
   }
 
   gd_cleanup();
-  return ( lookSz > 0 && sugN > 0 && ftsOk ) ? 0 : 1;
+  return ( lookSz > 0 && sugN > 0 && ftsOk && dedupOk ) ? 0 : 1;
 }

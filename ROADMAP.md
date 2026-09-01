@@ -36,11 +36,12 @@ mobile") plus later proposals.
   CRUD + reorder via the boundary, add a groups UI (v1 is single-group).
   Done: OpenSpec change `multi-group-management` archived 2026-09-01 (12/12
   tasks plus a post-review navigation/hang fix, verified on Motorola ThinkPhone).
-- 🔵 **Full-text search (xapian)** — re-enable FTS in the carve: cross-compile
+- ✅ **Full-text search (xapian)** — re-enable FTS in the carve: cross-compile
   xapian for Android, add `gd_fts_*` boundary calls, FTS UI. Highest
   power-user value; touches the merge contract (new dep + boundary API).
-  In progress: OpenSpec change `full-text-search` — done through device
-  verification (host smoke + APK build pass; on-device checks pending).
+  Done: OpenSpec change `full-text-search` — implemented through task 7.1,
+  verified on Motorola ThinkPhone (prefix matching, auto index build, active
+  group). Wildcard expansion needs patch 0003 (upstream caps at 1 term).
 - ✅ **Quick-settings tile / home-screen widget** — instant lookup from the
   shelf.
   Done: OpenSpec change `quick-lookup-shortcuts` archived 2026-09-01

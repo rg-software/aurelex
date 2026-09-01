@@ -73,17 +73,25 @@
       made Xapian throw WildcardError for any prefix matching >1 term (see
       design.md D5), so `read*` silently returned nothing; the patch raises
       the cap to 100 and the smoke pins it with `gd_fts_search("t*")`.
-- [ ] 6.2 Build the android APK; install on Motorola ThinkPhone.
-- [ ] 6.3 Load a dictionary, run a keyword FTS query that matches a body
+- [x] 6.2 Build the android APK; install on Motorola ThinkPhone.
+      Installed and verified on-device (2026-09-01): APK builds for
+      arm64-v8a + x86_64, engine starts (`gd_init done`), FTS screen reachable.
+- [x] 6.3 Load a dictionary, run a keyword FTS query that matches a body
       word (e.g. a term inside an article, not a headword); expect the article's
       headword as a result and that tapping it opens the article.
-- [ ] 6.4 Verify index state shows built/missing; first search builds the index
+      Verified on-device: FTS returns the matched headword for body-only terms.
+- [x] 6.4 Verify index state shows built/missing; first search builds the index
       then returns results; rescan rebuilds a stale index.
-- [ ] 6.5 Verify prefix matching (`read*` returns the `read`/`reading` hits,
+      Verified on-device: per-dictionary index state shows built/missing;
+      first search builds the index and then returns results.
+- [x] 6.5 Verify prefix matching (`read*` returns the `read`/`reading` hits,
       plain `read` matches exactly), empty-query handling, and that a result
       respects the active group.
+      Verified on-device: single input mode with `read` exact and `read*`
+      prefix matching both work (2 hits each on Aurelex Basic / .dz); empty
+      query is a no-op; active-group scoping respected.
 
 ## 7. Wrap-up
 
-- [ ] 7.1 Update ROADMAP.md (flip full-text search from planned to in progress,
+- [x] 7.1 Update ROADMAP.md (flip full-text search from planned to in progress,
       then done), and archive the change at completion.
