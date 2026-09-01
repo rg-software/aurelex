@@ -48,10 +48,21 @@ mobile") plus later proposals.
   (17/20 tasks; tile clipboard lookup and widget verified on Motorola
   ThinkPhone — active-group respect, rotation/rescale, and restart checks not
   run before archive).
+  ⚠️ **Known limitation:** the widget is a styled shortcut, not a search field.
+  RemoteViews cannot capture typed text (`EditText` crashes on many launchers),
+  so tapping it sends `ACTION_SEARCH` with an empty word and just opens the
+  search screen — functionally identical to opening the app icon. See
+  `widget_search.xml` comment and design.md D2 (which envisioned an in-widget
+  `EditText` that was dropped during implementation).
 - 🟢 **Pre-built desktop-generated index caches** — copy indexes along with
   dictionaries to skip on-device indexing.
 - 🟢 **Translate-later / word-list export** — extract headwords/definitions to
   a file/anki.
+- 🟢 **Widget fills search with clipboard** — alternative to the widget-as-
+  shortcut limitation above: tapping the widget copies the clipboard text into
+  the in-app search field (or starts lookup directly), reusing the tile's
+  clipboard-read path. Needs an on-device check that the clipboard read happens
+  in the foreground activity (Android 10+), same as the tile.
 - 🟢 **Distribution & polish** — signed release APK, GitHub releases + F-Droid
   metadata, app icon, onboarding/empty state.
 
