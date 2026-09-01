@@ -423,6 +423,20 @@ class MainViewModel : ViewModel() {
         _backStack.value = s + Dest.ARTICLE
     }
 
+    private val _searchFocusRequest = MutableStateFlow(0)
+    val searchFocusRequest: StateFlow<Int> = _searchFocusRequest
+
+    /**
+     * Navigates to the search screen (used by the launcher shortcuts when there
+     * is nothing to look up). Each call bumps [searchFocusRequest] so the search
+     * field requests keyboard focus on the next composition (spec "Widget opens
+     * search screen").
+     */
+    fun openSearch() {
+        _backStack.value = listOf(Dest.SEARCH)
+        _searchFocusRequest.value += 1
+    }
+
     /** Fetches an embedded resource (bres://) or audio (gdau://) URL. */
     fun fetchResource(url: String): Future<ByteArray?> = EngineClient.getResource(url)
 

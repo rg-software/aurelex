@@ -34,6 +34,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -68,25 +70,83 @@ class MainActivity : ComponentActivity() {
         handleLookupIntent(intent)
     }
 
-    /** Routes an incoming share/VIEW intent into a lookup (task 1.1). */
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        // A clipboard read requires the window to have input focus, so a
+        // clipboard lookup received while the activity is still gaining focus
+        // is deferred until focus is granted (design D1).
+        if (hasFocus && clipboardLookupPending) {
+            clipboardLookupPending = false
+            performClipboardLookup(0)
+        }
+    }
+
+    @Volatile
+    private var clipboardLookupPending = false
+
+    /**
+     * Routes an incoming external intent into a lookup. Share/VIEW keep their
+     * existing behavior; the launcher shortcuts (Quick Settings tile and
+     * home-screen widget) land here via the QuickLookup actions. Every branch
+     * funnels non-blank text into [MainViewModel.lookup] so the article /
+     * not-found / active-group / history handling is reused (tasks 4.1-4.3),
+     * and blank text opens the search screen.
+     */
     private fun handleLookupIntent(intent: Intent?) {
         if (intent == null) return
-        val word = when (intent.action) {
+        when (intent.action) {
             Intent.ACTION_SEND -> {
-                (intent.getStringExtra(Intent.EXTRA_TEXT) ?: intent.getStringExtra(Intent.EXTRA_SUBJECT))?.trim()
+                val word = (intent.getStringExtra(Intent.EXTRA_TEXT)
+                    ?: intent.getStringExtra(Intent.EXTRA_SUBJECT))?.trim()
+                if (word?.isNotBlank() == true) mainViewModel.lookup(word)
             }
             Intent.ACTION_VIEW -> {
                 // aurelex://lookup?word=<word> or /lookup/<word>
-                intent.data?.let { uri ->
+                val word = intent.data?.let { uri ->
                     uri.getQueryParameter("word")
                         ?: uri.path?.trimStart('/')?.trim()
                 } ?: ""
+                if (word.isNotBlank()) mainViewModel.lookup(word)
             }
-            else -> return
+            QuickLookup.ACTION_LOOKUP_CLIPBOARD -> {
+                // The clipboard is only readable while the window has input
+                // focus, so if it hasn't yet, defer until onWindowFocusChanged
+                // fires (design D1).
+                if (hasWindowFocus()) performClipboardLookup(0)
+                else clipboardLookupPending = true
+            }
+            QuickLookup.ACTION_SEARCH -> {
+                // Field text lands in EXTRA_TEXT on launchers that deliver it;
+                // blank means "open the search screen with focus" (design D2).
+                val word = intent.getStringExtra(QuickLookup.EXTRA_TEXT)?.trim()
+                if (word.isNullOrBlank()) mainViewModel.openSearch()
+                else mainViewModel.lookup(word)
+                refreshWidget()
+            }
         }
-        if (word?.isNotBlank() == true) {
-            mainViewModel.lookup(word)
+    }
+
+    /** Reads the clipboard and routes it to a lookup or the search screen. */
+    private fun performClipboardLookup(attempt: Int) {
+        val clip = mainViewModel.clipboardText(applicationContext)?.trim()
+        when {
+            !clip.isNullOrBlank() -> mainViewModel.lookup(clip)
+            attempt == 0 -> {
+                // The clipboard may only become readable once the window is fully
+                // focused; retry once shortly after before giving up.
+                android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                    performClipboardLookup(1)
+                }, 250L)
+            }
+            else -> mainViewModel.openSearch()
         }
+    }
+
+    /** Re-wires the widget's RemoteViews after a submit handled it (task 3.2). */
+    private fun refreshWidget() {
+        sendBroadcast(Intent(this, AurelexSearchWidget::class.java).apply {
+            action = QuickLookup.ACTION_REFRESH_WIDGET
+        })
     }
 }
 
@@ -123,10 +183,18 @@ fun SearchScreen(viewModel: MainViewModel) {
     val activeGroup by viewModel.activeGroupId.collectAsState()
     val context = LocalContext.current
     val activeName = groups.firstOrNull { it.id == activeGroup }?.name ?: "All"
+    val focusRequest by viewModel.searchFocusRequest.collectAsState()
+    val focusRequester = remember { FocusRequester() }
 
     LaunchedEffect(query) {
             viewModel.suggest(query)
         }
+
+    // Request keyboard focus when the launcher shortcuts drop the user here
+    // without a word to look up (spec "Widget opens search screen").
+    LaunchedEffect(focusRequest) {
+        if (focusRequest > 0) focusRequester.requestFocus()
+    }
 
     Column(modifier = Modifier.fillMaxSize()) {
             Text(
@@ -142,7 +210,8 @@ fun SearchScreen(viewModel: MainViewModel) {
             onValueChange = { query = it },
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp),
+                .padding(horizontal = 16.dp)
+                .focusRequester(focusRequester),
             placeholder = { Text("Search dictionaries") },
             singleLine = true
         )

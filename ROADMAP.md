@@ -39,8 +39,12 @@ mobile") plus later proposals.
 - 🟢 **Full-text search (xapian)** — re-enable FTS in the carve: cross-compile
   xapian for Android, add `gd_fts_*` boundary calls, FTS UI. Highest
   power-user value; touches the merge contract (new dep + boundary API).
-- 🟢 **Quick-settings tile / home-screen widget** — instant lookup from the
+- ✅ **Quick-settings tile / home-screen widget** — instant lookup from the
   shelf.
+  Done: OpenSpec change `quick-lookup-shortcuts` archived 2026-09-01
+  (17/20 tasks; tile clipboard lookup and widget verified on Motorola
+  ThinkPhone — active-group respect, rotation/rescale, and restart checks not
+  run before archive).
 - 🟢 **Pre-built desktop-generated index caches** — copy indexes along with
   dictionaries to skip on-device indexing.
 - 🟢 **Translate-later / word-list export** — extract headwords/definitions to

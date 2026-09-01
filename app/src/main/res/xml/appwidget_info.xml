@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Home-screen search widget (design D4): one fixed search field,
+     horizontally+vertically resizable by the launcher, no periodic update. -->
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    android:minWidth="250dp"
+    android:minHeight="40dp"
+    android:targetCellWidth="4"
+    android:targetCellHeight="1"
+    android:maxResizeWidth="400dp"
+    android:maxResizeHeight="60dp"
+    android:updatePeriodMillis="0"
+    android:resizeMode="horizontal|vertical"
+    android:initialLayout="@layout/widget_search"
+    android:widgetCategory="home_screen"
+    android:label="@string/widget_search_label"
+    android:description="@string/widget_search_description" />
