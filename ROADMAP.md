@@ -63,8 +63,23 @@ mobile") plus later proposals.
   the in-app search field (or starts lookup directly), reusing the tile's
   clipboard-read path. Needs an on-device check that the clipboard read happens
   in the foreground activity (Android 10+), same as the tile.
-- 🟢 **Distribution & polish** — signed release APK, GitHub releases + F-Droid
-  metadata, app icon, onboarding/empty state.
+- 🔵 **Distribution & polish** — signed release APK + AAB (Google Play / F-Droid
+  signing), GitHub releases, app icon, onboarding/empty state.
+  In progress: OpenSpec change `distribution-and-polish` — code done through
+  task 5.1; remaining on-device (5.2) and CI release-artifact (5.3) verification.
+
+## Priority queue (not yet proposed)
+
+| Priority | Feature | Boundary/engine? | Notes |
+| --- | --- | --- | --- |
+| 1 | Translate-later / word-list export | pure Kotlin | Collect words, share/export list |
+| 2 | Pre-built desktop-generated index caches | boundary (cache format) | Copy index caches along with dictionaries |
+
+## Parked (cut for v1, may return)
+
+Remaining (b)-list items from the v1 design's cut-scope register that are
+deferred and not yet queued above. (a)-list items (tray, hotkeys, scan popup,
+print/PDF, desktop preferences surface) are cut permanently on mobile.
 
 ## Cut permanently (no future plans)
 

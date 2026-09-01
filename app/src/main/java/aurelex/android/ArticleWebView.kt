@@ -159,12 +159,25 @@ fun ArticleView(
     // key(word) rebuilds the WebView when the article changes (in-article links
     // navigate to a different word, which is a distinct article).
     key(word) {
+        // The engine re-emits HTML for the same word when a preference changes
+        // (dark-mode toggle re-runs the lookup); the WebView must reload then,
+        // not just when the word changes.
+        var renderedHtml by remember { mutableStateOf(html) }
         AndroidView(
             modifier = modifier,
             factory = { ctx ->
                 val webView = WebView(ctx)
-                ArticleWebView(ctx, onLookup, onAudioResult).render(webView, html)
+                val bridge = ArticleWebView(ctx, onLookup, onAudioResult)
+                webView.tag = bridge
+                bridge.render(webView, html)
+                renderedHtml = html
                 webView
+            },
+            update = { webView ->
+                if (renderedHtml != html) {
+                    renderedHtml = html
+                    (webView.tag as? ArticleWebView)?.render(webView, html)
+                }
             }
         )
     }
