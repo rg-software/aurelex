@@ -99,13 +99,13 @@ jobs:
       - name: Run smoke and assert non-empty HTML
         shell: bash
         run: |
-          # The carve links Qt6Core/Gui/Xml; the Windows platform plugin is
-          # needed too. Relying on an exported PATH entry into the workspace
-          # has proven fragile on the runner (native DllMain failure surfaces as
-          # a bare exit code 127 with no output), so stage the DLLs and the
-          # plugin next to the exe and keep the PATH export as a fallback.
+          # The carve links Qt6Core/Gui/Xml and vcpkg deps by plain name
+          # (link_directories, so CMake never copies their DLLs). On a bare
+          # runner with nothing on PATH the Windows loader aborts with a bare
+          # exit code 127 and no output. Stage every runtime DLL next to the
+          # exe (Qt + platform plugin + vcpkg bin) to make loading independent
+          # of the runner's PATH.
           QT_ROOT="${{ github.workspace }}/qt/${{ env.QT_VERSION }}/msvc2019_64"
-          export PATH="$QT_ROOT/bin:$PATH"
           echo "=== Qt bin ==="
           ls -1 "$QT_ROOT/bin"/Qt6Core.dll "$QT_ROOT/bin"/Qt6Gui.dll "$QT_ROOT/bin"/Qt6Xml.dll
           echo "=== Qt platform plugin ==="
@@ -113,6 +113,13 @@ jobs:
           cp "$QT_ROOT/bin"/Qt6Core.dll "$QT_ROOT/bin"/Qt6Gui.dll "$QT_ROOT/bin"/Qt6Xml.dll build-gh/Release/
           mkdir -p build-gh/Release/plugins/platforms
           cp "$QT_ROOT/plugins/platforms/qwindows.dll" build-gh/Release/plugins/platforms/
+          # The carve links vcpkg deps by name (link_directories), so their
+          # runtime DLLs are not copied by CMake; the exe needs them beside it
+          # or the Windows loader aborts with bare exit code 127.
+          VCPKG_BIN="${{ env.VCPKG_ROOT }}/installed/x64-windows/bin"
+          echo "=== vcpkg bin ==="
+          ls -1 "$VCPKG_BIN"/*.dll
+          cp "$VCPKG_BIN"/*.dll build-gh/Release/
           echo "=== staged tool dir ==="
           ls -1 build-gh/Release
           export QT_DEBUG_PLUGINS=1
