@@ -16,6 +16,9 @@ on:
 jobs:
   sign:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write          # create the GitHub release + attach artifacts
+      id-token: write          # (kept minimal; only the release step uses it)
     env:
       # Android SDK/NDK for the JNI + Qt carve. NDK 23.2 matches local dev
       # (app/build.gradle.kts); the ndk.dir in local.properties is not used.
