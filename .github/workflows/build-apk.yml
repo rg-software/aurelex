@@ -47,8 +47,13 @@ jobs:
         shell: bash
         run: |
           pip install aqtinstall
+          # Desktop kit provides moc/rcc host tools (QT_HOST_PATH).
           python -m aqt install-qt linux desktop 6.6.3 gcc_64 -O "${{ github.workspace }}/qt" \
             || true
+          # Android kits are what the carve links against (QT_BASE ->
+          # qt/6.6.3/android_*).
+          python -m aqt install-qt linux android 6.6.3 android_arm64_v8a -O "${{ github.workspace }}/qt"
+          python -m aqt install-qt linux android 6.6.3 android_x86_64 -O "${{ github.workspace }}/qt"
           git clone --depth 1 --branch 2026.07.29 https://github.com/microsoft/vcpkg.git "${{ github.workspace }}/vcpkg" || true
 
       - name: Build xapian for Android (full-text search dependency)
