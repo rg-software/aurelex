@@ -57,7 +57,21 @@ SHALL/MUST language) — follow the instructions output before writing any artif
 ## Conventions
 
 - Spec capability paths: kebab-case, flat layout (`dictionary-management`, `lookup`, ...).
-- Commit messages: concise, matching the change being described; never commit unless asked.
 - Before any upstream bump: build the engine, run the CI smoke test, and update specs only if
   observable behavior changed (never massage specs to fit a refactor).
 - Work flows through OpenSpec changes first; implementation does not run ahead of the plan.
+
+## Git / Commit conventions
+
+Write conventional, structured commit messages so the release pipeline can group them into
+categories (it parses `feat:`/`fix:` prefixes):
+
+- **Format**: Conventional Commits — use a type prefix such as `feat:`, `fix:`, `docs:`,
+  `refactor:`, `chore:`. Use a scoped prefix (e.g. `feat(comics):`, `fix(sidebar):`) when a
+  subsystem is affected.
+- **Mood**: imperative mood in the subject line (e.g. prefer "Add feature" over "Added feature" /
+  "Adding feature").
+- **Length**: keep the first line under 72 characters.
+- **Issue Link**: use `Fixes #<id>` for bug fixes, `Refs #<id>` otherwise. Skip the reference if
+  the branch is not issue-based.
+- **When to commit**: never commit unless asked.
