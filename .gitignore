@@ -30,3 +30,6 @@ build-host/
 
 # Vcpkg / toolchain cache
 vcpkg_installed/
+# qt-quick experiment build outputs
+/build-qtquick/
+
