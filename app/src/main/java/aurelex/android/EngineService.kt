@@ -146,7 +146,7 @@ class EngineService : Service() {
         val notif = android.app.Notification.Builder(this, CHANNEL_ID)
             .setContentTitle("Aurelex engine")
             .setContentText("Dictionary engine running")
-            .setSmallIcon(android.R.drawable.ic_menu_search)
+            .setSmallIcon(R.drawable.ic_launcher_foreground)
             .build()
         startForeground(NOTIF_ID, notif)
 

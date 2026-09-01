@@ -1,8 +1,11 @@
-name: build release apk
+name: release build
 
-# Builds a signed release APK (task 7.2) and, on tag pushes, drafts a GitHub
-# release with the APK attached (task 7.3). Signing secrets must be configured
-# as repository Actions secrets.
+# On tag push (vX.Y.Z) builds BOTH signed artifacts:
+#   - a signed AAB for Google Play (Play App Signing re-signs on ingest)
+#   - a signed APK for GitHub releases / F-Droid / sideload
+# and attaches them to a GitHub release. versionName/versionCode are derived
+# from the tag. Signing secrets must be configured as repository Actions
+# secrets (see docs/SIGNING.md).
 
 on:
   push:
@@ -80,7 +83,19 @@ jobs:
             chmod 600 "$RUNNER_TEMP/release.jks"
           fi
 
-      - name: Build signed release APK
+      - name: Derive version props from the release tag
+        shell: bash
+        run: |
+          # vX.Y.Z -> -PversionName=X.Y.Z and a deterministic versionCode.
+          tag="${GITHUB_REF_NAME#v}"
+          if [[ "$tag" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+            vc=$(( BASH_REMATCH[1] * 10000 + BASH_REMATCH[2] * 100 + BASH_REMATCH[3] ))
+            echo "VERSION_ARGS=-PversionName=$tag -PversionCode=$vc" >> "$GITHUB_ENV"
+          else
+            echo "VERSION_ARGS=" >> "$GITHUB_ENV"
+          fi
+
+      - name: Build signed release AAB + APK
         shell: bash
         env:
           AURELEX_KEYSTORE_PATH: ${{ runner.temp }}/release.jks
@@ -88,18 +103,23 @@ jobs:
           AURELEX_KEY_ALIAS: ${{ secrets.AURELEX_KEY_ALIAS }}
           AURELEX_KEY_PASSWORD: ${{ secrets.AURELEX_KEY_PASSWORD }}
         run: |
-          ./gradlew :app:assembleRelease --no-daemon --stacktrace
+          echo "version args: [$VERSION_ARGS]"
+          ./gradlew :app:assembleRelease :app:bundleRelease --no-daemon --stacktrace $VERSION_ARGS
 
-      - name: Upload signed APK
+      - name: Upload release artifacts
         uses: actions/upload-artifact@v4
         with:
           name: aurelex-release
-          path: app/build/outputs/apk/release/app-release.apk
+          path: |
+            app/build/outputs/apk/release/app-release.apk
+            app/build/outputs/bundle/release/app-release.aab
           if-no-files-found: error
 
       - name: Create GitHub release (tag pushes)
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: app/build/outputs/apk/release/app-release.apk
+          files: |
+            app/build/outputs/apk/release/app-release.apk
+            app/build/outputs/bundle/release/app-release.aab
           generate_release_notes: true

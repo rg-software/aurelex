@@ -74,8 +74,10 @@ Requirements: JDK 17+, Android SDK/NDK 23.2, Qt 6.6.3 android + desktop kits, vc
 ./gradlew :app:assembleDebug
 ```
 
-The result is `app/build/outputs/apk/debug/app-debug.apk`. A signed release APK is produced by the
-CI workflow (`.github/workflows/build-apk.yml`) with `AURELEX_KEYSTORE_*` secrets.
+The result is `app/build/outputs/apk/debug/app-debug.apk`. A signed release APK and AAB are produced
+by the CI workflow (`.github/workflows/build-apk.yml`) on `vX.Y.Z` tag pushes, using
+`AURELEX_KEYSTORE_*` secrets; `versionName`/`versionCode` come from the tag. See `docs/SIGNING.md`
+for the Google Play / F-Droid signing split.
 
 ## Upstream & maintenance
 

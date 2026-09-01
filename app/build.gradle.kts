@@ -12,6 +12,11 @@ plugins {
 //   AURELEX_KEY_ALIAS, AURELEX_KEY_PASSWORD
 val hasSigningConfig = !System.getenv("AURELEX_KEYSTORE_PATH").isNullOrBlank()
 
+// Release versioning (design D2): CI passes -PversionName=1.2.3 and
+// -PversionCode=<n> on tag pushes; local/dev builds fall back to defaults.
+val releaseVersionName = (project.findProperty("versionName") as String?)?.takeIf { it.isNotBlank() }
+val releaseVersionCode = (project.findProperty("versionCode") as String?)?.takeIf { it.isNotBlank() }?.toIntOrNull()
+
 val localProps = Properties().apply {
     val f = rootProject.file("local.properties")
     if (f.exists()) FileInputStream(f).use(::load)
@@ -35,8 +40,8 @@ android {
         applicationId = "aurelex.android"
         minSdk = 28
         targetSdk = 36
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = releaseVersionCode ?: 1
+        versionName = releaseVersionName ?: "0.1.0"
         ndk {
             abiFilters += listOf("arm64-v8a", "x86_64")
         }

@@ -1,0 +1,84 @@
+## Purpose
+
+Lets a user install and recognize Aurelex by shipping signed, versioned release
+artifacts through Google Play and F-Droid (and sideload), an app icon, and
+first-run onboarding with helpful empty states.
+
+## ADDED Requirements
+
+### Requirement: Signed release artifacts
+The system SHALL produce a signed release AAB and APK from CI using a signing
+keystore supplied via CI secrets (never committed to the repository), and SHALL
+derive versionCode/versionName from the release tag rather than a fixed value.
+
+#### Scenario: Tag push produces signed artifacts
+- **WHEN** a release tag is pushed
+- **THEN** CI builds a signed AAB and a signed APK and attaches them to the
+  release
+
+#### Scenario: Version reflects the tag
+- **WHEN** a release tagged `vX.Y.Z` is built
+- **THEN** the artifact reports versionName `X.Y.Z` and a monotonically
+  increasing versionCode derived from the tag
+
+#### Scenario: Keystore never leaks
+- **WHEN** CI signs a release
+- **THEN** the keystore contents are read only from CI secrets and never appear
+  in the repository or release artifacts
+
+### Requirement: Google Play signing
+The system SHALL distribute to Google Play under Play App Signing: an upload
+key signs the AAB we upload, while Google's app-signing key signs the APKs Play
+delivers. The distinct roles of the upload key and the app-signing key SHALL be
+documented.
+
+#### Scenario: Play distributes with its app-signing key
+- **WHEN** a signed AAB is uploaded to Play Console
+- **THEN** Play App Signing re-signs it with Google's app-signing key before
+  users install it
+
+#### Scenario: Upload key is recoverable separately
+- **WHEN** the developer loses the upload key
+- **THEN** it can be reset via Play Console without re-keying delivered apps
+
+### Requirement: F-Droid signing
+The system SHALL provide F-Droid with a stable signing strategy so its
+source-built APKs carry our signature: either a shared signing keystore or a
+reproducible build verified to match our published APK. The chosen strategy
+SHALL be documented.
+
+#### Scenario: F-Droid signs with our key
+- **WHEN** F-Droid builds the app from source for a release
+- **THEN** the APK it publishes matches the stored signing key fingerprint so
+  updates remain compatible
+
+#### Scenario: Signatures differ per channel by design
+- **WHEN** the app is published on both Google Play and F-Droid
+- **THEN** each channel's signature is independent (Play uses Google's
+  app-signing key; F-Droid uses ours) and cross-store updates are not required
+
+### Requirement: App icon
+The system SHALL ship a proper adaptive launcher icon and SHALL use it in the
+app notifications and the home-screen widget.
+
+#### Scenario: Launcher shows the app icon
+- **WHEN** the user looks at the launcher
+- **THEN** Aurelex shows its adaptive icon instead of a default placeholder
+
+#### Scenario: Notification and widget use the icon
+- **WHEN** the engine notification or home-screen widget is rendered
+- **THEN** it uses the same app icon
+
+### Requirement: First-run onboarding
+The system SHALL guide a new user through first steps on first launch and SHALL
+show helpful guidance when the app has no dictionaries yet.
+
+#### Scenario: First launch shows onboarding
+- **WHEN** the app is launched for the first time
+- **THEN** it shows a short onboarding explaining how to add dictionaries and
+  use full-text search
+
+#### Scenario: Empty search state
+- **WHEN** the user opens search with no dictionaries loaded
+- **THEN** the app explains that dictionaries must be added first instead of
+  showing a blank screen

@@ -71,7 +71,17 @@ class MainViewModel : ViewModel() {
         _history.value = store.history
         _favorites.value = store.favorites
         _activeGroupId.value = store.activeGroupId
+        _onboarded.value = store.onboarded
         refreshGroups()
+    }
+
+    /** Whether first-run onboarding still needs to be shown (design D5). */
+    private val _onboarded = MutableStateFlow(true)
+    val onboarded: StateFlow<Boolean> = _onboarded
+
+    fun markOnboarded() {
+        prefs?.markOnboarded()
+        _onboarded.value = true
     }
 
     /** Pulls group list + active id from the engine; used on startup and after changes. */

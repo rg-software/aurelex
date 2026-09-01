@@ -72,12 +72,28 @@ class PreferencesStore(context: Context) {
 
     fun isFavorite(word: String): Boolean = favorites.contains(word)
 
+    /**
+     * Whether the first-run onboarding has been shown (design D5). Existing
+     * users (whose prefs were written before this flag existed) skip onboarding:
+     * absent flag + any prior usage (history or a staged scan path) => already
+     * onboarded.
+     */
+    val onboarded: Boolean
+        get() = prefs.getBoolean(KEY_ONBOARDED, false)
+            || !prefs.getString(KEY_HISTORY, null).isNullOrBlank()
+            || !prefs.getString("scanPath", null).isNullOrBlank()
+
+    fun markOnboarded() {
+        prefs.edit { putBoolean(KEY_ONBOARDED, true) }
+    }
+
     companion object {
         private const val KEY_DARK = "darkMode"
         private const val KEY_TTS = "ttsEnabled"
         private const val KEY_ACTIVE_GROUP = "activeGroupId"
         private const val KEY_HISTORY = "history"
         private const val KEY_FAVORITES = "favorites"
+        private const val KEY_ONBOARDED = "onboarded"
         private const val HISTORY_SEP = "\u0001"
         private const val FAVORITES_SEP = "\u0001"
     }

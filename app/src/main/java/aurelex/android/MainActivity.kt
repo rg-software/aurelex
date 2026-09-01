@@ -156,6 +156,7 @@ class MainActivity : ComponentActivity() {
 fun AurelexApp(viewModel: MainViewModel) {
     val backStack by viewModel.backStack.collectAsState()
     val darkMode by viewModel.darkMode.collectAsState()
+    val onboarded by viewModel.onboarded.collectAsState()
     val current = backStack.lastOrNull() ?: Dest.SEARCH
 
     BackHandler(enabled = backStack.size > 1) { viewModel.pop() }
@@ -176,6 +177,51 @@ fun AurelexApp(viewModel: MainViewModel) {
             }
         }
     }
+
+    // First-run onboarding overlays everything until dismissed (design D5).
+    if (!onboarded) {
+        OnboardingScreen(onDone = { viewModel.markOnboarded() })
+    }
+}
+
+@Composable
+fun OnboardingScreen(onDone: () -> Unit) {
+    androidx.compose.material3.Surface(modifier = Modifier.fillMaxSize()) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(24.dp),
+            verticalArrangement = Arrangement.Center
+        ) {
+            Text(
+                text = "Welcome to Aurelex",
+                style = MaterialTheme.typography.headlineMedium
+            )
+            Text(
+                text = "Your offline dictionary. Add dictionary files (mdict, DSL, StarDict) from any folder, then look words up — including full-text search inside article bodies.",
+                style = MaterialTheme.typography.bodyLarge,
+                modifier = Modifier.padding(top = 12.dp)
+            )
+            Text(
+                text = "1.  Dictionaries → Add dictionaries… and pick a folder.",
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.padding(top = 16.dp)
+            )
+            Text(
+                text = "2.  Type a word on the search screen, or use Full text to search inside articles.",
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.padding(top = 6.dp)
+            )
+            Button(
+                onClick = onDone,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 28.dp)
+            ) {
+                Text("Get started")
+            }
+        }
+    }
 }
 
 @Composable
@@ -188,6 +234,7 @@ fun SearchScreen(viewModel: MainViewModel) {
     val activeName = groups.firstOrNull { it.id == activeGroup }?.name ?: "All"
     val focusRequest by viewModel.searchFocusRequest.collectAsState()
     val focusRequester = remember { FocusRequester() }
+    val dictCount by viewModel.dictCount.collectAsState()
 
     LaunchedEffect(query) {
             viewModel.suggest(query)
@@ -246,7 +293,26 @@ fun SearchScreen(viewModel: MainViewModel) {
         }
 
         LazyColumn(modifier = Modifier.fillMaxSize()) {
-                    items(suggestions) { w ->
+            if (dictCount == 0 && suggestions.isEmpty()) {
+                item {
+                    // Empty state (spec "First-run onboarding"/"Empty search state"):
+                    // with no dictionaries there is nothing to search.
+                    Column(modifier = Modifier.padding(24.dp)) {
+                        Text(
+                            text = "No dictionaries yet",
+                            style = MaterialTheme.typography.titleMedium
+                        )
+                        Text(
+                            text = "Add a folder of dictionary files (mdict, DSL, StarDict) to start searching.",
+                            modifier = Modifier.padding(top = 8.dp)
+                        )
+                        TextButton(onClick = { viewModel.push(Dest.DICTIONARIES) }) {
+                            Text("Add dictionaries…")
+                        }
+                    }
+                }
+            }
+            items(suggestions) { w ->
                 TextButton(onClick = { viewModel.lookup(w) }) {
                     Text(w)
                 }
