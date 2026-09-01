@@ -9,6 +9,11 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 
+# The Qt android toolchain doesn't define __ANDROID_API__, but bionic's iconv.h/
+# libc APIs guard on it (`#if __ANDROID_API__ >= 28`). The shipped app targets
+# API 28+; define it here so iconv and friends are declared.
+add_compile_definitions(__ANDROID_API__=35)
+
 if(NOT QT_BASE)
     message(FATAL_ERROR "QT_BASE must be set (C:/Qt/6.6.3)")
 endif()
@@ -52,7 +57,6 @@ set(ENGINE_SRC "${CMAKE_CURRENT_SOURCE_DIR}/../../../../engine")
 
 qt_add_executable(aurelex_exp
     main.cpp
-    "${CARVE_DIR}/gd_boundary.cc"
     $<TARGET_OBJECTS:aurelex_carve>
 )
 target_include_directories(aurelex_exp PRIVATE
@@ -78,7 +82,22 @@ qt_add_qml_module(aurelex_exp
     QML_FILES main.qml
 )
 
+set(PROGRAM_FILES_ROOT "/data/data/com.aurelex.experiment/files")
+
+# The carve needs bionic's iconv.h for android (design D6: no vcpkg libiconv on
+# android; bionic provides iconv at API 28+). The Qt android toolchain doesn't
+# add the NDK sysroot include automatically; add it for the carve build here.
+set(_ndk_inc "${ANDROID_NDK_ROOT}/toolchains/llvm/prebuilt/windows-x86_64/sysroot/usr/include")
+if(NOT EXISTS "${_ndk_inc}/iconv.h")
+    set(_ndk_inc "${ANDROID_NDK_ROOT}/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/include")
+endif()
+if(EXISTS "${_ndk_inc}/iconv.h")
+    target_include_directories(aurelex_carve PRIVATE "${_ndk_inc}")
+endif()
+
 set_target_properties(aurelex_exp PROPERTIES
     QT_ANDROID_PACKAGE_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/android"
 )
-qt_add_apk_target(aurelex_exp)
+# NOTE: qt_add_apk_target is absent from the installed Qt 6.6.3 carve subset
+# (no Qt6AndroidDeployQt cmake package). The APK is packaged manually with
+# androiddeployqt (see README/experiment notes).

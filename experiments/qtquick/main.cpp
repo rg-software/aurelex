@@ -55,7 +55,7 @@ int main(int argc, char *argv[])
     QQmlApplicationEngine engine;
     engine.rootContext()->setContextProperty("articleHtml", qrcToAsset(html));
     engine.rootContext()->setContextProperty("articleBase", QStringLiteral("file:///android_asset/"));
-    engine.load(QUrl(QStringLiteral("qrc:/qt/qml/AurelexExp/main.qml")));
+    engine.load(QUrl(QStringLiteral("qrc:/AurelexExp/main.qml")));
     if (engine.rootObjects().isEmpty())
         return -1;
 
