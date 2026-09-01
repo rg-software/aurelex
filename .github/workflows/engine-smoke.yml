@@ -98,9 +98,28 @@ jobs:
       - name: Run smoke and assert non-empty HTML
         shell: bash
         run: |
-          export PATH="${{ github.workspace }}/qt/${{ env.QT_VERSION }}/msvc2019_64/bin:$PATH"
-          out=$(./build-gh/Release/aurelex_smoke.exe "$RUNNER_TEMP/cfg" "$RUNNER_TEMP/dic" smoke)
+          # The carve links Qt6Core/Gui/Xml; the Windows platform plugin is
+          # needed too. Relying on an exported PATH entry into the workspace
+          # has proven fragile on the runner (native DllMain failure surfaces as
+          # a bare exit code 127 with no output), so stage the DLLs and the
+          # plugin next to the exe and keep the PATH export as a fallback.
+          QT_ROOT="${{ github.workspace }}/qt/${{ env.QT_VERSION }}/msvc2019_64"
+          export PATH="$QT_ROOT/bin:$PATH"
+          echo "=== Qt bin ==="
+          ls -1 "$QT_ROOT/bin"/Qt6Core.dll "$QT_ROOT/bin"/Qt6Gui.dll "$QT_ROOT/bin"/Qt6Xml.dll
+          echo "=== Qt platform plugin ==="
+          ls -1 "$QT_ROOT/plugins/platforms"/qwindows.dll
+          cp "$QT_ROOT/bin"/Qt6Core.dll "$QT_ROOT/bin"/Qt6Gui.dll "$QT_ROOT/bin"/Qt6Xml.dll build-gh/Release/
+          mkdir -p build-gh/Release/plugins/platforms
+          cp "$QT_ROOT/plugins/platforms/qwindows.dll" build-gh/Release/plugins/platforms/
+          echo "=== staged tool dir ==="
+          ls -1 build-gh/Release
+          export QT_DEBUG_PLUGINS=1
+          out=$(./build-gh/Release/aurelex_smoke.exe "$RUNNER_TEMP/cfg" "$RUNNER_TEMP/dic" smoke 2>&1)
+          ex=$?
+          echo "SMOKE_EXE_EXIT=$ex"
           echo "$out"
+          test "$ex" -eq 0 || { echo "SMOKE FAILED: exe exited $ex"; exit 1; }
           printf '%s' "$out" | grep -q "gd_lookup(\"smoke\") -> [1-9]" \
             || { echo "SMOKE FAILED: gd_lookup returned no HTML"; exit 1; }
           # The folder now contains the StarDict fixture + a .dsl.dz; the scan
