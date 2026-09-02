@@ -87,6 +87,10 @@ if (Test-Path (Join-Path $ExpDir "android\src")) {
     New-Item -ItemType Directory -Force -Path (Join-Path $ApkDir "src") | Out-Null
     Copy-Item (Join-Path $ExpDir "android\src\*") (Join-Path $ApkDir "src\") -Recurse -Force
 }
+if (Test-Path (Join-Path $ExpDir "android\res")) {
+    New-Item -ItemType Directory -Force -Path (Join-Path $ApkDir "res") | Out-Null
+    Copy-Item (Join-Path $ExpDir "android\res\*") (Join-Path $ApkDir "res\") -Recurse -Force
+}
 if ($LASTEXITCODE -ne 0) { throw "androiddeployqt failed" }
 
 Write-Host "== [5/5] gradle overrides + assembleDebug ==" -ForegroundColor Cyan

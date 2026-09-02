@@ -6,6 +6,7 @@
     android:versionName="0.0.1">
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
     <uses-feature android:glEsVersion="0x00020000" android:required="true" />
 
     <application
@@ -46,10 +47,10 @@
             <meta-data android:name="android.app.extract_android_style" android:value="minimal" />
         </activity>
 
-        <!-- Gate 3 probe: our Java shell (QS tile) beside the QML UI. -->
+        <!-- QS tile: clipboard lookup funnel -->
         <service
-            android:name=".ProbeTileService"
-            android:label="AurelexExp probe"
+            android:name=".AurelexTileService"
+            android:label="AurelexExp Lookup"
             android:icon="@android:drawable/ic_menu_search"
             android:permission="android.permission.BIND_QUICK_SETTINGS_TILE"
             android:exported="true">
@@ -57,5 +58,18 @@
                 <action android:name="android.service.quicksettings.action.QS_TILE" />
             </intent-filter>
         </service>
+
+        <!-- Home-screen search widget -->
+        <receiver
+            android:name=".AurelexSearchWidget"
+            android:label="AurelexExp Search"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/appwidget_info" />
+        </receiver>
     </application>
 </manifest>

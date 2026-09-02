@@ -616,3 +616,35 @@ QString EngineController::clipboardText()
     return cb->text();
 }
 
+
+// ---------- Milestone 7: storage opt-in ----------
+
+bool EngineController::isAllFilesAccessGranted() const
+{
+    return QJniObject::callStaticMethod<jboolean>(
+        "android/os/Environment",
+        "isExternalStorageManager",
+        "()Z");
+}
+
+void EngineController::openAllFilesAccessSettings()
+{
+    QJniObject activity = QJniObject::callStaticObjectMethod(
+        "org/qtproject/qt/android/QtNative",
+        "activity",
+        "()Landroid/app/Activity;");
+    if (!activity.isValid()) return;
+
+    QJniObject intent(
+        "android/content/Intent",
+        "(Ljava/lang/String;)V",
+        QJniObject::fromString(
+            QStringLiteral("android.settings.MANAGE_ALL_FILES_ACCESS_PERMISSION")).object());
+    activity.callMethod<void>("startActivity",
+                              "(Landroid/content/Intent;)V", intent.object());
+}
+
+QString EngineController::externalStoragePath() const
+{
+    return QStringLiteral("/storage/emulated/0");
+}

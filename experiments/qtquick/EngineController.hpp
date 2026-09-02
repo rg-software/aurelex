@@ -109,6 +109,13 @@ public:
     // bridge) and returns it. Empty when the clipboard has no text.
     Q_INVOKABLE QString clipboardText();
 
+    // Milestone 7: storage opt-in. Returns true when the app has All-Files-Access
+    // (the user granted it in Settings). When granted, the controller scans the
+    // real external storage path instead of the private staged dir.
+    Q_INVOKABLE bool isAllFilesAccessGranted() const;
+    Q_INVOKABLE void openAllFilesAccessSettings();
+    Q_INVOKABLE QString externalStoragePath() const;
+
     bool buildingFts() const { return m_buildingFts; }
 
     // Lookup a word. `articleLoaded(word, html)` on success, or
