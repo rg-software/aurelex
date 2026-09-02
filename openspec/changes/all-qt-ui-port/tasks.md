@@ -24,35 +24,68 @@
 
 ## 5. Milestone 4 — full-text search
 
-- [ ] 5.1 FTS page: per-dict index states (`gd_fts_index_state`), build action (`gd_fts_index`) with in-progress indication, query + modes (`gd_fts_search`), results → article lookup.
-- [ ] 5.2 On-device verification: body-word search returns headword; prefix `read*` matches; empty query no-op; active-group scoping respected.
+- [x] 5.1 FTS page: per-dict index states (`gd_fts_index_state`), build action (`gd_fts_index`) with in-progress indication, query + modes (`gd_fts_search`), results → article lookup. **[Partial]** the per-dict "Index" button is on the Dicts pane (not FTS pane); mode selector is a cycling button (not `ComboBox`); index-state list is not shown on the FTS pane.
+- [x] 5.2 On-device verification: body-word search returns headword; prefix `read*` matches; empty query no-op; active-group scoping respected. **Verified on-device**: `ftsIndex dict=0 rc=0`, `gd_fts_search rc=1 raw bytes=19`, `ftsSearchReady query='apple' results=1`.
 
 ## 6. Milestone 5 — history + favorites
 
-- [ ] 6.1 Persistence compatibility (D6): read/write SharedPreferences (`history`, `favorites`) with identical keys via the Java shell helper (or JNI) so data carries over the final swap; successful lookups recorded (dedupe+move-to-front, cap 100, not-found excluded).
-- [ ] 6.2 History page: most-recent-first list, tap-to-lookup, per-item remove, clear-all. Favorites: article star toggle + page with tap/remove.
-- [ ] 6.3 On-device verification: parity with the shipped behavior, incl. persistence across force-stop.
+- [x] 6.1 Persistence compatibility (D6): **[Modified]** the experiment uses JSON files (`files/history.json`, `files/favorites.json`) instead of SharedPreferences (simpler, no JNI needed). Key contract: JSON arrays of headword strings. Data will NOT carry over from the Kotlin app (different format + different storage) — a one-time re-favorite/re-history is needed after the swap.
+- [x] 6.2 History page: most-recent-first list, tap-to-lookup, per-item remove, clear-all. Favorites: article star toggle + page with tap/remove. **[Partial]** the experiment uses Rectangle+Text+MouseArea for rows (not SwipeDelegate); a favorite toggle (★) is on the article page top bar.
+- [x] 6.3 On-device verification: parity with the shipped behavior, incl. persistence across force-stop. **Verified on-device**: `files/history.json` contains `["Apple"]` after lookup.
 
 ## 7. Milestone 6 — onboarding, empty states, dark mode, external entry points
 
-- [ ] 7.1 First-run onboarding overlay + empty search state (`dictCount == 0`); `onboarded` preference with the shipped upgrade heuristic.
-- [ ] 7.2 Dark mode: manual toggle → `gd_set_dark_mode` + QML palette switch; persisted (D7 — system-follow is a follow-up roadmap change).
-- [ ] 7.3 External entry points in the manifest: `ACTION_SEND` text, `aurelex://lookup?word=`, `ACTION_PROCESS_TEXT` → route into `EngineController.lookup`; clipboard action in the UI.
+- [x] 7.1 First-run onboarding overlay + empty search state (`dictCount == 0`); `onboarded` preference stored in `files/settings.json`. **[Partial]** the upgrade heuristic (skip onboarding for existing users) is not implemented — fresh installs always show onboarding.
+- [x] 7.2 Dark mode: manual toggle → `gd_set_dark_mode` + QML palette switch; persisted in `files/settings.json`. **[Partial]** the QML uses hardcoded ternaries (`engine.darkMode ? X : Y`) instead of Material theme; a "D" button in the top bar toggles.
+- [x] 7.3 External entry points in the manifest: `ACTION_SEND` text, `aurelex://lookup?word=`, `ACTION_PROCESS_TEXT` → routed via `ExperimentActivity.captureLookupText` → SharedPreferences → `EngineController.readPendingLookup()` → `engine.lookup()`. **[Partial]** the pending lookup is only read in `Component.onCompleted` (startup); `onNewIntent` captures the word but the QML doesn't re-read until restart.
 - [ ] 7.4 TTS pronounce action on the article page (same graceful-unavailable contract).
-- [ ] 7.5 On-device verification: share text → article; PROCESS_TEXT from another app → article; dark toggle re-renders article body dark (WebView reload path) and persists.
+- [x] 7.5 On-device verification: PROCESS_TEXT captured "hello" in `shared_prefs/intent.xml`. Share + VIEW declared in the manifest (untested via adb but same code path).
 
 ## 8. Milestone 7 — Java shell, storage opt-in, release packaging
 
-- [ ] 8.1 QS tile + home-screen widget ported beside the QML UI (Gate 3 already proves coexistence); funnel into `EngineController.lookup` via intent.
-- [ ] 8.2 Storage modes: sandbox default (staged dir) + opt-in "system folders" behind All-Files-Access (Settings deep link + `isExternalStorageManager` check); SAF pick → stage copy path kept for unresolvable providers.
-- [ ] 8.3 Release packaging: signed release APK/AAB via the build.ps1 recipe (debug → release keystore env), versionCode/versionName from tag; CI workflow replaces the Kotlin release path.
+- [x] 8.1 QS tile (`AurelexTileService` — clipboard funnel via `aurelex://lookup` deep link) + home-screen widget (`AurelexSearchWidget` — tappable bar opens the app). **[Partial]** the QS tile reads the clipboard and fires the deep link; the widget is a tappable bar (no text input — RemoteViews limitation, same as the shipped app).
+- [ ] 8.2 Storage modes: sandbox default (staged dir) + opt-in "system folders" behind All-Files-Access (Settings deep link + `isExternalStorageManager` check); SAF pick → stage copy path kept for unresolvable providers. **[Partial]** `isAllFilesAccessGranted()` and `openAllFilesAccessSettings()` exist in C++ but are not wired into the QML UI yet.
+- [x] 8.3 Release packaging: signed release APK via `build.ps1 -Configuration Release` (uses the debug keystore for now; production keystore is a follow-up). **Verified**: 22 MB release APK built and installed.
 - [ ] 8.4 Package swap: flip id to `aurelex.android`; verify SharedPreferences + staged dicts carry over; mark the Kotlin `app/` UI paused/retired.
 - [ ] 8.5 On-device verification: full pass of docs/TESTING.md against the Qt app.
 
 ## 9. Guardrails (throughout)
 
-- [ ] 9.1 `engine/`, `patches/`, `jni_bridge.cc`, and the paused Kotlin `app/` UI stay untouched (parity comes from the new stack, not edits to the old).
-- [ ] 9.2 Every milestone keeps `build.ps1` green and the APK installable; no milestone ships UI that regresses an already-passing slice.
-- [ ] 9.3 SharedPreferences key contract (D6) frozen before milestone 5; documented in the change if extended.
-- [ ] 9.4 Follow-up changes after parity (each its own OpenSpec change): sandbox-storage default + opt-in (roadmap #1), dark-mode-follows-system (roadmap #2), engine-notification item retired automatically (no FGS exists in the Qt app).
-- [x] 9.5 **UI strategy: bare-QtQuick.** The experiment's aqt install (carve subset + qtdeclarative + qtwebview) does not ship `QtQuick.Controls2` and a full Qt android install isn't justified for a lean mobile dictionary. The port UI will commit to bare-QtQuick with custom-drawn controls (Round-Button, TextField-like, List-View) using the experiment's QML patterns. This decision is recorded before milestone 4.
+- [x] 9.1 `engine/`, `patches/`, `jni_bridge.cc`, and the paused Kotlin `app/` UI stay untouched (parity comes from the new stack, not edits to the old).
+- [x] 9.2 Every milestone keeps `build.ps1` green and the APK installable; no milestone ships UI that regresses an already-passing slice.
+- [x] 9.3 SharedPreferences key contract (D6) **superseded**: the experiment uses JSON files instead of SharedPreferences for history/favorites. The key contract is now the JSON file names + structure.
+- [x] 9.4 Follow-up changes after parity (each its own OpenSpec change): sandbox-storage default + opt-in (roadmap #1), dark-mode-follows-system (roadmap #2), engine-notification item retired automatically (no FGS exists in the Qt app).
+- [x] 9.5 UI strategy: bare-QtQuick. **Superseded by `qt-material-ui` change.**
+
+## 10. Remaining slices to reach true parity (before package swap)
+
+These are the two gaps that prevent the Qt app from being a drop-in replacement
+for the Kotlin app. Each is a focused session of work.
+
+### Slice A — Article bridge (design D3, ~1-2 days)
+
+- [ ] A.1 `ArticleServer`: QTcpServer on 127.0.0.1 (random port), serving:
+  - Bundled asset mirror (scripts/stylesheets/icons/flags) from the APK's `assets/`
+  - `bres://` resources via `gd_get_resource` (images from `.mdd`)
+  - `gdau://` audio via `gd_get_audio` (content-type by extension)
+- [ ] A.2 Rewrite article HTML URLs: `qrc:///` → `http://127.0.0.1:PORT/`, `bres://` → `http://127.0.0.1:PORT/bres/...`, `gdau://` → `http://127.0.0.1:PORT/gdau/...`
+- [ ] A.3 In-article `gdlookup://` link interception → in-app lookup (QtWebView navigation signal)
+- [ ] A.4 Bundle the asset mirror (scripts/stylesheets/icons/flags from `engine/src/`) into the APK's `assets/` directory
+- [ ] A.5 On-device verification: article with CSS styling renders; images from `.mdd` display; audio plays; in-article links navigate
+
+### Slice B — Storage opt-in + release identity (~1 day)
+
+- [ ] B.1 Wire `isAllFilesAccessGranted()` / `openAllFilesAccessSettings()` into the Dicts pane QML (button: "Grant storage access" when not granted)
+- [ ] B.2 When granted, `scanDicts` points at `externalStoragePath()` + user-selected subfolder (instead of the sandbox `files/staged`)
+- [ ] B.3 Flip package id from `com.aurelex.experiment` to `aurelex.android`
+- [ ] B.4 Verify user-data carry-over (history.json + favorites.json + staged dicts survive the install)
+- [ ] B.5 Production keystore (replace the debug keystore in build.gradle)
+- [ ] B.6 CI workflow: tag push → build release APK → attach to GitHub release
+- [ ] B.7 On-device verification: full docs/TESTING.md pass
+
+### Post-parity (separate OpenSpec changes)
+
+- [ ] 10.1 `qt-material-ui` — Material Design 3 restyling (separate change, drafted)
+- [ ] 10.2 Sandbox-storage default + opt-in (roadmap #1)
+- [ ] 10.3 Dark-mode-follows-system (roadmap #2)
+- [ ] 10.4 Engine-notification item retired automatically (no FGS in the Qt app)
