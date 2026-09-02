@@ -14,6 +14,8 @@
 
 param(
     [string]$Abi = "arm64-v8a",
+    [ValidateSet("Debug", "Release")]
+    [string]$Configuration = "Debug",
     [switch]$SkipConfigure,
     [switch]$Install
 )
@@ -43,7 +45,9 @@ $env:ANDROID_SDK_ROOT  = $RealSdk
 $env:ANDROID_HOME      = $RealSdk
 $env:ANDROID_NDK_ROOT  = $NdkRoot
 
-Write-Host "== [1/5] cmake configure ($Abi) ==" -ForegroundColor Cyan
+$gradleTask = "assemble$Configuration"
+
+Write-Host "== [1/5] cmake configure ($Abi, $Configuration) ==" -ForegroundColor Cyan
 if (-not $SkipConfigure) {
     & $CmakeExe -S $ExpDir -B $BuildDir -G Ninja `
         "-DCMAKE_TOOLCHAIN_FILE=$QtBase/android_arm64_v8a/lib/cmake/Qt6/qt.toolchain.cmake" `
@@ -93,7 +97,7 @@ if (Test-Path (Join-Path $ExpDir "android\res")) {
 }
 if ($LASTEXITCODE -ne 0) { throw "androiddeployqt failed" }
 
-Write-Host "== [5/5] gradle overrides + assembleDebug ==" -ForegroundColor Cyan
+Write-Host "== [5/5] gradle overrides + assemble$Configuration ==" -ForegroundColor Cyan
 # androiddeployqt regenerates these two files; re-apply the working overrides.
 Set-Content (Join-Path $ApkDir "local.properties") "sdk.dir=C\:/Program Files (x86)/Android/android-sdk" -NoNewline
 $gpPath = Join-Path $ApkDir "gradle.properties"
@@ -106,21 +110,55 @@ if (-not (Test-Path (Join-Path $ApkDir "settings.gradle"))) {
     Set-Content (Join-Path $ApkDir "settings.gradle") 'rootProject.name = "aurelex-exp"'
 }
 
+# For Release builds: inject a signing config using the debug keystore
+# (the experiment doesn't have a release keystore yet).
+if ($Configuration -eq "Release") {
+    $bgPath = Join-Path $ApkDir "build.gradle"
+    $bg = Get-Content $bgPath -Raw
+    if ($bg -notmatch "signingConfigs") {
+        # Insert signing config before the android { } block
+        $signBlock = @'
+
+    signingConfigs {
+        release {
+            storeFile file("C:/Users/Maxim/.android/debug.keystore")
+            storePassword "android"
+            keyAlias "androiddebugkey"
+            keyPassword "android"
+        }
+    }
+'@
+        # Insert after "apply plugin: 'com.android.application'" and deps
+        $marker = "android {"
+        $idx = $bg.IndexOf($marker)
+        if ($idx -ge 0) {
+            # Insert the signing configs right before android {
+            $bg = $bg.Substring(0, $idx).TrimEnd() + "`n`n" + $signBlock.TrimStart() + "`n" + $bg.Substring($idx)
+        }
+        # Add signingConfig to the release build type
+        $bg = $bg -replace '(buildTypes\s*\{[^}]*release\s*\{)', "`$1`n            signingConfig signingConfigs.release"
+        Set-Content $bgPath $bg -NoNewline
+        Write-Host "Injected release signing config." -ForegroundColor Yellow
+    }
+}
+
 Push-Location $ApkDir
 try {
-    & ".\gradlew.bat" --no-daemon assembleDebug
-    if ($LASTEXITCODE -ne 0) { throw "gradle assembleDebug failed" }
+    & ".\gradlew.bat" --no-daemon $gradleTask
+    if ($LASTEXITCODE -ne 0) { throw "gradle $gradleTask failed" }
 } finally {
     Pop-Location
 }
 
-$apk = Get-ChildItem "$ApkDir\build\outputs\apk\debug" -Filter "*.apk" | Select-Object -First 1
-if (-not $apk) { throw "APK not produced" }
+$configLower = $Configuration.ToLower()
+$apkDir2 = "$ApkDir\build\outputs\apk\$configLower"
+$apk = Get-ChildItem $apkDir2 -Filter "*.apk" | Select-Object -First 1
+if (-not $apk) { throw "APK not produced in $apkDir2" }
 Write-Host "== DONE: $($apk.FullName) ($([math]::Round($apk.Length/1MB,1)) MB) ==" -ForegroundColor Green
 
 if ($Install) {
     $adb = "$RealSdk\platform-tools\adb.exe"
     & $adb install -r $apk.FullName
-    & $adb shell "am start -n com.aurelex.experiment/org.qtproject.qt.android.bindings.QtActivity"
+    & $adb shell "am start -n com.aurelex.experiment/.ExperimentActivity"
     Write-Host "Installed + launched." -ForegroundColor Green
 }
