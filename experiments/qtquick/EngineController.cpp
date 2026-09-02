@@ -6,6 +6,10 @@
 #include <QDebug>
 #include <QVariantMap>
 #include <QPair>
+#include <QFile>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonValue>
 
 EngineController::EngineController(QObject *parent) : QObject(parent) {}
 EngineController::~EngineController() = default;
@@ -92,6 +96,8 @@ void EngineController::initialize(const QString &appDir, const QString &stagedDi
         }
         setReady(true);
         w->deleteLater();
+        loadHistory();
+        loadFavorites();
         runScan();
     });
     w->setFuture(f);
@@ -299,8 +305,12 @@ void EngineController::lookup(const QString &word) {
     auto *w = new QFutureWatcher<QString>(this);
     connect(w, &QFutureWatcher<QString>::finished, this, [this, word, w]{
         const QString html = w->result();
-        if (html.isEmpty()) emit articleNotFound(word);
-        else emit articleLoaded(word, html);
+        if (html.isEmpty()) {
+            emit articleNotFound(word);
+        } else {
+            recordHistory(word);
+            emit articleLoaded(word, html);
+        }
         w->deleteLater();
     });
     w->setFuture(f);
@@ -412,4 +422,100 @@ QVariantList EngineController::ftsSearch(const QString &query, int mode, int gro
     });
     w->setFuture(f);
     return QVariantList();
+}
+
+// ---------- Milestone 5: history + favorites ----------
+
+void EngineController::loadHistory()
+{
+    const QString path = m_appDir + "/history.json";
+    QFile f(path);
+    if (!f.open(QIODevice::ReadOnly)) { setHistory(QStringList()); return; }
+    const QJsonDocument doc = QJsonDocument::fromJson(f.readAll());
+    QStringList list;
+    for (const QJsonValue &v : doc.array()) list.append(v.toString());
+    setHistory(list);
+}
+
+void EngineController::saveHistory()
+{
+    const QString path = m_appDir + "/history.json";
+    QFile f(path);
+    if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate)) return;
+    QJsonArray arr;
+    for (const QString &w : m_history) arr.append(w);
+    f.write(QJsonDocument(arr).toJson(QJsonDocument::Compact));
+}
+
+void EngineController::loadFavorites()
+{
+    const QString path = m_appDir + "/favorites.json";
+    QFile f(path);
+    if (!f.open(QIODevice::ReadOnly)) { setFavorites(QStringList()); return; }
+    const QJsonDocument doc = QJsonDocument::fromJson(f.readAll());
+    QStringList list;
+    for (const QJsonValue &v : doc.array()) list.append(v.toString());
+    setFavorites(list);
+}
+
+void EngineController::saveFavorites()
+{
+    const QString path = m_appDir + "/favorites.json";
+    QFile f(path);
+    if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate)) return;
+    QJsonArray arr;
+    for (const QString &w : m_favorites) arr.append(w);
+    f.write(QJsonDocument(arr).toJson(QJsonDocument::Compact));
+}
+
+void EngineController::setHistory(const QStringList &list)
+{
+    if (m_history == list) return;
+    m_history = list;
+    emit historyChanged();
+}
+
+void EngineController::setFavorites(const QStringList &list)
+{
+    if (m_favorites == list) return;
+    m_favorites = list;
+    emit favoritesChanged();
+}
+
+void EngineController::recordHistory(const QString &word)
+{
+    if (word.isEmpty()) return;
+    // Dedupe + move-to-front, cap at 100.
+    QStringList updated;
+    updated.append(word);
+    for (const QString &w : m_history) {
+        if (w == word) continue;
+        updated.append(w);
+    }
+    while (updated.size() > 100) updated.removeLast();
+    setHistory(updated);
+    saveHistory();
+}
+
+void EngineController::toggleFavorite(const QString &word)
+{
+    QStringList updated = m_favorites;
+    if (updated.contains(word)) updated.removeAll(word);
+    else updated.append(word);
+    setFavorites(updated);
+    saveFavorites();
+}
+
+void EngineController::removeHistory(const QString &word)
+{
+    QStringList updated = m_history;
+    updated.removeAll(word);
+    setHistory(updated);
+    saveHistory();
+}
+
+void EngineController::clearHistory()
+{
+    setHistory(QStringList());
+    saveHistory();
 }

@@ -389,6 +389,18 @@ Window {
                         onClicked: root.state = 0
                     }
                 }
+
+                Rectangle {
+                    width: 40
+                    height: 32
+                    anchors.verticalCenter: parent.verticalCenter
+                    color: "#3a3a3a"
+                    Text { anchors.centerIn: parent; color: engine.favorites.indexOf(root.currentWord) >= 0 ? "gold" : "#cccccc"; font.pixelSize: 18; text: "*" }
+                    MouseArea {
+                        anchors.fill: parent
+                        onClicked: engine.toggleFavorite(root.currentWord)
+                    }
+                }
             }
         }
 

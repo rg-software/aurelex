@@ -24,6 +24,8 @@ class EngineController : public QObject
     Q_PROPERTY(QVariantList dictionaries READ dictionaries NOTIFY dictionariesChanged)
     Q_PROPERTY(QVariantList groups READ groups NOTIFY groupsChanged)
     Q_PROPERTY(int activeGroupId READ activeGroupId NOTIFY activeGroupChanged)
+    Q_PROPERTY(QStringList history READ history NOTIFY historyChanged)
+    Q_PROPERTY(QStringList favorites READ favorites NOTIFY favoritesChanged)
 public:
     explicit EngineController(QObject *parent = nullptr);
     ~EngineController() override;
@@ -34,6 +36,8 @@ public:
     QVariantList dictionaries() const { return m_dictionaries; }
     QVariantList groups() const { return m_groups; }
     int activeGroupId() const { return m_activeGroupId; }
+    QStringList history() const { return m_history; }
+    QStringList favorites() const { return m_favorites; }
 
     // Initialise the engine. `configDir`/`indexDir` are usually the same
     // AppLocalDataLocation; `stagedDir` is the dict folder the app stages to.
@@ -77,6 +81,18 @@ public:
     Q_INVOKABLE QVariantList ftsIndexStates() const;
     Q_INVOKABLE QVariantList ftsSearch(const QString &query, int mode, int groupId = 0);
 
+    // History + favorites persistence. The carve's engine has no built-in
+    // history/favorites; we use a small JSON file in AppLocalDataLocation
+    // (files/history.json, files/favorites.json). The controller caps the
+    // history at 100 entries (most-recent-first, dedupes), matching the
+    // shipped app's behavior. Persistence is transparent: on engine init the
+    // controller loads the file, every mutation rewrites the file, and
+    // historyChanged()/favoritesChanged() fire so QML stays in sync.
+    Q_INVOKABLE void recordHistory(const QString &word);
+    Q_INVOKABLE void toggleFavorite(const QString &word);
+    Q_INVOKABLE void removeHistory(const QString &word);
+    Q_INVOKABLE void clearHistory();
+
     bool buildingFts() const { return m_buildingFts; }
 
     // Lookup a word. `articleLoaded(word, html)` on success, or
@@ -105,6 +121,8 @@ signals:
     void ftsIndexChanged(int dictIndex);
     void ftsSearchReady(const QString &query, const QVariantList &results);
     void buildingFtsChanged();
+    void historyChanged();
+    void favoritesChanged();
 
 private:
     void runScan();
@@ -115,6 +133,12 @@ private:
     void setGroups(const QVariantList &list);
     void setActiveGroupId(int id);
     void setBuildingFts(bool b);
+    void setHistory(const QStringList &list);
+    void setFavorites(const QStringList &list);
+    void loadHistory();
+    void saveHistory();
+    void loadFavorites();
+    void saveFavorites();
 
     int m_dictCount = 0;
     bool m_ready = false;
@@ -123,6 +147,8 @@ private:
     QVariantList m_groups;
     int m_activeGroupId = 0;
     bool m_buildingFts = false;
+    QStringList m_history;
+    QStringList m_favorites;
     QString m_appDir;
     QString m_stagedDir;
 };
