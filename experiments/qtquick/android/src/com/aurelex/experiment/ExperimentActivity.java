@@ -34,9 +34,8 @@ public class ExperimentActivity extends QtActivity {
                 Thread.getDefaultUncaughtExceptionHandler();
         Thread.setDefaultUncaughtExceptionHandler((thread, throwable) -> {
             if (throwable instanceof NullPointerException
-                    && throwable.getStackTrace().length > 0
-                    && throwable.getStackTrace()[0].getClassName()
-                            .contains("QtActivityDelegate")) {
+                    && throwable.getMessage() != null
+                    && throwable.getMessage().contains("setActivityDisplayRotation")) {
                 android.util.Log.w(TAG, "Swallowed QTBUG-122886 display-rotation NPE");
                 return; // don't crash
             }
