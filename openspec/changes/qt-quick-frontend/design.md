@@ -76,10 +76,13 @@ QML + native WebView coexistence limit, or HWUI/QPainter surface conflict).
   does **not** intercept custom schemes — the spike already rewrites `qrc:///`
   → `file:///android_asset/` in `qrcToAsset`; `bres://`/`gdau://` still require a
   WebViewClient-equivalent (recorded as a follow-up for a full port).
-- **Gate 3 — Java-shell coexistence: NOT RUN.** A QS tile / widget / SAF check
-  needs a second Java component beside the Qt Activity; out of scope for this
-  spike's device pass and flagged as a remaining unknown (the real tile/widget live
-  in the shipped app's package anyway).
+- **Gate 3 — Java-shell coexistence: PASS.** A `ProbeTileService` (QS tile,
+  mirroring the shipped `QuickLookupTileService` shape) was added to the
+  experiment package and registered via `cmd statusbar add-tile`. SystemUI bound
+  it and it ran `onCreate`/`onTileAdded` in **the same process (pid 31282)** as
+  the QML Activity + engine — one process for the whole package, UI still
+  top-resumed and rendering, no crash. This confirms the port keeps the thin
+  Java shell (QS tile / widget / SAF host) beside the Qt Quick UI.
 - **Tooling notes (for the follow-up port):** `qt_add_apk_target` is absent from
   the aqt "carve subset" install — package with `androiddeployqt` + a generated
   `android-aurelex_exp-deployment-settings.json` manually. The Qt android
@@ -89,12 +92,14 @@ QML + native WebView coexistence limit, or HWUI/QPainter surface conflict).
   JDK 21 → D8 NPE). aapt2 needs compileSdk `android-34` with AGP 7.4.1.
 
 **Assessment:** the all-Qt direction is **viable and low-risk to build on** —
-Gate 1 and the article pipeline are proven on-device, and the tooling friction
-above is mechanical, not architectural. Remaining unknowns before committing a
-full port: Gate 3 (Java shell coexistence) and the real cost estimate of porting
-the Compose feature set to QML (not yet measured).
+Gate 1, the article pipeline, and Gate 3 are all proven on-device; the tooling
+friction above is mechanical, not architectural. The only remaining input before
+committing a full port is the port-cost estimate for the Compose feature set
+(search/article, dicts/groups, FTS, history/favorites, onboarding/empty states,
+dark mode) — the port itself will be sliced so core functions are tested first.
 
-**Recommendation (tentative):** GO on the all-Qt direction as the eventual
-architecture, pending (a) Gate 3 and (b) a bounded port-cost estimate. The
-`confined-qt-shim` path becomes unnecessary if this holds (Qt is embraced, not
-shimmed).
+**Decision: GO on the all-Qt architecture.** All three gates pass. The Kotlin
+UI goes "on pause" (no removal work now); the port proceeds as the follow-up
+implementation change, replacing the Kotlin UI completely when it reaches
+parity. The `confined-qt-shim` path is unnecessary (Qt is embraced, not
+shimmed) and should be closed without implementation.

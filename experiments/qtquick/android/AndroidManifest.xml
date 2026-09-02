@@ -27,5 +27,17 @@
             <meta-data android:name="android.app.lib_name" android:value="-- %%INSERT_APP_LIB_NAME%% --" />
             <meta-data android:name="android.app.extract_android_style" android:value="minimal" />
         </activity>
+
+        <!-- Gate 3 probe: our Java shell (QS tile) beside the QML UI. -->
+        <service
+            android:name=".ProbeTileService"
+            android:label="AurelexExp probe"
+            android:icon="@android:drawable/ic_menu_search"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
     </application>
 </manifest>
