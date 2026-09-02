@@ -87,6 +87,19 @@ dir (`files/staged`) and `scanPath` semantics stay identical.
 + QML palette), matching current behavior; system-follow lands as the roadmap
 follow-up change.
 
+**D8 — UI strategy: bare-QtQuick, not QtQuick.Controls2.** The experiment's
+aqt install (carve subset + qtdeclarative + qtwebview) does **not** ship
+`QtQuick.Controls2` reliably on android arm64-v8a, and a full Qt android
+install is unjustified for a lean mobile dictionary. The port UI commits
+to **bare-QtQuick with custom-drawn controls** (Round-Button, TextField-like,
+List-View) using the experiment's QML patterns. The experiment's EngineController
++ main.qml are reused as the starting point. This decision is recorded
+*before* milestone 4 (FTS) so the remaining slices don't accidentally
+regress the bare-QtQuick commitment. Alternative considered: pull a full
+Qt android install with `QtQuick.Controls2` (regular Button, TextField, etc.)
+— rejected for the lean mobile story and the fact that the experiment is
+working end-to-end on bare-QtQuick today.
+
 ### Risks / Trade-offs
 
 - [QtWebView feature gaps vs Android WebView API (e.g. file chooser, text

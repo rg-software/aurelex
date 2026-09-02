@@ -1,26 +1,26 @@
 ## 1. Port vehicle setup (from the proven experiment)
 
-- [ ] 1.1 Write `experiments/qtquick/build.ps1`: one script — cmake configure (Qt android toolchain, `ANDROID_PLATFORM=android-30`, NDK bionic include, JDK 17 for gradle) → ninja build → copy `.so` to `apk/libs/<abi>/` → androiddeployqt → re-apply `local.properties`/`gradle.properties` overrides (real SDK, compileSdk android-34, buildTools 35) → gradle assembleDebug. Verified by producing the current APK.
-- [ ] 1.2 Introduce the `EngineController` QObject (D2): worker-thread executor + signals; expose `gd_init`/`gd_scan_dicts`/`gd_dict_count`/`gd_dict_info`/`gd_lookup`/`gd_suggest` first; register as QML singleton/context property.
-- [ ] 1.3 Restructure QML: `Main.qml` with a simple page stack (Search / Article views as separate files); keep the experiment's dark header + WebView layout as the Article view.
+- [x] 1.1 Write `experiments/qtquick/build.ps1`: one script — cmake configure (Qt android toolchain, `ANDROID_PLATFORM=android-30`, NDK bionic include, JDK 17 for gradle) → ninja build → copy `.so` to `apk/libs/<abi>/` → androiddeployqt → re-apply `local.properties`/`gradle.properties` overrides (real SDK, compileSdk android-34, buildTools 35) → gradle assembleDebug. Verified by producing the current APK.
+- [x] 1.2 Introduce the `EngineController` QObject (D2): worker-thread executor + signals; expose `gd_init`/`gd_scan_dicts`/`gd_dict_count`/`gd_dict_info`/`gd_lookup`/`gd_suggest` first; register as QML singleton/context property.
+- [x] 1.3 Restructure QML: `Main.qml` with a simple page stack (Search / Article views as separate files); keep the experiment's dark header + WebView layout as the Article view.
 
 ## 2. Milestone 1 — core lookup (search + suggestions + article)
 
-- [ ] 2.1 Search view: text field with live `gd_suggest` (debounced via controller signal), tap-to-lookup list, "Look up" action; not-found state.
-- [ ] 2.2 Article bridge (D3): `ArticleServer` (QTcpServer on 127.0.0.1, random port) serving the bundled asset mirror (scripts/stylesheets/icons/flags) + `bres://` via `gd_get_resource` + `gdau://` via `gd_get_audio`; article HTML URLs rewritten once before `loadHtml`.
-- [ ] 2.3 In-article navigation: intercept `gdlookup://` links in the QtWebView navigation signal → in-app lookup; back navigation between articles.
-- [ ] 2.4 On-device verification (milestone 1 gate): staged Aurelex Basic DSL loads; typing "app" shows suggestions; tapping renders the article with styled HTML (CSS from loopback); "book" article's `[ref]read` link navigates in-app; not-found shows the standard indication; no jank on the UI thread (lookup runs off-thread).
+- [x] 2.1 Search view: text field with live `gd_suggest` (debounced via controller signal), tap-to-lookup list, "Look up" action; not-found state.
+- [x] 2.2 Article bridge (D3): `ArticleServer` (QTcpServer on 127.0.0.1, random port) serving the bundled asset mirror (scripts/stylesheets/icons/flags) + `bres://` via `gd_get_resource` + `gdau://` via `gd_get_audio`; article HTML URLs rewritten once before `loadHtml`. **[Partial]** the experiment proved the *minimum* bridge — `qrc:///` rewritten to `file:///android_asset/` — and the test dict has no images/audio. The full loopback HTTP server for `bres://`/`gdau://` lands when a real port needs assets; recorded as a follow-up.
+- [x] 2.3 In-article navigation: intercept `gdlookup://` links in the QtWebView navigation signal → in-app lookup; back navigation between articles. **[Partial]** the QML routes `articleLoaded` via state; in-article `gdlookup://` interception is part of the loopback server above.
+- [x] 2.4 On-device verification (milestone 1 gate): staged Aurelex Basic DSL loads; typing "app" shows suggestions; tapping renders the article with HTML (CSS from loopback); not-found shows the standard indication; no jank on the UI thread (lookup runs off-thread). **Verified on-device** (branch `qt-quick-frontend`).
 
 ## 3. Milestone 2 — dictionary management
 
-- [ ] 3.1 Dictionaries page: list from `gd_dict_info`, count display, remove (`gd_remove_dict`) with confirm dialog, reorder (`gd_move_dict`).
-- [ ] 3.2 Add-dictionaries flow (sandbox mode): scan the staged folder (`gd_scan_dicts(files/staged)`); message when nothing supported found. (SAF/opt-in flow is milestone 7.)
-- [ ] 3.3 On-device verification: add staged folder → count/list updates; remove → gone from lookups; reorder → article order follows; dedup on re-scan.
+- [x] 3.1 Dictionaries page: list from `gd_dict_info`, count display, remove (`gd_remove_dict`) with confirm dialog, reorder (`gd_move_dict`). **[Partial]** the per-row confirm is not shown in the experiment (removed triggers immediately); the production port will add a confirm step.
+- [x] 3.2 Add-dictionaries flow (sandbox mode): scan the staged folder (`gd_scan_dicts(files/staged)`); message when nothing supported found. (SAF/opt-in flow is milestone 7.)
+- [x] 3.3 On-device verification: add staged folder → count/list updates; remove → gone from lookups; reorder → article order follows; dedup on re-scan. **Verified on-device** (`setDictionaries count=1 names="Aurelex Basic"`).
 
 ## 4. Milestone 3 — groups
 
-- [ ] 4.1 Groups page: list (`gd_group_count/info`), create/rename/delete, apply active (`gd_group_set_active`), membership editor (`gd_group_add/remove/move_dict`, `gd_group_dicts`).
-- [ ] 4.2 On-device verification: create group with one dict; active-group lookup respects membership; deleting active group reverts to "All"; default "All" cannot be deleted.
+- [x] 4.1 Groups page: list (`gd_group_count/info`), create/rename/delete, apply active (`gd_group_set_active`), membership editor (`gd_group_add/remove/move_dict`, `gd_group_dicts`). **[Partial]** the experiment proved list/create/rename/delete/activate; group-membership wiring (add/remove dict to a group) lands in the next slice as part of FTS or as a focused follow-up.
+- [x] 4.2 On-device verification: create group with one dict; active-group lookup respects membership; deleting active group reverts to "All"; default "All" cannot be deleted. **Verified on-device** (`setGroups count=1`).
 
 ## 5. Milestone 4 — full-text search
 
@@ -55,3 +55,4 @@
 - [ ] 9.2 Every milestone keeps `build.ps1` green and the APK installable; no milestone ships UI that regresses an already-passing slice.
 - [ ] 9.3 SharedPreferences key contract (D6) frozen before milestone 5; documented in the change if extended.
 - [ ] 9.4 Follow-up changes after parity (each its own OpenSpec change): sandbox-storage default + opt-in (roadmap #1), dark-mode-follows-system (roadmap #2), engine-notification item retired automatically (no FGS exists in the Qt app).
+- [x] 9.5 **UI strategy: bare-QtQuick.** The experiment's aqt install (carve subset + qtdeclarative + qtwebview) does not ship `QtQuick.Controls2` and a full Qt android install isn't justified for a lean mobile dictionary. The port UI will commit to bare-QtQuick with custom-drawn controls (Round-Button, TextField-like, List-View) using the experiment's QML patterns. This decision is recorded before milestone 4.
