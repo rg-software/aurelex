@@ -53,6 +53,33 @@ public class ExperimentActivity extends QtActivity {
     }
 
     @Override
+    protected void onResume() {
+        super.onResume();
+        // Qt 6.6 on Android 14+: the QtEditText InputConnection can bind
+        // INACTIVE ("getExtractedText on inactive InputConnection"); IME
+        // composing then gets swallowed/reset by the keyboard (text appears
+        // and instantly vanishes). Force a re-bind shortly after resume.
+        new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(this::restartQtInput, 400);
+    }
+
+    private void restartQtInput() {
+        try {
+            android.view.View focused = getCurrentFocus();
+            if (focused == null) {
+                android.util.Log.i(TAG, "restartQtInput: no focused view");
+                return;
+            }
+            android.view.inputmethod.InputMethodManager imm =
+                    (android.view.inputmethod.InputMethodManager)
+                            getSystemService(INPUT_METHOD_SERVICE);
+            imm.restartInput(focused);
+            android.util.Log.i(TAG, "restarted IME input connection for " + focused.getClass().getName());
+        } catch (Exception e) {
+            android.util.Log.w(TAG, "restartQtInput failed: " + e);
+        }
+    }
+
+    @Override
     protected void onDestroy() {
         // Qt 6.6 cannot start the Qt app a second time in the same process:
         // the second startApplication blocks forever on QtThread's semaphore

@@ -43,7 +43,7 @@ set(Qt6Qml_DIR        "${QT_ANDROID_ROOT}/lib/cmake/Qt6Qml"        CACHE PATH ""
 set(Qt6Quick_DIR      "${QT_ANDROID_ROOT}/lib/cmake/Qt6Quick"      CACHE PATH "" FORCE)
 set(Qt6WebView_DIR    "${QT_ANDROID_ROOT}/lib/cmake/Qt6WebView"    CACHE PATH "" FORCE)
 
-find_package(Qt6 REQUIRED COMPONENTS Core Gui Xml Concurrent Qml Quick WebView)
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Xml Concurrent Qml Quick WebView VirtualKeyboard)
 
 set(VCPKG_ANDROID_ROOT "${VCPKG_BASE}/installed/${VCPKG_TRIPLET}")
 link_directories("${VCPKG_ANDROID_ROOT}/lib")
@@ -74,6 +74,7 @@ target_include_directories(aurelex_exp PRIVATE
 target_link_libraries(aurelex_exp PRIVATE
     Qt6::Core Qt6::Gui Qt6::Xml Qt6::Concurrent
     Qt6::Qml Qt6::Quick Qt6::WebView
+    Qt6::VirtualKeyboard
     xapian z bz2 lzma lzo2 fmt
 )
 

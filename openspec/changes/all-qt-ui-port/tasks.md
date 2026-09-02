@@ -68,20 +68,25 @@ for the Kotlin app. Each is a focused session of work.
   - Bundled asset mirror (scripts/stylesheets/icons/flags) from the APK's `assets/`
   - `bres://` resources via `gd_get_resource` (images from `.mdd`)
   - `gdau://` audio via `gd_get_audio` (content-type by extension)
+  - **Build note**: Android 9+ blocks cleartext HTTP — add `android:usesCleartextTraffic="true"` (or a networkSecurityConfig allowing 127.0.0.1) to the manifest.
 - [ ] A.2 Rewrite article HTML URLs: `qrc:///` → `http://127.0.0.1:PORT/`, `bres://` → `http://127.0.0.1:PORT/bres/...`, `gdau://` → `http://127.0.0.1:PORT/gdau/...`
-- [ ] A.3 In-article `gdlookup://` link interception → in-app lookup (QtWebView navigation signal)
-- [ ] A.4 Bundle the asset mirror (scripts/stylesheets/icons/flags from `engine/src/`) into the APK's `assets/` directory
-- [ ] A.5 On-device verification: article with CSS styling renders; images from `.mdd` display; audio plays; in-article links navigate
+- [ ] A.3 In-article `gdlookup://` link interception → in-app lookup. **API note**: QtWebView 6.6 has no navigationRequested — intercept via `onUrlChanged` (if url starts with gdlookup:// → parse word, engine.lookup, restore previous page).
+- [ ] A.4 Bundle the asset mirror (scripts/stylesheets/icons/flags from `engine/src/`) into the APK's `assets/` directory. **Evidence it's missing**: WebView console shows "jQuery is not defined" / "QWebChannel is not defined" — article scripts don't load today.
+- [ ] A.5 On-device verification: article with CSS styling renders; images from `.mdd` display; audio plays; in-article links navigate. **Missing input**: a test dictionary with images + audio (candidates: the user's real dictionaries in `/storage/emulated/0/GoldenDict/{English,Finnish,Japanese,Thesauri}/` subfolders, or craft a small `.mdx`).
 
 ### Slice B — Storage opt-in + release identity (~1 day)
 
-- [ ] B.1 Wire `isAllFilesAccessGranted()` / `openAllFilesAccessSettings()` into the Dicts pane QML (button: "Grant storage access" when not granted)
-- [ ] B.2 When granted, `scanDicts` points at `externalStoragePath()` + user-selected subfolder (instead of the sandbox `files/staged`)
-- [ ] B.3 Flip package id from `com.aurelex.experiment` to `aurelex.android`
-- [ ] B.4 Verify user-data carry-over (history.json + favorites.json + staged dicts survive the install)
-- [ ] B.5 Production keystore (replace the debug keystore in build.gradle)
-- [ ] B.6 CI workflow: tag push → build release APK → attach to GitHub release
-- [ ] B.7 On-device verification: full docs/TESTING.md pass
+- [x] B.1 Wire `isAllFilesAccessGranted()` / `openAllFilesAccessSettings()` into the Dicts pane QML (button: "Grant storage access" when not granted). **Verified on-device** (grant via appops → hint text swapped live).
+- [x] B.2 When granted, `scanDicts` points at `externalStoragePath()` + `/GoldenDict` (created on demand) instead of the sandbox `files/staged`. **Verified on-device** (scan switched, dict loaded from /GoldenDict; note: scan is top-level only, per the boundary's non-recursive `collectFiles`).
+- [ ] B.3 Flip package id from `com.aurelex.experiment` to `aurelex.android`. **Decision needed**: installing over the old Kotlin app (same id) is blocked by signature mismatch → old app must be uninstalled first, which deletes its data. Confirm no-carry-over is acceptable (dicts survive in /storage/emulated/0/GoldenDict; history/favorites start fresh).
+- [ ] B.4 Verify user-data carry-over after the id flip (fresh-install expectations: rescan /GoldenDict, onboarding shows, history/favorites empty). **Scope note**: the old Kotlin app's SharedPreferences history/favorites do NOT carry over (the Qt app stores JSON files with a different model) — the task narrows to verifying the fresh-install path.
+- [ ] B.5 Production keystore (replace the debug keystore in build.gradle). **Missing input**: keystore file + passwords (or generate one and store in GitHub secrets).
+- [ ] B.6 CI workflow: tag push → build release APK → attach to GitHub release. **Missing input**: check existing .github/workflows; the Qt build needs Qt 6.6.3 (aqt) + modules (incl. manual VirtualKeyboard staging per build.ps1) + vcpkg cache (xapian et al — long compile) + NDK r23c + JDK 17.
+- [ ] B.7 On-device verification: full docs/TESTING.md pass.
+
+### Follow-up (recorded, not in parity scope)
+
+- [ ] F.1 Restore user-preferred (system) keyboard. Interim state: embedded Qt VirtualKeyboard (bypasses the system IME entirely — QT_IM_MODULE=qtvirtualkeyboard, manual VK staging in build.ps1). System IME broke on Qt 6.6 + Android 15 (composing revert, inactive InputConnection, IME deadlocks). Real fix candidates: upgrade to Qt 6.8/6.9 (reworked InputConnection lifecycle) or deeper workarounds. QtVK is acceptable for the experiment phase.
 
 ### Post-parity (separate OpenSpec changes)
 

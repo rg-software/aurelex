@@ -95,6 +95,58 @@ if (Test-Path (Join-Path $ExpDir "android\res")) {
     New-Item -ItemType Directory -Force -Path (Join-Path $ApkDir "res") | Out-Null
     Copy-Item (Join-Path $ExpDir "android\res\*") (Join-Path $ApkDir "res\") -Recurse -Force
 }
+
+# Qt VirtualKeyboard: androiddeployqt plans the VK dependencies but silently
+# skips staging them (observed with --no-build on the carve-subset kit). Stage
+# them manually: libs + the QML modules under assets/qml (Qt resolves QML
+# imports from assets on Android; main.cpp adds assets:/qml to the import
+# paths).
+$VkLibDir = "$QtBase\android_arm64_v8a\lib"
+$VkQmlSrc = "$QtBase\android_arm64_v8a\qml\QtQuick\VirtualKeyboard"
+if (Test-Path $VkQmlSrc) {
+    foreach ($lib in @(
+        "libQt6VirtualKeyboard_arm64-v8a.so",
+        "libQt6VirtualKeyboardSettings_arm64-v8a.so",
+        "libQt6Svg_arm64-v8a.so",
+        "libQt6QuickLayouts_arm64-v8a.so",
+        "libQt6LabsFolderListModel_arm64-v8a.so",
+        "libqml_QtQuick_VirtualKeyboard_qtvkbplugin_arm64-v8a.so",
+        "libqml_QtQuick_VirtualKeyboard_Settings_qtvkbsettingsplugin_arm64-v8a.so")) {
+        $candidates = @(
+            (Join-Path $VkLibDir $lib),
+            "$QtBase\android_arm64_v8a\plugins\platforminputcontexts\$lib",
+            "$QtBase\android_arm64_v8a\qml\QtQuick\VirtualKeyboard\$lib")
+        $src = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+        if ($src) { Copy-Item $src "$ApkDir\libs\$Abi\" -Force }
+        else { Write-Host "  note: $lib not in kit (skipped)" -ForegroundColor DarkYellow }
+    }
+    # Settings/Styles plugin .so live inside the qml module dir
+    Get-ChildItem $VkQmlSrc -Recurse -Filter "lib*.so" | ForEach-Object {
+        Copy-Item $_.FullName "$ApkDir\libs\$Abi\" -Force
+    }
+    # QML module -> assets. VirtualKeyboard + its dependency modules
+    # (Window/Layouts/labs.folderlistmodel are imported by Keyboard.qml).
+    $qmlAssetRoot = "$ApkDir\assets\qml"
+    New-Item -ItemType Directory -Force -Path "$qmlAssetRoot\QtQuick" | Out-Null
+    foreach ($dir in @(
+        "$QtBase\android_arm64_v8a\qml\QtQuick\VirtualKeyboard",
+        "$QtBase\android_arm64_v8a\qml\QtQuick\Window",
+        "$QtBase\android_arm64_v8a\qml\QtQuick\Layouts",
+        "$QtBase\android_arm64_v8a\qml\Qt\labs\folderlistmodel")) {
+        $name = Split-Path $dir -Leaf
+        $parent = Split-Path (Split-Path $dir) -Leaf
+        $dst = if ($parent -eq "labs") { "$qmlAssetRoot\Qt\labs\$name" } else { "$qmlAssetRoot\QtQuick\$name" }
+        if (Test-Path $dst) { Remove-Item $dst -Recurse -Force }
+        New-Item -ItemType Directory -Force -Path $dst | Out-Null
+        Copy-Item "$dir\*" $dst -Recurse -Force
+        # QML plugin .so must live in libs/<abi> for the class loader; the
+        # qmldir "plugin" lines dlopen them from there at import time.
+        Get-ChildItem $dst -Recurse -Filter "*.so" | ForEach-Object {
+            Copy-Item $_.FullName "$ApkDir\libs\$Abi\" -Force
+        }
+        Get-ChildItem $dst -Recurse -Filter "*.so" | Remove-Item -Force
+    }
+}
 if ($LASTEXITCODE -ne 0) { throw "androiddeployqt failed" }
 
 Write-Host "== [5/5] gradle overrides + assemble$Configuration ==" -ForegroundColor Cyan

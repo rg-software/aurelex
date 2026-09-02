@@ -1,5 +1,6 @@
 import QtQuick
 import QtWebView
+import QtQuick.VirtualKeyboard
 
 // All-Qt UI: search / dictionaries / groups / FTS / history / favorites /
 // article panes switched by `state`, plus onboarding + dark mode.
@@ -210,7 +211,6 @@ Window {
                     // ImhNoPredictiveText reduces IME composing side effects;
                     // activeFocusOnTab=false keeps the tab-focus chain empty so
                     // IME queries never walk it (infinite-loop ANR, see _blurActive).
-                    inputMethodHints: Qt.ImhNoPredictiveText | Qt.ImhNoAutoUppercase
                     activeFocusOnTab: false
                     anchors.fill: parent
                     anchors.leftMargin: 8
@@ -429,7 +429,6 @@ Window {
 
                 TextInput {
                     id: newGroupInput
-                    inputMethodHints: Qt.ImhNoPredictiveText | Qt.ImhNoAutoUppercase
                     activeFocusOnTab: false
                     anchors.fill: parent
                     anchors.leftMargin: 8
@@ -719,7 +718,6 @@ Window {
                     border.color: root.cardBorder
                     TextInput {
                         id: ftsInput
-                        inputMethodHints: Qt.ImhNoPredictiveText | Qt.ImhNoAutoUppercase
                         activeFocusOnTab: false
                         anchors.fill: parent
                         anchors.leftMargin: 8
@@ -799,6 +797,34 @@ Window {
                         onClicked: engine.lookup(modelData.headword)
                     }
                 }
+            }
+        }
+    }
+
+    // --- virtual keyboard (Qt Quick VirtualKeyboard) ---
+    // The system IME (SwiftKey/Gboard) proved unreliable with Qt 6.6 on this
+    // device: composing text reverted instantly, IME deadlocks, inactive
+    // input connections. The embedded keyboard bypasses the system IME
+    // entirely for Qt fields.
+    InputPanel {
+        id: inputPanel
+        z: 99
+        x: 0
+        y: root.height
+        width: root.width
+        visible: Qt.inputMethod.visible
+
+        states: State {
+            name: "visible"
+            when: inputPanel.visible
+            PropertyChanges { target: inputPanel; y: root.height - inputPanel.height }
+        }
+        transitions: Transition {
+            from: ""
+            to: "visible"
+            reversible: true
+            ParallelAnimation {
+                NumberAnimation { properties: "y"; duration: 250; easing.type: Easing.InOutQuad }
             }
         }
     }
