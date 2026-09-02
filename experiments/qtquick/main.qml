@@ -76,6 +76,8 @@ Window {
         engine.ftsSearch(ftsInput.text, 2, engine.activeGroupId)
     }
 
+    Component.onCompleted: console.log("[qml] root ready, state:", state)
+
     Connections {
         target: engine
         function onFtsSearchReady(query, results) {
@@ -178,8 +180,14 @@ Window {
         Connections {
             target: engine
             function onSuggestionsReady(prefix, suggestions) {
-                if (prefix !== input.text) return
+                console.log("[qml] suggestionsReady", prefix, "count:", suggestions.length)
+                // No prefix check here: the C++ side drops stale generations,
+                // and Gboard's composing/autocorrect can rewrite input.text
+                // after the suggest fired (the old filter rejected valid
+                // results, leaving the list stale).
                 suggestionList.model = suggestions
+                suggestionList.forceLayout()
+                suggestionList.positionViewAtBeginning()
             }
             function onArticleNotFound(word) {
                 suggestionList.model = ["(no results for " + word + ")"]
@@ -209,7 +217,7 @@ Window {
                     verticalAlignment: TextInput.AlignVCenter
                     font.pixelSize: 18
                     color: root.fg
-                    onTextChanged: debounce.restart()
+                    onTextChanged: { console.log("[qml] textChanged:", text); debounce.restart() }
                     onAccepted: { focus = false; engine.lookup(text.trim()) }
                     Component.onCompleted: forceActiveFocus()
                 }
@@ -221,7 +229,7 @@ Window {
                     width: 120
                     height: 32
                     color: "#3a3a3a"
-                    Text { anchors.centerIn: parent; color: "white"; font.pixelSize: 13; text: "Clipboard" }
+                    Text { anchors.centerIn: parent; color: "white"; font.pixelSize: 13; text: "Clipb2" }
                     MouseArea {
                         anchors.fill: parent
                         onClicked: {
@@ -230,12 +238,19 @@ Window {
                         }
                     }
                 }
+                Rectangle {
+                    width: 80
+                    height: 32
+                    color: "#224488"
+                    Text { anchors.centerIn: parent; color: "white"; font.pixelSize: 13; text: "SUG" }
+                    MouseArea { anchors.fill: parent; onClicked: engine.suggest("app") }
+                }
             }
 
             Timer {
                 id: debounce
                 interval: 250
-                onTriggered: searchPane._doSuggest()
+                onTriggered: { console.log("[qml] debounce fired, text:", input.text); searchPane._doSuggest() }
             }
 
             Text {

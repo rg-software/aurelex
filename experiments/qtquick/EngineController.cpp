@@ -346,6 +346,11 @@ void EngineController::lookup(const QString &word) {
 }
 
 void EngineController::suggest(const QString &prefix) {
+    qInfo() << "[aurelex] suggest firing:" << prefix;
+    // Only the latest request may emit: while the user keeps typing (or the
+    // IME rewrites composing text), older results would otherwise land late
+    // and repopulate the list with stale content.
+    const int gen = ++m_suggestGeneration;
     QFuture<QStringList> f = QtConcurrent::run([prefix]{
         std::vector<char> buf(1 << 16);
         const int n = gd_suggest(prefix.toLocal8Bit().constData(),
@@ -354,7 +359,13 @@ void EngineController::suggest(const QString &prefix) {
         return QString::fromLocal8Bit(buf.data(), strlen(buf.data())).split('\n', Qt::SkipEmptyParts);
     });
     auto *w = new QFutureWatcher<QStringList>(this);
-    connect(w, &QFutureWatcher<QStringList>::finished, this, [this, prefix, w]{
+    connect(w, &QFutureWatcher<QStringList>::finished, this, [this, prefix, gen, w]{
+        if (gen != m_suggestGeneration) {
+            qInfo() << "[aurelex] suggest stale, dropped:" << prefix;
+            w->deleteLater();
+            return;
+        }
+        qInfo() << "[aurelex] suggest ready:" << prefix << "count:" << w->result().size();
         emit suggestionsReady(prefix, w->result());
         w->deleteLater();
     });

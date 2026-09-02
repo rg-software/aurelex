@@ -176,6 +176,7 @@ private:
 
     QTimer m_pollTimer;
     int m_clipboardRetries = 0;
+    int m_suggestGeneration = 0;
 
     int m_dictCount = 0;
     bool m_ready = false;
