@@ -57,6 +57,7 @@ set(ENGINE_SRC "${CMAKE_CURRENT_SOURCE_DIR}/../../../../engine")
 
 qt_add_executable(aurelex_exp
     main.cpp
+    EngineController.cpp
     $<TARGET_OBJECTS:aurelex_carve>
 )
 target_include_directories(aurelex_exp PRIVATE
@@ -79,8 +80,9 @@ target_link_libraries(aurelex_exp PRIVATE
 qt_add_qml_module(aurelex_exp
     URI AurelexExp
     VERSION 1.0
-    QML_FILES main.qml
-)
+    QML_FILES
+        main.qml
+        )
 
 set(PROGRAM_FILES_ROOT "/data/data/com.aurelex.experiment/files")
 
