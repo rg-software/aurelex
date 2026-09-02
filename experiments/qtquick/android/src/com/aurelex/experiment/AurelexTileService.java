@@ -36,27 +36,32 @@ public class AurelexTileService extends TileService {
             tile.updateTile();
         }
 
-        // Read the clipboard (tile services can read without focus on API 29+).
-        ClipboardManager cm = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
-        CharSequence text = (cm != null && cm.hasPrimaryClip())
-                ? cm.getPrimaryClip().getItemAt(0).getText() : null;
+        // Run off the main thread: clipboard reads and activity launches from a
+        // tile have deadlocked the app's main thread here (service ANR after
+        // 200s, window left without an input channel). onClick must return fast.
+        new Thread(() -> {
+            // Read the clipboard (tile services can read without focus on API 29+).
+            ClipboardManager cm = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+            CharSequence text = (cm != null && cm.hasPrimaryClip())
+                    ? cm.getPrimaryClip().getItemAt(0).getText() : null;
 
-        final Intent intent;
-        if (text == null || text.toString().trim().isEmpty()) {
-            // Empty clipboard: just open the app's search screen.
-            intent = new Intent(this, ExperimentActivity.class);
-        } else {
-            // Funnel the word into the app via the aurelex://lookup deep link
-            // (ExperimentActivity.captureLookupText picks it up).
-            Uri uri = new Uri.Builder()
-                    .scheme("aurelex")
-                    .authority("lookup")
-                    .appendQueryParameter("word", text.toString().trim())
-                    .build();
-            intent = new Intent(Intent.ACTION_VIEW, uri, this, ExperimentActivity.class);
-        }
-        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP);
-        launchFromTile(intent);
+            final Intent intent;
+            if (text == null || text.toString().trim().isEmpty()) {
+                // Empty clipboard: just open the app's search screen.
+                intent = new Intent(this, ExperimentActivity.class);
+            } else {
+                // Funnel the word into the app via the aurelex://lookup deep link
+                // (ExperimentActivity.captureLookupText picks it up).
+                Uri uri = new Uri.Builder()
+                        .scheme("aurelex")
+                        .authority("lookup")
+                        .appendQueryParameter("word", text.toString().trim())
+                        .build();
+                intent = new Intent(Intent.ACTION_VIEW, uri, this, ExperimentActivity.class);
+            }
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+            launchFromTile(intent);
+        }, "aurelex-tile").start();
     }
 
     /**
