@@ -14,8 +14,17 @@
 #include <QJsonValue>
 #include <QXmlStreamReader>
 #include <QGuiApplication>
+EngineController::EngineController(QObject *parent)
+    : QObject(parent)
+{
+    // Incoming-lookup poller: ExperimentActivity writes shared_prefs/intent.xml
+    // for every share/deep-link/PROCESS_TEXT/tile intent (cold or warm). Consume
+    // it here as soon as the engine is ready; words arriving before gd_init
+    // completes stay in the file and are picked up on a later tick.
+    connect(&m_pollTimer, &QTimer::timeout, this, &EngineController::pollPendingLookup);
+    m_pollTimer.start(500);
+}
 
-EngineController::EngineController(QObject *parent) : QObject(parent) {}
 EngineController::~EngineController() = default;
 
 void EngineController::setDictCount(int n) {
@@ -61,16 +70,28 @@ void EngineController::setBuildingFts(bool b) {
 }
 
 void EngineController::runScan() {
-    QFuture<int> f = QtConcurrent::run([staged = m_stagedDir]{
-        return gd_scan_dicts(staged.toLocal8Bit().constData());
+    // Sandbox default: the staged dir. With All-Files-Access granted, scan the
+    // conventional /GoldenDict folder on external storage (created on demand so
+    // the user has a predictable drop location).
+    QString dir = m_stagedDir;
+    if (isAllFilesAccessGranted()) {
+        const QString gd = externalStoragePath() + QStringLiteral("/GoldenDict");
+        QDir().mkpath(gd);
+        dir = gd;
+        qInfo() << "[aurelex] scanning external dir" << dir;
+    }
+    QFuture<QPair<int, int>> f = QtConcurrent::run([dir]{
+        const int rc = gd_scan_dicts(dir.toLocal8Bit().constData());
+        // The scan result counts newly-added dicts; the UI shows the total.
+        return QPair<int, int>(rc, gd_dict_count());
     });
-    auto *w = new QFutureWatcher<int>(this);
-    connect(w, &QFutureWatcher<int>::finished, this, [this, w]{
-        const int n = w->result();
-        qInfo() << "[aurelex] scan ->" << n;
-        setDictCount(n);
+    auto *w = new QFutureWatcher<QPair<int, int>>(this);
+    connect(w, &QFutureWatcher<QPair<int, int>>::finished, this, [this, w]{
+        const QPair<int, int> result = w->result();
+        qInfo() << "[aurelex] scan ->" << result.first;
+        setDictCount(result.second);
         w->deleteLater();
-        if (n > 0) {
+        if (result.first > 0 || result.second > 0) {
             refreshDictionaries();
             refreshGroups();
         }
@@ -583,8 +604,22 @@ void EngineController::clearHistory()
 
 QString EngineController::readPendingLookup()
 {
+    // Consume-and-return variant (kept for the QML invokable API). The poller
+    // (pollPendingLookup) is the primary consumer now.
+    const QString word = peekPendingLookup();
+    if (!word.isEmpty()) {
+        const QString path = m_appDir + QStringLiteral("/../shared_prefs/intent.xml");
+        QFile f(path);
+        f.remove();
+    }
+    return word;
+}
+
+QString EngineController::peekPendingLookup() const
+{
     // The Java shell writes the captured lookup word into
     // shared_prefs/intent.xml as a standard SharedPreferences XML file.
+    if (m_appDir.isEmpty()) return QString();
     const QString path = m_appDir + QStringLiteral("/../shared_prefs/intent.xml");
     QFile f(path);
     if (!f.open(QIODevice::ReadOnly)) return QString();
@@ -606,12 +641,20 @@ QString EngineController::readPendingLookup()
             break;
         }
     }
-
-    if (!word.isEmpty()) {
-        // Consume: delete the file so the lookup isn't re-triggered.
-        f.remove();
-    }
     return word;
+}
+
+void EngineController::pollPendingLookup()
+{
+    const QString word = peekPendingLookup();
+    if (word.isEmpty()) return;
+    if (!m_ready) return; // engine still initializing; retry on a later tick
+    // Consume so the word isn't re-looked-up, then run it.
+    const QString path = m_appDir + QStringLiteral("/../shared_prefs/intent.xml");
+    QFile f(path);
+    f.remove();
+    qInfo() << "[aurelex] pending lookup:" << word;
+    lookup(word);
 }
 
 QString EngineController::clipboardText()

@@ -17,7 +17,6 @@ Window {
     property int state: 0
     property string currentWord: ""
     property string currentHtml: ""
-    property int ftsMode: 0
     property var ftsResults: []
 
     // Dark-mode-aware palette.
@@ -72,7 +71,9 @@ Window {
         state = 6
     }
     function _runFts() {
-        engine.ftsSearch(ftsInput.text, ftsMode, engine.activeGroupId)
+        // Wildcards is the only mode that works reliably (regex is broken
+        // upstream; plain == wildcard search without wildcards).
+        engine.ftsSearch(ftsInput.text, 2, engine.activeGroupId)
     }
 
     Connections {
@@ -273,6 +274,15 @@ Window {
         visible: root.state === 1
 
         Component.onCompleted: engine.refreshDictionaries()
+        // Refresh the storage-access state while the pane is visible (the grant
+        // happens in the system Settings; bindings can't see it change).
+        property bool storageGranted: engine.isAllFilesAccessGranted()
+        Timer {
+            interval: 1000
+            repeat: true
+            running: root.state === 1
+            onTriggered: dictsPane.storageGranted = engine.isAllFilesAccessGranted()
+        }
         Connections {
             target: engine
             function onDictionariesChanged() { dictsList.model = engine.dictionaries }
@@ -290,6 +300,28 @@ Window {
                 color: "#3a3a3a"
                 Text { anchors.centerIn: parent; color: "white"; font.pixelSize: 13; text: "Rescan" }
                 MouseArea { anchors.fill: parent; onClicked: engine.rescan() }
+            }
+
+            Rectangle {
+                visible: !dictsPane.storageGranted
+                width: parent.width
+                height: 44
+                color: "#224488"
+                Text {
+                    anchors.centerIn: parent
+                    color: "white"; font.pixelSize: 13
+                    text: "Add dictionaries: grant storage access"
+                }
+                MouseArea { anchors.fill: parent; onClicked: engine.openAllFilesAccessSettings() }
+            }
+
+            Text {
+                visible: dictsPane.storageGranted
+                color: root.subFg
+                font.pixelSize: 12
+                wrapMode: Text.Wrap
+                width: parent.width
+                text: "Storage access granted. Copy dictionary files (.mdx, .dsl, .dsl.dz, .ifo) into the GoldenDict folder on the device storage, then tap Rescan."
             }
 
             ListView {
@@ -621,13 +653,8 @@ Window {
         onTriggered: view.loadHtml(engine.rewriteArticleUrls(root.currentHtml), "file:///android_asset/")
     }
 
-    Component.onCompleted: {
-        const pending = engine.readPendingLookup()
-        if (pending && pending.length > 0) {
-            console.log('[aurelex] pending lookup:', pending)
-            engine.lookup(pending)
-        }
-    }
+    // Incoming lookups (share / PROCESS_TEXT / deep link / QS tile) are consumed
+    // by the EngineController's poller — see pollPendingLookup in C++.
 
     // --- FTS view ---
     Rectangle {
@@ -674,11 +701,7 @@ Window {
                     height: 32
                     anchors.verticalCenter: parent.verticalCenter
                     color: "#3a3a3a"
-                    Text { anchors.centerIn: parent; color: "white"; font.pixelSize: 14; text: root.ftsMode === 0 ? "Xapian" : root.ftsMode === 1 ? "Plain" : root.ftsMode === 2 ? "Wild*" : "Regex" }
-                    MouseArea {
-                        anchors.fill: parent
-                        onClicked: root.ftsMode = (root.ftsMode + 1) % 4
-                    }
+                    Text { anchors.centerIn: parent; color: "white"; font.pixelSize: 14; text: "Wild*" }
                 }
             }
 

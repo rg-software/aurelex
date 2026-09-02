@@ -1,5 +1,6 @@
 package com.aurelex.experiment;
 
+import android.app.PendingIntent;
 import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.Intent;
@@ -39,23 +40,40 @@ public class AurelexTileService extends TileService {
         ClipboardManager cm = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
         CharSequence text = (cm != null && cm.hasPrimaryClip())
                 ? cm.getPrimaryClip().getItemAt(0).getText() : null;
+
+        final Intent intent;
         if (text == null || text.toString().trim().isEmpty()) {
             // Empty clipboard: just open the app's search screen.
-            Intent open = new Intent(this, ExperimentActivity.class);
-            open.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP);
-            startActivity(open);
-            return;
+            intent = new Intent(this, ExperimentActivity.class);
+        } else {
+            // Funnel the word into the app via the aurelex://lookup deep link
+            // (ExperimentActivity.captureLookupText picks it up).
+            Uri uri = new Uri.Builder()
+                    .scheme("aurelex")
+                    .authority("lookup")
+                    .appendQueryParameter("word", text.toString().trim())
+                    .build();
+            intent = new Intent(Intent.ACTION_VIEW, uri, this, ExperimentActivity.class);
         }
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+        launchFromTile(intent);
+    }
 
-        // Funnel the word into the app via the aurelex://lookup deep link
-        // (ExperimentActivity.captureLookupText picks it up).
-        Uri uri = new Uri.Builder()
-                .scheme("aurelex")
-                .authority("lookup")
-                .appendQueryParameter("word", text.toString().trim())
-                .build();
-        Intent lookup = new Intent(Intent.ACTION_VIEW, uri, this, ExperimentActivity.class);
-        lookup.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP);
-        startActivity(lookup);
+    /**
+     * API 34+ requires a PendingIntent (the Intent variant is deprecated and
+     * plain startActivity() from a tile leaves the shade open without focusing
+     * the app on modern Android). startActivityAndCollapse(PendingIntent)
+     * collapses the shade and brings the activity forward.
+     */
+    private void launchFromTile(Intent intent) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            PendingIntent pi = PendingIntent.getActivity(
+                    this, 0, intent,
+                    PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
+            startActivityAndCollapse(pi);
+        } else {
+            //noinspection deprecation
+            startActivityAndCollapse(intent);
+        }
     }
 }

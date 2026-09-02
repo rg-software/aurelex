@@ -7,6 +7,7 @@
 #include <QVariantMap>
 #include <QFuture>
 #include <QFutureWatcher>
+#include <QTimer>
 
 extern "C" {
 #include "goldendict.h"
@@ -101,9 +102,11 @@ public:
     Q_INVOKABLE void clearHistory();
 
     // Milestone 6: incoming lookup intents. The Java shell (ExperimentActivity)
-    // writes the captured word into shared_prefs/intent.xml. QML calls this on
-    // startup + resume; the method returns the pending word (or empty) and
-    // clears the file so the next lookup isn't re-triggered.
+    // writes the captured word into shared_prefs/intent.xml on every
+    // onCreate/onNewIntent (share sheet, aurelex://, PROCESS_TEXT, QS tile).
+    // A poller (m_pollTimer) consumes the file as soon as the engine is ready
+    // and runs the lookup — this covers cold start AND warm onNewIntent, where
+    // the old Component.onCompleted read missed words entirely.
     Q_INVOKABLE QString readPendingLookup();
 
     // Clipboard lookup: reads the system clipboard text (via the JNI clipboard
@@ -167,6 +170,10 @@ private:
     void saveFavorites();
     void loadSettings();
     void saveSettings();
+    void pollPendingLookup();
+    QString peekPendingLookup() const;
+
+    QTimer m_pollTimer;
 
     int m_dictCount = 0;
     bool m_ready = false;
