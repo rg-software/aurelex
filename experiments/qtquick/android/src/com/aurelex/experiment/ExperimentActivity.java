@@ -22,6 +22,23 @@ public class ExperimentActivity extends QtActivity {
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
+        // Workaround for QTBUG-122886 (Qt 6.6): QtActivityDelegate's display
+        // listener fires setActivityDisplayRotation on a null mLayout when a
+        // display change races with activity teardown. The NPE is harmless but
+        // kills the process. Swallow it until we upgrade to Qt 6.7+.
+        final Thread.UncaughtExceptionHandler defaultHandler =
+                Thread.getDefaultUncaughtExceptionHandler();
+        Thread.setDefaultUncaughtExceptionHandler((thread, throwable) -> {
+            if (throwable instanceof NullPointerException
+                    && throwable.getStackTrace().length > 0
+                    && throwable.getStackTrace()[0].getClassName()
+                            .contains("QtActivityDelegate")) {
+                android.util.Log.w(TAG, "Swallowed QTBUG-122886 display-rotation NPE");
+                return; // don't crash
+            }
+            if (defaultHandler != null) defaultHandler.uncaughtException(thread, throwable);
+        });
+
         super.onCreate(savedInstanceState);
         captureLookupText(getIntent());
     }
