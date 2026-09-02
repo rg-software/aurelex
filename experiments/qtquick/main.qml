@@ -11,10 +11,12 @@ Window {
     title: "AurelexExp"
     color: "#ececec"
 
-    // 0 = search, 1 = dictionaries, 2 = article, 3 = groups.
+    // 0 = search, 1 = dictionaries, 2 = article, 3 = groups, 4 = fts.
     property int state: 0
     property string currentWord: ""
     property string currentHtml: ""
+    property int ftsMode: 0
+    property var ftsResults: []
 
     function _showArticle(word, html) {
         currentWord = word
@@ -32,6 +34,21 @@ Window {
         engine.refreshGroups()
         state = 3
     }
+    function _openFts() {
+        ftsResults = []
+        state = 4
+    }
+    function _runFts() {
+        engine.ftsSearch(ftsInput.text, ftsMode, engine.activeGroupId)
+    }
+
+    Connections {
+        target: engine
+        function onFtsSearchReady(query, results) {
+            if (query !== ftsInput.text) return
+            ftsResults = results
+        }
+    }
 
     // --- shared top bar ---
     Rectangle {
@@ -46,7 +63,7 @@ Window {
             anchors.leftMargin: 12
             spacing: 12
 
-            // Cycle button: search -> dicts -> groups -> search.
+            // Cycle button: search -> dicts -> groups -> fts -> search.
             Rectangle {
                 width: 90
                 height: 30
@@ -58,7 +75,8 @@ Window {
                     font.pixelSize: 13
                     text: root.state === 0 ? "Dicts"
                         : root.state === 1 ? "Groups"
-                        : root.state === 3 ? "<- Search"
+                        : root.state === 3 ? "FTS"
+                        : root.state === 4 ? "<- Search"
                         : "Dicts"
                 }
                 MouseArea {
@@ -66,7 +84,8 @@ Window {
                     onClicked: {
                         if (root.state === 0) root._openDicts()
                         else if (root.state === 1) root._openGroups()
-                        else if (root.state === 3) root.state = 0
+                        else if (root.state === 3) root._openFts()
+                        else if (root.state === 4) root.state = 0
                         else root.state = 0
                     }
                 }
@@ -79,6 +98,7 @@ Window {
                 text: root.state === 0 ? "Search"
                     : root.state === 1 ? "Dictionaries (" + engine.dictCount + ")"
                     : root.state === 3 ? "Groups (" + engine.groups.length + ", active=" + engine.activeGroupId + ")"
+                    : root.state === 4 ? "FTS (" + root.ftsResults.length + ")"
                     : root.currentWord
             }
         }
@@ -209,19 +229,24 @@ Window {
                             model: [
                                 { label: "Up",   delta: -1 },
                                 { label: "Down", delta:  1 },
+                                { label: "Index", delta: -2 },
                                 { label: "Remove", delta: 0 }
                             ]
                             delegate: Rectangle {
                                 width: 76
                                 height: 28
-                                color: modelData.label === "Remove" ? "#882222" : "#3a3a3a"
+                                color: modelData.label === "Remove" ? "#882222"
+                                    : modelData.label === "Index" ? "#224488" : "#3a3a3a"
                                 Text { anchors.centerIn: parent; text: modelData.label; color: "white"; font.pixelSize: 12 }
                                 MouseArea {
                                     anchors.fill: parent
                                     onClicked: {
                                         const idx = index
-                                        if (modelData.label === "Remove") {
+                                        const op = modelData.label
+                                        if (op === "Remove") {
                                             engine.removeDictionary(idx)
+                                        } else if (op === "Index") {
+                                            engine.ftsIndex(idx)
                                         } else {
                                             const target = Math.max(0, Math.min(engine.dictionaries.length - 1, idx + modelData.delta))
                                             if (target !== idx) engine.moveDictionary(idx, target)
@@ -384,6 +409,109 @@ Window {
     onCurrentHtmlChanged: {
         if (state === 2) {
             view.loadHtml(engine.rewriteArticleUrls(currentHtml), "file:///android_asset/")
+        }
+    }
+    
+    // --- FTS view ---
+    Rectangle {
+        id: ftsPane
+        anchors { top: topBar.bottom; left: parent.left; right: parent.right; bottom: parent.bottom }
+        color: "#ececec"
+        visible: root.state === 4
+
+        Connections {
+            target: engine
+            function onBuildingFtsChanged() { ftsInput.enabled = !engine.buildingFts; ftsSearchBtn.enabled = !engine.buildingFts }
+        }
+
+        Column {
+            anchors.fill: parent
+            anchors.margins: 12
+            spacing: 8
+
+            Row {
+                spacing: 8
+                height: 48
+                width: parent.width
+
+                Rectangle {
+                    width: parent.width - 110
+                    height: 48
+                    color: "white"
+                    border.color: "#cccccc"
+                    TextInput {
+                        id: ftsInput
+                        anchors.fill: parent
+                        anchors.leftMargin: 8
+                        verticalAlignment: TextInput.AlignVCenter
+                        font.pixelSize: 18
+                        onAccepted: root._runFts()
+                    }
+                }
+
+                Rectangle {
+                    width: 90
+                    height: 32
+                    anchors.verticalCenter: parent.verticalCenter
+                    color: "#3a3a3a"
+                    Text { anchors.centerIn: parent; color: "white"; font.pixelSize: 14; text: root.ftsMode === 0 ? "Xapian" : root.ftsMode === 1 ? "Plain" : root.ftsMode === 2 ? "Wild*" : "Regex" }
+                    MouseArea {
+                        anchors.fill: parent
+                        onClicked: root.ftsMode = (root.ftsMode + 1) % 4
+                    }
+                }
+            }
+
+            Rectangle {
+                id: ftsSearchBtn
+                width: 100
+                height: 32
+                color: "#224488"
+                Text { anchors.centerIn: parent; color: "white"; font.pixelSize: 14; text: "Search" }
+                MouseArea {
+                    anchors.fill: parent
+                    onClicked: root._runFts()
+                }
+            }
+
+            Text {
+                visible: engine.lastError.length > 0
+                text: "engine error: " + engine.lastError
+                color: "red"
+                wrapMode: Text.Wrap
+                width: parent.width
+            }
+
+            ListView {
+                width: parent.width
+                height: parent.height - 96 - 32
+                clip: true
+                model: root.ftsResults
+                spacing: 4
+                delegate: Rectangle {
+                    width: ListView.view.width
+                    height: 44
+                    color: "white"
+                    border.color: "#dddddd"
+                    Row {
+                        anchors.fill: parent
+                        anchors.margins: 8
+                        spacing: 8
+
+                        Column {
+                            anchors.verticalCenter: parent.verticalCenter
+                            width: parent.width - 16
+                            spacing: 0
+                            Text { text: modelData.headword; color: "black"; font.pixelSize: 16; font.bold: true }
+                            Text { text: modelData.dictName; color: "#777"; font.pixelSize: 11 }
+                        }
+                    }
+                    MouseArea {
+                        anchors.fill: parent
+                        onClicked: engine.lookup(modelData.headword)
+                    }
+                }
+            }
         }
     }
 }

@@ -46,6 +46,12 @@ void EngineController::setActiveGroupId(int id) {
     emit activeGroupChanged();
 }
 
+void EngineController::setBuildingFts(bool b) {
+    if (m_buildingFts == b) return;
+    m_buildingFts = b;
+    emit buildingFtsChanged();
+}
+
 void EngineController::runScan() {
     QFuture<int> f = QtConcurrent::run([staged = m_stagedDir]{
         return gd_scan_dicts(staged.toLocal8Bit().constData());
@@ -314,4 +320,93 @@ void EngineController::suggest(const QString &prefix) {
         w->deleteLater();
     });
     w->setFuture(f);
+}
+int EngineController::ftsIndexState(int dictIndex) const
+{
+    if (!m_ready) return -1;
+    int out = 0;
+    return gd_fts_index_state(dictIndex, &out) == 0 ? out : -1;
+}
+
+QVariantList EngineController::ftsIndexStates() const
+{
+    QVariantList out;
+    if (!m_ready) return out;
+    const int n = m_dictCount;
+    for (int i = 0; i < n; ++i) {
+        int state = 1;
+        const int rc = gd_fts_index_state(i, &state);
+        if (rc != 0) state = -1;
+        QVariantMap m;
+        m.insert("index", i);
+        QString name;
+        for (const QVariant &v : m_dictionaries) {
+            const QVariantMap mm = v.toMap();
+            if (mm.value("index", -1).toInt() == i) { name = mm.value("name").toString(); break; }
+        }
+        if (name.isEmpty()) {
+            std::vector<char> buf(256);
+            if (gd_dict_info(i, buf.data(), static_cast<int>(buf.size()), nullptr, 0) == 0) {
+                name = QString::fromLocal8Bit(buf.data());
+            }
+        }
+        m.insert("name", name);
+        m.insert("state", state);
+        out.append(m);
+    }
+    return out;
+}
+
+void EngineController::ftsIndex(int dictIndex)
+{
+    if (!m_ready) return;
+    if (m_buildingFts) return;
+    setBuildingFts(true);
+    QFuture<int> f = QtConcurrent::run([dictIndex]{
+        return gd_fts_index(dictIndex);
+    });
+    auto *w = new QFutureWatcher<int>(this);
+    connect(w, &QFutureWatcher<int>::finished, this, [this, dictIndex, w]{
+        const int rc = w->result();
+        qInfo() << "[aurelex] ftsIndex dict=" << dictIndex << " rc=" << rc;
+        setBuildingFts(false);
+        emit ftsIndexChanged(dictIndex);
+        w->deleteLater();
+    });
+    w->setFuture(f);
+}
+
+QVariantList EngineController::ftsSearch(const QString &query, int mode, int groupId)
+{
+    if (!m_ready) return QVariantList();
+    if (query.isEmpty()) return QVariantList();
+    QFuture<QVariantList> f = QtConcurrent::run([query, mode, groupId]{
+        std::vector<char> buf(1 << 20);
+        const int n = gd_fts_search(query.toLocal8Bit().constData(), mode, groupId,
+                                    buf.data(), static_cast<int>(buf.size()));
+        if (n < 0) return QVariantList();
+        const QString raw = QString::fromUtf8(buf.data());
+        QVariantList list;
+        const QStringList lines = raw.split('\n', Qt::SkipEmptyParts);
+        for (const QString &line : lines) {
+            const int tab = line.indexOf('\t');
+            QVariantMap row;
+            if (tab < 0) {
+                row.insert("headword", line);
+                row.insert("dictName", QString());
+            } else {
+                row.insert("headword", line.left(tab));
+                row.insert("dictName", line.mid(tab + 1));
+            }
+            list.append(row);
+        }
+        return list;
+    });
+    auto *w = new QFutureWatcher<QVariantList>(this);
+    connect(w, &QFutureWatcher<QVariantList>::finished, this, [this, query, w]{
+        emit ftsSearchReady(query, w->result());
+        w->deleteLater();
+    });
+    w->setFuture(f);
+    return QVariantList();
 }

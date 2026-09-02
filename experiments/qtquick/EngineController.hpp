@@ -64,6 +64,21 @@ public:
     Q_INVOKABLE void deleteGroup(int groupId);
     Q_INVOKABLE void setActiveGroup(int groupId);
 
+    // Full-text search. Index build (`gd_fts_index`) is heavy and runs on the
+    // worker thread; the controller's `buildingFts` Q_PROPERTY flips while it's
+    // in flight and `ftsIndexChanged(dictIndex)` fires on completion. State queries
+    // are fast; `ftsIndexState` returns 0 (built) or 1 (missing/stale) for a
+    // dictionary, and `ftsIndexStates` returns the same for all loaded dicts.
+    // Search returns QVariantList of {headword, dictName} pairs (newline-separated
+    // upstream format, split here). `mode` maps to FTS::SearchMode: 0=xapian
+    // syntax, 1=plain, 2=wildcards, 3=regexp.
+    Q_INVOKABLE void ftsIndex(int dictIndex);
+    Q_INVOKABLE int ftsIndexState(int dictIndex) const;
+    Q_INVOKABLE QVariantList ftsIndexStates() const;
+    Q_INVOKABLE QVariantList ftsSearch(const QString &query, int mode, int groupId = 0);
+
+    bool buildingFts() const { return m_buildingFts; }
+
     // Lookup a word. `articleLoaded(word, html)` on success, or
     // `articleNotFound(word)` when the engine returned a "no match" article.
     Q_INVOKABLE void lookup(const QString &word);
@@ -87,6 +102,9 @@ signals:
     void articleLoaded(const QString &word, const QString &html);
     void articleNotFound(const QString &word);
     void suggestionsReady(const QString &prefix, const QStringList &suggestions);
+    void ftsIndexChanged(int dictIndex);
+    void ftsSearchReady(const QString &query, const QVariantList &results);
+    void buildingFtsChanged();
 
 private:
     void runScan();
@@ -96,6 +114,7 @@ private:
     void setDictionaries(const QVariantList &list);
     void setGroups(const QVariantList &list);
     void setActiveGroupId(int id);
+    void setBuildingFts(bool b);
 
     int m_dictCount = 0;
     bool m_ready = false;
@@ -103,6 +122,7 @@ private:
     QVariantList m_dictionaries;
     QVariantList m_groups;
     int m_activeGroupId = 0;
+    bool m_buildingFts = false;
     QString m_appDir;
     QString m_stagedDir;
 };
