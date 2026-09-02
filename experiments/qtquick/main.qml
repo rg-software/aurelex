@@ -19,6 +19,10 @@ Window {
     property string currentWord: ""
     property string currentHtml: ""
     property var ftsResults: []
+    // Back-stack for in-article navigation. Each entry is a {word, html} pair
+    // so the Back button can pop to the previous article without losing scroll
+    // position (we re-render the prior article's HTML).
+    property var navStack: []
 
     // Dark-mode-aware palette.
     property color bg: engine.darkMode ? "#222222" : "#ececec"
@@ -32,12 +36,26 @@ Window {
     // Qt tab-focus-chain walker forever (ANR deadlock with the IME's
     // blocking finishComposingText on the Android main thread).
     function _showArticle(word, html) {
+        if (currentWord !== "" && currentWord !== word) {
+            navStack.push({ word: currentWord, html: currentHtml })
+        }
         currentWord = word
         currentHtml = html
         _blurActive()
         state = 2
         // Deferred load: loading while the keyboard-hide resize is in flight
         // can leave the Chromium surface blank; wait for it to settle.
+        articleLoadTimer.restart()
+    }
+    function _backFromArticle() {
+        if (navStack.length === 0) {
+            state = 0
+            return
+        }
+        const prev = navStack.pop()
+        currentWord = prev.word
+        currentHtml = prev.html
+        state = 2
         articleLoadTimer.restart()
     }
     function _blurActive() {
@@ -171,11 +189,26 @@ Window {
         visible: root.state === 0
 
         function _doSuggest() {
-            if (input.text.trim().length === 0) {
+            // displayText = committed text + IME preedit: during SwiftKey/
+            // Gboard composition, `text` is empty while the word lives in the
+            // preedit — suggesting on `text` alone misses typing entirely.
+            const t = input.displayText
+            if (t.trim().length === 0) {
                 suggestionList.model = []
                 return
             }
-            engine.suggest(input.text)
+            engine.suggest(t)
+        }
+
+        property var pendingSuggestions: []
+        Timer {
+            id: suggestApplyTimer
+            interval: 60
+            onTriggered: {
+                suggestionList.model = searchPane.pendingSuggestions
+                suggestionList.forceLayout()
+                suggestionList.positionViewAtBeginning()
+            }
         }
 
         Connections {
@@ -183,12 +216,16 @@ Window {
             function onSuggestionsReady(prefix, suggestions) {
                 console.log("[qml] suggestionsReady", prefix, "count:", suggestions.length)
                 // No prefix check here: the C++ side drops stale generations,
-                // and Gboard's composing/autocorrect can rewrite input.text
-                // after the suggest fired (the old filter rejected valid
-                // results, leaving the list stale).
-                suggestionList.model = suggestions
-                suggestionList.forceLayout()
-                suggestionList.positionViewAtBeginning()
+                // and the IME can rewrite the preedit after the suggest fired.
+                // NOTE: qualify explicitly — an unqualified write inside a
+                // Connections handler resolves to a GLOBAL (silently failing,
+                // "Invalid write to global property").
+                // Apply DEFERRED (60ms): assigning the model synchronously
+                // inside the IME's composition event storm leaves the ListView
+                // visually stale (Qt Quick frame starvation, same family as
+                // the blank WebView bug).
+                searchPane.pendingSuggestions = suggestions
+                suggestApplyTimer.restart()
             }
             function onArticleNotFound(word) {
                 suggestionList.model = ["(no results for " + word + ")"]
@@ -212,14 +249,16 @@ Window {
                     // and commits keys directly (no composing/extracted-text
                     // monitoring) — the mechanism that breaks on Qt 6.6 +
                     // Android 15. The field still echoes normal text.
-                    inputMethodHints: Qt.ImhHiddenText
                     activeFocusOnTab: false
                     anchors.fill: parent
                     anchors.leftMargin: 8
                     verticalAlignment: TextInput.AlignVCenter
                     font.pixelSize: 18
                     color: root.fg
-                    onTextChanged: { console.log("[qml] textChanged:", text); debounce.restart() }
+                    // Trigger on displayText (= text + IME preedit): during
+                    // composition `text` is empty while the word lives in the
+                    // preedit, so textChanged alone misses typing.
+                    onDisplayTextChanged: debounce.restart()
                     onAccepted: { focus = false; engine.lookup(text.trim()) }
                     Component.onCompleted: forceActiveFocus()
                 }
@@ -231,7 +270,7 @@ Window {
                     width: 120
                     height: 32
                     color: "#3a3a3a"
-                    Text { anchors.centerIn: parent; color: "white"; font.pixelSize: 13; text: "Clipb2" }
+                    Text { anchors.centerIn: parent; color: "white"; font.pixelSize: 13; text: "Clipboard" }
                     MouseArea {
                         anchors.fill: parent
                         onClicked: {
@@ -431,7 +470,6 @@ Window {
 
                 TextInput {
                     id: newGroupInput
-                    inputMethodHints: Qt.ImhHiddenText
                     activeFocusOnTab: false
                     anchors.fill: parent
                     anchors.leftMargin: 8
@@ -536,7 +574,7 @@ Window {
                     Text { anchors.centerIn: parent; text: "<- Back"; color: "white"; font.pixelSize: 14 }
                     MouseArea {
                         anchors.fill: parent
-                        onClicked: root.state = 0
+                        onClicked: root._backFromArticle()
                     }
                 }
 
@@ -557,6 +595,26 @@ Window {
         WebView {
             id: view
             anchors { top: parent.top; topMargin: 44; left: parent.left; right: parent.right; bottom: parent.bottom }
+            // In-article gdlookup:// interception. QtWebView 6.6 has no
+            // navigationRequested; onUrlChanged fires after the WebView has
+            // already started navigating to the link. We (a) parse the word,
+            // (b) call engine.lookup(), and (c) rewind the WebView with a
+            // loadHtml(about:blank) so the user does not see a "page not
+            // found" frame before the new article lands. The new article's
+            // articleLoaded handler then sets state=2 and re-loads.
+            onUrlChanged: {
+                const u = url.toString()
+                if (u.indexOf("gdlookup://") === 0) {
+                    const word = _parseGdlookupUrl(u)
+                    if (word.length > 0) {
+                        _gdlookupInFlight = word
+                        engine.lookup(word)
+                    }
+                    view.loadHtml("<html><body></body></html>", engine.articleBaseUrl)
+                    return
+                }
+                console.log("WebView url:", u)
+            }
             onLoadingChanged: console.log("WebView loading:", loading, "url:", url)
             onHeightChanged: {
                 if (root.state === 2 && view.height !== root.loadedAtHeight && root.currentHtml.length > 0)
@@ -564,6 +622,31 @@ Window {
             }
         }
     }
+
+    // Parse the upstream gdlookup URL into a word we can pass back into
+    // engine.lookup(). The engine emits two forms (engine/src/article_netmgr.cc):
+    //   gdlookup://localhost/<word>          (path-based)
+    //   gdlookup://localhost/?word=<w>&...   (query-based, after netmgr rewrite)
+    // We also see gdlookup://localhost (the welcome/empty page) — return "".
+    function _parseGdlookupUrl(u) {
+        const q = u.indexOf("?")
+        if (q >= 0) {
+            const params = u.substring(q + 1).split("&")
+            for (let i = 0; i < params.length; ++i) {
+                const kv = params[i].split("=")
+                if (kv.length === 2 && kv[0] === "word") {
+                    return decodeURIComponent(kv[1].replace(/\+/g, " "))
+                }
+            }
+            return ""
+        }
+        const slash = u.indexOf("/", "gdlookup://".length)
+        if (slash < 0) return ""
+        return decodeURIComponent(u.substring(slash + 1))
+    }
+    // Tracks the in-flight lookup triggered by a gdlookup click so we don't
+    // re-trigger on the resulting onUrlChanged for the about:blank rewind.
+    property string _gdlookupInFlight: ""
 
     // --- history view ---
     Rectangle {
@@ -668,6 +751,14 @@ Window {
         }
     }
 
+    Connections {
+        target: engine
+        function onArticleBaseUrlChanged() {
+            if (state === 2 && currentHtml.length > 0)
+                _loadArticleNow()
+        }
+    }
+
     Timer {
         id: articleLoadTimer
         interval: 400
@@ -686,7 +777,12 @@ Window {
     function _loadArticleNow() {
         if (state !== 2) return
         loadedAtHeight = view.height
-        view.loadHtml(engine.rewriteArticleUrls(currentHtml), "file:///android_asset/")
+        // Base URL must be the loopback origin so relative URLs in the article
+        // (and the engine's rewritten qrc:/// / bres:// / gdau://) resolve via
+        // the ArticleServer. Pass an empty base to use the default; the WebView
+        // resolves relative URLs against the loaded HTML's origin.
+        view.loadHtml(engine.rewriteArticleUrls(currentHtml),
+                      engine.articleBaseUrl.length > 0 ? engine.articleBaseUrl + "/" : "")
     }
 
     // Incoming lookups (share / PROCESS_TEXT / deep link / QS tile) are consumed
@@ -721,7 +817,6 @@ Window {
                     border.color: root.cardBorder
                     TextInput {
                         id: ftsInput
-                        inputMethodHints: Qt.ImhHiddenText
                         activeFocusOnTab: false
                         anchors.fill: parent
                         anchors.leftMargin: 8

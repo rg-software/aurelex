@@ -7,7 +7,10 @@
 #include <QVariantMap>
 #include <QFuture>
 #include <QFutureWatcher>
+#include <QPointer>
 #include <QTimer>
+
+class ArticleServer;
 
 extern "C" {
 #include "goldendict.h"
@@ -127,13 +130,19 @@ public:
     Q_INVOKABLE void lookup(const QString &word);
     Q_INVOKABLE void suggest(const QString &prefix);
 
-    // Rewrite upstream article asset URLs (qrc:///, :/<module>/) to
-    // file:///android_asset/ so the platform WebView can load them.
-    // Engine image / audio resources (bres://, gdau://) get a local loopback
-    // HTTP server in a later milestone (article bridge D3 in the all-qt-ui-port
-    // design); for milestone 1 the test dict has no images/audio, so this
-    // rewrite is enough.
+    // Rewrite upstream article asset URLs (qrc:///, bres://, gdau://) to the
+    // loopback HTTP server's origin (baseUrl()). gdlookup:// links in the
+    // article are intercepted separately by the WebView's onUrlChanged handler
+    // (in-article navigation, see main.qml). Engine resource routes are served
+    // by the loopback server; engine qrc:/// assets are bundled into the APK's
+    // assets/ directory by build.ps1.
     Q_INVOKABLE QString rewriteArticleUrls(const QString &html) const;
+
+    // Loopback article server's base URL (e.g. "http://127.0.0.1:54321") once
+    // it has bound a port. Empty before startup. Useful for tests and for
+    // constructing manual resource URLs from QML.
+    Q_PROPERTY(QString articleBaseUrl READ articleBaseUrl NOTIFY articleBaseUrlChanged)
+    QString articleBaseUrl() const;
 
 signals:
     void dictCountChanged();
@@ -152,6 +161,7 @@ signals:
     void favoritesChanged();
     void darkModeChanged();
     void onboardedChanged();
+    void articleBaseUrlChanged();
 
 private:
     void runScan();
@@ -191,4 +201,5 @@ private:
     bool m_onboarded = false;
     QString m_appDir;
     QString m_stagedDir;
+    QPointer<ArticleServer> m_articleServer;
 };

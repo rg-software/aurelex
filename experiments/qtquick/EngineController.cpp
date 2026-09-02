@@ -1,4 +1,5 @@
 #include "EngineController.hpp"
+#include "ArticleServer.hpp"
 
 #include <QtConcurrent>
 #include <QStandardPaths>
@@ -23,6 +24,15 @@ EngineController::EngineController(QObject *parent)
     // completes stay in the file and are picked up on a later tick.
     connect(&m_pollTimer, &QTimer::timeout, this, &EngineController::pollPendingLookup);
     m_pollTimer.start(500);
+
+    // Article bridge: start the loopback HTTP server as soon as the controller
+    // exists so the WebView (and its URL rewriter) can rely on the base URL
+    // being available by the time the first article renders. The server binds
+    // a random free port and emits articleBaseUrlChanged when ready.
+    m_articleServer = new ArticleServer(this);
+    connect(m_articleServer, &ArticleServer::baseUrlChanged,
+            this, &EngineController::articleBaseUrlChanged);
+    m_articleServer->listen();
 }
 
 EngineController::~EngineController() = default;
@@ -318,9 +328,29 @@ void EngineController::setActiveGroup(int groupId) {
 }
 
 QString EngineController::rewriteArticleUrls(const QString &html) const {
+    if (!m_articleServer || !m_articleServer->isRunning()) {
+        // Server hasn't bound yet (cold start, before EngineController's ctor
+        // finished). Return the raw HTML — the WebView will render unstyled
+        // and retry when the base URL becomes available. QML re-loads on
+        // articleBaseUrlChanged if needed.
+        return html;
+    }
+    const QString base = m_articleServer->baseUrl(); // e.g. http://127.0.0.1:54321
     QString out = html;
-    out.replace(QStringLiteral("qrc:///"), QStringLiteral("file:///android_asset/"));
+    // Order matters: bres/gdau MUST be replaced before the bare qrc:// since
+    // they share no syntax. The two URL forms in upstream HTML:
+    //   href="qrc:///scripts/jquery-3.6.0.slim.min.js"
+    //   src="bres://<dictId>/<path-in-mdd>"
+    //   href="gdau://<dictId>/<path>"
+    // All become absolute http URLs against the loopback server.
+    out.replace(QStringLiteral("bres://"), base + QStringLiteral("/bres/"));
+    out.replace(QStringLiteral("gdau://"), base + QStringLiteral("/gdau/"));
+    out.replace(QStringLiteral("qrc:///"), base + QStringLiteral("/"));
     return out;
+}
+
+QString EngineController::articleBaseUrl() const {
+    return (m_articleServer && m_articleServer->isRunning()) ? m_articleServer->baseUrl() : QString();
 }
 
 void EngineController::lookup(const QString &word) {

@@ -27,15 +27,16 @@ $ExpDir     = $PSScriptRoot
 $BuildDir   = Join-Path $RepoRoot "build-qtquick"
 $ApkDir     = Join-Path $BuildDir "apk"
 
-$QtBase     = "C:\Qt\6.6.3"
-$QtHost     = "C:\Qt\6.6.3\msvc2019_64"
-$VcpkgBase  = "C:\vcpkg"
-$NdkRoot    = "C:\Program Files (x86)\Android\AndroidNDK\android-ndk-r23c"
-$RealSdk    = "C:\Program Files (x86)\Android\android-sdk"
-$UnitySdk   = "C:\Program Files\Unity\Hub\Editor\6000.0.62f1\Editor\Data\PlaybackEngines\AndroidPlayer\SDK"
-$Jdk17      = "C:\Program Files\Unity\Hub\Editor\6000.0.62f1\Editor\Data\PlaybackEngines\AndroidPlayer\OpenJDK"
-$CmakeExe   = "$UnitySdk\cmake\3.22.1\bin\cmake.exe"
-$DeployQt   = "$QtHost\bin\androiddeployqt.exe"
+# Local defaults assume the Unity-2025 install layout; CI overrides via env.
+$QtBase     = if ($env:AURELEX_QT_BASE)     { $env:AURELEX_QT_BASE }     else { "C:\Qt\6.6.3" }
+$QtHost     = if ($env:AURELEX_QT_HOST)     { $env:AURELEX_QT_HOST }     else { "$QtBase\msvc2019_64" }
+$VcpkgBase  = if ($env:AURELEX_VCPKG_BASE)  { $env:AURELEX_VCPKG_BASE }  else { "C:\vcpkg" }
+$NdkRoot    = if ($env:AURELEX_NDK_ROOT)    { $env:AURELEX_NDK_ROOT }    else { "C:\Program Files (x86)\Android\AndroidNDK\android-ndk-r23c" }
+$RealSdk    = if ($env:AURELEX_ANDROID_SDK) { $env:AURELEX_ANDROID_SDK } else { "C:\Program Files (x86)\Android\android-sdk" }
+$Jdk17      = if ($env:AURELEX_JDK17)       { $env:AURELEX_JDK17 }       else { "C:\Program Files\Unity\Hub\Editor\6000.0.62f1\Editor\Data\PlaybackEngines\AndroidPlayer\OpenJDK" }
+$UnitySdk   = if ($env:AURELEX_UNITY_SDK)   { $env:AURELEX_UNITY_SDK }   else { "C:\Program Files\Unity\Hub\Editor\6000.0.62f1\Editor\Data\PlaybackEngines\AndroidPlayer\SDK" }
+$CmakeExe   = if ($env:AURELEX_CMAKE_EXE)   { $env:AURELEX_CMAKE_EXE }   else { "$UnitySdk\cmake\3.22.1\bin\cmake.exe" }
+$DeployQt   = if ($env:AURELEX_DEPLOYQT)    { $env:AURELEX_DEPLOYQT }    else { "$QtHost\bin\androiddeployqt.exe" }
 
 if (-not (Test-Path $CmakeExe)) { throw "cmake not found at $CmakeExe" }
 if (-not (Test-Path $DeployQt)) { throw "androiddeployqt not found at $DeployQt" }
@@ -87,6 +88,18 @@ $settings = Join-Path $BuildDir "android-aurelex_exp-deployment-settings.json"
 # not merge the package-source manifest (custom activity / intent-filters /
 # Java sources). Re-copy them after the deploy step.
 Copy-Item (Join-Path $ExpDir "android\AndroidManifest.xml") (Join-Path $ApkDir "AndroidManifest.xml") -Force
+# Version stamping for release builds (CI sets AURELEX_VERSION_NAME / _CODE
+# from the tag; local builds keep the manifest's 0.0.1 / 1 defaults).
+if ($env:AURELEX_VERSION_NAME) {
+    $mPath = Join-Path $ApkDir "AndroidManifest.xml"
+    $m = Get-Content $mPath -Raw
+    $m = $m -replace 'android:versionName="[^"]*"', ('android:versionName="' + $env:AURELEX_VERSION_NAME + '"')
+    if ($env:AURELEX_VERSION_CODE) {
+        $m = $m -replace 'android:versionCode="[^"]*"', ('android:versionCode="' + $env:AURELEX_VERSION_CODE + '"')
+    }
+    Set-Content $mPath $m -NoNewline
+    Write-Host "Stamped manifest versionName=$env:AURELEX_VERSION_NAME versionCode=$env:AURELEX_VERSION_CODE" -ForegroundColor Yellow
+}
 if (Test-Path (Join-Path $ExpDir "android\src")) {
     New-Item -ItemType Directory -Force -Path (Join-Path $ApkDir "src") | Out-Null
     Copy-Item (Join-Path $ExpDir "android\src\*") (Join-Path $ApkDir "src\") -Recurse -Force
@@ -94,6 +107,13 @@ if (Test-Path (Join-Path $ExpDir "android\src")) {
 if (Test-Path (Join-Path $ExpDir "android\res")) {
     New-Item -ItemType Directory -Force -Path (Join-Path $ApkDir "res") | Out-Null
     Copy-Item (Join-Path $ExpDir "android\res\*") (Join-Path $ApkDir "res\") -Recurse -Force
+}
+# Article asset mirror (engine qrc:/// -> APK assets/). androiddeployqt in the
+# carve-subset kit does not always propagate QT_ANDROID_PACKAGE_SOURCE_DIR/assets
+# into the gradle staging tree, so copy explicitly.
+if (Test-Path (Join-Path $ExpDir "android\assets")) {
+    New-Item -ItemType Directory -Force -Path (Join-Path $ApkDir "assets") | Out-Null
+    Copy-Item (Join-Path $ExpDir "android\assets\*") (Join-Path $ApkDir "assets\") -Recurse -Force
 }
 
 # Qt VirtualKeyboard: androiddeployqt plans the VK dependencies but silently
@@ -151,7 +171,10 @@ if ($LASTEXITCODE -ne 0) { throw "androiddeployqt failed" }
 
 Write-Host "== [5/5] gradle overrides + assemble$Configuration ==" -ForegroundColor Cyan
 # androiddeployqt regenerates these two files; re-apply the working overrides.
-Set-Content (Join-Path $ApkDir "local.properties") "sdk.dir=C\:/Program Files (x86)/Android/android-sdk" -NoNewline
+# sdk.dir: the colon is escaped (\:) like the original local default; spaces
+# are left as-is (AGP tolerates them).
+$sdkDir = if ($env:AURELEX_ANDROID_SDK) { $env:AURELEX_ANDROID_SDK } else { "C:\Program Files (x86)\Android\android-sdk" }
+Set-Content (Join-Path $ApkDir "local.properties") "sdk.dir=$($sdkDir -replace ':', '\:')" -NoNewline
 $gpPath = Join-Path $ApkDir "gradle.properties"
 $gp = Get-Content $gpPath -Raw
 $gp = $gp -replace 'androidCompileSdkVersion=android-\d+', 'androidCompileSdkVersion=android-34'
@@ -162,35 +185,53 @@ if (-not (Test-Path (Join-Path $ApkDir "settings.gradle"))) {
     Set-Content (Join-Path $ApkDir "settings.gradle") 'rootProject.name = "aurelex-exp"'
 }
 
-# For Release builds: inject a signing config using the debug keystore
-# (the experiment doesn't have a release keystore yet).
+# For Release builds: inject a signing config. Local builds use the debug
+# keystore; CI overrides via AURELEX_KEYSTORE_PATH / _PASSWORD / _ALIAS /
+# _KEY_PASSWORD (see .github/workflows/release-qt.yml). When neither the
+# env-provided keystore nor the local debug keystore exists (e.g. a CI
+# dry-run with no secrets), skip injection so gradle produces an unsigned
+# release APK instead of failing on a missing storeFile.
 if ($Configuration -eq "Release") {
-    $bgPath = Join-Path $ApkDir "build.gradle"
-    $bg = Get-Content $bgPath -Raw
-    if ($bg -notmatch "signingConfigs") {
-        # Insert signing config before the android { } block
-        $signBlock = @'
+    $ksPath = ""
+    if ($env:AURELEX_KEYSTORE_PATH) {
+        $ksPath = $env:AURELEX_KEYSTORE_PATH
+    } else {
+        $localDebug = Join-Path $env:USERPROFILE ".android\debug.keystore"
+        if (Test-Path $localDebug) { $ksPath = $localDebug }
+    }
+    if ($ksPath) {
+        $ksPass    = if ($env:AURELEX_KEYSTORE_PASSWORD) { $env:AURELEX_KEYSTORE_PASSWORD } else { "android" }
+        $ksAlias   = if ($env:AURELEX_KEY_ALIAS)         { $env:AURELEX_KEY_ALIAS }         else { "androiddebugkey" }
+        $ksKeyPass = if ($env:AURELEX_KEY_PASSWORD)      { $env:AURELEX_KEY_PASSWORD }      else { "android" }
+        $bgPath = Join-Path $ApkDir "build.gradle"
+        $bg = Get-Content $bgPath -Raw
+        if ($bg -notmatch "signingConfigs") {
+            # Insert signing config before the android { } block
+            $signBlock = @"
 
     signingConfigs {
         release {
-            storeFile file("C:/Users/Maxim/.android/debug.keystore")
-            storePassword "android"
-            keyAlias "androiddebugkey"
-            keyPassword "android"
+            storeFile file("$($ksPath -replace '\\', '/')")
+            storePassword "$ksPass"
+            keyAlias "$ksAlias"
+            keyPassword "$ksKeyPass"
         }
     }
-'@
-        # Insert after "apply plugin: 'com.android.application'" and deps
-        $marker = "android {"
-        $idx = $bg.IndexOf($marker)
-        if ($idx -ge 0) {
-            # Insert the signing configs right before android {
-            $bg = $bg.Substring(0, $idx).TrimEnd() + "`n`n" + $signBlock.TrimStart() + "`n" + $bg.Substring($idx)
+"@
+            # Insert after "apply plugin: 'com.android.application'" and deps
+            $marker = "android {"
+            $idx = $bg.IndexOf($marker)
+            if ($idx -ge 0) {
+                # Insert the signing configs right before android {
+                $bg = $bg.Substring(0, $idx).TrimEnd() + "`n`n" + $signBlock.TrimStart() + "`n" + $bg.Substring($idx)
+            }
+            # Add signingConfig to the release build type
+            $bg = $bg -replace '(buildTypes\s*\{[^}]*release\s*\{)', "`$1`n            signingConfig signingConfigs.release"
+            Set-Content $bgPath $bg -NoNewline
+            Write-Host "Injected release signing config (storeFile=$ksPath)." -ForegroundColor Yellow
         }
-        # Add signingConfig to the release build type
-        $bg = $bg -replace '(buildTypes\s*\{[^}]*release\s*\{)', "`$1`n            signingConfig signingConfigs.release"
-        Set-Content $bgPath $bg -NoNewline
-        Write-Host "Injected release signing config." -ForegroundColor Yellow
+    } else {
+        Write-Host "No release keystore available; building unsigned release APK." -ForegroundColor Yellow
     }
 }
 

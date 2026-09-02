@@ -42,8 +42,9 @@ set(Qt6Concurrent_DIR "${QT_ANDROID_ROOT}/lib/cmake/Qt6Concurrent" CACHE PATH ""
 set(Qt6Qml_DIR        "${QT_ANDROID_ROOT}/lib/cmake/Qt6Qml"        CACHE PATH "" FORCE)
 set(Qt6Quick_DIR      "${QT_ANDROID_ROOT}/lib/cmake/Qt6Quick"      CACHE PATH "" FORCE)
 set(Qt6WebView_DIR    "${QT_ANDROID_ROOT}/lib/cmake/Qt6WebView"    CACHE PATH "" FORCE)
+set(Qt6Network_DIR    "${QT_ANDROID_ROOT}/lib/cmake/Qt6Network"    CACHE PATH "" FORCE)
 
-find_package(Qt6 REQUIRED COMPONENTS Core Gui Xml Concurrent Qml Quick WebView VirtualKeyboard)
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Xml Concurrent Qml Quick WebView Network VirtualKeyboard)
 
 set(VCPKG_ANDROID_ROOT "${VCPKG_BASE}/installed/${VCPKG_TRIPLET}")
 link_directories("${VCPKG_ANDROID_ROOT}/lib")
@@ -58,6 +59,7 @@ set(ENGINE_SRC "${CMAKE_CURRENT_SOURCE_DIR}/../../../../engine")
 qt_add_executable(aurelex_exp
     main.cpp
     EngineController.cpp
+    ArticleServer.cpp
     $<TARGET_OBJECTS:aurelex_carve>
 )
 target_include_directories(aurelex_exp PRIVATE
@@ -73,7 +75,7 @@ target_include_directories(aurelex_exp PRIVATE
 # final link (they are not propagated from an OBJECT library).
 target_link_libraries(aurelex_exp PRIVATE
     Qt6::Core Qt6::Gui Qt6::Xml Qt6::Concurrent
-    Qt6::Qml Qt6::Quick Qt6::WebView
+    Qt6::Qml Qt6::Quick Qt6::WebView Qt6::Network
     Qt6::VirtualKeyboard
     xapian z bz2 lzma lzo2 fmt
 )

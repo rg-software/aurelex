@@ -1,0 +1,59 @@
+#wordList,
+#dictsPane,
+#dictsList,
+#historyPane,
+#historyList,
+#favoritesPane,
+#favoritesTree {
+  background: #fefdeb;
+  color: black;
+}
+
+#navToolbar #menuButton::menu-indicator {
+  image: none;
+}
+
+/* stylelint-disable-next-line selector-type-no-unknown */
+QTabBar::close-button {
+  image: url(:/icons/closetab.svg);
+}
+/* stylelint-disable-next-line selector-type-no-unknown */
+QTabBar::close-button:hover {
+  image: url(:/icons/closetab-hover.png);
+}
+
+ScanPopup #translateLine {
+  margin: 0px;
+  padding: 1px 3px 1px 3px;
+  border: 1px solid gray;
+  border-radius: 3px;
+  border-top-left-radius: 0px;
+  border-bottom-left-radius: 0px;
+}
+
+ScanPopup GroupComboBox {
+  margin: 0px 0px 0px 1px;
+  padding: 1px 4px 1px 4px;
+  border: 1px solid gray;
+  border-right: 1px transparent;
+  border-radius: 3px;
+  border-top-right-radius: 0px;
+  border-bottom-right-radius: 0px;
+}
+
+ScanPopup GroupComboBox:on {
+  padding: 3px 3px 1px 5px;
+}
+
+ScanPopup GroupComboBox::drop-down {
+  subcontrol-origin: padding;
+  subcontrol-position: top right;
+  width: 15px;
+  border-left: 1px solid darkgray;
+  border-right: 1px transparent;
+}
+
+ScanPopup GroupComboBox::down-arrow {
+  image: url(:/icons/1downarrow.svg);
+  max-height: 100%;
+}
