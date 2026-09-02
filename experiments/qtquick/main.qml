@@ -1,10 +1,10 @@
 import QtQuick
 import QtWebView
 
-// Milestone 1 (core lookup): one Window that hosts both the search view and
-// the article view, switched via local state. Bare QtQuick only (no
-// QtQuick.Controls2, no separate QtQuick.Window import — Window comes from
-// `import QtQuick` here, as proven in the original experiment).
+// Milestone 2 (dictionaries): same single-Window layout with three panes
+// (search, dictionaries, article) switched by an integer state. Bare QtQuick
+// only. Dictionary list lives on EngineController as a QVariantList; we drive
+// a refresh on entering the pane and on every mutation.
 Window {
     id: root
     width: 480
@@ -13,30 +13,67 @@ Window {
     title: "AurelexExp"
     color: "#ececec"
 
+    // 0 = search, 1 = dictionaries, 2 = article.
+    property int state: 0
     property string currentWord: ""
     property string currentHtml: ""
 
-    // The article bridge: in this minimal build we still rely on the rewrite of
-    // upstream qrc:/// to file:///android_asset/ and the engine's in-process
-    // render. EngineController.rewriteArticleUrls handles it; QtWebView cannot
-    // intercept custom schemes. Audio / image resources (bres://, gdau://)
-    // land in the loopback HTTP server milestone (design D3).
     function _showArticle(word, html) {
         currentWord = word
         currentHtml = html
-        searchPane.visible = false
-        articlePane.visible = true
+        state = 2
     }
     function _backToSearch() {
-        searchPane.visible = true
-        articlePane.visible = false
+        state = 0
+    }
+    function _openDicts() {
+        engine.refreshDictionaries()
+        state = 1
+    }
+
+    // --- shared top bar ---
+    Rectangle {
+        id: topBar
+        width: parent.width
+        height: 44
+        color: "#222222"
+        z: 5
+
+        Row {
+            anchors.fill: parent
+            anchors.leftMargin: 12
+            spacing: 12
+
+            Rectangle {
+                width: 90
+                height: 30
+                anchors.verticalCenter: parent.verticalCenter
+                color: "#3a3a3a"
+                Text { anchors.centerIn: parent; color: "white"; font.pixelSize: 13; text: root.state === 0 ? "Dicts" : (root.state === 1 ? "<- Search" : "<- Dicts") }
+                MouseArea {
+                    anchors.fill: parent
+                    onClicked: {
+                        if (root.state === 0) root._openDicts()
+                        else root.state = 0
+                    }
+                }
+            }
+
+            Text {
+                anchors.verticalCenter: parent.verticalCenter
+                color: "white"
+                font.pixelSize: 16
+                text: root.state === 0 ? "Search" : (root.state === 1 ? "Dictionaries (" + engine.dictCount + ")" : root.currentWord)
+            }
+        }
     }
 
     // --- search view ---
     Rectangle {
         id: searchPane
-        anchors.fill: parent
+        anchors { top: topBar.bottom; left: parent.left; right: parent.right; bottom: parent.bottom }
         color: "#ececec"
+        visible: root.state === 0
 
         function _doSuggest() {
             if (input.text.trim().length === 0) {
@@ -71,16 +108,16 @@ Window {
                 color: "white"
                 border.color: "#cccccc"
 
-            TextInput {
-                id: input
-                anchors.fill: parent
-                anchors.leftMargin: 8
-                verticalAlignment: TextInput.AlignVCenter
-                font.pixelSize: 18
-                onTextChanged: debounce.restart()
-                onAccepted: engine.lookup(text.trim())
-                Component.onCompleted: forceActiveFocus()
-            }
+                TextInput {
+                    id: input
+                    anchors.fill: parent
+                    anchors.leftMargin: 8
+                    verticalAlignment: TextInput.AlignVCenter
+                    font.pixelSize: 18
+                    onTextChanged: debounce.restart()
+                    onAccepted: engine.lookup(text.trim())
+                    Component.onCompleted: forceActiveFocus()
+                }
             }
 
             Timer {
@@ -117,12 +154,78 @@ Window {
         }
     }
 
+    // --- dictionaries view ---
+    Rectangle {
+        id: dictsPane
+        anchors { top: topBar.bottom; left: parent.left; right: parent.right; bottom: parent.bottom }
+        color: "#ececec"
+        visible: root.state === 1
+
+        Component.onCompleted: engine.refreshDictionaries()
+        Connections {
+            target: engine
+            function onDictionariesChanged() { dictsList.model = engine.dictionaries }
+            function onReadyChanged() { if (engine.ready) engine.refreshDictionaries() }
+        }
+
+        ListView {
+            id: dictsList
+            anchors.fill: parent
+            anchors.margins: 12
+            clip: true
+            model: engine.dictionaries
+            spacing: 6
+            delegate: Rectangle {
+                width: ListView.view.width
+                height: 56
+                color: "white"
+                border.color: "#dddddd"
+                Column {
+                    anchors.fill: parent
+                    anchors.margins: 8
+                    spacing: 2
+                    Text { text: modelData.name; color: "black"; font.pixelSize: 16; font.bold: true }
+                    Text { text: modelData.source; color: "#777"; font.pixelSize: 12; elide: Text.ElideMiddle; width: parent.width }
+                    Row {
+                        spacing: 8
+                        height: 28
+                        Repeater {
+                            model: [
+                                { label: "Up",   delta: -1 },
+                                { label: "Down", delta:  1 },
+                                { label: "Remove", delta: 0 }
+                            ]
+                            delegate: Rectangle {
+                                width: 76
+                                height: 28
+                                color: modelData.label === "Remove" ? "#882222" : "#3a3a3a"
+                                Text { anchors.centerIn: parent; text: modelData.label; color: "white"; font.pixelSize: 12 }
+                                MouseArea {
+                                    anchors.fill: parent
+                                    onClicked: {
+                                        const idx = index
+                                        if (modelData.label === "Remove") {
+                                            engine.removeDictionary(idx)
+                                        } else {
+                                            const target = Math.max(0, Math.min(engine.dictionaries.length - 1, idx + modelData.delta))
+                                            if (target !== idx) engine.moveDictionary(idx, target)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     // --- article view ---
     Rectangle {
         id: articlePane
-        anchors.fill: parent
+        anchors { top: topBar.bottom; left: parent.left; right: parent.right; bottom: parent.bottom }
         color: "#ececec"
-        visible: false
+        visible: root.state === 2
 
         Rectangle {
             width: parent.width
@@ -143,15 +246,8 @@ Window {
                     Text { anchors.centerIn: parent; text: "<- Back"; color: "white"; font.pixelSize: 14 }
                     MouseArea {
                         anchors.fill: parent
-                        onClicked: root._backToSearch()
+                        onClicked: root.state = 0
                     }
-                }
-
-                Text {
-                    anchors.verticalCenter: parent.verticalCenter
-                    text: root.currentWord
-                    color: "white"
-                    font.pixelSize: 18
                 }
             }
         }
@@ -166,34 +262,12 @@ Window {
     Connections {
         target: engine
         function onArticleLoaded(word, html) {
-            // For the search-pane -> article-pane flow, the inline function above
-            // also runs; this is the second connection (harmless: it just re-sets
-            // the same properties). Kept so the inline switch works when the QML
-            // engine dispatches the signal through any one of the connections.
             root._showArticle(word, html)
         }
     }
 
-    Component.onCompleted: {
-        // engine.rewriteArticleUrls is a Q_INVOKABLE on the controller; pass
-        // the rewritten HTML to the WebView when navigating to article view.
-        view.loadHtml(engine.rewriteArticleUrls(currentHtml), "file:///android_asset/")
-
-        // Experiment self-test: one-shot lookup a few seconds after start so the
-        // full engine -> signal -> QML -> WebView pipeline runs without requiring
-        // adb input. Remove when the experiment is no longer a smoke test.
-        oneShotTimer.start()
-    }
-
-    Timer {
-        id: oneShotTimer
-        interval: 2500
-        repeat: false
-        onTriggered: engine.lookup("apple")
-    }
-
     onCurrentHtmlChanged: {
-        if (articlePane.visible) {
+        if (state === 2) {
             view.loadHtml(engine.rewriteArticleUrls(currentHtml), "file:///android_asset/")
         }
     }
