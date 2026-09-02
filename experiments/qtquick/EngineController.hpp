@@ -28,6 +28,7 @@ class EngineController : public QObject
     Q_PROPERTY(QStringList favorites READ favorites NOTIFY favoritesChanged)
     Q_PROPERTY(bool darkMode READ darkMode WRITE setDarkMode NOTIFY darkModeChanged)
     Q_PROPERTY(bool onboarded READ onboarded WRITE setOnboarded NOTIFY onboardedChanged)
+    Q_PROPERTY(bool buildingFts READ buildingFts NOTIFY buildingFtsChanged)
 public:
     explicit EngineController(QObject *parent = nullptr);
     ~EngineController() override;

@@ -1,42 +1,75 @@
 import QtQuick
 import QtWebView
 
-// Milestone 3 (groups): a fourth pane (Groups) joins the cycle
-// search -> dictionaries -> groups -> search. Bare QtQuick only.
+// All-Qt UI: search / dictionaries / groups / FTS / history / favorites /
+// article panes switched by `state`, plus onboarding + dark mode.
+// Bare QtQuick only (no Controls2 in the carve-subset install).
 Window {
     id: root
     width: 480
     height: 800
     visible: true
     title: "AurelexExp"
-    color: "#ececec"
+    color: root.bg
 
-    // 0 = search, 1 = dictionaries, 2 = article, 3 = groups, 4 = fts.
+    // 0 = search, 1 = dictionaries, 2 = article, 3 = groups, 4 = fts,
+    // 5 = history, 6 = favorites.
     property int state: 0
     property string currentWord: ""
     property string currentHtml: ""
     property int ftsMode: 0
     property var ftsResults: []
 
+    // Dark-mode-aware palette.
+    property color bg: engine.darkMode ? "#222222" : "#ececec"
+    property color card: engine.darkMode ? "#2e2e2e" : "white"
+    property color cardBorder: engine.darkMode ? "#444444" : "#dddddd"
+    property color fg: engine.darkMode ? "#eeeeee" : "black"
+    property color subFg: engine.darkMode ? "#999999" : "#777777"
+
+    // All pane switches blur the focused input BEFORE hiding its pane:
+    // an IME query arriving at a focused-but-hidden item can spin the
+    // Qt tab-focus-chain walker forever (ANR deadlock with the IME's
+    // blocking finishComposingText on the Android main thread).
     function _showArticle(word, html) {
         currentWord = word
         currentHtml = html
+        _blurActive()
         state = 2
+        // Deferred load: loading while the keyboard-hide resize is in flight
+        // can leave the Chromium surface blank; wait for it to settle.
+        articleLoadTimer.restart()
     }
-    function _backToSearch() {
-        state = 0
+    function _blurActive() {
+        if (root.activeFocusItem && root.activeFocusItem.forceActiveFocus === undefined) return
+        // Move active focus to the root window item (no activeFocusOnTab items
+        // remain in the chain while inputs are blurred).
+        if (input.activeFocus) input.focus = false
+        if (newGroupInput.activeFocus) newGroupInput.focus = false
+        if (ftsInput.activeFocus) ftsInput.focus = false
     }
     function _openDicts() {
+        _blurActive()
         engine.refreshDictionaries()
         state = 1
     }
     function _openGroups() {
+        _blurActive()
         engine.refreshGroups()
         state = 3
     }
     function _openFts() {
+        _blurActive()
         ftsResults = []
         state = 4
+    }
+    function _openHistory() {
+        _blurActive()
+        state = 5
+    }
+    function _openFavorites() {
+        _blurActive()
+        state = 6
     }
     function _runFts() {
         engine.ftsSearch(ftsInput.text, ftsMode, engine.activeGroupId)
@@ -63,7 +96,7 @@ Window {
             anchors.leftMargin: 12
             spacing: 12
 
-            // Cycle button: search -> dicts -> groups -> fts -> search.
+            // Cycle button: search -> dicts -> groups -> fts -> hist -> favs -> search.
             Rectangle {
                 width: 90
                 height: 30
@@ -76,7 +109,9 @@ Window {
                     text: root.state === 0 ? "Dicts"
                         : root.state === 1 ? "Groups"
                         : root.state === 3 ? "FTS"
-                        : root.state === 4 ? "<- Search"
+                        : root.state === 4 ? "Hist"
+                        : root.state === 5 ? "Favs"
+                        : root.state === 6 ? "<- Search"
                         : "Dicts"
                 }
                 MouseArea {
@@ -85,7 +120,8 @@ Window {
                         if (root.state === 0) root._openDicts()
                         else if (root.state === 1) root._openGroups()
                         else if (root.state === 3) root._openFts()
-                        else if (root.state === 4) root.state = 0
+                        else if (root.state === 4) root._openHistory()
+                        else if (root.state === 5) root._openFavorites()
                         else root.state = 0
                     }
                 }
@@ -99,7 +135,26 @@ Window {
                     : root.state === 1 ? "Dictionaries (" + engine.dictCount + ")"
                     : root.state === 3 ? "Groups (" + engine.groups.length + ", active=" + engine.activeGroupId + ")"
                     : root.state === 4 ? "FTS (" + root.ftsResults.length + ")"
+                    : root.state === 5 ? "History (" + engine.history.length + ")"
+                    : root.state === 6 ? "Favorites (" + engine.favorites.length + ")"
                     : root.currentWord
+            }
+
+            Rectangle {
+                width: 32
+                height: 30
+                anchors.verticalCenter: parent.verticalCenter
+                color: "#3a3a3a"
+                Text {
+                    anchors.centerIn: parent
+                    color: engine.darkMode ? "gold" : "white"
+                    font.pixelSize: 14
+                    text: "D"
+                }
+                MouseArea {
+                    anchors.fill: parent
+                    onClicked: engine.darkMode = !engine.darkMode
+                }
             }
         }
     }
@@ -108,7 +163,7 @@ Window {
     Rectangle {
         id: searchPane
         anchors { top: topBar.bottom; left: parent.left; right: parent.right; bottom: parent.bottom }
-        color: "#ececec"
+        color: root.bg
         visible: root.state === 0
 
         function _doSuggest() {
@@ -125,9 +180,6 @@ Window {
                 if (prefix !== input.text) return
                 suggestionList.model = suggestions
             }
-            function onArticleLoaded(word, html) {
-                root._showArticle(word, html)
-            }
             function onArticleNotFound(word) {
                 suggestionList.model = ["(no results for " + word + ")"]
             }
@@ -141,18 +193,41 @@ Window {
             Rectangle {
                 width: parent.width
                 height: 48
-                color: "white"
-                border.color: "#cccccc"
+                color: root.card
+                border.color: root.cardBorder
 
                 TextInput {
                     id: input
+                    // ImhNoPredictiveText reduces IME composing side effects;
+                    // activeFocusOnTab=false keeps the tab-focus chain empty so
+                    // IME queries never walk it (infinite-loop ANR, see _blurActive).
+                    inputMethodHints: Qt.ImhNoPredictiveText | Qt.ImhNoAutoUppercase
+                    activeFocusOnTab: false
                     anchors.fill: parent
                     anchors.leftMargin: 8
                     verticalAlignment: TextInput.AlignVCenter
                     font.pixelSize: 18
+                    color: root.fg
                     onTextChanged: debounce.restart()
-                    onAccepted: engine.lookup(text.trim())
+                    onAccepted: { focus = false; engine.lookup(text.trim()) }
                     Component.onCompleted: forceActiveFocus()
+                }
+            }
+
+            Row {
+                spacing: 8
+                Rectangle {
+                    width: 120
+                    height: 32
+                    color: "#3a3a3a"
+                    Text { anchors.centerIn: parent; color: "white"; font.pixelSize: 13; text: "Clipboard" }
+                    MouseArea {
+                        anchors.fill: parent
+                        onClicked: {
+                            const t = engine.clipboardText()
+                            if (t.length > 0) engine.lookup(t)
+                        }
+                    }
                 }
             }
 
@@ -173,14 +248,14 @@ Window {
             ListView {
                 id: suggestionList
                 width: parent.width
-                height: parent.height - 56
+                height: parent.height - 100
                 clip: true
                 model: []
                 delegate: Rectangle {
                     width: ListView.view.width
                     height: 40
-                    color: "white"
-                    Text { anchors.verticalCenter: parent.verticalCenter; anchors.left: parent.left; anchors.leftMargin: 12; text: modelData; color: "black"; font.pixelSize: 16 }
+                    color: root.card
+                    Text { anchors.verticalCenter: parent.verticalCenter; anchors.left: parent.left; anchors.leftMargin: 12; text: modelData; color: root.fg; font.pixelSize: 16 }
                     MouseArea {
                         anchors.fill: parent
                         onClicked: engine.lookup(modelData)
@@ -194,7 +269,7 @@ Window {
     Rectangle {
         id: dictsPane
         anchors { top: topBar.bottom; left: parent.left; right: parent.right; bottom: parent.bottom }
-        color: "#ececec"
+        color: root.bg
         visible: root.state === 1
 
         Component.onCompleted: engine.refreshDictionaries()
@@ -204,52 +279,71 @@ Window {
             function onReadyChanged() { if (engine.ready) engine.refreshDictionaries() }
         }
 
-        ListView {
-            id: dictsList
+        Column {
             anchors.fill: parent
             anchors.margins: 12
-            clip: true
-            model: engine.dictionaries
-            spacing: 6
-            delegate: Rectangle {
-                width: ListView.view.width
-                height: 56
-                color: "white"
-                border.color: "#dddddd"
-                Column {
-                    anchors.fill: parent
-                    anchors.margins: 8
-                    spacing: 2
-                    Text { text: modelData.name; color: "black"; font.pixelSize: 16; font.bold: true }
-                    Text { text: modelData.source; color: "#777"; font.pixelSize: 12; elide: Text.ElideMiddle; width: parent.width }
-                    Row {
-                        spacing: 8
-                        height: 28
-                        Repeater {
-                            model: [
-                                { label: "Up",   delta: -1 },
-                                { label: "Down", delta:  1 },
-                                { label: "Index", delta: -2 },
-                                { label: "Remove", delta: 0 }
-                            ]
-                            delegate: Rectangle {
-                                width: 76
-                                height: 28
-                                color: modelData.label === "Remove" ? "#882222"
-                                    : modelData.label === "Index" ? "#224488" : "#3a3a3a"
-                                Text { anchors.centerIn: parent; text: modelData.label; color: "white"; font.pixelSize: 12 }
-                                MouseArea {
-                                    anchors.fill: parent
-                                    onClicked: {
-                                        const idx = index
-                                        const op = modelData.label
-                                        if (op === "Remove") {
-                                            engine.removeDictionary(idx)
-                                        } else if (op === "Index") {
-                                            engine.ftsIndex(idx)
-                                        } else {
-                                            const target = Math.max(0, Math.min(engine.dictionaries.length - 1, idx + modelData.delta))
-                                            if (target !== idx) engine.moveDictionary(idx, target)
+            spacing: 8
+
+            Rectangle {
+                width: 120
+                height: 32
+                color: "#3a3a3a"
+                Text { anchors.centerIn: parent; color: "white"; font.pixelSize: 13; text: "Rescan" }
+                MouseArea { anchors.fill: parent; onClicked: engine.rescan() }
+            }
+
+            ListView {
+                id: dictsList
+                width: parent.width
+                height: parent.height - 40
+                clip: true
+                model: engine.dictionaries
+                spacing: 6
+                delegate: Rectangle {
+                    id: dictRow
+                    // Capture the outer ListView's model roles: the inner button
+                    // Repeater shadows `index`/`modelData`.
+                    property int dictIndex: index
+                    property var dictData: modelData
+                    width: ListView.view.width
+                    height: 56
+                    color: root.card
+                    border.color: root.cardBorder
+                    Column {
+                        anchors.fill: parent
+                        anchors.margins: 8
+                        spacing: 2
+                        Text { text: dictRow.dictData.name; color: root.fg; font.pixelSize: 16; font.bold: true }
+                        Text { text: dictRow.dictData.source; color: root.subFg; font.pixelSize: 12; elide: Text.ElideMiddle; width: parent.width }
+                        Row {
+                            spacing: 8
+                            height: 28
+                            Repeater {
+                                model: [
+                                    { label: "Up",   delta: -1 },
+                                    { label: "Down", delta:  1 },
+                                    { label: "Index", delta: -2 },
+                                    { label: "Remove", delta: 0 }
+                                ]
+                                delegate: Rectangle {
+                                    width: 76
+                                    height: 28
+                                    color: modelData.label === "Remove" ? "#882222"
+                                        : modelData.label === "Index" ? "#224488" : "#3a3a3a"
+                                    Text { anchors.centerIn: parent; text: modelData.label; color: "white"; font.pixelSize: 12 }
+                                    MouseArea {
+                                        anchors.fill: parent
+                                        onClicked: {
+                                            const idx = dictRow.dictIndex
+                                            const op = modelData.label
+                                            if (op === "Remove") {
+                                                engine.removeDictionary(idx)
+                                            } else if (op === "Index") {
+                                                engine.ftsIndex(idx)
+                                            } else {
+                                                const target = Math.max(0, Math.min(engine.dictionaries.length - 1, idx + modelData.delta))
+                                                if (target !== idx) engine.moveDictionary(idx, target)
+                                            }
                                         }
                                     }
                                 }
@@ -265,7 +359,7 @@ Window {
     Rectangle {
         id: groupsPane
         anchors { top: topBar.bottom; left: parent.left; right: parent.right; bottom: parent.bottom }
-        color: "#ececec"
+        color: root.bg
         visible: root.state === 3
 
         Component.onCompleted: engine.refreshGroups()
@@ -283,15 +377,18 @@ Window {
             Rectangle {
                 width: parent.width
                 height: 48
-                color: "white"
-                border.color: "#cccccc"
+                color: root.card
+                border.color: root.cardBorder
 
                 TextInput {
                     id: newGroupInput
+                    inputMethodHints: Qt.ImhNoPredictiveText | Qt.ImhNoAutoUppercase
+                    activeFocusOnTab: false
                     anchors.fill: parent
                     anchors.leftMargin: 8
                     verticalAlignment: TextInput.AlignVCenter
                     font.pixelSize: 18
+                    color: root.fg
                     onAccepted: {
                         if (text.trim().length > 0) {
                             engine.createGroup(text.trim())
@@ -309,10 +406,14 @@ Window {
                 model: engine.groups
                 spacing: 6
                 delegate: Rectangle {
+                    id: groupRow
+                    // Capture the outer ListView's model roles: the inner button
+                    // Repeater shadows `index`/`modelData`.
+                    property var groupData: modelData
                     width: ListView.view.width
                     height: 48
-                    color: modelData.id === engine.activeGroupId ? "#224422" : "white"
-                    border.color: "#dddddd"
+                    color: groupRow.groupData.id === engine.activeGroupId ? "#224422" : root.card
+                    border.color: root.cardBorder
                     Row {
                         anchors.fill: parent
                         anchors.margins: 8
@@ -322,8 +423,12 @@ Window {
                             anchors.verticalCenter: parent.verticalCenter
                             width: parent.width - 280
                             spacing: 0
-                            Text { text: modelData.name + " (" + modelData.dictCount + ")"; color: "white"; font.pixelSize: 16; font.bold: true }
-                            Text { text: "id=" + modelData.id; color: "#cccccc"; font.pixelSize: 11 }
+                            Text {
+                                text: groupRow.groupData.name + " (" + groupRow.groupData.dictCount + ")"
+                                color: groupRow.groupData.id === engine.activeGroupId ? "white" : root.fg
+                                font.pixelSize: 16; font.bold: true
+                            }
+                            Text { text: "id=" + groupRow.groupData.id; color: root.subFg; font.pixelSize: 11 }
                         }
 
                         Repeater {
@@ -341,15 +446,11 @@ Window {
                                 MouseArea {
                                     anchors.fill: parent
                                     onClicked: {
-                                        const id = modelData.id
+                                        const id = groupRow.groupData.id
                                         const op = modelData.op
                                         if (op === "activate") engine.setActiveGroup(id)
-                                        else if (op === "rename") {
-                                            // Quick rename: append "_r" for demonstration; a real
-                                            // UI would use a dialog. For the experiment gate, the
-                                            // round-trip is what matters.
-                                            engine.renameGroup(id, modelData.name + "_r")
-                                        } else if (op === "delete") engine.deleteGroup(id)
+                                        else if (op === "rename") engine.renameGroup(id, groupRow.groupData.name + "_r")
+                                        else if (op === "delete") engine.deleteGroup(id)
                                     }
                                 }
                             }
@@ -364,7 +465,7 @@ Window {
     Rectangle {
         id: articlePane
         anchors { top: topBar.bottom; left: parent.left; right: parent.right; bottom: parent.bottom }
-        color: "#ececec"
+        color: root.bg
         visible: root.state === 2
 
         Rectangle {
@@ -411,48 +512,113 @@ Window {
         }
     }
 
+    // --- history view ---
+    Rectangle {
+        id: historyPane
+        anchors { top: topBar.bottom; left: parent.left; right: parent.right; bottom: parent.bottom }
+        color: root.bg
+        visible: root.state === 5
+
+        Column {
+            anchors.fill: parent
+            anchors.margins: 12
+            spacing: 8
+
+            Rectangle {
+                width: 120
+                height: 32
+                color: "#882222"
+                Text { anchors.centerIn: parent; color: "white"; font.pixelSize: 13; text: "Clear all" }
+                MouseArea { anchors.fill: parent; onClicked: engine.clearHistory() }
+            }
+
+            ListView {
+                width: parent.width
+                height: parent.height - 40
+                clip: true
+                model: engine.history
+                spacing: 4
+                delegate: Rectangle {
+                    id: histRow
+                    property string word: modelData
+                    width: ListView.view.width
+                    height: 44
+                    color: root.card
+                    border.color: root.cardBorder
+                    Text {
+                        anchors.verticalCenter: parent.verticalCenter
+                        anchors.left: parent.left; anchors.leftMargin: 12
+                        text: histRow.word; color: root.fg; font.pixelSize: 16
+                    }
+                    MouseArea {
+                        anchors.fill: parent
+                        onClicked: engine.lookup(histRow.word)
+                    }
+                    Rectangle {
+                        width: 40; height: 32
+                        anchors.verticalCenter: parent.verticalCenter
+                        anchors.right: parent.right; anchors.rightMargin: 8
+                        color: "#882222"
+                        Text { anchors.centerIn: parent; color: "white"; text: "X" }
+                        MouseArea { anchors.fill: parent; onClicked: engine.removeHistory(histRow.word) }
+                    }
+                }
+            }
+        }
+    }
+
+    // --- favorites view ---
+    Rectangle {
+        id: favoritesPane
+        anchors { top: topBar.bottom; left: parent.left; right: parent.right; bottom: parent.bottom }
+        color: root.bg
+        visible: root.state === 6
+
+        ListView {
+            anchors.fill: parent
+            anchors.margins: 12
+            clip: true
+            model: engine.favorites
+            spacing: 4
+            delegate: Rectangle {
+                id: favRow
+                property string word: modelData
+                width: ListView.view.width
+                height: 44
+                color: root.card
+                border.color: root.cardBorder
+                Text {
+                    anchors.verticalCenter: parent.verticalCenter
+                    anchors.left: parent.left; anchors.leftMargin: 12
+                    text: favRow.word; color: root.fg; font.pixelSize: 16
+                }
+                MouseArea {
+                    anchors.fill: parent
+                    onClicked: engine.lookup(favRow.word)
+                }
+                Rectangle {
+                    width: 40; height: 32
+                    anchors.verticalCenter: parent.verticalCenter
+                    anchors.right: parent.right; anchors.rightMargin: 8
+                    color: "#882222"
+                    Text { anchors.centerIn: parent; color: "white"; text: "X" }
+                    MouseArea { anchors.fill: parent; onClicked: engine.toggleFavorite(favRow.word) }
+                }
+            }
+        }
+    }
+
     Connections {
         target: engine
         function onArticleLoaded(word, html) {
             root._showArticle(word, html)
         }
-        // Experiment smoke test for FTS: when the dictionary list is ready, build
-        // the FTS index for every loaded dict, then run a body-word search for
-        // "app" and log the result. Lets us verify the FTS pipeline end-to-end
-        // on-device without tapping through the UI. This block can be removed once
-        // the QML UI is interactive enough to drive directly.
-        function onDictionariesChanged() {
-            if (!engine.ready) return
-            if (engine.dictCount === 0) return
-            if (ftsSmokeArmed === false) return
-            ftsSmokeArmed = false
-            for (let i = 0; i < engine.dictCount; ++i) engine.ftsIndex(i)
-            ftsBuildWaitTimer.start()
-        }
     }
-
-    property bool ftsSmokeArmed: true
 
     Timer {
-        id: ftsBuildWaitTimer
-        interval: 500
-        repeat: true
-        onTriggered: {
-            if (engine.buildingFts) return
-            ftsBuildWaitTimer.stop()
-            const r = engine.ftsSearch("apple", 0, 0)
-            if (r && r.length > 0) console.log("[smoke] ftsSearch sync returned", r.length)
-        }
-    }
-
-    Connections {
-        target: engine
-        function onFtsSearchReady(query, results) {
-            console.log("[smoke] ftsSearchReady query='" + query + "' results=" + results.length)
-            for (let i = 0; i < results.length; ++i) {
-                console.log("  " + results[i].headword + " (" + results[i].dictName + ")")
-            }
-        }
+        id: articleLoadTimer
+        interval: 400
+        onTriggered: view.loadHtml(engine.rewriteArticleUrls(root.currentHtml), "file:///android_asset/")
     }
 
     Component.onCompleted: {
@@ -463,17 +629,11 @@ Window {
         }
     }
 
-    onCurrentHtmlChanged: {
-        if (state === 2) {
-            view.loadHtml(engine.rewriteArticleUrls(currentHtml), "file:///android_asset/")
-        }
-    }
-    
     // --- FTS view ---
     Rectangle {
         id: ftsPane
         anchors { top: topBar.bottom; left: parent.left; right: parent.right; bottom: parent.bottom }
-        color: "#ececec"
+        color: root.bg
         visible: root.state === 4
 
         Connections {
@@ -494,15 +654,18 @@ Window {
                 Rectangle {
                     width: parent.width - 110
                     height: 48
-                    color: "white"
-                    border.color: "#cccccc"
+                    color: root.card
+                    border.color: root.cardBorder
                     TextInput {
                         id: ftsInput
+                        inputMethodHints: Qt.ImhNoPredictiveText | Qt.ImhNoAutoUppercase
+                        activeFocusOnTab: false
                         anchors.fill: parent
                         anchors.leftMargin: 8
                         verticalAlignment: TextInput.AlignVCenter
                         font.pixelSize: 18
-                        onAccepted: root._runFts()
+                        color: root.fg
+                        onAccepted: { focus = false; root._runFts() }
                     }
                 }
 
@@ -519,15 +682,26 @@ Window {
                 }
             }
 
-            Rectangle {
-                id: ftsSearchBtn
-                width: 100
-                height: 32
-                color: "#224488"
-                Text { anchors.centerIn: parent; color: "white"; font.pixelSize: 14; text: "Search" }
-                MouseArea {
-                    anchors.fill: parent
-                    onClicked: root._runFts()
+            Row {
+                spacing: 8
+                Text {
+                    anchors.verticalCenter: parent.verticalCenter
+                    visible: engine.buildingFts
+                    color: root.subFg
+                    font.pixelSize: 13
+                    text: "Indexing..."
+                }
+                Rectangle {
+                    id: ftsSearchBtn
+                    width: 100
+                    height: 32
+                    color: ftsSearchBtn.enabled ? "#224488" : "#555555"
+                    Text { anchors.centerIn: parent; color: "white"; font.pixelSize: 14; text: "Search" }
+                    MouseArea {
+                        anchors.fill: parent
+                        enabled: ftsSearchBtn.enabled
+                        onClicked: root._runFts()
+                    }
                 }
             }
 
@@ -548,8 +722,8 @@ Window {
                 delegate: Rectangle {
                     width: ListView.view.width
                     height: 44
-                    color: "white"
-                    border.color: "#dddddd"
+                    color: root.card
+                    border.color: root.cardBorder
                     Row {
                         anchors.fill: parent
                         anchors.margins: 8
@@ -559,8 +733,8 @@ Window {
                             anchors.verticalCenter: parent.verticalCenter
                             width: parent.width - 16
                             spacing: 0
-                            Text { text: modelData.headword; color: "black"; font.pixelSize: 16; font.bold: true }
-                            Text { text: modelData.dictName; color: "#777"; font.pixelSize: 11 }
+                            Text { text: modelData.headword; color: root.fg; font.pixelSize: 16; font.bold: true }
+                            Text { text: modelData.dictName; color: root.subFg; font.pixelSize: 11 }
                         }
                     }
                     MouseArea {
@@ -568,6 +742,45 @@ Window {
                         onClicked: engine.lookup(modelData.headword)
                     }
                 }
+            }
+        }
+    }
+
+    // --- onboarding overlay ---
+    Rectangle {
+        anchors.fill: parent
+        z: 100
+        visible: !engine.onboarded
+        color: "#222222"
+
+        Column {
+            anchors.centerIn: parent
+            spacing: 16
+            width: parent.width - 48
+
+            Text {
+                text: "Welcome to Aurelex"
+                color: "white"
+                font.pixelSize: 22
+                font.bold: true
+                width: parent.width
+                horizontalAlignment: Text.AlignHCenter
+            }
+            Text {
+                text: "Add dictionaries by copying supported files (.mdx, .dsl, .dsl.dz, .ifo) into the app's data folder, then open Dicts and tap Rescan. Use the top-left button to switch between Search, Dictionaries, Groups, FTS, History and Favorites."
+                color: "#cccccc"
+                font.pixelSize: 15
+                wrapMode: Text.Wrap
+                width: parent.width
+                horizontalAlignment: Text.AlignHCenter
+            }
+            Rectangle {
+                width: 200
+                height: 44
+                anchors.horizontalCenter: parent.horizontalCenter
+                color: "#224488"
+                Text { anchors.centerIn: parent; color: "white"; font.pixelSize: 16; text: "Get started" }
+                MouseArea { anchors.fill: parent; onClicked: engine.onboarded = true }
             }
         }
     }

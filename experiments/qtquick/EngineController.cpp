@@ -146,18 +146,19 @@ void EngineController::refreshDictionaries() {
 
 void EngineController::removeDictionary(int index) {
     if (!m_ready) return;
-    QFuture<int> f = QtConcurrent::run([index]{
-        return gd_remove_dict(index);
+    QFuture<QPair<int, int>> f = QtConcurrent::run([index]{
+        const int rc = gd_remove_dict(index);
+        return QPair<int, int>(rc, gd_dict_count());
     });
-    auto *w = new QFutureWatcher<int>(this);
-    connect(w, &QFutureWatcher<int>::finished, this, [this, w]{
-        const int rc = w->result();
-        qInfo() << "[aurelex] remove dict" << rc;
-        if (rc == 0) {
+    auto *w = new QFutureWatcher<QPair<int, int>>(this);
+    connect(w, &QFutureWatcher<QPair<int, int>>::finished, this, [this, w]{
+        const QPair<int, int> result = w->result();
+        qInfo() << "[aurelex] remove dict" << result.first;
+        if (result.first == 0) {
             refreshDictionaries();
-            setDictCount(gd_dict_count());
+            setDictCount(result.second);
         } else {
-            setLastError(QStringLiteral("remove_dict failed (rc=%1)").arg(rc));
+            setLastError(QStringLiteral("remove_dict failed (rc=%1)").arg(result.first));
         }
         w->deleteLater();
     });
@@ -186,7 +187,7 @@ void EngineController::refreshGroups() {
         return;
     }
     qInfo() << "[aurelex] refreshGroups firing";
-    QFuture<QVariantList> f = QtConcurrent::run([]{
+    QFuture<QPair<QVariantList, int>> f = QtConcurrent::run([]{
         QVariantList list;
         const int n = gd_group_count();
         list.reserve(n);
@@ -204,15 +205,16 @@ void EngineController::refreshGroups() {
             m.insert("dictCount", dictCountOut);
             list.append(m);
         }
-        return list;
-    });
-    auto *w = new QFutureWatcher<QVariantList>(this);
-    connect(w, &QFutureWatcher<QVariantList>::finished, this, [this, w]{
-        setGroups(w->result());
-        w->deleteLater();
         int active = 0;
         gd_group_active(&active);
-        setActiveGroupId(active);
+        return QPair<QVariantList, int>(list, active);
+    });
+    auto *w = new QFutureWatcher<QPair<QVariantList, int>>(this);
+    connect(w, &QFutureWatcher<QPair<QVariantList, int>>::finished, this, [this, w]{
+        const QPair<QVariantList, int> result = w->result();
+        setGroups(result.first);
+        setActiveGroupId(result.second);
+        w->deleteLater();
     });
     w->setFuture(f);
 }
@@ -274,19 +276,20 @@ void EngineController::deleteGroup(int groupId) {
 
 void EngineController::setActiveGroup(int groupId) {
     if (!m_ready) return;
-    QFuture<int> f = QtConcurrent::run([groupId]{
-        return gd_group_set_active(groupId);
+    QFuture<QPair<int, int>> f = QtConcurrent::run([groupId]{
+        const int rc = gd_group_set_active(groupId);
+        int active = 0;
+        gd_group_active(&active);
+        return QPair<int, int>(rc, active);
     });
-    auto *w = new QFutureWatcher<int>(this);
-    connect(w, &QFutureWatcher<int>::finished, this, [this, w]{
-        const int rc = w->result();
-        qInfo() << "[aurelex] setActiveGroup" << rc;
-        if (rc == 0) {
-            int active = 0;
-            gd_group_active(&active);
-            setActiveGroupId(active);
+    auto *w = new QFutureWatcher<QPair<int, int>>(this);
+    connect(w, &QFutureWatcher<QPair<int, int>>::finished, this, [this, w]{
+        const QPair<int, int> result = w->result();
+        qInfo() << "[aurelex] setActiveGroup" << result.first;
+        if (result.first == 0) {
+            setActiveGroupId(result.second);
         } else {
-            setLastError(QStringLiteral("group_set_active failed (rc=%1)").arg(rc));
+            setLastError(QStringLiteral("group_set_active failed (rc=%1)").arg(result.first));
         }
         w->deleteLater();
     });
@@ -491,7 +494,9 @@ void EngineController::setDarkMode(bool on)
 {
     if (m_darkMode == on) return;
     m_darkMode = on;
-    gd_set_dark_mode(on ? 1 : 0);
+    // Off-thread: gd_set_dark_mode takes the engine mutex, which a concurrent
+    // FTS index build may hold for a long time. Never block the UI thread.
+    QtConcurrent::run([on]{ gd_set_dark_mode(on ? 1 : 0); });
     QFile f(m_appDir + "/settings.json");
     if (f.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
         QJsonObject obj;
