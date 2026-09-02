@@ -644,17 +644,63 @@ QString EngineController::peekPendingLookup() const
     return word;
 }
 
-void EngineController::pollPendingLookup()
+bool EngineController::peekPendingClipboardFlag() const
 {
-    const QString word = peekPendingLookup();
-    if (word.isEmpty()) return;
-    if (!m_ready) return; // engine still initializing; retry on a later tick
-    // Consume so the word isn't re-looked-up, then run it.
+    if (m_appDir.isEmpty()) return false;
     const QString path = m_appDir + QStringLiteral("/../shared_prefs/intent.xml");
     QFile f(path);
-    f.remove();
-    qInfo() << "[aurelex] pending lookup:" << word;
-    lookup(word);
+    if (!f.open(QIODevice::ReadOnly)) return false;
+    const QString xml = QString::fromUtf8(f.readAll());
+    f.close();
+
+    QXmlStreamReader xr(xml);
+    while (!xr.atEnd()) {
+        const auto tok = xr.readNext();
+        if (tok == QXmlStreamReader::StartElement
+            && xr.name() == QStringLiteral("boolean")
+            && xr.attributes().value(QStringLiteral("name")) == QStringLiteral("lookupClipboard")) {
+            return xr.attributes().value(QStringLiteral("value")) == QStringLiteral("true");
+        }
+    }
+    return false;
+}
+
+void EngineController::pollPendingLookup()
+{
+    if (m_appDir.isEmpty()) return;
+    const QString path = m_appDir + QStringLiteral("/../shared_prefs/intent.xml");
+
+    // A concrete word (share / PROCESS_TEXT / deep link) takes priority over
+    // the clipboard marker; each Java capture clears the prefs file, so at most
+    // one request is ever pending.
+    const QString word = peekPendingLookup();
+    if (!word.isEmpty()) {
+        if (!m_ready) return; // engine still initializing; retry on a later tick
+        QFile f(path);
+        f.remove();
+        qInfo() << "[aurelex] pending lookup:" << word;
+        lookup(word);
+        return;
+    }
+
+    // Clipboard-lookup marker (QS tile): the tile can't read the clipboard
+    // (no window focus), so it just signals us; read it here once the app has
+    // window focus. Retry briefly when focus/clipboard aren't ready yet.
+    if (peekPendingClipboardFlag()) {
+        if (!m_ready) return; // engine still initializing; retry on a later tick
+        const QString clip = clipboardText().trimmed();
+        if (clip.isEmpty() && m_clipboardRetries < 10) {
+            ++m_clipboardRetries;
+            return;
+        }
+        m_clipboardRetries = 0;
+        QFile f(path);
+        f.remove();
+        if (!clip.isEmpty()) {
+            qInfo() << "[aurelex] clipboard lookup:" << clip;
+            lookup(clip);
+        }
+    }
 }
 
 QString EngineController::clipboardText()

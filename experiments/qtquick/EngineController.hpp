@@ -172,8 +172,10 @@ private:
     void saveSettings();
     void pollPendingLookup();
     QString peekPendingLookup() const;
+    bool peekPendingClipboardFlag() const;
 
     QTimer m_pollTimer;
+    int m_clipboardRetries = 0;
 
     int m_dictCount = 0;
     bool m_ready = false;

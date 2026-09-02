@@ -541,6 +541,10 @@ Window {
             id: view
             anchors { top: parent.top; topMargin: 44; left: parent.left; right: parent.right; bottom: parent.bottom }
             onLoadingChanged: console.log("WebView loading:", loading, "url:", url)
+            onHeightChanged: {
+                if (root.state === 2 && view.height !== root.loadedAtHeight && root.currentHtml.length > 0)
+                    articleReloader.restart()
+            }
         }
     }
 
@@ -650,7 +654,22 @@ Window {
     Timer {
         id: articleLoadTimer
         interval: 400
-        onTriggered: view.loadHtml(engine.rewriteArticleUrls(root.currentHtml), "file:///android_asset/")
+        onTriggered: root._loadArticleNow()
+    }
+    Timer {
+        id: articleReloader
+        interval: 200
+        onTriggered: root._loadArticleNow()
+    }
+    // Height of the WebView at the time of the last load; a mismatch means the
+    // window was resized (keyboard hide/show, rotation) after the load started
+    // — Chromium silently starves loads during a surface resize, leaving a
+    // blank page — so we re-load once the size settles.
+    property real loadedAtHeight: 0
+    function _loadArticleNow() {
+        if (state !== 2) return
+        loadedAtHeight = view.height
+        view.loadHtml(engine.rewriteArticleUrls(currentHtml), "file:///android_asset/")
     }
 
     // Incoming lookups (share / PROCESS_TEXT / deep link / QS tile) are consumed

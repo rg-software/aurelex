@@ -54,6 +54,7 @@ public class ExperimentActivity extends QtActivity {
 
     private void captureLookupText(Intent intent) {
         if (intent == null) return;
+        final SharedPreferences prefs = getSharedPreferences("intent", Context.MODE_PRIVATE);
         String word = null;
         final String action = intent.getAction();
         if (Intent.ACTION_SEND.equals(action)) {
@@ -62,6 +63,16 @@ public class ExperimentActivity extends QtActivity {
         } else if (Intent.ACTION_VIEW.equals(action)) {
             final android.net.Uri uri = intent.getData();
             if (uri != null) {
+                // Tile funnel: no word in the URI; the app reads the clipboard
+                // itself once it has window focus (tile services can't reliably).
+                if ("1".equals(uri.getQueryParameter("clipboard"))) {
+                    // clear(): the in-memory prefs cache must not resurrect
+                    // stale keys into later captures; commit(): synchronous, so
+                    // the C++ poller never races a half-written file.
+                    prefs.edit().clear().putBoolean("lookupClipboard", true).commit();
+                    android.util.Log.i(TAG, "captured clipboard-lookup request");
+                    return;
+                }
                 word = uri.getQueryParameter("word");
                 if (word == null) word = uri.getPath();
                 if (word != null) word = word.replaceFirst("^/", "");
@@ -73,8 +84,7 @@ public class ExperimentActivity extends QtActivity {
         if (word == null) return;
         word = word.trim();
         if (word.isEmpty()) return;
-        final SharedPreferences prefs = getSharedPreferences("intent", Context.MODE_PRIVATE);
-        prefs.edit().putString("lookupText", word).apply();
+        prefs.edit().clear().putString("lookupText", word).commit();
         android.util.Log.i(TAG, "captured lookup text: " + word);
     }
 }
