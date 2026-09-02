@@ -22,10 +22,14 @@ public class ExperimentActivity extends QtActivity {
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+
         // Workaround for QTBUG-122886 (Qt 6.6): QtActivityDelegate's display
         // listener fires setActivityDisplayRotation on a null mLayout when a
         // display change races with activity teardown. The NPE is harmless but
         // kills the process. Swallow it until we upgrade to Qt 6.7+.
+        // NOTE: must be set AFTER super.onCreate() because Qt's own setup
+        // installs its own default handler which would overwrite ours.
         final Thread.UncaughtExceptionHandler defaultHandler =
                 Thread.getDefaultUncaughtExceptionHandler();
         Thread.setDefaultUncaughtExceptionHandler((thread, throwable) -> {
@@ -39,7 +43,6 @@ public class ExperimentActivity extends QtActivity {
             if (defaultHandler != null) defaultHandler.uncaughtException(thread, throwable);
         });
 
-        super.onCreate(savedInstanceState);
         captureLookupText(getIntent());
     }
 
