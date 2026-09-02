@@ -43,7 +43,7 @@
                 <category android:name="android.intent.category.DEFAULT" />
                 <data android:mimeType="text/plain" />
             </intent-filter>
-            <meta-data android:name="android.app.lib_name" android:value="-- %%INSERT_APP_LIB_NAME%% --" />
+            <meta-data android:name="android.app.lib_name" android:value="aurelex_exp" />
             <meta-data android:name="android.app.extract_android_style" android:value="minimal" />
         </activity>
 
