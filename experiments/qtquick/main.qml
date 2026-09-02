@@ -208,9 +208,11 @@ Window {
 
                 TextInput {
                     id: input
-                    // ImhNoPredictiveText reduces IME composing side effects;
-                    // activeFocusOnTab=false keeps the tab-focus chain empty so
-                    // IME queries never walk it (infinite-loop ANR, see _blurActive).
+                    // ImhHiddenText: the IME treats the field as password-style
+                    // and commits keys directly (no composing/extracted-text
+                    // monitoring) — the mechanism that breaks on Qt 6.6 +
+                    // Android 15. The field still echoes normal text.
+                    inputMethodHints: Qt.ImhHiddenText
                     activeFocusOnTab: false
                     anchors.fill: parent
                     anchors.leftMargin: 8
@@ -429,6 +431,7 @@ Window {
 
                 TextInput {
                     id: newGroupInput
+                    inputMethodHints: Qt.ImhHiddenText
                     activeFocusOnTab: false
                     anchors.fill: parent
                     anchors.leftMargin: 8
@@ -718,6 +721,7 @@ Window {
                     border.color: root.cardBorder
                     TextInput {
                         id: ftsInput
+                        inputMethodHints: Qt.ImhHiddenText
                         activeFocusOnTab: false
                         anchors.fill: parent
                         anchors.leftMargin: 8

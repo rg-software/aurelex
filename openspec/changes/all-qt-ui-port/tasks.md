@@ -86,7 +86,7 @@ for the Kotlin app. Each is a focused session of work.
 
 ### Follow-up (recorded, not in parity scope)
 
-- [ ] F.1 Restore user-preferred (system) keyboard. Interim state: embedded Qt VirtualKeyboard (bypasses the system IME entirely — QT_IM_MODULE=qtvirtualkeyboard, manual VK staging in build.ps1). System IME broke on Qt 6.6 + Android 15 (composing revert, inactive InputConnection, IME deadlocks). Real fix candidates: upgrade to Qt 6.8/6.9 (reworked InputConnection lifecycle) or deeper workarounds. QtVK is acceptable for the experiment phase.
+- [ ] F.1 Restore full IME composing (user-preferred keyboard works today, limited). **Resolved pragmatically**: system IME (SwiftKey) + `ImhHiddenText` hints on all TextInputs — the IME treats fields as password-style and commits keys directly, bypassing the broken composing/extracted-text path (Qt 6.6 + Android 15: composing revert, inactive InputConnection, IME deadlocks). Trade-off: no swipe-typing/autocorrect/composing — acceptable for dictionary headword lookups. Embedded Qt VirtualKeyboard kept as a fallback (QT_IM_MODULE=qtvirtualkeyboard env toggle in main.cpp; VK staging in build.ps1). Full composing needs the Qt 6.8/6.9 upgrade.
 
 ### Post-parity (separate OpenSpec changes)
 
