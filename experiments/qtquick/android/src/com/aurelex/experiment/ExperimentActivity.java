@@ -52,6 +52,21 @@ public class ExperimentActivity extends QtActivity {
         captureLookupText(intent);
     }
 
+    @Override
+    protected void onDestroy() {
+        // Qt 6.6 cannot start the Qt app a second time in the same process:
+        // the second startApplication blocks forever on QtThread's semaphore
+        // (QtLayout.onSizeChanged -> QtNative.startApplication -> Semaphore
+        // .acquire). Task removal (swipe-away from recents) destroys the
+        // activity but leaves the process cached, so a relaunch would resume
+        // this doomed process and freeze on the splash screen forever.
+        // Kill the process here so every relaunch is a clean start.
+        android.util.Log.w(TAG, "onDestroy: terminating process (Qt 6.6 cannot restart Qt in-process)");
+        android.os.Process.killProcess(android.os.Process.myPid());
+        System.exit(0);
+        super.onDestroy();
+    }
+
     private void captureLookupText(Intent intent) {
         if (intent == null) return;
         final SharedPreferences prefs = getSharedPreferences("intent", Context.MODE_PRIVATE);
