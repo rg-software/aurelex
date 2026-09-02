@@ -380,12 +380,15 @@ QVariantList EngineController::ftsSearch(const QString &query, int mode, int gro
 {
     if (!m_ready) return QVariantList();
     if (query.isEmpty()) return QVariantList();
+    qInfo() << "[aurelex] ftsSearch query='" << query << "' mode=" << mode << " group=" << groupId;
     QFuture<QVariantList> f = QtConcurrent::run([query, mode, groupId]{
         std::vector<char> buf(1 << 20);
         const int n = gd_fts_search(query.toLocal8Bit().constData(), mode, groupId,
                                     buf.data(), static_cast<int>(buf.size()));
+        qInfo() << "[aurelex]   gd_fts_search rc=" << n;
         if (n < 0) return QVariantList();
         const QString raw = QString::fromUtf8(buf.data());
+        qInfo() << "[aurelex]   raw bytes=" << raw.size();
         QVariantList list;
         const QStringList lines = raw.split('\n', Qt::SkipEmptyParts);
         for (const QString &line : lines) {

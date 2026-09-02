@@ -404,6 +404,43 @@ Window {
         function onArticleLoaded(word, html) {
             root._showArticle(word, html)
         }
+        // Experiment smoke test for FTS: when the dictionary list is ready, build
+        // the FTS index for every loaded dict, then run a body-word search for
+        // "app" and log the result. Lets us verify the FTS pipeline end-to-end
+        // on-device without tapping through the UI. This block can be removed once
+        // the QML UI is interactive enough to drive directly.
+        function onDictionariesChanged() {
+            if (!engine.ready) return
+            if (engine.dictCount === 0) return
+            if (ftsSmokeArmed === false) return
+            ftsSmokeArmed = false
+            for (let i = 0; i < engine.dictCount; ++i) engine.ftsIndex(i)
+            ftsBuildWaitTimer.start()
+        }
+    }
+
+    property bool ftsSmokeArmed: true
+
+    Timer {
+        id: ftsBuildWaitTimer
+        interval: 500
+        repeat: true
+        onTriggered: {
+            if (engine.buildingFts) return
+            ftsBuildWaitTimer.stop()
+            const r = engine.ftsSearch("apple", 0, 0)
+            if (r && r.length > 0) console.log("[smoke] ftsSearch sync returned", r.length)
+        }
+    }
+
+    Connections {
+        target: engine
+        function onFtsSearchReady(query, results) {
+            console.log("[smoke] ftsSearchReady query='" + query + "' results=" + results.length)
+            for (let i = 0; i < results.length; ++i) {
+                console.log("  " + results[i].headword + " (" + results[i].dictName + ")")
+            }
+        }
     }
 
     onCurrentHtmlChanged: {
