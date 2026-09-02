@@ -4,6 +4,7 @@
 #include <QString>
 #include <QStringList>
 #include <QVariantList>
+#include <QVariantMap>
 #include <QFuture>
 #include <QFutureWatcher>
 
@@ -21,6 +22,8 @@ class EngineController : public QObject
     Q_PROPERTY(bool ready READ ready NOTIFY readyChanged)
     Q_PROPERTY(QString lastError READ lastError NOTIFY lastErrorChanged)
     Q_PROPERTY(QVariantList dictionaries READ dictionaries NOTIFY dictionariesChanged)
+    Q_PROPERTY(QVariantList groups READ groups NOTIFY groupsChanged)
+    Q_PROPERTY(int activeGroupId READ activeGroupId NOTIFY activeGroupChanged)
 public:
     explicit EngineController(QObject *parent = nullptr);
     ~EngineController() override;
@@ -29,6 +32,8 @@ public:
     bool ready() const { return m_ready; }
     QString lastError() const { return m_lastError; }
     QVariantList dictionaries() const { return m_dictionaries; }
+    QVariantList groups() const { return m_groups; }
+    int activeGroupId() const { return m_activeGroupId; }
 
     // Initialise the engine. `configDir`/`indexDir` are usually the same
     // AppLocalDataLocation; `stagedDir` is the dict folder the app stages to.
@@ -44,6 +49,20 @@ public:
     // route them through QtConcurrent anyway so they never block the UI thread.
     Q_INVOKABLE void removeDictionary(int index);
     Q_INVOKABLE void moveDictionary(int from, int to);
+
+    // Refresh the groups list + the active group id.
+    Q_INVOKABLE void refreshGroups();
+
+    // Group CRUD. `name` is required for create; rename/replace take a new
+    // string; delete and setActive act on the integer group id returned by
+    // gd_group_create (and listed in groups()). Membership / reordering is
+    // deferred to a follow-up: for the experiment gate, the groups list + active
+    // toggle prove the UI/controller pattern; dict-in-group wiring (Q_INVOKABLE
+    // wrappers around gd_group_add/remove/move_dict) is the next slice.
+    Q_INVOKABLE void createGroup(const QString &name);
+    Q_INVOKABLE void renameGroup(int groupId, const QString &newName);
+    Q_INVOKABLE void deleteGroup(int groupId);
+    Q_INVOKABLE void setActiveGroup(int groupId);
 
     // Lookup a word. `articleLoaded(word, html)` on success, or
     // `articleNotFound(word)` when the engine returned a "no match" article.
@@ -63,6 +82,8 @@ signals:
     void readyChanged();
     void lastErrorChanged();
     void dictionariesChanged();
+    void groupsChanged();
+    void activeGroupChanged();
     void articleLoaded(const QString &word, const QString &html);
     void articleNotFound(const QString &word);
     void suggestionsReady(const QString &prefix, const QStringList &suggestions);
@@ -73,11 +94,15 @@ private:
     void setReady(bool r);
     void setLastError(const QString &e);
     void setDictionaries(const QVariantList &list);
+    void setGroups(const QVariantList &list);
+    void setActiveGroupId(int id);
 
     int m_dictCount = 0;
     bool m_ready = false;
     QString m_lastError;
     QVariantList m_dictionaries;
+    QVariantList m_groups;
+    int m_activeGroupId = 0;
     QString m_appDir;
     QString m_stagedDir;
 };

@@ -1,10 +1,8 @@
 import QtQuick
 import QtWebView
 
-// Milestone 2 (dictionaries): same single-Window layout with three panes
-// (search, dictionaries, article) switched by an integer state. Bare QtQuick
-// only. Dictionary list lives on EngineController as a QVariantList; we drive
-// a refresh on entering the pane and on every mutation.
+// Milestone 3 (groups): a fourth pane (Groups) joins the cycle
+// search -> dictionaries -> groups -> search. Bare QtQuick only.
 Window {
     id: root
     width: 480
@@ -13,7 +11,7 @@ Window {
     title: "AurelexExp"
     color: "#ececec"
 
-    // 0 = search, 1 = dictionaries, 2 = article.
+    // 0 = search, 1 = dictionaries, 2 = article, 3 = groups.
     property int state: 0
     property string currentWord: ""
     property string currentHtml: ""
@@ -30,6 +28,10 @@ Window {
         engine.refreshDictionaries()
         state = 1
     }
+    function _openGroups() {
+        engine.refreshGroups()
+        state = 3
+    }
 
     // --- shared top bar ---
     Rectangle {
@@ -44,16 +46,27 @@ Window {
             anchors.leftMargin: 12
             spacing: 12
 
+            // Cycle button: search -> dicts -> groups -> search.
             Rectangle {
                 width: 90
                 height: 30
                 anchors.verticalCenter: parent.verticalCenter
                 color: "#3a3a3a"
-                Text { anchors.centerIn: parent; color: "white"; font.pixelSize: 13; text: root.state === 0 ? "Dicts" : (root.state === 1 ? "<- Search" : "<- Dicts") }
+                Text {
+                    anchors.centerIn: parent
+                    color: "white"
+                    font.pixelSize: 13
+                    text: root.state === 0 ? "Dicts"
+                        : root.state === 1 ? "Groups"
+                        : root.state === 3 ? "<- Search"
+                        : "Dicts"
+                }
                 MouseArea {
                     anchors.fill: parent
                     onClicked: {
                         if (root.state === 0) root._openDicts()
+                        else if (root.state === 1) root._openGroups()
+                        else if (root.state === 3) root.state = 0
                         else root.state = 0
                     }
                 }
@@ -63,7 +76,10 @@ Window {
                 anchors.verticalCenter: parent.verticalCenter
                 color: "white"
                 font.pixelSize: 16
-                text: root.state === 0 ? "Search" : (root.state === 1 ? "Dictionaries (" + engine.dictCount + ")" : root.currentWord)
+                text: root.state === 0 ? "Search"
+                    : root.state === 1 ? "Dictionaries (" + engine.dictCount + ")"
+                    : root.state === 3 ? "Groups (" + engine.groups.length + ", active=" + engine.activeGroupId + ")"
+                    : root.currentWord
             }
         }
     }
@@ -210,6 +226,105 @@ Window {
                                             const target = Math.max(0, Math.min(engine.dictionaries.length - 1, idx + modelData.delta))
                                             if (target !== idx) engine.moveDictionary(idx, target)
                                         }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // --- groups view ---
+    Rectangle {
+        id: groupsPane
+        anchors { top: topBar.bottom; left: parent.left; right: parent.right; bottom: parent.bottom }
+        color: "#ececec"
+        visible: root.state === 3
+
+        Component.onCompleted: engine.refreshGroups()
+        Connections {
+            target: engine
+            function onGroupsChanged() { groupsList.model = engine.groups }
+            function onReadyChanged() { if (engine.ready) engine.refreshGroups() }
+        }
+
+        Column {
+            anchors.fill: parent
+            anchors.margins: 12
+            spacing: 8
+
+            Rectangle {
+                width: parent.width
+                height: 48
+                color: "white"
+                border.color: "#cccccc"
+
+                TextInput {
+                    id: newGroupInput
+                    anchors.fill: parent
+                    anchors.leftMargin: 8
+                    verticalAlignment: TextInput.AlignVCenter
+                    font.pixelSize: 18
+                    onAccepted: {
+                        if (text.trim().length > 0) {
+                            engine.createGroup(text.trim())
+                            text = ""
+                        }
+                    }
+                }
+            }
+
+            ListView {
+                id: groupsList
+                width: parent.width
+                height: parent.height - 56
+                clip: true
+                model: engine.groups
+                spacing: 6
+                delegate: Rectangle {
+                    width: ListView.view.width
+                    height: 48
+                    color: modelData.id === engine.activeGroupId ? "#224422" : "white"
+                    border.color: "#dddddd"
+                    Row {
+                        anchors.fill: parent
+                        anchors.margins: 8
+                        spacing: 8
+
+                        Column {
+                            anchors.verticalCenter: parent.verticalCenter
+                            width: parent.width - 280
+                            spacing: 0
+                            Text { text: modelData.name + " (" + modelData.dictCount + ")"; color: "white"; font.pixelSize: 16; font.bold: true }
+                            Text { text: "id=" + modelData.id; color: "#cccccc"; font.pixelSize: 11 }
+                        }
+
+                        Repeater {
+                            model: [
+                                { label: "Active", op: "activate" },
+                                { label: "Rename", op: "rename" },
+                                { label: "Delete", op: "delete" }
+                            ]
+                            delegate: Rectangle {
+                                width: 80
+                                height: 28
+                                color: modelData.op === "delete" ? "#882222"
+                                    : modelData.op === "activate" ? "#224488" : "#3a3a3a"
+                                Text { anchors.centerIn: parent; text: modelData.label; color: "white"; font.pixelSize: 12 }
+                                MouseArea {
+                                    anchors.fill: parent
+                                    onClicked: {
+                                        const id = modelData.id
+                                        const op = modelData.op
+                                        if (op === "activate") engine.setActiveGroup(id)
+                                        else if (op === "rename") {
+                                            // Quick rename: append "_r" for demonstration; a real
+                                            // UI would use a dialog. For the experiment gate, the
+                                            // round-trip is what matters.
+                                            engine.renameGroup(id, modelData.name + "_r")
+                                        } else if (op === "delete") engine.deleteGroup(id)
                                     }
                                 }
                             }

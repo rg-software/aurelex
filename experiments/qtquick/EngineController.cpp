@@ -5,6 +5,7 @@
 #include <QDir>
 #include <QDebug>
 #include <QVariantMap>
+#include <QPair>
 
 EngineController::EngineController(QObject *parent) : QObject(parent) {}
 EngineController::~EngineController() = default;
@@ -33,6 +34,18 @@ void EngineController::setDictionaries(const QVariantList &list) {
     emit dictionariesChanged();
 }
 
+void EngineController::setGroups(const QVariantList &list) {
+    m_groups = list;
+    qInfo() << "[aurelex] setGroups count=" << list.size();
+    emit groupsChanged();
+}
+
+void EngineController::setActiveGroupId(int id) {
+    if (m_activeGroupId == id) return;
+    m_activeGroupId = id;
+    emit activeGroupChanged();
+}
+
 void EngineController::runScan() {
     QFuture<int> f = QtConcurrent::run([staged = m_stagedDir]{
         return gd_scan_dicts(staged.toLocal8Bit().constData());
@@ -43,9 +56,10 @@ void EngineController::runScan() {
         qInfo() << "[aurelex] scan ->" << n;
         setDictCount(n);
         w->deleteLater();
-        // After a successful scan, refresh the dictionaries list so the UI
-        // reflects the new state without the user having to call refresh.
-        if (n > 0) refreshDictionaries();
+        if (n > 0) {
+            refreshDictionaries();
+            refreshGroups();
+        }
     });
     w->setFuture(f);
 }
@@ -123,7 +137,6 @@ void EngineController::removeDictionary(int index) {
         const int rc = w->result();
         qInfo() << "[aurelex] remove dict" << rc;
         if (rc == 0) {
-            // Successful removal: re-fetch list + count.
             refreshDictionaries();
             setDictCount(gd_dict_count());
         } else {
@@ -145,6 +158,119 @@ void EngineController::moveDictionary(int from, int to) {
         qInfo() << "[aurelex] move dict" << rc;
         if (rc == 0) refreshDictionaries();
         else setLastError(QStringLiteral("move_dict failed (rc=%1)").arg(rc));
+        w->deleteLater();
+    });
+    w->setFuture(f);
+}
+
+void EngineController::refreshGroups() {
+    if (!m_ready) {
+        qInfo() << "[aurelex] refreshGroups skipped: not ready";
+        return;
+    }
+    qInfo() << "[aurelex] refreshGroups firing";
+    QFuture<QVariantList> f = QtConcurrent::run([]{
+        QVariantList list;
+        const int n = gd_group_count();
+        list.reserve(n);
+        std::vector<char> name(256);
+        for (int i = 0; i < n; ++i) {
+            int idOut = 0;
+            int dictCountOut = 0;
+            const int rn = gd_group_info(i, &idOut, name.data(),
+                                         static_cast<int>(name.size()),
+                                         &dictCountOut);
+            if (rn != 0) continue;
+            QVariantMap m;
+            m.insert("id", idOut);
+            m.insert("name", QString::fromLocal8Bit(name.data()));
+            m.insert("dictCount", dictCountOut);
+            list.append(m);
+        }
+        return list;
+    });
+    auto *w = new QFutureWatcher<QVariantList>(this);
+    connect(w, &QFutureWatcher<QVariantList>::finished, this, [this, w]{
+        setGroups(w->result());
+        w->deleteLater();
+        int active = 0;
+        gd_group_active(&active);
+        setActiveGroupId(active);
+    });
+    w->setFuture(f);
+}
+
+void EngineController::createGroup(const QString &name) {
+    if (!m_ready) return;
+    QFuture<QPair<int, int>> f = QtConcurrent::run([name]{
+        int idOut = 0;
+        const int rc = gd_group_create(name.toLocal8Bit().constData(), &idOut);
+        return QPair<int, int>(rc, idOut);
+    });
+    auto *w = new QFutureWatcher<QPair<int, int>>(this);
+    connect(w, &QFutureWatcher<QPair<int, int>>::finished, this, [this, w]{
+        const QPair<int, int> result = w->result();
+        const int rc = result.first;
+        const int newId = result.second;
+        qInfo() << "[aurelex] createGroup rc=" << rc << " id=" << newId;
+        if (rc != 0) {
+            setLastError(QStringLiteral("group_create failed (rc=%1)").arg(rc));
+        } else {
+            refreshGroups();
+        }
+        w->deleteLater();
+    });
+    w->setFuture(f);
+}
+
+void EngineController::renameGroup(int groupId, const QString &newName) {
+    if (!m_ready) return;
+    QFuture<int> f = QtConcurrent::run([groupId, newName]{
+        return gd_group_rename(groupId, newName.toLocal8Bit().constData());
+    });
+    auto *w = new QFutureWatcher<int>(this);
+    connect(w, &QFutureWatcher<int>::finished, this, [this, w]{
+        const int rc = w->result();
+        qInfo() << "[aurelex] renameGroup" << rc;
+        if (rc == 0) refreshGroups();
+        else setLastError(QStringLiteral("group_rename failed (rc=%1)").arg(rc));
+        w->deleteLater();
+    });
+    w->setFuture(f);
+}
+
+void EngineController::deleteGroup(int groupId) {
+    if (!m_ready) return;
+    QFuture<int> f = QtConcurrent::run([groupId]{
+        return gd_group_delete(groupId);
+    });
+    auto *w = new QFutureWatcher<int>(this);
+    connect(w, &QFutureWatcher<int>::finished, this, [this, w]{
+        const int rc = w->result();
+        qInfo() << "[aurelex] deleteGroup" << rc;
+        if (rc == 0) refreshGroups();
+        else setLastError(QStringLiteral("group_delete failed (rc=%1)").arg(rc));
+        w->deleteLater();
+    });
+    w->setFuture(f);
+}
+
+void EngineController::setActiveGroup(int groupId) {
+    if (!m_ready) return;
+    QFuture<int> f = QtConcurrent::run([groupId]{
+        return gd_group_set_active(groupId);
+    });
+    auto *w = new QFutureWatcher<int>(this);
+    connect(w, &QFutureWatcher<int>::finished, this, [this, w]{
+        const int rc = w->result();
+        qInfo() << "[aurelex] setActiveGroup" << rc;
+        if (rc == 0) {
+            int active = 0;
+            gd_group_active(&active);
+            setActiveGroupId(active);
+        } else {
+            setLastError(QStringLiteral("group_set_active failed (rc=%1)").arg(rc));
+        }
         w->deleteLater();
     });
     w->setFuture(f);
