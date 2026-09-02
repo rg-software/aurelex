@@ -1,6 +1,5 @@
 import QtQuick
 import QtWebView
-import QtQuick.VirtualKeyboard
 
 // All-Qt UI: search / dictionaries / groups / FTS / history / favorites /
 // article panes switched by `state`, plus onboarding + dark mode.
@@ -94,8 +93,6 @@ Window {
         // upstream; plain == wildcard search without wildcards).
         engine.ftsSearch(ftsInput.text, 2, engine.activeGroupId)
     }
-
-    Component.onCompleted: console.log("[qml] root ready, state:", state)
 
     Connections {
         target: engine
@@ -214,8 +211,7 @@ Window {
         Connections {
             target: engine
             function onSuggestionsReady(prefix, suggestions) {
-                console.log("[qml] suggestionsReady", prefix, "count:", suggestions.length)
-                // No prefix check here: the C++ side drops stale generations,
+                    // No prefix check here: the C++ side drops stale generations,
                 // and the IME can rewrite the preedit after the suggest fired.
                 // NOTE: qualify explicitly — an unqualified write inside a
                 // Connections handler resolves to a GLOBAL (silently failing,
@@ -264,34 +260,24 @@ Window {
                 }
             }
 
-            Row {
-                spacing: 8
-                Rectangle {
-                    width: 120
-                    height: 32
-                    color: "#3a3a3a"
-                    Text { anchors.centerIn: parent; color: "white"; font.pixelSize: 13; text: "Clipboard" }
-                    MouseArea {
-                        anchors.fill: parent
-                        onClicked: {
-                            const t = engine.clipboardText()
-                            if (t.length > 0) engine.lookup(t)
-                        }
+            Rectangle {
+                width: 120
+                height: 32
+                color: "#3a3a3a"
+                Text { anchors.centerIn: parent; color: "white"; font.pixelSize: 13; text: "Clipboard" }
+                MouseArea {
+                    anchors.fill: parent
+                    onClicked: {
+                        const t = engine.clipboardText()
+                        if (t.length > 0) engine.lookup(t)
                     }
-                }
-                Rectangle {
-                    width: 80
-                    height: 32
-                    color: "#224488"
-                    Text { anchors.centerIn: parent; color: "white"; font.pixelSize: 13; text: "SUG" }
-                    MouseArea { anchors.fill: parent; onClicked: engine.suggest("app") }
                 }
             }
 
             Timer {
                 id: debounce
                 interval: 250
-                onTriggered: { console.log("[qml] debounce fired, text:", input.text); searchPane._doSuggest() }
+                onTriggered: searchPane._doSuggest()
             }
 
             Text {
@@ -896,34 +882,6 @@ Window {
                         onClicked: engine.lookup(modelData.headword)
                     }
                 }
-            }
-        }
-    }
-
-    // --- virtual keyboard (Qt Quick VirtualKeyboard) ---
-    // The system IME (SwiftKey/Gboard) proved unreliable with Qt 6.6 on this
-    // device: composing text reverted instantly, IME deadlocks, inactive
-    // input connections. The embedded keyboard bypasses the system IME
-    // entirely for Qt fields.
-    InputPanel {
-        id: inputPanel
-        z: 99
-        x: 0
-        y: root.height
-        width: root.width
-        visible: Qt.inputMethod.visible
-
-        states: State {
-            name: "visible"
-            when: inputPanel.visible
-            PropertyChanges { target: inputPanel; y: root.height - inputPanel.height }
-        }
-        transitions: Transition {
-            from: ""
-            to: "visible"
-            reversible: true
-            ParallelAnimation {
-                NumberAnimation { properties: "y"; duration: 250; easing.type: Easing.InOutQuad }
             }
         }
     }

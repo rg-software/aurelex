@@ -11,11 +11,12 @@
 
 int main(int argc, char *argv[])
 {
-    // System-IME experiment: the embedded VirtualKeyboard works but the user
-    // wants their own keyboard. ImhHiddenText hints on the TextInputs make
-    // IMEs use direct key commit (no composing/extracted-text monitoring,
-    // which is what breaks on Qt 6.6 + Android 15). If this env override is
-    // re-enabled the embedded keyboard takes over instead.
+    // Text input uses the system IME (any keyboard). Full IME composing is
+    // bypassed via displayText-driven suggestions (see main.qml) because Qt
+    // 6.6's composing/extracted-text path breaks on Android 14+. If the
+    // system keyboard ever proves unusable on some device, the embedded Qt
+    // VirtualKeyboard is the fallback: re-enable the line below (and restore
+    // the VK staging + InputPanel from git history, commit 7b26780).
     // qputenv("QT_IM_MODULE", QByteArray("qtvirtualkeyboard"));
     QtWebView::initialize();
     QGuiApplication app(argc, argv);
@@ -29,9 +30,6 @@ int main(int argc, char *argv[])
     engine.initialize(home, staged);
 
     QQmlApplicationEngine qengine;
-    // The VirtualKeyboard QML module is staged under assets/qml (see
-    // build.ps1); the default import path doesn't include it on Android.
-    qengine.addImportPath(QStringLiteral("assets:/qml"));
     qengine.rootContext()->setContextProperty("engine", &engine);
     qengine.load(QUrl(QStringLiteral("qrc:/AurelexExp/main.qml")));
     if (qengine.rootObjects().isEmpty())

@@ -33,7 +33,12 @@ $QtHost     = if ($env:AURELEX_QT_HOST)     { $env:AURELEX_QT_HOST }     else { 
 $VcpkgBase  = if ($env:AURELEX_VCPKG_BASE)  { $env:AURELEX_VCPKG_BASE }  else { "C:\vcpkg" }
 $NdkRoot    = if ($env:AURELEX_NDK_ROOT)    { $env:AURELEX_NDK_ROOT }    else { "C:\Program Files (x86)\Android\AndroidNDK\android-ndk-r23c" }
 $RealSdk    = if ($env:AURELEX_ANDROID_SDK) { $env:AURELEX_ANDROID_SDK } else { "C:\Program Files (x86)\Android\android-sdk" }
-$Jdk17      = if ($env:AURELEX_JDK17)       { $env:AURELEX_JDK17 }       else { "C:\Program Files\Unity\Hub\Editor\6000.0.62f1\Editor\Data\PlaybackEngines\AndroidPlayer\OpenJDK" }
+# JDK: CI overrides via AURELEX_JDK17 (actions/setup-java). Locally, hardcode
+# the Unity 17 used for the proven AGP 7.4.1 setup — never pick up the host
+# JAVA_HOME, which may be JDK 21+ and triggers the D8 NPE (see header comment).
+$Jdk17 = if ($env:AURELEX_JDK17) { $env:AURELEX_JDK17 } else {
+    "C:\Program Files\Unity\Hub\Editor\6000.0.62f1\Editor\Data\PlaybackEngines\AndroidPlayer\OpenJDK"
+}
 $UnitySdk   = if ($env:AURELEX_UNITY_SDK)   { $env:AURELEX_UNITY_SDK }   else { "C:\Program Files\Unity\Hub\Editor\6000.0.62f1\Editor\Data\PlaybackEngines\AndroidPlayer\SDK" }
 $CmakeExe   = if ($env:AURELEX_CMAKE_EXE)   { $env:AURELEX_CMAKE_EXE }   else { "$UnitySdk\cmake\3.22.1\bin\cmake.exe" }
 $DeployQt   = if ($env:AURELEX_DEPLOYQT)    { $env:AURELEX_DEPLOYQT }    else { "$QtHost\bin\androiddeployqt.exe" }
@@ -116,57 +121,6 @@ if (Test-Path (Join-Path $ExpDir "android\assets")) {
     Copy-Item (Join-Path $ExpDir "android\assets\*") (Join-Path $ApkDir "assets\") -Recurse -Force
 }
 
-# Qt VirtualKeyboard: androiddeployqt plans the VK dependencies but silently
-# skips staging them (observed with --no-build on the carve-subset kit). Stage
-# them manually: libs + the QML modules under assets/qml (Qt resolves QML
-# imports from assets on Android; main.cpp adds assets:/qml to the import
-# paths).
-$VkLibDir = "$QtBase\android_arm64_v8a\lib"
-$VkQmlSrc = "$QtBase\android_arm64_v8a\qml\QtQuick\VirtualKeyboard"
-if (Test-Path $VkQmlSrc) {
-    foreach ($lib in @(
-        "libQt6VirtualKeyboard_arm64-v8a.so",
-        "libQt6VirtualKeyboardSettings_arm64-v8a.so",
-        "libQt6Svg_arm64-v8a.so",
-        "libQt6QuickLayouts_arm64-v8a.so",
-        "libQt6LabsFolderListModel_arm64-v8a.so",
-        "libqml_QtQuick_VirtualKeyboard_qtvkbplugin_arm64-v8a.so",
-        "libqml_QtQuick_VirtualKeyboard_Settings_qtvkbsettingsplugin_arm64-v8a.so")) {
-        $candidates = @(
-            (Join-Path $VkLibDir $lib),
-            "$QtBase\android_arm64_v8a\plugins\platforminputcontexts\$lib",
-            "$QtBase\android_arm64_v8a\qml\QtQuick\VirtualKeyboard\$lib")
-        $src = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
-        if ($src) { Copy-Item $src "$ApkDir\libs\$Abi\" -Force }
-        else { Write-Host "  note: $lib not in kit (skipped)" -ForegroundColor DarkYellow }
-    }
-    # Settings/Styles plugin .so live inside the qml module dir
-    Get-ChildItem $VkQmlSrc -Recurse -Filter "lib*.so" | ForEach-Object {
-        Copy-Item $_.FullName "$ApkDir\libs\$Abi\" -Force
-    }
-    # QML module -> assets. VirtualKeyboard + its dependency modules
-    # (Window/Layouts/labs.folderlistmodel are imported by Keyboard.qml).
-    $qmlAssetRoot = "$ApkDir\assets\qml"
-    New-Item -ItemType Directory -Force -Path "$qmlAssetRoot\QtQuick" | Out-Null
-    foreach ($dir in @(
-        "$QtBase\android_arm64_v8a\qml\QtQuick\VirtualKeyboard",
-        "$QtBase\android_arm64_v8a\qml\QtQuick\Window",
-        "$QtBase\android_arm64_v8a\qml\QtQuick\Layouts",
-        "$QtBase\android_arm64_v8a\qml\Qt\labs\folderlistmodel")) {
-        $name = Split-Path $dir -Leaf
-        $parent = Split-Path (Split-Path $dir) -Leaf
-        $dst = if ($parent -eq "labs") { "$qmlAssetRoot\Qt\labs\$name" } else { "$qmlAssetRoot\QtQuick\$name" }
-        if (Test-Path $dst) { Remove-Item $dst -Recurse -Force }
-        New-Item -ItemType Directory -Force -Path $dst | Out-Null
-        Copy-Item "$dir\*" $dst -Recurse -Force
-        # QML plugin .so must live in libs/<abi> for the class loader; the
-        # qmldir "plugin" lines dlopen them from there at import time.
-        Get-ChildItem $dst -Recurse -Filter "*.so" | ForEach-Object {
-            Copy-Item $_.FullName "$ApkDir\libs\$Abi\" -Force
-        }
-        Get-ChildItem $dst -Recurse -Filter "*.so" | Remove-Item -Force
-    }
-}
 if ($LASTEXITCODE -ne 0) { throw "androiddeployqt failed" }
 
 Write-Host "== [5/5] gradle overrides + assemble$Configuration ==" -ForegroundColor Cyan
@@ -174,7 +128,8 @@ Write-Host "== [5/5] gradle overrides + assemble$Configuration ==" -ForegroundCo
 # sdk.dir: the colon is escaped (\:) like the original local default; spaces
 # are left as-is (AGP tolerates them).
 $sdkDir = if ($env:AURELEX_ANDROID_SDK) { $env:AURELEX_ANDROID_SDK } else { "C:\Program Files (x86)\Android\android-sdk" }
-Set-Content (Join-Path $ApkDir "local.properties") "sdk.dir=$($sdkDir -replace ':', '\:')" -NoNewline
+$sdkProp = ($sdkDir -replace '\\', '/') -replace ':', '\:'
+Set-Content (Join-Path $ApkDir "local.properties") "sdk.dir=$sdkProp" -NoNewline
 $gpPath = Join-Path $ApkDir "gradle.properties"
 $gp = Get-Content $gpPath -Raw
 $gp = $gp -replace 'androidCompileSdkVersion=android-\d+', 'androidCompileSdkVersion=android-34'
@@ -193,7 +148,7 @@ if (-not (Test-Path (Join-Path $ApkDir "settings.gradle"))) {
 # release APK instead of failing on a missing storeFile.
 if ($Configuration -eq "Release") {
     $ksPath = ""
-    if ($env:AURELEX_KEYSTORE_PATH) {
+    if ($env:AURELEX_KEYSTORE_PATH -and (Test-Path $env:AURELEX_KEYSTORE_PATH)) {
         $ksPath = $env:AURELEX_KEYSTORE_PATH
     } else {
         $localDebug = Join-Path $env:USERPROFILE ".android\debug.keystore"
