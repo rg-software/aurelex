@@ -7,9 +7,13 @@
 #include <QVariantMap>
 #include <QPair>
 #include <QFile>
+#include <QClipboard>
 #include <QJsonArray>
 #include <QJsonDocument>
+#include <QJsonObject>
 #include <QJsonValue>
+#include <QXmlStreamReader>
+#include <QGuiApplication>
 
 EngineController::EngineController(QObject *parent) : QObject(parent) {}
 EngineController::~EngineController() = default;
@@ -96,6 +100,7 @@ void EngineController::initialize(const QString &appDir, const QString &stagedDi
         }
         setReady(true);
         w->deleteLater();
+        loadSettings();
         loadHistory();
         loadFavorites();
         runScan();
@@ -482,6 +487,57 @@ void EngineController::setFavorites(const QStringList &list)
     emit favoritesChanged();
 }
 
+void EngineController::setDarkMode(bool on)
+{
+    if (m_darkMode == on) return;
+    m_darkMode = on;
+    gd_set_dark_mode(on ? 1 : 0);
+    QFile f(m_appDir + "/settings.json");
+    if (f.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        QJsonObject obj;
+        obj.insert("darkMode", on);
+        obj.insert("onboarded", m_onboarded);
+        f.write(QJsonDocument(obj).toJson(QJsonDocument::Compact));
+    }
+    emit darkModeChanged();
+}
+
+void EngineController::setOnboarded(bool v)
+{
+    if (m_onboarded == v) return;
+    m_onboarded = v;
+    QFile f(m_appDir + "/settings.json");
+    if (f.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        QJsonObject obj;
+        obj.insert("darkMode", m_darkMode);
+        obj.insert("onboarded", v);
+        f.write(QJsonDocument(obj).toJson(QJsonDocument::Compact));
+    }
+    emit onboardedChanged();
+}
+
+void EngineController::loadSettings()
+{
+    QFile f(m_appDir + "/settings.json");
+    if (!f.open(QIODevice::ReadOnly)) return;
+    const QJsonDocument doc = QJsonDocument::fromJson(f.readAll());
+    m_darkMode = doc.object().value("darkMode").toBool(false);
+    m_onboarded = doc.object().value("onboarded").toBool(false);
+    gd_set_dark_mode(m_darkMode ? 1 : 0);
+    emit darkModeChanged();
+    emit onboardedChanged();
+}
+
+void EngineController::saveSettings()
+{
+    QFile f(m_appDir + "/settings.json");
+    if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate)) return;
+    QJsonObject obj;
+    obj.insert("darkMode", m_darkMode);
+    obj.insert("onboarded", m_onboarded);
+    f.write(QJsonDocument(obj).toJson(QJsonDocument::Compact));
+}
+
 void EngineController::recordHistory(const QString &word)
 {
     if (word.isEmpty()) return;
@@ -519,3 +575,44 @@ void EngineController::clearHistory()
     setHistory(QStringList());
     saveHistory();
 }
+
+QString EngineController::readPendingLookup()
+{
+    // The Java shell writes the captured lookup word into
+    // shared_prefs/intent.xml as a standard SharedPreferences XML file.
+    const QString path = m_appDir + QStringLiteral("/../shared_prefs/intent.xml");
+    QFile f(path);
+    if (!f.open(QIODevice::ReadOnly)) return QString();
+    const QString xml = QString::fromUtf8(f.readAll());
+    f.close();
+
+    QXmlStreamReader xr(xml);
+    QString word;
+    bool inLookup = false;
+    while (!xr.atEnd()) {
+        const auto tok = xr.readNext();
+        if (tok == QXmlStreamReader::StartElement
+            && xr.name() == QStringLiteral("string")
+            && xr.attributes().value(QStringLiteral("name")) == QStringLiteral("lookupText")) {
+            inLookup = true;
+        } else if (tok == QXmlStreamReader::Characters && inLookup) {
+            word = xr.text().toString();
+        } else if (tok == QXmlStreamReader::EndElement && inLookup) {
+            break;
+        }
+    }
+
+    if (!word.isEmpty()) {
+        // Consume: delete the file so the lookup isn't re-triggered.
+        f.remove();
+    }
+    return word;
+}
+
+QString EngineController::clipboardText()
+{
+    QClipboard *cb = QGuiApplication::clipboard();
+    if (!cb) return QString();
+    return cb->text();
+}
+

@@ -26,6 +26,8 @@ class EngineController : public QObject
     Q_PROPERTY(int activeGroupId READ activeGroupId NOTIFY activeGroupChanged)
     Q_PROPERTY(QStringList history READ history NOTIFY historyChanged)
     Q_PROPERTY(QStringList favorites READ favorites NOTIFY favoritesChanged)
+    Q_PROPERTY(bool darkMode READ darkMode WRITE setDarkMode NOTIFY darkModeChanged)
+    Q_PROPERTY(bool onboarded READ onboarded WRITE setOnboarded NOTIFY onboardedChanged)
 public:
     explicit EngineController(QObject *parent = nullptr);
     ~EngineController() override;
@@ -38,6 +40,10 @@ public:
     int activeGroupId() const { return m_activeGroupId; }
     QStringList history() const { return m_history; }
     QStringList favorites() const { return m_favorites; }
+    bool darkMode() const { return m_darkMode; }
+    bool onboarded() const { return m_onboarded; }
+    void setDarkMode(bool on);
+    void setOnboarded(bool v);
 
     // Initialise the engine. `configDir`/`indexDir` are usually the same
     // AppLocalDataLocation; `stagedDir` is the dict folder the app stages to.
@@ -93,6 +99,16 @@ public:
     Q_INVOKABLE void removeHistory(const QString &word);
     Q_INVOKABLE void clearHistory();
 
+    // Milestone 6: incoming lookup intents. The Java shell (ExperimentActivity)
+    // writes the captured word into shared_prefs/intent.xml. QML calls this on
+    // startup + resume; the method returns the pending word (or empty) and
+    // clears the file so the next lookup isn't re-triggered.
+    Q_INVOKABLE QString readPendingLookup();
+
+    // Clipboard lookup: reads the system clipboard text (via the JNI clipboard
+    // bridge) and returns it. Empty when the clipboard has no text.
+    Q_INVOKABLE QString clipboardText();
+
     bool buildingFts() const { return m_buildingFts; }
 
     // Lookup a word. `articleLoaded(word, html)` on success, or
@@ -123,6 +139,8 @@ signals:
     void buildingFtsChanged();
     void historyChanged();
     void favoritesChanged();
+    void darkModeChanged();
+    void onboardedChanged();
 
 private:
     void runScan();
@@ -139,6 +157,8 @@ private:
     void saveHistory();
     void loadFavorites();
     void saveFavorites();
+    void loadSettings();
+    void saveSettings();
 
     int m_dictCount = 0;
     bool m_ready = false;
@@ -149,6 +169,8 @@ private:
     bool m_buildingFts = false;
     QStringList m_history;
     QStringList m_favorites;
+    bool m_darkMode = false;
+    bool m_onboarded = false;
     QString m_appDir;
     QString m_stagedDir;
 };

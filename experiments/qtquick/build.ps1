@@ -78,6 +78,15 @@ $settings = Join-Path $BuildDir "android-aurelex_exp-deployment-settings.json"
 # let androiddeployqt invoke gradle itself (its internal run uses the Unity SDK
 # + wrong JDK). We apply overrides, then build with gradle under JDK 17.
 & $DeployQt --output $ApkDir --input $settings --no-build
+
+# androiddeployqt regenerates AndroidManifest.xml from its template and does
+# not merge the package-source manifest (custom activity / intent-filters /
+# Java sources). Re-copy them after the deploy step.
+Copy-Item (Join-Path $ExpDir "android\AndroidManifest.xml") (Join-Path $ApkDir "AndroidManifest.xml") -Force
+if (Test-Path (Join-Path $ExpDir "android\src")) {
+    New-Item -ItemType Directory -Force -Path (Join-Path $ApkDir "src") | Out-Null
+    Copy-Item (Join-Path $ExpDir "android\src\*") (Join-Path $ApkDir "src\") -Recurse -Force
+}
 if ($LASTEXITCODE -ne 0) { throw "androiddeployqt failed" }
 
 Write-Host "== [5/5] gradle overrides + assembleDebug ==" -ForegroundColor Cyan

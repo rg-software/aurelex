@@ -14,7 +14,7 @@
         android:label="AurelexExp"
         android:allowBackup="true">
         <activity
-            android:name="org.qtproject.qt.android.bindings.QtActivity"
+            android:name=".ExperimentActivity"
             android:configChanges="orientation|uiMode|screenLayout|screenSize|smallestScreenSize|layoutDirection|locale|fontScale|keyboard|keyboardHidden|navigation|mcc|mnc|density"
             android:label="AurelexExp"
             android:launchMode="singleTop"
@@ -23,6 +23,24 @@
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <!-- "Look up in AurelexExp" from other apps' share sheets -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
+            <!-- Explicit lookup intent, e.g. aurelex://lookup?word=<word> -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:scheme="aurelex" android:host="lookup" />
+            </intent-filter>
+            <!-- Selection-toolbar lookup: "Look up in AurelexExp" on selected text -->
+            <intent-filter>
+                <action android:name="android.intent.action.PROCESS_TEXT" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
             </intent-filter>
             <meta-data android:name="android.app.lib_name" android:value="-- %%INSERT_APP_LIB_NAME%% --" />
             <meta-data android:name="android.app.extract_android_style" android:value="minimal" />

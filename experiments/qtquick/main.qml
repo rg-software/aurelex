@@ -455,6 +455,14 @@ Window {
         }
     }
 
+    Component.onCompleted: {
+        const pending = engine.readPendingLookup()
+        if (pending && pending.length > 0) {
+            console.log('[aurelex] pending lookup:', pending)
+            engine.lookup(pending)
+        }
+    }
+
     onCurrentHtmlChanged: {
         if (state === 2) {
             view.loadHtml(engine.rewriteArticleUrls(currentHtml), "file:///android_asset/")
