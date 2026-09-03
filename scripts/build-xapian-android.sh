@@ -253,10 +253,13 @@ if [ -n "$FREE_SHELL" ]; then
 fi
 $MAKE_BIN $MAKE_SHELL -j"${XAPIAN_JOBS:-$(nproc 2>/dev/null || echo 4)}"
 echo "== installing =="
-# Skip install-man: makemanpage produced a bogus 'xapia.-check' name under the
-# Windows/MSYS2 toolchain (mangled basename), which fails install-man1. We only
-# need the library + headers, so install exec/data targets directly.
-$MAKE_BIN $MAKE_SHELL install-exec install-data
+# install-exec puts libxapian.a (and the bins) in place. Skip install-data:
+# it recurses into install-man1, which fails because makemanpage mangles the
+# "xapian-check" basename to "xapia.-check" under the Windows toolchain. We
+# only need the static library + headers, so copy the public header manually.
+$MAKE_BIN $MAKE_SHELL install-exec
+mkdir -p "${PREFIX}/include"
+install -m 644 include/xapian.h "${PREFIX}/include/xapian.h"
 
 echo "== done: ${PREFIX}/include/xapian.h, ${PREFIX}/lib/libxapian.a =="
 ls -l "${PREFIX}/include/xapian.h" "${PREFIX}/lib/libxapian.a"
