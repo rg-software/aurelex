@@ -43,8 +43,12 @@ set(Qt6Qml_DIR        "${QT_ANDROID_ROOT}/lib/cmake/Qt6Qml"        CACHE PATH ""
 set(Qt6Quick_DIR      "${QT_ANDROID_ROOT}/lib/cmake/Qt6Quick"      CACHE PATH "" FORCE)
 set(Qt6WebView_DIR    "${QT_ANDROID_ROOT}/lib/cmake/Qt6WebView"    CACHE PATH "" FORCE)
 set(Qt6Network_DIR    "${QT_ANDROID_ROOT}/lib/cmake/Qt6Network"    CACHE PATH "" FORCE)
+set(Qt6QuickControls2_DIR "${QT_ANDROID_ROOT}/lib/cmake/Qt6QuickControls2" CACHE PATH "" FORCE)
+set(Qt6QuickControls2Impl_DIR "${QT_ANDROID_ROOT}/lib/cmake/Qt6QuickControls2Impl" CACHE PATH "" FORCE)
+set(Qt6QuickControls2Material_DIR "${QT_ANDROID_ROOT}/lib/cmake/Qt6QuickControls2Material" CACHE PATH "" FORCE)
+set(Qt6QuickControls2MaterialStyleImpl_DIR "${QT_ANDROID_ROOT}/lib/cmake/Qt6QuickControls2MaterialStyleImpl" CACHE PATH "" FORCE)
 
-find_package(Qt6 REQUIRED COMPONENTS Core Gui Xml Concurrent Qml Quick WebView Network)
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Xml Concurrent Qml Quick QuickControls2 WebView Network)
 
 set(VCPKG_ANDROID_ROOT "${VCPKG_BASE}/installed/${VCPKG_TRIPLET}")
 link_directories("${VCPKG_ANDROID_ROOT}/lib")
@@ -60,6 +64,7 @@ qt_add_executable(aurelex_exp
     main.cpp
     EngineController.cpp
     ArticleServer.cpp
+    fonts.qrc
     $<TARGET_OBJECTS:aurelex_carve>
 )
 target_include_directories(aurelex_exp PRIVATE
@@ -75,7 +80,7 @@ target_include_directories(aurelex_exp PRIVATE
 # final link (they are not propagated from an OBJECT library).
 target_link_libraries(aurelex_exp PRIVATE
     Qt6::Core Qt6::Gui Qt6::Xml Qt6::Concurrent
-    Qt6::Qml Qt6::Quick Qt6::WebView Qt6::Network
+    Qt6::Qml Qt6::Quick Qt6::QuickControls2 Qt6::WebView Qt6::Network
     xapian z bz2 lzma lzo2 fmt
 )
 

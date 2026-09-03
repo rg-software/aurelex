@@ -5,6 +5,7 @@
 #include <QStandardPaths>
 #include <QUrl>
 #include <QDebug>
+#include <QFontDatabase>
 #include <QtWebView/QtWebView>
 
 #include "EngineController.hpp"
@@ -20,6 +21,17 @@ int main(int argc, char *argv[])
     // qputenv("QT_IM_MODULE", QByteArray("qtvirtualkeyboard"));
     QtWebView::initialize();
     QGuiApplication app(argc, argv);
+
+    // Register the Material Icons font (bundled via fonts.qrc) so QML can render
+    // glyphs with the "Material Icons" family. See qt-material-ui change design D6.
+    const int fontId = QFontDatabase::addApplicationFont(
+        QStringLiteral(":/fonts/MaterialIcons-Regular.ttf"));
+    if (fontId < 0) {
+        qWarning() << "[aurelex] failed to register Material Icons font";
+    } else {
+        qInfo() << "[aurelex] Material Icons font families:"
+                << QFontDatabase::applicationFontFamilies(fontId);
+    }
 
     const QString home = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
     const QString staged = home + QStringLiteral("/staged");

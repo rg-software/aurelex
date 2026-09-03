@@ -1,16 +1,32 @@
 import QtQuick
+import QtQuick.Controls
+import QtQuick.Controls.Material
+import QtQuick.Layouts
 import QtWebView
 
 // All-Qt UI: search / dictionaries / groups / FTS / history / favorites /
-// article panes switched by `state`, plus onboarding + dark mode.
-// Bare QtQuick only (no Controls2 in the carve-subset install).
-Window {
+// article panes switched by `state`, plus onboarding + theme.
+// Material Design 3 via QtQuick.Controls2 (Material style). See the
+// qt-material-ui change; the Material palette drives light/dark.
+// NOTE: legacy component behavior (no `pragma ComponentBehavior: Bound`) —
+// several delegates rely on the implicit `modelData`/`index` injection, which
+// Bound would remove. The article WebView still resolves `engine` (context
+// property) and outer ids across the Loader boundary as-is.
+ApplicationWindow {
     id: root
     width: 480
     height: 800
     visible: true
     title: "AurelexExp"
-    color: root.bg
+
+    // Material accent drives highlights; theme follows system dark with the
+    // manual D-toggle override (see EngineController userDarkOverride/systemDark).
+    // Task 3.1: Material.theme bound at the root so light/dark is driven by the
+    // effective dark mode (JNI systemDark + userDarkOverride), not by Qt's own
+    // (unreliable on Android 6.6) system detection.
+    Material.accent: Material.Purple
+    Material.theme: (engine.userDarkOverride || engine.systemDark)
+                    ? Material.Dark : Material.Light
 
     // 0 = search, 1 = dictionaries, 2 = article, 3 = groups, 4 = fts,
     // 5 = history, 6 = favorites.
@@ -18,17 +34,41 @@ Window {
     property string currentWord: ""
     property string currentHtml: ""
     property var ftsResults: []
+    // The article WebView is created on demand (articleLoader) to avoid
+    // standing up a full-bleed native Android WebView over the UI at startup;
+    // root.view aliases the loaded item (null until article mode).
+    property var view: articleLoader.item
     // Back-stack for in-article navigation. Each entry is a {word, html} pair
     // so the Back button can pop to the previous article without losing scroll
     // position (we re-render the prior article's HTML).
     property var navStack: []
 
-    // Dark-mode-aware palette.
-    property color bg: engine.darkMode ? "#222222" : "#ececec"
-    property color card: engine.darkMode ? "#2e2e2e" : "white"
-    property color cardBorder: engine.darkMode ? "#444444" : "#dddddd"
-    property color fg: engine.darkMode ? "#eeeeee" : "black"
-    property color subFg: engine.darkMode ? "#999999" : "#777777"
+    // Material icon font family (registered from fonts.qrc in main.cpp) + the
+    // icon-name -> codepoint helper (qt-material-ui task 7.2).
+    property string iconFontFamily: "Material Icons"
+    function icon( name ) {
+        var map = {
+            "search": 0xe8b6,
+            "library_books": 0xe254,
+            "folder": 0xe2c7,
+            "history": 0xe889,
+            "star": 0xe838,
+            "star_border": 0xe83a,
+            "arrow_back": 0xe5c4,
+            "close": 0xe5cd,
+            "add": 0xe145,
+            "delete": 0xe872,
+            "bookmark": 0xe866,
+            "dark_mode": 0xe51c
+        }
+        return map[name] !== undefined ? String.fromCharCode(map[name]) : "\uFFFD"
+    }
+    // Convenient Material palette aliases (replaces the old darkMode ternaries).
+    property color uiBg: Material.background
+    property color uiCard: Material.dialogColor
+    property color uiBorder: Material.dividerColor
+    property color uiFg: Material.foreground
+    property color uiSubFg: Material.secondaryTextColor
 
     // All pane switches blur the focused input BEFORE hiding its pane:
     // an IME query arriving at a focused-but-hidden item can spin the
@@ -42,8 +82,6 @@ Window {
         currentHtml = html
         _blurActive()
         state = 2
-        // Deferred load: loading while the keyboard-hide resize is in flight
-        // can leave the Chromium surface blank; wait for it to settle.
         articleLoadTimer.restart()
     }
     function _backFromArticle() {
@@ -59,8 +97,6 @@ Window {
     }
     function _blurActive() {
         if (root.activeFocusItem && root.activeFocusItem.forceActiveFocus === undefined) return
-        // Move active focus to the root window item (no activeFocusOnTab items
-        // remain in the chain while inputs are blurred).
         if (input.activeFocus) input.focus = false
         if (newGroupInput.activeFocus) newGroupInput.focus = false
         if (ftsInput.activeFocus) ftsInput.focus = false
@@ -89,9 +125,25 @@ Window {
         state = 6
     }
     function _runFts() {
-        // Wildcards is the only mode that works reliably (regex is broken
-        // upstream; plain == wildcard search without wildcards).
+        // Single v1 mode: Wildcards (FTS::SearchMode=2). See full-text-search.
         engine.ftsSearch(ftsInput.text, 2, engine.activeGroupId)
+    }
+    // Navigation labels/icons for the bottom TabBar.
+    property var navItems: [
+        { idx: 0, label: "Search",   icon: "search" },
+        { idx: 1, label: "Dicts",    icon: "library_books" },
+        { idx: 3, label: "Groups",   icon: "folder" },
+        { idx: 4, label: "FTS",      icon: "history" },
+        { idx: 5, label: "History",  icon: "history" },
+        { idx: 6, label: "Favs",     icon: "star" }
+    ]
+    function _navTo(idx) {
+        if (idx === 0) { _blurActive(); state = 0; return }
+        if (idx === 1) { _openDicts(); return }
+        if (idx === 3) { _openGroups(); return }
+        if (idx === 4) { _openFts(); return }
+        if (idx === 5) { _openHistory(); return }
+        if (idx === 6) { _openFavorites(); return }
     }
 
     Connections {
@@ -102,54 +154,21 @@ Window {
         }
     }
 
-    // --- shared top bar ---
-    Rectangle {
+    // --- shared top bar (Material ToolBar) ---
+    ToolBar {
         id: topBar
         width: parent.width
-        height: 44
-        color: "#222222"
         z: 5
 
-        Row {
+        RowLayout {
             anchors.fill: parent
             anchors.leftMargin: 12
-            spacing: 12
+            anchors.rightMargin: 8
+            spacing: 8
 
-            // Cycle button: search -> dicts -> groups -> fts -> hist -> favs -> search.
-            Rectangle {
-                width: 90
-                height: 30
-                anchors.verticalCenter: parent.verticalCenter
-                color: "#3a3a3a"
-                Text {
-                    anchors.centerIn: parent
-                    color: "white"
-                    font.pixelSize: 13
-                    text: root.state === 0 ? "Dicts"
-                        : root.state === 1 ? "Groups"
-                        : root.state === 3 ? "FTS"
-                        : root.state === 4 ? "Hist"
-                        : root.state === 5 ? "Favs"
-                        : root.state === 6 ? "<- Search"
-                        : "Dicts"
-                }
-                MouseArea {
-                    anchors.fill: parent
-                    onClicked: {
-                        if (root.state === 0) root._openDicts()
-                        else if (root.state === 1) root._openGroups()
-                        else if (root.state === 3) root._openFts()
-                        else if (root.state === 4) root._openHistory()
-                        else if (root.state === 5) root._openFavorites()
-                        else root.state = 0
-                    }
-                }
-            }
-
-            Text {
-                anchors.verticalCenter: parent.verticalCenter
-                color: "white"
-                font.pixelSize: 16
+            Label {
+                Layout.fillWidth: true
+                elide: Text.ElideRight
                 text: root.state === 0 ? "Search"
                     : root.state === 1 ? "Dictionaries (" + engine.dictCount + ")"
                     : root.state === 3 ? "Groups (" + engine.groups.length + ", active=" + engine.activeGroupId + ")"
@@ -159,21 +178,74 @@ Window {
                     : root.currentWord
             }
 
-            Rectangle {
-                width: 32
-                height: 30
-                anchors.verticalCenter: parent.verticalCenter
-                color: "#3a3a3a"
-                Text {
+            ToolButton {
+                // Manual dark override D toggle. When following system it forces
+                // dark; when forcing dark it returns to following the system theme.
+                property string _name: "dark_mode"
+                text: root.icon("dark_mode")
+                font.family: root.iconFontFamily
+                font.pixelSize: 20
+                ToolTip.visible: hovered
+                ToolTip.text: engine.userDarkOverride ? "Dark (forced) — tap to follow system"
+                                                       : "Follow system — tap to force dark"
+                onClicked: {
+                    engine.toggleDarkOverride()
+                    root._blurActive()
+                }
+            }
+        }
+    }
+
+    // --- bottom navigation (Material TabBar, replaces the old cycle button) ---
+    TabBar {
+        id: navBar
+        // 5.2: anchor to the BOTTOM. Without anchors the TabBar defaulted to
+        // (0,0) and rendered as a second top bar overlapping the ToolBar; every
+        // pane (bottom: navBar.top) then collapsed against y=0.
+        anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
+        z: 5
+        // 5.2: highlight the active tab by driving the TabBar's own selection
+        // (TabButton has no `highlighted` in Qt 6.6). State -> tab index; the
+        // article pane (state 2) has no tab, so clear the selection.
+        currentIndex: root.state === 2 ? -1
+                    : root.state === 3 ? 2
+                    : root.state === 4 ? 3
+                    : root.state === 5 ? 4
+                    : root.state === 6 ? 5
+                    : root.state
+
+        Repeater {
+            model: root.navItems
+            delegate: TabButton {
+                id: tabBtn
+                // Equal-width tabs from the fixed window width (avoiding a
+                // TabButton width <-> TabBar implicitWidth binding loop).
+                width: root.width / root.navItems.length
+                // 5.3: icon glyph in the Material Icons font + label in the theme
+                // font. The default TabButton renders `text` in a single font, so
+                // applying the icon font hid the labels (icon font has no Latin
+                // glyphs). Custom two-line contentItem mirrors the Material
+                // TabButton color rule (checked/down -> accent).
+                contentItem: Column {
                     anchors.centerIn: parent
-                    color: engine.darkMode ? "gold" : "white"
-                    font.pixelSize: 14
-                    text: "D"
+                    spacing: 0
+                    Text {
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        text: root.icon(modelData.icon)
+                        font.family: root.iconFontFamily
+                        font.pixelSize: 18
+                        color: tabBtn.down || tabBtn.checked ? tabBtn.Material.accentColor
+                                                             : tabBtn.Material.foreground
+                    }
+                    Text {
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        text: modelData.label
+                        font.pixelSize: 11
+                        color: tabBtn.down || tabBtn.checked ? tabBtn.Material.accentColor
+                                                             : tabBtn.Material.foreground
+                    }
                 }
-                MouseArea {
-                    anchors.fill: parent
-                    onClicked: engine.darkMode = !engine.darkMode
-                }
+                onClicked: root._navTo(modelData.idx)
             }
         }
     }
@@ -181,14 +253,11 @@ Window {
     // --- search view ---
     Rectangle {
         id: searchPane
-        anchors { top: topBar.bottom; left: parent.left; right: parent.right; bottom: parent.bottom }
-        color: root.bg
+        anchors { top: topBar.bottom; left: parent.left; right: parent.right; bottom: navBar.top }
+        color: root.uiBg
         visible: root.state === 0
 
         function _doSuggest() {
-            // displayText = committed text + IME preedit: during SwiftKey/
-            // Gboard composition, `text` is empty while the word lives in the
-            // preedit — suggesting on `text` alone misses typing entirely.
             const t = input.displayText
             if (t.trim().length === 0) {
                 suggestionList.model = []
@@ -211,15 +280,6 @@ Window {
         Connections {
             target: engine
             function onSuggestionsReady(prefix, suggestions) {
-                    // No prefix check here: the C++ side drops stale generations,
-                // and the IME can rewrite the preedit after the suggest fired.
-                // NOTE: qualify explicitly — an unqualified write inside a
-                // Connections handler resolves to a GLOBAL (silently failing,
-                // "Invalid write to global property").
-                // Apply DEFERRED (60ms): assigning the model synchronously
-                // inside the IME's composition event storm leaves the ListView
-                // visually stale (Qt Quick frame starvation, same family as
-                // the blank WebView bug).
                 searchPane.pendingSuggestions = suggestions
                 suggestApplyTimer.restart()
             }
@@ -228,45 +288,27 @@ Window {
             }
         }
 
-        Column {
+        ColumnLayout {
             anchors.fill: parent
             anchors.margins: 16
             spacing: 8
 
-            Rectangle {
-                width: parent.width
-                height: 48
-                color: root.card
-                border.color: root.cardBorder
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: 8
 
-                TextInput {
+                TextField {
                     id: input
-                    // ImhHiddenText: the IME treats the field as password-style
-                    // and commits keys directly (no composing/extracted-text
-                    // monitoring) — the mechanism that breaks on Qt 6.6 +
-                    // Android 15. The field still echoes normal text.
-                    activeFocusOnTab: false
-                    anchors.fill: parent
-                    anchors.leftMargin: 8
-                    verticalAlignment: TextInput.AlignVCenter
+                    Layout.fillWidth: true
+                    placeholderText: "Search dictionaries"
                     font.pixelSize: 18
-                    color: root.fg
-                    // Trigger on displayText (= text + IME preedit): during
-                    // composition `text` is empty while the word lives in the
-                    // preedit, so textChanged alone misses typing.
                     onDisplayTextChanged: debounce.restart()
-                    onAccepted: { focus = false; engine.lookup(text.trim()) }
+                    onAccepted: { input.focus = false; engine.lookup(text.trim()) }
                     Component.onCompleted: forceActiveFocus()
                 }
-            }
 
-            Rectangle {
-                width: 120
-                height: 32
-                color: "#3a3a3a"
-                Text { anchors.centerIn: parent; color: "white"; font.pixelSize: 13; text: "Clipboard" }
-                MouseArea {
-                    anchors.fill: parent
+                Button {
+                    text: "Clipboard"
                     onClicked: {
                         const t = engine.clipboardText()
                         if (t.length > 0) engine.lookup(t)
@@ -280,29 +322,25 @@ Window {
                 onTriggered: searchPane._doSuggest()
             }
 
-            Text {
+            Label {
+                Layout.fillWidth: true
                 visible: engine.lastError.length > 0
                 text: "engine error: " + engine.lastError
-                color: "red"
+                color: Material.color(Material.Red)
                 wrapMode: Text.Wrap
-                width: parent.width
             }
 
             ListView {
                 id: suggestionList
-                width: parent.width
-                height: parent.height - 100
+                Layout.fillWidth: true
+                Layout.fillHeight: true
                 clip: true
                 model: []
-                delegate: Rectangle {
+                delegate: ItemDelegate {
                     width: ListView.view.width
-                    height: 40
-                    color: root.card
-                    Text { anchors.verticalCenter: parent.verticalCenter; anchors.left: parent.left; anchors.leftMargin: 12; text: modelData; color: root.fg; font.pixelSize: 16 }
-                    MouseArea {
-                        anchors.fill: parent
-                        onClicked: engine.lookup(modelData)
-                    }
+                    height: 44
+                    text: modelData
+                    onClicked: engine.lookup(modelData)
                 }
             }
         }
@@ -311,13 +349,11 @@ Window {
     // --- dictionaries view ---
     Rectangle {
         id: dictsPane
-        anchors { top: topBar.bottom; left: parent.left; right: parent.right; bottom: parent.bottom }
-        color: root.bg
+        anchors { top: topBar.bottom; left: parent.left; right: parent.right; bottom: navBar.top }
+        color: root.uiBg
         visible: root.state === 1
 
         Component.onCompleted: engine.refreshDictionaries()
-        // Refresh the storage-access state while the pane is visible (the grant
-        // happens in the system Settings; bindings can't see it change).
         property bool storageGranted: engine.isAllFilesAccessGranted()
         property int removeIndex: -1
         property string removeName: ""
@@ -341,97 +377,128 @@ Window {
             function onReadyChanged() { if (engine.ready) engine.refreshDictionaries() }
         }
 
-        Column {
+        ColumnLayout {
             anchors.fill: parent
             anchors.margins: 12
             spacing: 8
 
-            Rectangle {
-                width: 120
-                height: 32
-                color: "#3a3a3a"
-                Text { anchors.centerIn: parent; color: "white"; font.pixelSize: 13; text: "Rescan" }
-                MouseArea { anchors.fill: parent; onClicked: engine.rescan() }
-            }
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: 8
 
-            Rectangle {
-                visible: !dictsPane.storageGranted
-                width: parent.width
-                height: 44
-                color: "#224488"
-                Text {
-                    anchors.centerIn: parent
-                    color: "white"; font.pixelSize: 13
-                    text: "Add dictionaries: grant storage access"
+                Button {
+                    text: "Rescan"
+                    onClicked: engine.rescan()
                 }
-                MouseArea { anchors.fill: parent; onClicked: engine.openAllFilesAccessSettings() }
+                // 8.2: "Add dictionaries" action (Qt 6.6 RoundButton stands in
+                // for the Material 3 FloatingActionButton, which Qt 6.6 lacks).
+                RoundButton {
+                    text: "Add dictionaries"
+                    highlighted: true
+                    onClicked: {
+                        if (!dictsPane.storageGranted) {
+                            engine.openAllFilesAccessSettings()
+                        } else {
+                            engine.rescan()
+                        }
+                    }
+                }
             }
 
-            Text {
+            Pane {
+                Layout.fillWidth: true
+                visible: !dictsPane.storageGranted
+                padding: 12
+                contentItem: ColumnLayout {
+                    spacing: 8
+                    Label {
+                        Layout.fillWidth: true
+                        text: "Add dictionaries: grant storage access"
+                        wrapMode: Text.Wrap
+                        color: Material.primaryTextColor
+                    }
+                    Button {
+                        text: "Open settings"
+                        onClicked: engine.openAllFilesAccessSettings()
+                    }
+                }
+            }
+
+            Label {
+                Layout.fillWidth: true
                 visible: dictsPane.storageGranted
-                color: root.subFg
+                color: root.uiSubFg
                 font.pixelSize: 12
                 wrapMode: Text.Wrap
-                width: parent.width
                 text: "Storage access granted. Copy dictionary files (.mdx, .dsl, .dsl.dz, .ifo) into the GoldenDict folder on the device storage, then tap Rescan."
             }
 
             ListView {
                 id: dictsList
-                width: parent.width
-                height: parent.height - 40
+                Layout.fillWidth: true
+                Layout.fillHeight: true
                 clip: true
                 model: engine.dictionaries
-                spacing: 6
-                delegate: Rectangle {
+                spacing: 2
+                delegate: ItemDelegate {
                     id: dictRow
-                    // Capture the outer ListView's model roles: the inner button
-                    // Repeater shadows `index`/`modelData`.
                     property int dictIndex: index
                     property var dictData: modelData
                     width: ListView.view.width
-                    height: 56
-                    color: root.card
-                    border.color: root.cardBorder
-                    Column {
-                        anchors.fill: parent
-                        anchors.margins: 8
+                    height: 76
+                    padding: 8
+
+                    contentItem: ColumnLayout {
                         spacing: 2
-                        Text { text: dictRow.dictData.name; color: root.fg; font.pixelSize: 16; font.bold: true }
-                        Text { text: dictRow.dictData.source; color: root.subFg; font.pixelSize: 12; elide: Text.ElideMiddle; width: parent.width }
-                        Row {
-                            spacing: 8
-                            height: 28
-                            Repeater {
-                                model: [
-                                    { label: "Up",   delta: -1 },
-                                    { label: "Down", delta:  1 },
-                                    { label: "Index", delta: -2 },
-                                    { label: "Remove", delta: 0 }
-                                ]
-                                delegate: Rectangle {
-                                    width: 76
-                                    height: 28
-                                    color: modelData.label === "Remove" ? "#882222"
-                                        : modelData.label === "Index" ? "#224488" : "#3a3a3a"
-                                    Text { anchors.centerIn: parent; text: modelData.label; color: "white"; font.pixelSize: 12 }
-                                    MouseArea {
-                                        anchors.fill: parent
-                                        onClicked: {
-                                            const idx = dictRow.dictIndex
-                                            const op = modelData.label
-                                            if (op === "Remove") {
-                                                dictsPane._requestRemove(idx, dictRow.dictData.name)
-                                            } else if (op === "Index") {
-                                                engine.ftsIndex(idx)
-                                            } else {
-                                                const target = Math.max(0, Math.min(engine.dictionaries.length - 1, idx + modelData.delta))
-                                                if (target !== idx) engine.moveDictionary(idx, target)
-                                            }
-                                        }
-                                    }
-                                }
+                        Label {
+                            text: dictRow.dictData.name
+                            font.pixelSize: 16
+                            font.bold: true
+                            elide: Text.ElideMiddle
+                            Layout.fillWidth: true
+                        }
+                        Label {
+                            text: dictRow.dictData.source
+                            color: root.uiSubFg
+                            font.pixelSize: 12
+                            elide: Text.ElideMiddle
+                            Layout.fillWidth: true
+                        }
+                    }
+
+                    // 4.2: Up/Down/Index/Remove as ToolButtons in a RowLayout.
+                    RowLayout {
+                        anchors {
+                            right: parent.right
+                            rightMargin: 4
+                            verticalCenter: parent.verticalCenter
+                        }
+                        spacing: 2
+                        visible: dictRow.hovered || true
+
+                        ToolButton {
+                            text: "Up"
+                            onClicked: {
+                                const idx = dictRow.dictIndex
+                                const target = Math.max(0, idx - 1)
+                                if (target !== idx) engine.moveDictionary(idx, target)
                             }
+                        }
+                        ToolButton {
+                            text: "Down"
+                            onClicked: {
+                                const idx = dictRow.dictIndex
+                                const target = Math.min(engine.dictionaries.length - 1, idx + 1)
+                                if (target !== idx) engine.moveDictionary(idx, target)
+                            }
+                        }
+                        ToolButton {
+                            text: "Index"
+                            onClicked: engine.ftsIndex(dictRow.dictIndex)
+                        }
+                        ToolButton {
+                            text: "Remove"
+                            onClicked: dictsPane._requestRemove(dictRow.dictIndex, dictRow.dictData.name)
                         }
                     }
                 }
@@ -439,67 +506,43 @@ Window {
         }
 
         // --- remove-dictionary confirm dialog ---
-        Rectangle {
+        Dialog {
+            id: removeDialog
+            anchors.centerIn: parent
+            width: Math.min(parent.width - 80, 360)
+            modal: true
+            title: "Remove dictionary"
             visible: dictsPane.removeIndex >= 0
-            anchors.fill: parent
-            color: "#80000000"
-            z: 10
 
-            Rectangle {
-                anchors.centerIn: parent
-                width: parent.width - 80
-                height: 170
-                color: root.card
-                border.color: root.cardBorder
-
-                Column {
-                    anchors.fill: parent
-                    anchors.margins: 16
-                    spacing: 12
-
-                    Text {
-                        width: parent.width
-                        color: root.fg
-                        font.pixelSize: 16
-                        wrapMode: Text.Wrap
-                        text: "Remove dictionary \"" + (dictsPane.removeName !== "" ? dictsPane.removeName : "(unknown)") + "\"?"
-                    }
-                    Text {
-                        width: parent.width
-                        color: root.subFg
-                        font.pixelSize: 13
-                        wrapMode: Text.Wrap
-                        text: "It will be unloaded from the app. The file stays on disk."
-                    }
-
-                    Row {
-                        spacing: 12
-                        anchors.horizontalCenter: parent.horizontalCenter
-                        Rectangle {
-                            width: 120; height: 36
-                            color: "#3a3a3a"
-                            Text { anchors.centerIn: parent; text: "Cancel"; color: "white"; font.pixelSize: 14 }
-                            MouseArea { anchors.fill: parent; onClicked: dictsPane._cancelRemove() }
-                        }
-                        Rectangle {
-                            width: 120; height: 36
-                            color: "#882222"
-                            Text { anchors.centerIn: parent; text: "Remove"; color: "white"; font.pixelSize: 14 }
-                            MouseArea { anchors.fill: parent; onClicked: dictsPane._confirmRemove() }
-                        }
-                    }
+            ColumnLayout {
+                width: parent.width
+                spacing: 8
+                Label {
+                    Layout.fillWidth: true
+                    text: "Remove dictionary \"" + (dictsPane.removeName !== "" ? dictsPane.removeName : "(unknown)") + "\"?"
+                    wrapMode: Text.Wrap
+                }
+                Label {
+                    Layout.fillWidth: true
+                    color: root.uiSubFg
+                    text: "It will be unloaded from the app. The file stays on disk."
+                    wrapMode: Text.Wrap
                 }
             }
+
+            standardButtons: Dialog.Cancel | Dialog.Ok
+
+            onAccepted: dictsPane._confirmRemove()
+            onRejected: dictsPane._cancelRemove()
         }
     }
+
     Rectangle {
         id: groupsPane
-        anchors { top: topBar.bottom; left: parent.left; right: parent.right; bottom: parent.bottom }
-        color: root.bg
+        anchors { top: topBar.bottom; left: parent.left; right: parent.right; bottom: navBar.top }
+        color: root.uiBg
         visible: root.state === 3
 
-        // Membership editor state. editingGroup === -1 shows the group list;
-        // otherwise the group's dict membership editor is shown.
         property int editingGroup: -1
         property string editingGroupName: ""
         property var groupMembers: []
@@ -536,104 +579,97 @@ Window {
         }
 
         // --- group list mode ---
-        Column {
+        ColumnLayout {
             visible: groupsPane.editingGroup === -1
             anchors.fill: parent
             anchors.margins: 12
             spacing: 8
 
-            Rectangle {
-                width: parent.width
-                height: 48
-                color: root.card
-                border.color: root.cardBorder
-
-                TextInput {
-                    id: newGroupInput
-                    activeFocusOnTab: false
-                    anchors.fill: parent
-                    anchors.leftMargin: 8
-                    verticalAlignment: TextInput.AlignVCenter
-                    font.pixelSize: 18
-                    color: root.fg
-                    onAccepted: {
-                        if (text.trim().length > 0) {
-                            engine.createGroup(text.trim())
-                            text = ""
-                        }
+            TextField {
+                id: newGroupInput
+                Layout.fillWidth: true
+                placeholderText: "New group name"
+                font.pixelSize: 18
+                onAccepted: {
+                    if (text.trim().length > 0) {
+                        engine.createGroup(text.trim())
+                        text = ""
                     }
                 }
             }
 
             ListView {
                 id: groupsList
-                width: parent.width
-                height: parent.height - 56
+                Layout.fillWidth: true
+                Layout.fillHeight: true
                 clip: true
                 model: engine.groups
-                spacing: 6
-                delegate: Rectangle {
+                spacing: 2
+                delegate: ItemDelegate {
                     id: groupRow
-                    // Capture the outer ListView's model roles: the inner button
-                    // Repeater shadows `index`/`modelData`.
                     property var groupData: modelData
                     width: ListView.view.width
-                    height: 48
-                    color: groupRow.groupData.id === engine.activeGroupId ? "#224422" : root.card
-                    border.color: root.cardBorder
-                    Row {
-                        anchors.fill: parent
-                        anchors.margins: 8
-                        spacing: 8
+                    height: 56
+                    padding: 4
 
-                        Column {
-                            anchors.verticalCenter: parent.verticalCenter
-                            width: parent.width - 470
-                            spacing: 0
-                            Text {
-                                text: groupRow.groupData.name + " (" + groupRow.groupData.dictCount + ")"
-                                color: groupRow.groupData.id === engine.activeGroupId ? "white" : root.fg
-                                font.pixelSize: 16; font.bold: true
-                            }
-                            Text { text: "id=" + groupRow.groupData.id; color: root.subFg; font.pixelSize: 11 }
+                    // 4.3: active-group highlight via Material.primary.
+                    highlighted: groupRow.groupData.id === engine.activeGroupId
+
+                    contentItem: ColumnLayout {
+                        spacing: 0
+                        Label {
+                            text: groupRow.groupData.name + " (" + groupRow.groupData.dictCount + ")"
+                            font.pixelSize: 16
+                            font.bold: true
+                            Layout.fillWidth: true
                         }
+                        Label {
+                            text: groupRow.groupData.id === 0 ? "All dictionaries" : "id=" + groupRow.groupData.id
+                            color: root.uiSubFg
+                            font.pixelSize: 11
+                        }
+                    }
 
-                        Rectangle {
-                            width: 70
-                            height: 28
-                            anchors.verticalCenter: parent.verticalCenter
+                    RowLayout {
+                        anchors {
+                            right: parent.right
+                            rightMargin: 4
+                            verticalCenter: parent.verticalCenter
+                        }
+                        spacing: 2
+
+                        ToolButton {
+                            text: "Active"
+                            visible: groupRow.groupData.id !== engine.activeGroupId
+                            enabled: groupRow.groupData.id !== 0
+                            onClicked: engine.setActiveGroup(groupRow.groupData.id)
+                        }
+                        ToolButton {
+                            text: "Dicts"
                             visible: groupRow.groupData.id !== 0
-                            color: "#3a3a3a"
-                            Text { anchors.centerIn: parent; text: "Dicts"; color: "white"; font.pixelSize: 12 }
-                            MouseArea {
-                                anchors.fill: parent
-                                onClicked: groupsPane._openMembership(groupRow.groupData.id, groupRow.groupData.name)
-                            }
+                            onClicked: groupsPane._openMembership(groupRow.groupData.id, groupRow.groupData.name)
                         }
-
-                        Repeater {
-                            model: [
-                                { label: "Active", op: "activate" },
-                                { label: "Rename", op: "rename" },
-                                { label: "Delete", op: "delete" }
-                            ]
-                            delegate: Rectangle {
-                                width: 70
-                                height: 28
-                                color: modelData.op === "delete" ? "#882222"
-                                    : modelData.op === "activate" ? "#224488" : "#3a3a3a"
-                                Text { anchors.centerIn: parent; text: modelData.label; color: "white"; font.pixelSize: 12 }
-                                MouseArea {
-                                    anchors.fill: parent
-                                    onClicked: {
-                                        const id = groupRow.groupData.id
-                                        const op = modelData.op
-                                        if (op === "activate") engine.setActiveGroup(id)
-                                        else if (op === "rename") engine.renameGroup(id, groupRow.groupData.name + "_r")
-                                        else if (op === "delete") engine.deleteGroup(id)
-                                    }
+                        Menu {
+                            id: groupMenu
+                            MenuItem {
+                                text: "Rename"
+                                onTriggered: {
+                                    const id = groupRow.groupData.id
+                                    if (id !== 0) engine.renameGroup(id, groupRow.groupData.name + "_r")
                                 }
                             }
+                            MenuItem {
+                                text: "Delete"
+                                onTriggered: {
+                                    const id = groupRow.groupData.id
+                                    if (id !== 0) engine.deleteGroup(id)
+                                }
+                            }
+                        }
+                        ToolButton {
+                            text: "..."
+                            visible: groupRow.groupData.id !== 0
+                            onClicked: groupMenu.popup()
                         }
                     }
                 }
@@ -641,118 +677,118 @@ Window {
         }
 
         // --- membership editor mode ---
-        Column {
+        ColumnLayout {
             visible: groupsPane.editingGroup !== -1
             anchors.fill: parent
             anchors.margins: 12
             spacing: 8
 
-            Row {
+            RowLayout {
+                Layout.fillWidth: true
                 spacing: 10
-                height: 36
-                width: parent.width
 
-                Rectangle {
-                    width: 80
-                    height: 32
-                    anchors.verticalCenter: parent.verticalCenter
-                    color: "#555555"
-                    Text { anchors.centerIn: parent; text: "<- Back"; color: "white"; font.pixelSize: 13 }
-                    MouseArea { anchors.fill: parent; onClicked: groupsPane.editingGroup = -1 }
+                Button {
+                    text: "<- Back"
+                    onClicked: groupsPane.editingGroup = -1
                 }
-
-                Text {
-                    anchors.verticalCenter: parent.verticalCenter
-                    color: root.fg
-                    font.pixelSize: 16; font.bold: true
+                Label {
+                    Layout.fillWidth: true
                     text: "Group: " + groupsPane.editingGroupName
+                    font.pixelSize: 16
+                    font.bold: true
+                    elide: Text.ElideMiddle
                 }
             }
 
-            Text { text: "In this group (" + groupsPane.groupMembers.length + ")"; color: root.subFg; font.pixelSize: 13 }
+            Label { text: "In this group (" + groupsPane.groupMembers.length + ")"; color: root.uiSubFg; font.pixelSize: 13 }
 
             ListView {
                 id: memberList
-                width: parent.width
-                height: 190
+                Layout.fillWidth: true
+                Layout.preferredHeight: 190
                 clip: true
                 model: groupsPane.groupMembers
-                spacing: 4
-                delegate: Rectangle {
+                spacing: 2
+                delegate: ItemDelegate {
                     id: memberRow
                     property var rowData: modelData
                     width: ListView.view.width
-                    height: 40
-                    color: root.card
-                    border.color: root.cardBorder
-                    Text {
-                        anchors.verticalCenter: parent.verticalCenter
-                        anchors.left: parent.left; anchors.leftMargin: 10
-                        width: parent.width - 250
+                    height: 44
+                    padding: 4
+
+                    contentItem: Label {
+                        text: memberRow.rowData.name
                         elide: Text.ElideMiddle
-                        text: memberRow.rowData.name; color: root.fg; font.pixelSize: 14
+                        verticalAlignment: Text.AlignVCenter
                     }
-                    Row {
-                        anchors.right: parent.right; anchors.rightMargin: 6
-                        anchors.verticalCenter: parent.verticalCenter
-                        spacing: 6
-                        Repeater {
-                            model: ["Up", "Down", "Remove"]
-                            delegate: Rectangle {
-                                width: 70; height: 28
-                                color: modelData === "Remove" ? "#882222" : "#3a3a3a"
-                                Text { anchors.centerIn: parent; text: modelData; color: "white"; font.pixelSize: 12 }
-                                MouseArea {
-                                    anchors.fill: parent
-                                    onClicked: {
-                                        const pos = memberRow.rowData.memberIndex
-                                        const op = modelData
-                                        if (op === "Up" && pos > 0) engine.groupMoveDict(groupsPane.editingGroup, pos, pos - 1)
-                                        else if (op === "Down" && pos < groupsPane.groupMembers.length - 1) engine.groupMoveDict(groupsPane.editingGroup, pos, pos + 1)
-                                        else if (op === "Remove") engine.groupRemoveDict(groupsPane.editingGroup, memberRow.rowData.index)
-                                        groupsPane._refreshMembership()
-                                    }
-                                }
+
+                    RowLayout {
+                        anchors {
+                            right: parent.right
+                            rightMargin: 4
+                            verticalCenter: parent.verticalCenter
+                        }
+                        spacing: 2
+                        ToolButton {
+                            text: "Up"
+                            enabled: memberRow.rowData.memberIndex > 0
+                            onClicked: {
+                                const pos = memberRow.rowData.memberIndex
+                                engine.groupMoveDict(groupsPane.editingGroup, pos, pos - 1)
+                                groupsPane._refreshMembership()
+                            }
+                        }
+                        ToolButton {
+                            text: "Down"
+                            enabled: memberRow.rowData.memberIndex < groupsPane.groupMembers.length - 1
+                            onClicked: {
+                                const pos = memberRow.rowData.memberIndex
+                                engine.groupMoveDict(groupsPane.editingGroup, pos, pos + 1)
+                                groupsPane._refreshMembership()
+                            }
+                        }
+                        ToolButton {
+                            text: "Remove"
+                            onClicked: {
+                                engine.groupRemoveDict(groupsPane.editingGroup, memberRow.rowData.index)
+                                groupsPane._refreshMembership()
                             }
                         }
                     }
                 }
             }
 
-            Text { text: "Add dictionaries"; color: root.subFg; font.pixelSize: 13 }
+            Label { text: "Add dictionaries"; color: root.uiSubFg; font.pixelSize: 13 }
 
             ListView {
-                width: parent.width
-                height: parent.height - 36 - 190 - 60
+                Layout.fillWidth: true
+                Layout.fillHeight: true
                 clip: true
                 model: groupsPane.groupNonMembers
-                spacing: 4
-                delegate: Rectangle {
+                spacing: 2
+                delegate: ItemDelegate {
                     id: nonMemberRow
                     property var rowData: modelData
                     width: ListView.view.width
-                    height: 40
-                    color: root.card
-                    border.color: root.cardBorder
-                    Text {
-                        anchors.verticalCenter: parent.verticalCenter
-                        anchors.left: parent.left; anchors.leftMargin: 10
-                        width: parent.width - 100
+                    height: 44
+                    padding: 4
+
+                    contentItem: Label {
+                        text: nonMemberRow.rowData.name
                         elide: Text.ElideMiddle
-                        text: nonMemberRow.rowData.name; color: root.fg; font.pixelSize: 14
+                        verticalAlignment: Text.AlignVCenter
                     }
-                    Rectangle {
-                        width: 70; height: 28
-                        anchors.right: parent.right; anchors.rightMargin: 6
-                        anchors.verticalCenter: parent.verticalCenter
-                        color: "#224488"
-                        Text { anchors.centerIn: parent; text: "Add"; color: "white"; font.pixelSize: 12 }
-                        MouseArea {
-                            anchors.fill: parent
-                            onClicked: {
-                                engine.groupAddDict(groupsPane.editingGroup, nonMemberRow.rowData.index)
-                                groupsPane._refreshMembership()
-                            }
+
+                    ToolButton {
+                        anchors {
+                            right: parent.right
+                            rightMargin: 4
+                            verticalCenter: parent.verticalCenter
+                        }
+                        text: "Add"
+                        onClicked: {
+                            engine.groupAddDict(groupsPane.editingGroup, nonMemberRow.rowData.index)
+                            groupsPane._refreshMembership()
                         }
                     }
                 }
@@ -763,57 +799,61 @@ Window {
     // --- article view ---
     Rectangle {
         id: articlePane
-        anchors { top: topBar.bottom; left: parent.left; right: parent.right; bottom: parent.bottom }
-        color: root.bg
+        anchors { top: topBar.bottom; left: parent.left; right: parent.right; bottom: navBar.top }
+        color: root.uiBg
         visible: root.state === 2
 
         Rectangle {
             width: parent.width
             height: 44
-            color: "#333333"
+            color: root.uiCard
+            border.color: root.uiBorder
             z: 2
 
-            Row {
+            RowLayout {
                 anchors.fill: parent
-                anchors.leftMargin: 8
-                spacing: 8
+                anchors.leftMargin: 4
+                anchors.rightMargin: 4
+                spacing: 4
 
-                Rectangle {
-                    width: 80
-                    height: 32
-                    anchors.verticalCenter: parent.verticalCenter
-                    color: "#555555"
-                    Text { anchors.centerIn: parent; text: "<- Back"; color: "white"; font.pixelSize: 14 }
-                    MouseArea {
-                        anchors.fill: parent
-                        onClicked: root._backFromArticle()
-                    }
+                // 4.7: back button -> ToolButton with arrow_back icon.
+                ToolButton {
+                    text: root.icon("arrow_back")
+                    font.family: root.iconFontFamily
+                    font.pixelSize: 22
+                    ToolTip.visible: hovered
+                    ToolTip.text: "Back"
+                    onClicked: root._backFromArticle()
                 }
-
-                Rectangle {
-                    width: 40
-                    height: 32
-                    anchors.verticalCenter: parent.verticalCenter
-                    color: "#3a3a3a"
-                    Text { anchors.centerIn: parent; color: engine.favorites.indexOf(root.currentWord) >= 0 ? "gold" : "#cccccc"; font.pixelSize: 18; text: "*" }
-                    MouseArea {
-                        anchors.fill: parent
-                        onClicked: engine.toggleFavorite(root.currentWord)
-                    }
+                // 4.7: favorite star -> ToolButton, Material.primary when active.
+                ToolButton {
+                    property bool active: engine.favorites.indexOf(root.currentWord) >= 0
+                    text: root.icon(active ? "star" : "star_border")
+                    font.family: root.iconFontFamily
+                    font.pixelSize: 22
+                    Material.foreground: active ? Material.primary : root.uiSubFg
+                    ToolTip.visible: hovered
+                    ToolTip.text: active ? "Remove from favorites" : "Add to favorites"
+                    onClicked: engine.toggleFavorite(root.currentWord)
                 }
             }
         }
 
+        Loader {
+            id: articleLoader
+            anchors { top: parent.top; topMargin: 44; left: parent.left; right: parent.right; bottom: parent.bottom }
+            // Only create the WebView while the article pane is active, so the
+            // QtWebView native Android view never overlays the other panes.
+            active: root.state === 2
+            visible: root.state === 2
+            sourceComponent: articleViewComponent
+        }
+    }
+
+    Component {
+        id: articleViewComponent
         WebView {
             id: view
-            anchors { top: parent.top; topMargin: 44; left: parent.left; right: parent.right; bottom: parent.bottom }
-            // In-article gdlookup:// interception. QtWebView 6.6 has no
-            // navigationRequested; onUrlChanged fires after the WebView has
-            // already started navigating to the link. We (a) parse the word,
-            // (b) call engine.lookup(), and (c) rewind the WebView with a
-            // loadHtml(about:blank) so the user does not see a "page not
-            // found" frame before the new article lands. The new article's
-            // articleLoaded handler then sets state=2 and re-loads.
             onUrlChanged: {
                 const u = url.toString()
                 const base = engine.articleBaseUrl
@@ -836,9 +876,6 @@ Window {
                     return
                 }
                 if (base.length > 0 && u.indexOf(base + "/gdau/") === 0) {
-                    // Audio anchor: the ArticleServer serves the wav over
-                    // loopback. Play via Android MediaPlayer (in-app) instead of
-                    // navigating the WebView away from the article.
                     engine.playAudio(u)
                     view.loadHtml("<html><body></body></html>", engine.articleBaseUrl)
                     return
@@ -853,11 +890,6 @@ Window {
         }
     }
 
-    // Parse the upstream gdlookup URL into a word we can pass back into
-    // engine.lookup(). The engine emits two forms (engine/src/article_netmgr.cc):
-    //   gdlookup://localhost/<word>          (path-based)
-    //   gdlookup://localhost/?word=<w>&...   (query-based, after netmgr rewrite)
-    // We also see gdlookup://localhost (the welcome/empty page) — return "".
     function _parseGdlookupUrl(u) {
         const q = u.indexOf("?")
         if (q >= 0) {
@@ -874,13 +906,8 @@ Window {
         if (slash < 0) return ""
         return decodeURIComponent(u.substring(slash + 1))
     }
-    // Tracks the in-flight lookup triggered by a gdlookup click so we don't
-    // re-trigger on the resulting onUrlChanged for the about:blank rewind.
     property string _gdlookupInFlight: ""
 
-    // Parse the loopback-rewritten form of a gdlookup link. rewriteArticleUrls
-    // maps gdlookup://localhost/<word> to http://127.0.0.1:PORT/gdlookup/<word>
-    // and gdlookup://localhost/?word=x&group=... to .../gdlookup/?word=x&group=...
     function _parseGdlookupHttpUrl(u, base) {
         const rest = u.substring((base + "/gdlookup/").length)
         const q = rest.indexOf("?")
@@ -900,52 +927,57 @@ Window {
     // --- history view ---
     Rectangle {
         id: historyPane
-        anchors { top: topBar.bottom; left: parent.left; right: parent.right; bottom: parent.bottom }
-        color: root.bg
+        anchors { top: topBar.bottom; left: parent.left; right: parent.right; bottom: navBar.top }
+        color: root.uiBg
         visible: root.state === 5
 
-        Column {
+        ColumnLayout {
             anchors.fill: parent
             anchors.margins: 12
             spacing: 8
 
-            Rectangle {
-                width: 120
-                height: 32
-                color: "#882222"
-                Text { anchors.centerIn: parent; color: "white"; font.pixelSize: 13; text: "Clear all" }
-                MouseArea { anchors.fill: parent; onClicked: engine.clearHistory() }
+            // 4.5: Clear all -> flat Button (Material danger color).
+            Button {
+                text: "Clear all"
+                flat: true
+                highlighted: true
+                Material.foreground: Material.color(Material.Red)
+                onClicked: engine.clearHistory()
             }
 
             ListView {
-                width: parent.width
-                height: parent.height - 40
+                Layout.fillWidth: true
+                Layout.fillHeight: true
                 clip: true
                 model: engine.history
-                spacing: 4
-                delegate: Rectangle {
+                spacing: 2
+                delegate: SwipeDelegate {
                     id: histRow
                     property string word: modelData
                     width: ListView.view.width
-                    height: 44
-                    color: root.card
-                    border.color: root.cardBorder
-                    Text {
-                        anchors.verticalCenter: parent.verticalCenter
-                        anchors.left: parent.left; anchors.leftMargin: 12
-                        text: histRow.word; color: root.fg; font.pixelSize: 16
-                    }
-                    MouseArea {
-                        anchors.fill: parent
-                        onClicked: engine.lookup(histRow.word)
-                    }
-                    Rectangle {
-                        width: 40; height: 32
-                        anchors.verticalCenter: parent.verticalCenter
-                        anchors.right: parent.right; anchors.rightMargin: 8
-                        color: "#882222"
-                        Text { anchors.centerIn: parent; color: "white"; text: "X" }
-                        MouseArea { anchors.fill: parent; onClicked: engine.removeHistory(histRow.word) }
+                    height: 48
+                    text: histRow.word
+                    // tap -> lookup
+                    onClicked: engine.lookup(histRow.word)
+
+                    // 4.5: swipe-to-remove.
+                    swipe.right: Rectangle {
+                        clip: true
+                        color: Material.Red
+                        RowLayout {
+                            anchors.fill: parent
+                            Button {
+                                text: "Delete"
+                                Material.background: Material.Red
+                                Material.foreground: "white"
+                                Layout.fillHeight: true
+                                Layout.fillWidth: true
+                                onClicked: {
+                                    engine.removeHistory(histRow.word)
+                                    histRow.swipe.close()
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -955,8 +987,8 @@ Window {
     // --- favorites view ---
     Rectangle {
         id: favoritesPane
-        anchors { top: topBar.bottom; left: parent.left; right: parent.right; bottom: parent.bottom }
-        color: root.bg
+        anchors { top: topBar.bottom; left: parent.left; right: parent.right; bottom: navBar.top }
+        color: root.uiBg
         visible: root.state === 6
 
         ListView {
@@ -964,30 +996,33 @@ Window {
             anchors.margins: 12
             clip: true
             model: engine.favorites
-            spacing: 4
-            delegate: Rectangle {
+            spacing: 2
+            delegate: SwipeDelegate {
                 id: favRow
                 property string word: modelData
                 width: ListView.view.width
-                height: 44
-                color: root.card
-                border.color: root.cardBorder
-                Text {
-                    anchors.verticalCenter: parent.verticalCenter
-                    anchors.left: parent.left; anchors.leftMargin: 12
-                    text: favRow.word; color: root.fg; font.pixelSize: 16
-                }
-                MouseArea {
-                    anchors.fill: parent
-                    onClicked: engine.lookup(favRow.word)
-                }
-                Rectangle {
-                    width: 40; height: 32
-                    anchors.verticalCenter: parent.verticalCenter
-                    anchors.right: parent.right; anchors.rightMargin: 8
-                    color: "#882222"
-                    Text { anchors.centerIn: parent; color: "white"; text: "X" }
-                    MouseArea { anchors.fill: parent; onClicked: engine.toggleFavorite(favRow.word) }
+                height: 48
+                text: favRow.word
+                onClicked: engine.lookup(favRow.word)
+
+                // 4.6: swipe-to-remove.
+                swipe.right: Rectangle {
+                    clip: true
+                    color: Material.Red
+                    RowLayout {
+                        anchors.fill: parent
+                        Button {
+                            text: "Remove"
+                            Material.background: Material.Red
+                            Material.foreground: "white"
+                            Layout.fillHeight: true
+                            Layout.fillWidth: true
+                            onClicked: {
+                                engine.toggleFavorite(favRow.word)
+                                favRow.swipe.close()
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -1018,18 +1053,10 @@ Window {
         interval: 200
         onTriggered: root._loadArticleNow()
     }
-    // Height of the WebView at the time of the last load; a mismatch means the
-    // window was resized (keyboard hide/show, rotation) after the load started
-    // — Chromium silently starves loads during a surface resize, leaving a
-    // blank page — so we re-load once the size settles.
     property real loadedAtHeight: 0
     function _loadArticleNow() {
         if (state !== 2) return
         loadedAtHeight = view.height
-        // Base URL must be the loopback origin so relative URLs in the article
-        // (and the engine's rewritten qrc:/// / bres:// / gdau://) resolve via
-        // the ArticleServer. Pass an empty base to use the default; the WebView
-        // resolves relative URLs against the loaded HTML's origin.
         view.loadHtml(engine.rewriteArticleUrls(currentHtml),
                       engine.articleBaseUrl.length > 0 ? engine.articleBaseUrl + "/" : "")
     }
@@ -1040,12 +1067,6 @@ Window {
         running: root.state === 2
         onTriggered: {
             if (view.url.toString().length < 5) return
-            // QtWebView 6.6 on Android swallows anchor navigation (onUrlChanged
-            // never fires for in-page link clicks). Instead, poll a click
-            // listener injected into the article: it records the last anchor's
-            // href, which we read here and dispatch for gdau:// (audio) and
-            // gdlookup:// (in-app lookup). This is the loopback bridge for
-            // QtWebView — see all-qt-ui-port design D3.
             view.runJavaScript(
                 "if(!window.__probeInstalled){"
                 + "window.__tapped='';"
@@ -1064,10 +1085,6 @@ Window {
         property string _prev: ""
     }
 
-    // Dispatch an in-article anchor href. Links come in two flavors:
-    //   http://127.0.0.1:PORT/gdau/<dictId>/<file>   -> play audio
-    //   http://127.0.0.1:PORT/gdlookup/<word>        -> in-app lookup
-    // (rewriteArticleUrls rewrites gdau:// and gdlookup://localhost/ to these.)
     function _handleArticleLink(link) {
         const base = engine.articleBaseUrl
         if (base.length < 5) return
@@ -1082,14 +1099,11 @@ Window {
         }
     }
 
-    // Incoming lookups (share / PROCESS_TEXT / deep link / QS tile) are consumed
-    // by the EngineController's poller — see pollPendingLookup in C++.
-
     // --- FTS view ---
     Rectangle {
         id: ftsPane
-        anchors { top: topBar.bottom; left: parent.left; right: parent.right; bottom: parent.bottom }
-        color: root.bg
+        anchors { top: topBar.bottom; left: parent.left; right: parent.right; bottom: navBar.top }
+        color: root.uiBg
         visible: root.state === 4
 
         Connections {
@@ -1097,141 +1111,120 @@ Window {
             function onBuildingFtsChanged() { ftsInput.enabled = !engine.buildingFts; ftsSearchBtn.enabled = !engine.buildingFts }
         }
 
-        Column {
+        ColumnLayout {
             anchors.fill: parent
             anchors.margins: 12
             spacing: 8
 
-            Row {
+            RowLayout {
+                Layout.fillWidth: true
                 spacing: 8
-                height: 48
-                width: parent.width
 
-                Rectangle {
-                    width: parent.width - 110
-                    height: 48
-                    color: root.card
-                    border.color: root.cardBorder
-                    TextInput {
-                        id: ftsInput
-                        activeFocusOnTab: false
-                        anchors.fill: parent
-                        anchors.leftMargin: 8
-                        verticalAlignment: TextInput.AlignVCenter
-                        font.pixelSize: 18
-                        color: root.fg
-                        onAccepted: { focus = false; root._runFts() }
-                    }
+                TextField {
+                    id: ftsInput
+                    Layout.fillWidth: true
+                    placeholderText: "Full-text query (supports * wildcards)"
+                    font.pixelSize: 18
+                    enabled: !engine.buildingFts
+                    onAccepted: { ftsInput.focus = false; root._runFts() }
                 }
-
-                Rectangle {
-                    width: 90
-                    height: 32
-                    anchors.verticalCenter: parent.verticalCenter
-                    color: "#3a3a3a"
-                    Text { anchors.centerIn: parent; color: "white"; font.pixelSize: 14; text: "Wild*" }
-                }
+                // 4.4: single search mode. Wildcards (FTS::SearchMode=2) is the
+                // mode that parses `read*`-style prefixes and matches a plain
+                // term exactly; Xapian-syntax/Plain/Regexp were cut for v1 (see
+                // full-text-search spec — Wildcards subsumes plain matching).
             }
 
-            Row {
+            // 8.1: index-build progress bar.
+            ProgressBar {
+                Layout.fillWidth: true
+                visible: engine.buildingFts
+                indeterminate: true
+            }
+            Label {
+                Layout.fillWidth: true
+                visible: engine.buildingFts
+                color: root.uiSubFg
+                font.pixelSize: 13
+                text: "Indexing..."
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
                 spacing: 8
-                Text {
-                    anchors.verticalCenter: parent.verticalCenter
-                    visible: engine.buildingFts
-                    color: root.subFg
-                    font.pixelSize: 13
-                    text: "Indexing..."
-                }
-                Rectangle {
+
+                Button {
                     id: ftsSearchBtn
-                    width: 100
-                    height: 32
-                    color: ftsSearchBtn.enabled ? "#224488" : "#555555"
-                    Text { anchors.centerIn: parent; color: "white"; font.pixelSize: 14; text: "Search" }
-                    MouseArea {
-                        anchors.fill: parent
-                        enabled: ftsSearchBtn.enabled
-                        onClicked: root._runFts()
-                    }
+                    text: "Search"
+                    highlighted: true
+                    enabled: !engine.buildingFts
+                    onClicked: root._runFts()
                 }
             }
 
-            Text {
+            Label {
+                Layout.fillWidth: true
                 visible: engine.lastError.length > 0
                 text: "engine error: " + engine.lastError
-                color: "red"
+                color: Material.color(Material.Red)
                 wrapMode: Text.Wrap
-                width: parent.width
             }
 
             ListView {
-                width: parent.width
-                height: parent.height - 96 - 32
+                Layout.fillWidth: true
+                Layout.fillHeight: true
                 clip: true
                 model: root.ftsResults
-                spacing: 4
-                delegate: Rectangle {
+                spacing: 2
+                delegate: ItemDelegate {
                     width: ListView.view.width
-                    height: 44
-                    color: root.card
-                    border.color: root.cardBorder
-                    Row {
-                        anchors.fill: parent
-                        anchors.margins: 8
-                        spacing: 8
-
-                        Column {
-                            anchors.verticalCenter: parent.verticalCenter
-                            width: parent.width - 16
-                            spacing: 0
-                            Text { text: modelData.headword; color: root.fg; font.pixelSize: 16; font.bold: true }
-                            Text { text: modelData.dictName; color: root.subFg; font.pixelSize: 11 }
-                        }
+                    height: 52
+                    padding: 8
+                    contentItem: ColumnLayout {
+                        spacing: 0
+                        Label { text: modelData.headword; font.pixelSize: 16; font.bold: true }
+                        Label { text: modelData.dictName; color: root.uiSubFg; font.pixelSize: 11 }
                     }
-                    MouseArea {
-                        anchors.fill: parent
-                        onClicked: engine.lookup(modelData.headword)
-                    }
+                    onClicked: engine.lookup(modelData.headword)
                 }
             }
         }
     }
 
-    // --- onboarding overlay ---
-    Rectangle {
-        anchors.fill: parent
-        z: 100
+    // --- onboarding overlay (full-page Material Dialog) ---
+    Dialog {
+        anchors.centerIn: parent
+        width: parent.width
+        height: parent.height
+        modal: false
         visible: !engine.onboarded
-        color: "#222222"
+        padding: 24
+        closePolicy: Popup.NoAutoClose
 
-        Column {
-            anchors.centerIn: parent
+        contentItem: ColumnLayout {
+            anchors.fill: parent
             spacing: 16
-            width: parent.width - 48
 
-            Text {
+            Label {
+                Layout.fillWidth: true
                 text: "Welcome to Aurelex"
-                color: "white"
                 font.pixelSize: 22
                 font.bold: true
-                width: parent.width
                 horizontalAlignment: Text.AlignHCenter
             }
-            Text {
-                text: "Add dictionaries by copying supported files (.mdx, .dsl, .dsl.dz, .ifo) into the app's data folder, then open Dicts and tap Rescan. Use the top-left button to switch between Search, Dictionaries, Groups, FTS, History and Favorites."
-                color: "#cccccc"
+            Label {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                text: "Add dictionaries by copying supported files (.mdx, .dsl, .dsl.dz, .ifo) into the app's data folder, then open Dicts and tap Rescan. Use the bottom bar to switch between Search, Dictionaries, Groups, FTS, History and Favorites."
                 font.pixelSize: 15
                 wrapMode: Text.Wrap
-                width: parent.width
                 horizontalAlignment: Text.AlignHCenter
+                verticalAlignment: Text.AlignVCenter
             }
-            Rectangle {
-                width: 200
-                height: 44
-                anchors.horizontalCenter: parent.horizontalCenter
-                color: "#224488"
-                Text { anchors.centerIn: parent; color: "white"; font.pixelSize: 16; text: "Get started" }
-                MouseArea { anchors.fill: parent; onClicked: engine.onboarded = true }
+            Button {
+                Layout.alignment: Qt.AlignHCenter
+                text: "Get started"
+                highlighted: true
+                onClicked: engine.onboarded = true
             }
         }
     }

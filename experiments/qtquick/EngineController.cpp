@@ -134,6 +134,7 @@ void EngineController::initialize(const QString &appDir, const QString &stagedDi
         }
         setReady(true);
         w->deleteLater();
+        updateSystemDark();
         loadSettings();
         loadHistory();
         loadFavorites();
@@ -655,20 +656,53 @@ void EngineController::setFavorites(const QStringList &list)
     emit favoritesChanged();
 }
 
-void EngineController::setDarkMode(bool on)
+void EngineController::setUserDarkOverride(bool on)
 {
-    if (m_darkMode == on) return;
-    m_darkMode = on;
+    if (m_userDarkOverride == on) return;
+    m_userDarkOverride = on;
+    saveSettings();
+    applyEffectiveDark();
+    emit userDarkOverrideChanged();
+}
+
+void EngineController::toggleDarkOverride()
+{
+    // The manual D toggle: force dark when following system, else return to
+    // following the system theme.
+    qInfo("toggleDarkOverride: %d -> %d", int(m_userDarkOverride), int(!m_userDarkOverride));
+    setUserDarkOverride(!m_userDarkOverride);
+}
+
+bool EngineController::readSystemDark() const
+{
+#if defined(Q_OS_ANDROID)
+    return QJniObject::callStaticMethod<jboolean>(
+        "aurelex/android/ExperimentActivity",
+        "isNightModeActive",
+        "()Z");
+#else
+    return false;
+#endif
+}
+
+void EngineController::updateSystemDark()
+{
+    const bool current = m_systemDark;
+    m_systemDark = readSystemDark();
+    if (m_systemDark != current) {
+        emit systemDarkChanged();
+        applyEffectiveDark();
+    }
+}
+
+// Effective dark = manual override OR system dark. Drives the Material.theme
+// palette (QML) and the article CSS (gd_set_dark_mode).
+void EngineController::applyEffectiveDark()
+{
+    m_darkMode = m_userDarkOverride || m_systemDark;
     // Off-thread: gd_set_dark_mode takes the engine mutex, which a concurrent
     // FTS index build may hold for a long time. Never block the UI thread.
-    QtConcurrent::run([on]{ gd_set_dark_mode(on ? 1 : 0); });
-    QFile f(m_appDir + "/settings.json");
-    if (f.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
-        QJsonObject obj;
-        obj.insert("darkMode", on);
-        obj.insert("onboarded", m_onboarded);
-        f.write(QJsonDocument(obj).toJson(QJsonDocument::Compact));
-    }
+    QtConcurrent::run([dark = m_darkMode]{ gd_set_dark_mode(dark ? 1 : 0); });
     emit darkModeChanged();
 }
 
@@ -691,10 +725,17 @@ void EngineController::loadSettings()
     QFile f(m_appDir + "/settings.json");
     if (!f.open(QIODevice::ReadOnly)) return;
     const QJsonDocument doc = QJsonDocument::fromJson(f.readAll());
-    m_darkMode = doc.object().value("darkMode").toBool(false);
-    m_onboarded = doc.object().value("onboarded").toBool(false);
-    gd_set_dark_mode(m_darkMode ? 1 : 0);
-    emit darkModeChanged();
+    const QJsonObject obj = doc.object();
+    m_onboarded = obj.value("onboarded").toBool(false);
+    // Migrate the old bumped 'darkMode' key to the explicit userDarkOverride
+    // (absent = follow system). A persisted darkMode=true means the user had
+    // forced dark; map that onto an override so the old toggle keeps working.
+    if (obj.contains("userDarkOverride"))
+        m_userDarkOverride = obj.value("userDarkOverride").toBool(false);
+    else if (obj.value("darkMode").toBool(false))
+        m_userDarkOverride = true;
+    saveSettings();
+    applyEffectiveDark();
     emit onboardedChanged();
 }
 
@@ -703,7 +744,7 @@ void EngineController::saveSettings()
     QFile f(m_appDir + "/settings.json");
     if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate)) return;
     QJsonObject obj;
-    obj.insert("darkMode", m_darkMode);
+    obj.insert("userDarkOverride", m_userDarkOverride);
     obj.insert("onboarded", m_onboarded);
     f.write(QJsonDocument(obj).toJson(QJsonDocument::Compact));
 }
@@ -813,6 +854,11 @@ void EngineController::pollPendingLookup()
 {
     if (m_appDir.isEmpty()) return;
     const QString path = m_appDir + QStringLiteral("/../shared_prefs/intent.xml");
+
+    // Sample the Android system dark/light state (Qt 6.6 QPA can't detect it
+    // natively); the activity's onConfigurationChanged fires on a live switch,
+    // and this poll (500ms) picks it up for a near-immediate re-palette.
+    updateSystemDark();
 
     // A concrete word (share / PROCESS_TEXT / deep link) takes priority over
     // the clipboard marker; each Java capture clears the prefs file, so at most

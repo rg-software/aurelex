@@ -75,12 +75,32 @@ Write-Host "== [2/5] ninja build ==" -ForegroundColor Cyan
 & $CmakeExe --build $BuildDir --target aurelex_exp -j 8
 if ($LASTEXITCODE -ne 0) { throw "ninja build failed" }
 
-Write-Host "== [3/5] stage .so into apk libs ==" -ForegroundColor Cyan
+Write-Host "== [3/5] stage app .so + Qt runtime/QML libs into apk libs ==" -ForegroundColor Cyan
 $soName = "libaurelex_exp_$Abi.so"
 $soPath = Join-Path $BuildDir $soName
 if (-not (Test-Path $soPath)) { throw "built .so not found: $soPath" }
-New-Item -ItemType Directory -Force -Path "$ApkDir\libs\$Abi" | Out-Null
-Copy-Item $soPath "$ApkDir\libs\$Abi\" -Force
+$LibOut = "$ApkDir\libs\$Abi"
+New-Item -ItemType Directory -Force -Path $LibOut | Out-Null
+Copy-Item $soPath $LibOut -Force
+# NOTE (qt-material-ui): androiddeployqt's --no-build path in the aqt carve
+# subset logs "Appending dependency: lib/libQt6*" but does NOT physically copy
+# the Qt runtime / QML module / plugin libraries into jniLibs. Historically the
+# libs dir accumulated them from a stale one-time full deploy, which silently
+# broke on a clean checkout (APK with only the app .so -> UnsatisfiedLinkError).
+# Stage the complete Qt runtime set explicitly so the APK is self-contained and
+# reproducible. Gradle packages this dir via jniLibs.srcDirs = ['libs'].
+$KitRoot = if ($Abi -eq "arm64-v8a") { "$QtBase\android_arm64_v8a" }
+           elseif ($Abi -eq "x86_64") { "$QtBase\android_x86_64" }
+           else { throw "unsupported ABI $Abi" }
+Get-ChildItem -Path "$KitRoot\lib" -Filter "*.so" -ErrorAction SilentlyContinue |
+    Copy-Item -Destination $LibOut -Force
+Get-ChildItem -Path "$KitRoot\qml" -Recurse -Filter "libqml_*.so" -ErrorAction SilentlyContinue |
+    Copy-Item -Destination $LibOut -Force
+Get-ChildItem -Path "$KitRoot\plugins" -Recurse -Filter "libplugins_*.so" -ErrorAction SilentlyContinue |
+    Copy-Item -Destination $LibOut -Force
+# libc++_shared.so ships from the NDK sysroot, not the Qt kit.
+$cppShared = "$NdkRoot\toolchains\llvm\prebuilt\windows-x86_64\sysroot\usr\lib\aarch64-linux-android\libc++_shared.so"
+if (Test-Path $cppShared) { Copy-Item $cppShared $LibOut -Force }
 
 Write-Host "== [4/5] androiddeployqt (stage + generate project, --no-build) ==" -ForegroundColor Cyan
 $settings = Join-Path $BuildDir "android-aurelex_exp-deployment-settings.json"
@@ -125,6 +145,17 @@ if (Test-Path (Join-Path $ExpDir "android\res")) {
 if (Test-Path (Join-Path $ExpDir "android\assets")) {
     New-Item -ItemType Directory -Force -Path (Join-Path $ApkDir "assets") | Out-Null
     Copy-Item (Join-Path $ExpDir "android\assets\*") (Join-Path $ApkDir "assets\") -Recurse -Force
+}
+# QML module source overlay (qt-material-ui). androiddeployqt's createRCC path in
+# the aqt carve subset does not reliably stage the imported QML module sources
+# (Controls/Material/Templates/Layouts ...) into the APK, and --no-build even
+# wipes assets/qml. Qt on Android resolves QML-source modules (QtQuick.Controls
+# & styles are QML-based, unlike the compiled QtQuick core) from the qml import
+# tree under assets:/qml plus their plugin .so in jniLibs. Copy the kit's whole
+# qml tree deterministically so the Material UI modules import at runtime.
+if (Test-Path "$KitRoot\qml") {
+    New-Item -ItemType Directory -Force -Path (Join-Path $ApkDir "assets\qml") | Out-Null
+    Copy-Item (Join-Path $KitRoot "qml\*") (Join-Path $ApkDir "assets\qml\") -Recurse -Force
 }
 
 if ($LASTEXITCODE -ne 0) { throw "androiddeployqt failed" }

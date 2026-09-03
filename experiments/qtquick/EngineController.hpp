@@ -30,7 +30,9 @@ class EngineController : public QObject
     Q_PROPERTY(int activeGroupId READ activeGroupId NOTIFY activeGroupChanged)
     Q_PROPERTY(QStringList history READ history NOTIFY historyChanged)
     Q_PROPERTY(QStringList favorites READ favorites NOTIFY favoritesChanged)
-    Q_PROPERTY(bool darkMode READ darkMode WRITE setDarkMode NOTIFY darkModeChanged)
+    Q_PROPERTY(bool darkMode READ darkMode NOTIFY darkModeChanged)
+    Q_PROPERTY(bool systemDark READ systemDark NOTIFY systemDarkChanged)
+    Q_PROPERTY(bool userDarkOverride READ userDarkOverride WRITE setUserDarkOverride NOTIFY userDarkOverrideChanged)
     Q_PROPERTY(bool onboarded READ onboarded WRITE setOnboarded NOTIFY onboardedChanged)
     Q_PROPERTY(bool buildingFts READ buildingFts NOTIFY buildingFtsChanged)
 public:
@@ -46,9 +48,16 @@ public:
     QStringList history() const { return m_history; }
     QStringList favorites() const { return m_favorites; }
     bool darkMode() const { return m_darkMode; }
+    bool systemDark() const { return m_systemDark; }
+    bool userDarkOverride() const { return m_userDarkOverride; }
+    void setUserDarkOverride(bool on);
     bool onboarded() const { return m_onboarded; }
-    void setDarkMode(bool on);
     void setOnboarded(bool v);
+
+    // Cycle the manual dark override: when following system, force dark; when
+    // forcing dark, return to following system. Drives Material.theme + the
+    // effective dark mode (article CSS).
+    Q_INVOKABLE void toggleDarkOverride();
 
     // Initialise the engine. `configDir`/`indexDir` are usually the same
     // AppLocalDataLocation; `stagedDir` is the dict folder the app stages to.
@@ -181,6 +190,8 @@ signals:
     void darkModeChanged();
     void onboardedChanged();
     void articleBaseUrlChanged();
+    void systemDarkChanged();
+    void userDarkOverrideChanged();
 
 private:
     void runScan();
@@ -203,6 +214,12 @@ private:
     QString peekPendingLookup() const;
     bool peekPendingClipboardFlag() const;
 
+    // Android system dark-mode (Qt 6.6 QPA doesn't expose it); sampled via JNI
+    // on the poller tick. Recomputes and applies the effective dark mode.
+    bool readSystemDark() const;
+    void updateSystemDark();
+    void applyEffectiveDark();
+
     QTimer m_pollTimer;
     int m_clipboardRetries = 0;
     int m_suggestGeneration = 0;
@@ -217,6 +234,8 @@ private:
     QStringList m_history;
     QStringList m_favorites;
     bool m_darkMode = false;
+    bool m_systemDark = false;
+    bool m_userDarkOverride = false;
     bool m_onboarded = false;
     QString m_appDir;
     QString m_stagedDir;

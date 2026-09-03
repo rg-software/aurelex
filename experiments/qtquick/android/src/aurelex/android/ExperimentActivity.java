@@ -3,10 +3,12 @@ package aurelex.android;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.content.res.Configuration;
 import android.media.MediaPlayer;
 import android.os.Bundle;
 
 import org.qtproject.qt.android.bindings.QtActivity;
+import org.qtproject.qt.android.QtNative;
 
 /**
  * Gate-3 + M6 bridge: the QtActivity subclass captures incoming lookup intents
@@ -107,6 +109,33 @@ public class ExperimentActivity extends QtActivity {
         super.onNewIntent(intent);
         setIntent(intent);
         captureLookupText(intent);
+    }
+
+    /**
+     * Reports whether the system is in dark mode. Qt 6.6's Android QPA does not
+     * surface the system dark/light setting to the Material style, so the C++
+     * side (EngineController.readSystemDark) reads it here over JNI via
+     * QJniObject — the same pattern as isStorageManager handling.
+     */
+    public static boolean isNightModeActive() {
+        try {
+            android.app.Activity activity = QtNative.activity();
+            if (activity == null) return false;
+            int uiMode = activity.getResources().getConfiguration().uiMode;
+            return (uiMode & Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES;
+        } catch (Exception e) {
+            android.util.Log.w(TAG, "isNightModeActive failed: " + e);
+            return false;
+        }
+    }
+
+    @Override
+    public void onConfigurationChanged(Configuration newConfig) {
+        super.onConfigurationChanged(newConfig);
+        // A live dark/light switch lands here; the C++ poller (EngineController
+        // updateSystemDark, 500ms) picks up the new value on its next tick and
+        // re-palettes via Material.theme.
+        android.util.Log.i(TAG, "configuration changed; night=" + isNightModeActive());
     }
 
     @Override
