@@ -142,15 +142,17 @@ jobs:
       - name: Build xapian for Android
         shell: bash
         run: |
-          # The xapian make invocations use $(SHELL) via autoconf's
-          # depcomp/libtool. Git Bash's sh (C:/Program Files/Git/...) has a
-          # SPACED path which breaks make ("C:/Program: No such file or
-          # directory"). windows-2022 preinstalls MSYS2 at C:\msys64, whose
-          # sh is a spaces-free path that build-xapian-android.sh prefers.
-          # Install it explicitly only if the image did not provide it.
-          if [ ! -x /c/msys64/usr/bin/sh.exe ]; then
+          # The xapian autoconf build needs a POSIX-aware GNU make + sh. Git
+          # Bash's Windows-native make breaks recipes that exec ./config.status
+          # or $(SHELL) scripts ("make (e=2)", "C:/Program: No such file"), and
+          # the NDK .cmd wrappers can't be exec'd by any POSIX sh (the script
+          # wraps the .exe tools itself). The script prefers MSYS2's make + sh
+          # at C:\msys64; ensure MSYS2 make is installed if the preinstalled
+          # C:\msys64 lacks it.
+          if [ ! -x /c/msys64/usr/bin/bash.exe ]; then
             choco install -y msys2 --params "/NoUpdate /InstallDir:C:\msys64" --no-progress
           fi
+          /c/msys64/usr/bin/bash.exe -lc "pacman -S --needed --noconfirm make 2>/dev/null || true"
           ./scripts/build-xapian-android.sh "$NDK_ROOT" arm64-v8a "$VCPKG_ROOT/installed/arm64-android"
 
       - name: Apply engine patches

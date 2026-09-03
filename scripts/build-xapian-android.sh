@@ -37,6 +37,17 @@ ABI="${2:?abi (arm64-v8a|x86_64)}"
 PREFIX="${3:?install-prefix}"
 WORK="${4:-${PREFIX}/build-xapian}"
 
+# Normalise the three paths to POSIX form. They arrive as Windows paths under
+# Git Bash / MSYS2 (e.g. D:\a\aurelex\...); cygpath -m gives C:/... which
+# configure/libtool handle, but for ITEMS we exec from a POSIX shell we want
+# /d/... (cygpath -u). Normalise via cygpath when it exists (it does on both
+# Git Bash and MSYS2) and keep the input otherwise.
+if command -v cygpath >/dev/null 2>&1; then
+  NDK_ROOT="$(cygpath -u "${NDK_ROOT}" 2>/dev/null || echo "${NDK_ROOT}")"
+  PREFIX="$(cygpath -u "${PREFIX}" 2>/dev/null || echo "${PREFIX}")"
+  WORK="$(cygpath -u "${WORK}" 2>/dev/null || echo "${WORK}")"
+fi
+
 case "${ABI}" in
   arm64-v8a)
     CLANG_TARGET="aarch64"
@@ -229,9 +240,20 @@ fi
 echo "== building =="
 MAKE_SHELL=""
 if [ -n "$FREE_SHELL" ]; then MAKE_SHELL="SHELL=$FREE_SHELL"; fi
-make $MAKE_SHELL -j"${XAPIAN_JOBS:-$(nproc 2>/dev/null || echo 4)}"
+# Use MSYS2's make if present: it is a POSIX-aware GNU make that runs
+# autoconf recipes (./config.status, $(SHELL) ./depcomp, ./libtool) natively.
+# Git Bash's Windows-native make chokes on those ("make (e=2): system cannot
+# find the file", "C:/Program: No such file or directory").
+MAKE_BIN="make"
+if [ -n "$FREE_SHELL" ]; then
+  MSYS_MAKE="$(dirname "$FREE_SHELL")/../bin/make.exe"
+  if [ -x "$MSYS_MAKE" ]; then MAKE_BIN="$MSYS_MAKE"; fi
+  if [ -x "/c/msys64/usr/bin/make.exe" ]; then MAKE_BIN="/c/msys64/usr/bin/make.exe"; fi
+  echo "using make: $MAKE_BIN"
+fi
+$MAKE_BIN $MAKE_SHELL -j"${XAPIAN_JOBS:-$(nproc 2>/dev/null || echo 4)}"
 echo "== installing =="
-make $MAKE_SHELL install
+$MAKE_BIN $MAKE_SHELL install
 
 echo "== done: ${PREFIX}/include/xapian.h, ${PREFIX}/lib/libxapian.a =="
 ls -l "${PREFIX}/include/xapian.h" "${PREFIX}/lib/libxapian.a"
