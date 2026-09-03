@@ -115,9 +115,11 @@ jobs:
           # compiler doesn't need to be MSVC. The carve is C++17 and links
           # only against vcpkg + Qt + Android system libs, which MinGW handles.
           python -m aqt install-qt windows desktop 6.6.3 win64_mingw -O "$env:QT_ROOT"
-          # Android kits — what the carve links against.
-          python -m aqt install-qt windows android 6.6.3 android_arm64_v8a -O "$env:QT_ROOT"
-          python -m aqt install-qt windows android 6.6.3 android_x86_64 -O "$env:QT_ROOT"
+          # Android kits — what the carve links against. qtwebview is a
+          # separate module (not in the base archives); it depends on
+          # qtwebchannel (the qwebchannel.js transport). Install both.
+          python -m aqt install-qt windows android 6.6.3 android_arm64_v8a -O "$env:QT_ROOT" --modules qtwebview qtwebchannel
+          python -m aqt install-qt windows android 6.6.3 android_x86_64 -O "$env:QT_ROOT" --modules qtwebview qtwebchannel
           $deploy = "$env:AURELEX_QT_HOST\bin\androiddeployqt.exe"
           "AURELEX_DEPLOYQT=$deploy" >> $env:GITHUB_ENV
           if (-not (Test-Path $deploy)) { throw "androiddeployqt.exe not at $deploy" }
