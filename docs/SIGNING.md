@@ -84,37 +84,28 @@ keystore to F-Droid's submission form (#F-Droid requests the
 F-Droid then signs every build it produces from source with our key, keeping
 updates compatible with GitHub/Play-upload sideloads.
 
-## App icon & the engine notification
+## App icon & the indexing notification
 
 ### App icon
 The launcher icon is an adaptive icon (`mipmap-anydpi-v26/ic_launcher.xml`,
 `experiments/qtquick/android/res/`) with background, foreground, and monochrome layers; the
-same vector foreground is reused in the engine notification and the home-screen
-widget. `minSdk 28` (API 26+) means no legacy PNG fallback is needed.
+same vector foreground is reused in the home-screen widget. `minSdk 28` (API 26+)
+means no legacy PNG fallback is needed.
 
 Known gap (polish TODO): the monochrome (themed-dark) layer is a simple tint of
 the book glyph — it was added to satisfy adaptive-icon schema, but hasn't been
 given a dedicated monochrome shape or verified on a themed launcher.
 
-### Engine notification icon
-The `:engine` process runs as a **foreground service** (Android 8+ requires a
-persistent notification for any long-lived background service; it also keeps the
-engine alive across activity recreation, e.g. after a SAF folder grant restarts
-the activity, and during long-running dictionary scanning/indexing).
+### Indexing notification
+The engine runs **in-process** in the Qt app (no separate `:engine` process and
+no persistent notification). The only notification is the **bulk FTS indexing**
+foreground service (`IndexingService`) which shows a transient **"Indexing..."**
+notification while a long index build runs, so the build survives the app being
+backgrounded. It posts only while indexing is in progress and stops when the
+build completes; steady-state lookup has no notification.
+- Notification builder: `IndexingService` (channel `aurelex_indexing`, low
+  importance), small icon `ic_menu_search`.
+- Declared as a foreground service in `AndroidManifest.xml`
+  (`FOREGROUND_SERVICE` + `POST_NOTIFICATIONS`).
 
-- Notification builder: `EngineService.onCreate` (channel `aurelex_engine`,
-  low importance).
-- `setSmallIcon(R.drawable.ic_launcher_foreground)` — the app's book glyph as a
-  small monochrome status icon.
-
-**Status / plan:** the small-icon change from the Android default (`ic_menu_search`)
-to `ic_launcher_foreground` is in code and the notification posts, but the glyph
-is small and monochrome, so it is hard to visually distinguish from the stock
-icon in the shade. Two documented follow-ups (deferred to a polish pass):
-1. **Dedicated notification glyph** — a purpose-made small icon (sized/styled
-   for status-bar rendering) rather than reusing the launcher foreground.
-2. **Hide when in foreground (Android 13+)** — consider suppressing the
-   notification while the Aurelex UI is visible (the standard pattern for
-   always-on engine services), keeping it only in the background.
-
-Nothing here affects signing or distribution; it is cosmetic.
+This is cosmetic and does not affect signing or distribution.
