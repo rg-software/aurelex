@@ -106,8 +106,14 @@ if ($env:AURELEX_VERSION_NAME) {
     Write-Host "Stamped manifest versionName=$env:AURELEX_VERSION_NAME versionCode=$env:AURELEX_VERSION_CODE" -ForegroundColor Yellow
 }
 if (Test-Path (Join-Path $ExpDir "android\src")) {
-    New-Item -ItemType Directory -Force -Path (Join-Path $ApkDir "src") | Out-Null
-    Copy-Item (Join-Path $ExpDir "android\src\*") (Join-Path $ApkDir "src\") -Recurse -Force
+    $stageSrc = Join-Path $ApkDir "src"
+    New-Item -ItemType Directory -Force -Path $stageSrc | Out-Null
+    # androiddeployqt may have left stale Java sources from a previous build
+    # (e.g. pre-package-flip paths); remove them so only the current tree
+    # compiles.
+    if (Test-Path (Join-Path $stageSrc "com")) { Remove-Item (Join-Path $stageSrc "com") -Recurse -Force }
+    if (Test-Path (Join-Path $stageSrc "aurelex")) { Remove-Item (Join-Path $stageSrc "aurelex") -Recurse -Force }
+    Copy-Item (Join-Path $ExpDir "android\src\*") $stageSrc -Recurse -Force
 }
 if (Test-Path (Join-Path $ExpDir "android\res")) {
     New-Item -ItemType Directory -Force -Path (Join-Path $ApkDir "res") | Out-Null
@@ -207,6 +213,6 @@ Write-Host "== DONE: $($apk.FullName) ($([math]::Round($apk.Length/1MB,1)) MB) =
 if ($Install) {
     $adb = "$RealSdk\platform-tools\adb.exe"
     & $adb install -r $apk.FullName
-    & $adb shell "am start -n com.aurelex.experiment/.ExperimentActivity"
+    & $adb shell "am start -n aurelex.android/.ExperimentActivity"
     Write-Host "Installed + launched." -ForegroundColor Green
 }

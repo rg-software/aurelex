@@ -319,6 +319,16 @@ Window {
         // Refresh the storage-access state while the pane is visible (the grant
         // happens in the system Settings; bindings can't see it change).
         property bool storageGranted: engine.isAllFilesAccessGranted()
+        property int removeIndex: -1
+        property string removeName: ""
+        function _requestRemove(index, name) { removeIndex = index; removeName = name }
+        function _confirmRemove() {
+            const idx = removeIndex
+            if (idx >= 0) engine.removeDictionary(idx)
+            removeIndex = -1
+            removeName = ""
+        }
+        function _cancelRemove() { removeIndex = -1; removeName = "" }
         Timer {
             interval: 1000
             repeat: true
@@ -411,7 +421,7 @@ Window {
                                             const idx = dictRow.dictIndex
                                             const op = modelData.label
                                             if (op === "Remove") {
-                                                engine.removeDictionary(idx)
+                                                dictsPane._requestRemove(idx, dictRow.dictData.name)
                                             } else if (op === "Index") {
                                                 engine.ftsIndex(idx)
                                             } else {
@@ -427,9 +437,61 @@ Window {
                 }
             }
         }
-    }
 
-    // --- groups view ---
+        // --- remove-dictionary confirm dialog ---
+        Rectangle {
+            visible: dictsPane.removeIndex >= 0
+            anchors.fill: parent
+            color: "#80000000"
+            z: 10
+
+            Rectangle {
+                anchors.centerIn: parent
+                width: parent.width - 80
+                height: 170
+                color: root.card
+                border.color: root.cardBorder
+
+                Column {
+                    anchors.fill: parent
+                    anchors.margins: 16
+                    spacing: 12
+
+                    Text {
+                        width: parent.width
+                        color: root.fg
+                        font.pixelSize: 16
+                        wrapMode: Text.Wrap
+                        text: "Remove dictionary \"" + (dictsPane.removeName !== "" ? dictsPane.removeName : "(unknown)") + "\"?"
+                    }
+                    Text {
+                        width: parent.width
+                        color: root.subFg
+                        font.pixelSize: 13
+                        wrapMode: Text.Wrap
+                        text: "It will be unloaded from the app. The file stays on disk."
+                    }
+
+                    Row {
+                        spacing: 12
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        Rectangle {
+                            width: 120; height: 36
+                            color: "#3a3a3a"
+                            Text { anchors.centerIn: parent; text: "Cancel"; color: "white"; font.pixelSize: 14 }
+                            MouseArea { anchors.fill: parent; onClicked: dictsPane._cancelRemove() }
+                        }
+                        Rectangle {
+                            width: 120; height: 36
+                            color: "#882222"
+                            Text { anchors.centerIn: parent; text: "Remove"; color: "white"; font.pixelSize: 14 }
+                            MouseArea { anchors.fill: parent; onClicked: dictsPane._confirmRemove() }
+                        }
+                    }
+                }
+            }
+        }
+    }
     Rectangle {
         id: groupsPane
         anchors { top: topBar.bottom; left: parent.left; right: parent.right; bottom: parent.bottom }
@@ -970,6 +1032,54 @@ Window {
         // resolves relative URLs against the loaded HTML's origin.
         view.loadHtml(engine.rewriteArticleUrls(currentHtml),
                       engine.articleBaseUrl.length > 0 ? engine.articleBaseUrl + "/" : "")
+    }
+    Timer {
+        id: articleLinkPoller
+        interval: 400
+        repeat: true
+        running: root.state === 2
+        onTriggered: {
+            if (view.url.toString().length < 5) return
+            // QtWebView 6.6 on Android swallows anchor navigation (onUrlChanged
+            // never fires for in-page link clicks). Instead, poll a click
+            // listener injected into the article: it records the last anchor's
+            // href, which we read here and dispatch for gdau:// (audio) and
+            // gdlookup:// (in-app lookup). This is the loopback bridge for
+            // QtWebView — see all-qt-ui-port design D3.
+            view.runJavaScript(
+                "if(!window.__probeInstalled){"
+                + "window.__tapped='';"
+                + "document.addEventListener('click',function(e){"
+                + "var a=e.target.closest?e.target.closest('a'):null;"
+                + "window.__tapped=(a?a.href:'');},true);"
+                + "window.__probeInstalled=true;}"
+                + "(window.__tapped || '')",
+                function(v){
+                    if (v && v !== articleLinkPoller._prev) {
+                        articleLinkPoller._prev = v
+                        _handleArticleLink(v)
+                    }
+                })
+        }
+        property string _prev: ""
+    }
+
+    // Dispatch an in-article anchor href. Links come in two flavors:
+    //   http://127.0.0.1:PORT/gdau/<dictId>/<file>   -> play audio
+    //   http://127.0.0.1:PORT/gdlookup/<word>        -> in-app lookup
+    // (rewriteArticleUrls rewrites gdau:// and gdlookup://localhost/ to these.)
+    function _handleArticleLink(link) {
+        const base = engine.articleBaseUrl
+        if (base.length < 5) return
+        if (link.indexOf(base + "/gdau/") === 0) {
+            engine.playAudio(link)
+            return
+        }
+        if (link.indexOf(base + "/gdlookup/") === 0) {
+            const word = _parseGdlookupHttpUrl(link, base)
+            if (word.length > 0) engine.lookup(word)
+            return
+        }
     }
 
     // Incoming lookups (share / PROCESS_TEXT / deep link / QS tile) are consumed

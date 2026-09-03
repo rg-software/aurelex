@@ -86,7 +86,7 @@ qt_add_qml_module(aurelex_exp
         main.qml
         )
 
-set(PROGRAM_FILES_ROOT "/data/data/com.aurelex.experiment/files")
+set(PROGRAM_FILES_ROOT "/data/data/aurelex.android/files")
 
 # The carve needs bionic's iconv.h for android (design D6: no vcpkg libiconv on
 # android; bionic provides iconv at API 28+). The Qt android toolchain doesn't

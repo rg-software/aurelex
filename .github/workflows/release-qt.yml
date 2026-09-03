@@ -1,0 +1,211 @@
+name: release build (Qt)
+
+# On tag push (vX.Y.Z) builds a SIGNED release APK from the Qt experiment
+# (experiments/qtquick/) and attaches it to a GitHub release. The Kotlin app's
+# release workflow lives in build-apk.yml (Ubuntu) and is independent.
+#
+# Why Windows: experiments/qtquick/build.ps1 targets a Windows aqt 6.6.3
+# layout. The carve (engine/) compiles under the same script. Build time is
+# ~25-40 min on a 4-vcpu windows-latest runner (xapian dominates; cached on
+# the 2nd run, see the vcpkg cache step below).
+#
+# Signing secrets (per docs/SIGNING.md):
+#   AURELEX_KEYSTORE_BASE64   base64-encoded .jks release keystore
+#   AURELEX_KEYSTORE_PASSWORD keystore password
+#   AURELEX_KEY_ALIAS         key alias
+#   AURELEX_KEY_PASSWORD      key password
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    env:
+      QT_ROOT: ${{ github.workspace }}\qt
+      VCPKG_ROOT: ${{ github.workspace }}\vcpkg
+      NDK_ROOT: ${{ github.workspace }}\ndk\android-ndk-r23c
+      ANDROID_SDK_ROOT: ${{ github.workspace }}\android-sdk
+      AURELEX_QT_BASE: ${{ github.workspace }}\qt\6.6.3
+      AURELEX_QT_HOST: ${{ github.workspace }}\qt\6.6.3\mingw_64
+      AURELEX_VCPKG_BASE: ${{ github.workspace }}\vcpkg
+      AURELEX_NDK_ROOT: ${{ github.workspace }}\ndk\android-ndk-r23c
+      AURELEX_ANDROID_SDK: ${{ github.workspace }}\android-sdk
+    steps:
+      - name: Checkout with submodules
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: "temurin"
+          java-version: "17"
+
+      - name: Record JDK path for build.ps1
+        shell: pwsh
+        run: |
+          Write-Host "JAVA_HOME=$env:JAVA_HOME"
+          "AURELEX_JDK17=$env:JAVA_HOME" >> $env:GITHUB_ENV
+
+      - name: Install CMake
+        # Unity's bundled cmake 3.22.1 is not available on the runner; install
+        # a portable one. cmake 3.22+ is required by Qt6.
+        shell: pwsh
+        run: |
+          choco install cmake --installargs 'ADD_CMAKE_TO_PATH=System' -y
+          $cmake = (Get-Command cmake.exe).Source
+          Write-Host "cmake at: $cmake"
+          "AURELEX_CMAKE_EXE=$cmake" >> $env:GITHUB_ENV
+
+      - name: Install NDK r23c
+        shell: pwsh
+        run: |
+          $zip = "$env:RUNNER_TEMP\android-ndk-r23c-windows.zip"
+          Invoke-WebRequest -UseBasicParsing -Uri "https://dl.google.com/android/repository/android-ndk-r23c-windows.zip" -OutFile $zip
+          Expand-Archive -Path $zip -DestinationPath "$env:GITHUB_WORKSPACE\ndk" -Force
+          # Expand-Archive creates .../android-ndk-r23c/...; normalize.
+          if (-not (Test-Path "$env:NDK_ROOT")) {
+            Rename-Item (Join-Path "$env:GITHUB_WORKSPACE\ndk" "android-ndk-r23c") "android-ndk-r23c" -ErrorAction SilentlyContinue
+          }
+
+      - name: Install Android SDK (command-line tools)
+        shell: pwsh
+        run: |
+          $cli = "$env:RUNNER_TEMP\cmdline-tools.zip"
+          Invoke-WebRequest -UseBasicParsing -Uri "https://dl.google.com/android/repository/commandlinetools-win-11076708_latest.zip" -OutFile $cli
+          New-Item -ItemType Directory -Force -Path "$env:ANDROID_SDK_ROOT\cmdline-tools" | Out-Null
+          Expand-Archive -Path $cli -DestinationPath "$env:ANDROID_SDK_ROOT\cmdline-tools" -Force
+          # Flatten cmdline-tools/version/... -> cmdline-tools/latest/...
+          $inner = Get-ChildItem "$env:ANDROID_SDK_ROOT\cmdline-tools" -Directory | Where-Object { $_.Name -ne "latest" }
+          foreach ($d in $inner) {
+            Move-Item (Join-Path $d.FullName "*") "$env:ANDROID_SDK_ROOT\cmdline-tools\latest" -Force
+            Remove-Item $d.FullName -Recurse -Force
+          }
+          & "$env:ANDROID_SDK_ROOT\cmdline-tools\latest\bin\sdkmanager.bat" --sdk_root="$env:ANDROID_SDK_ROOT" `
+            "platforms;android-34" "build-tools;35.0.0" "build-tools;36.0.0" "platform-tools"
+
+      - name: Accept SDK licenses
+        shell: pwsh
+        run: |
+          $licensesDir = "$env:ANDROID_SDK_ROOT\licenses"
+          New-Item -ItemType Directory -Force -Path $licensesDir | Out-Null
+          $sdkLicense = "24333f8a63b6825ea9c5514f83c2829b004d1fee`n84831b9409646a918e30573bab4c9c91346d8abd"
+          Set-Content -Path "$licensesDir\android-sdk-license" -Value $sdkLicense -Encoding ASCII
+          $previewLicense = "8933bad161af4178b1185d1a37fbf41ea5269c55"
+          Add-Content -Path "$licensesDir\android-sdk-preview-license" -Value $previewLicense -Encoding ASCII
+
+      - name: Install Qt 6.6.3 (host + android kits)
+        shell: pwsh
+        run: |
+          pip install aqtinstall
+          # MinGW host kit: windows-latest runners don't ship Visual Studio,
+          # and the Qt android target uses the NDK's own clang so the host
+          # compiler doesn't need to be MSVC. The carve is C++17 and links
+          # only against vcpkg + Qt + Android system libs, which MinGW handles.
+          python -m aqt install-qt windows desktop 6.6.3 win64_mingw -O "$env:QT_ROOT"
+          # Android kits — what the carve links against.
+          python -m aqt install-qt windows android 6.6.3 android_arm64_v8a -O "$env:QT_ROOT"
+          python -m aqt install-qt windows android 6.6.3 android_x86_64 -O "$env:QT_ROOT"
+          $deploy = "$env:AURELEX_QT_HOST\bin\androiddeployqt.exe"
+          "AURELEX_DEPLOYQT=$deploy" >> $env:GITHUB_ENV
+          if (-not (Test-Path $deploy)) { throw "androiddeployqt.exe not at $deploy" }
+
+      - name: Cache vcpkg + xapian install (arm64-android)
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.VCPKG_ROOT }}\installed\arm64-android
+          key: vcpkg-arm64-${{ hashFiles('scripts/build-xapian-android.sh', '.github/workflows/release-qt.yml') }}
+          restore-keys: |
+            vcpkg-arm64-
+
+      - name: Bootstrap vcpkg + install carve deps
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "$env:VCPKG_ROOT\vcpkg.exe")) {
+            git clone --depth 1 --branch 2026.07.29 https://github.com/microsoft/vcpkg.git "$env:VCPKG_ROOT"
+            & "$env:VCPKG_ROOT\bootstrap-vcpkg.bat" -disableMetrics
+          }
+          & "$env:VCPKG_ROOT\vcpkg.exe" install zlib bzip2 liblzma lzo fmt --triplet arm64-android
+
+      - name: Build xapian for Android
+        shell: bash
+        run: |
+          ./scripts/build-xapian-android.sh "$NDK_ROOT" arm64-v8a "$VCPKG_ROOT/installed/arm64-android"
+
+      - name: Apply engine patches
+        shell: bash
+        run: ./scripts/apply-patches.sh
+
+      - name: Decode release keystore
+        shell: pwsh
+        env:
+          KEYSTORE_B64: ${{ secrets.AURELEX_KEYSTORE_BASE64 }}
+        run: |
+          if (-not $env:KEYSTORE_B64) {
+            Write-Host "AURELEX_KEYSTORE_BASE64 not set; skipping keystore decode (unsigned build)."
+            exit 0
+          }
+          $bytes = [Convert]::FromBase64String($env:KEYSTORE_B64)
+          if ($bytes.Length -eq 0) { throw "AURELEX_KEYSTORE_BASE64 is set but decodes to zero bytes" }
+          [IO.File]::WriteAllBytes("$env:RUNNER_TEMP\release.jks", $bytes)
+          Write-Host "keystore written to $env:RUNNER_TEMP\release.jks"
+
+      - name: Derive version props from the release tag
+        shell: bash
+        run: |
+          if [[ "${GITHUB_REF_NAME:-}" =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+            vc=$(( BASH_REMATCH[1] * 10000 + BASH_REMATCH[2] * 100 + BASH_REMATCH[3] ))
+            echo "AURELEX_VERSION_NAME=${BASH_REMATCH[1]}.${BASH_REMATCH[2]}.${BASH_REMATCH[3]}" >> "$GITHUB_ENV"
+            echo "AURELEX_VERSION_CODE=$vc" >> "$GITHUB_ENV"
+          else
+            echo "AURELEX_VERSION_NAME=" >> "$GITHUB_ENV"
+            echo "AURELEX_VERSION_CODE=" >> "$GITHUB_ENV"
+          fi
+
+      - name: Build signed release APK
+        shell: pwsh
+        env:
+          AURELEX_KEYSTORE_PATH: ${{ runner.temp }}\release.jks
+          AURELEX_KEYSTORE_PASSWORD: ${{ secrets.AURELEX_KEYSTORE_PASSWORD }}
+          AURELEX_KEY_ALIAS: ${{ secrets.AURELEX_KEY_ALIAS }}
+          AURELEX_KEY_PASSWORD: ${{ secrets.AURELEX_KEY_PASSWORD }}
+        run: |
+          if (Test-Path "$env:AURELEX_KEYSTORE_PATH") {
+            Write-Host "=== signed build ==="
+            & "$env:GITHUB_WORKSPACE\experiments\qtquick\build.ps1" -Configuration Release
+            if ($LASTEXITCODE -ne 0) { throw "build.ps1 failed" }
+          } else {
+            Write-Host "=== AURELEX_KEYSTORE_PATH not present; building unsigned release APK for dry-run ===" -ForegroundColor Yellow
+            & "$env:GITHUB_WORKSPACE\experiments\qtquick\build.ps1" -Configuration Release
+            if ($LASTEXITCODE -ne 0) { throw "build.ps1 failed" }
+          }
+
+      - name: Locate release APK
+        id: apk
+        shell: pwsh
+        run: |
+          $apk = Get-ChildItem "$env:GITHUB_WORKSPACE\build-qtquick\apk\build\outputs\apk\release" -Filter "*.apk" -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $apk) { throw "no release APK produced" }
+          Write-Host "release APK: $($apk.FullName) ($([math]::Round($apk.Length/1MB,1)) MB)"
+          "APK_PATH=$($apk.FullName)" >> $env:GITHUB_OUTPUT
+
+      - name: Upload release artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: aurelex-qt-release
+          path: ${{ steps.apk.outputs.APK_PATH }}
+          if-no-files-found: error
+
+      - name: Create GitHub release (tag pushes)
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ steps.apk.outputs.APK_PATH }}
+          generate_release_notes: true

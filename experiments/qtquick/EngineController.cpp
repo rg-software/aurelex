@@ -416,19 +416,15 @@ QString EngineController::rewriteArticleUrls(const QString &html) const {
     }
     const QString base = m_articleServer->baseUrl(); // e.g. http://127.0.0.1:54321
     QString out = html;
-    const int gdlookupBefore = out.count(QStringLiteral("gdlookup://localhost/"));
-    const int gdauBefore = out.count(QStringLiteral("gdau://"));
-    const int bresBefore = out.count(QStringLiteral("bres://"));
-    const int qrcBefore = out.count(QStringLiteral("qrc:///"));
+    // bres/gdau/gdlookup MUST be replaced before the bare qrc:// (they share
+    // no syntax, but keep order logical). Android's WebView cannot navigate to
+    // unknown schemes, so gdlookup://localhost/<word> anchors are ALSO
+    // rewritten to loopback http — the QML click-probe (main.qml) catches the
+    // click on the http URL and dispatches to engine.lookup().
     out.replace(QStringLiteral("gdlookup://localhost/"), base + QStringLiteral("/gdlookup/"));
     out.replace(QStringLiteral("bres://"), base + QStringLiteral("/bres/"));
     out.replace(QStringLiteral("gdau://"), base + QStringLiteral("/gdau/"));
     out.replace(QStringLiteral("qrc:///"), base + QStringLiteral("/"));
-    qInfo() << "[article-rewrite]" << base
-            << "gdlookup:" << gdlookupBefore
-            << "gdau:" << gdauBefore
-            << "bres:" << bresBefore
-            << "qrc:" << qrcBefore;
     return out;
 }
 
@@ -442,7 +438,7 @@ void EngineController::playAudio(const QString &url) {
     // MediaPlayer plays the loopback URL so the WebView keeps the article.
     const QJniObject javaUrl = QJniObject::fromString(url);
     QJniObject::callStaticMethod<void>(
-        "com/aurelex/experiment/ExperimentActivity",
+        "aurelex/android/ExperimentActivity",
         "playAudio",
         "(Ljava/lang/String;)V",
         javaUrl.object<jstring>());
@@ -454,7 +450,7 @@ void EngineController::playAudio(const QString &url) {
 void EngineController::stopAudio() {
 #if defined(Q_OS_ANDROID)
     QJniObject::callStaticMethod<void>(
-        "com/aurelex/experiment/ExperimentActivity",
+        "aurelex/android/ExperimentActivity",
         "stopAudio",
         "()V");
 #endif

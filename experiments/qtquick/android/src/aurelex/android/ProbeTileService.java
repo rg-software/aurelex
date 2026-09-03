@@ -1,4 +1,4 @@
-package com.aurelex.experiment;
+package aurelex.android;
 
 import android.content.Intent;
 import android.content.SharedPreferences;
