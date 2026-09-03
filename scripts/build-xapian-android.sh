@@ -173,6 +173,25 @@ extract
 
 cd "${SRC_DIR}"
 
+# GNU make on Windows uses `SHELL` from the environment. When the invoking
+# sh lives at a spaced path (Git for Windows: C:/Program Files/Git/usr/bin/sh),
+# autoconf's depcomp/libtool invocations like `$(SHELL) ./depcomp` break:
+# "C:/Program: No such file or directory". Prefer a spaces-free sh so those
+# $(SHELL) calls work. MSYS2 (C:/msys64) qualifies if present; otherwise fall
+# back to whatever sh is on PATH.
+case "$(uname -s)" in
+  MINGW* | MSYS* | CYGWIN*)
+    for cand in /c/msys64/usr/bin/sh.exe /c/tools/msys64/usr/bin/sh.exe "$(command -v sh)"; do
+      if [ -n "$cand" ] && [ -x "$cand" ]; then
+        case "$cand" in
+          *' '*) continue ;;   # skip spaced shells
+          *) export SHELL="$cand"; echo "using spaces-free shell: $SHELL"; break ;;
+        esac
+      fi
+    done
+    ;;
+esac
+
 if [ ! -f "config.status" ]; then
   echo "== configuring (host=${CONFIGURE_HOST}${XAPIAN_MIN_API}) =="
   # -fPIC is required: the static archive is linked into the android shared
