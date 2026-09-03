@@ -68,15 +68,30 @@ overrides `Material.theme: Material.Dark / Material.Light` via a two-way binding
 - `Text` (label) → `Label` (Material typography)
 - `Rectangle` (divider) → `MenuSeparator` / `ToolBar`
 
-**D6 — Material icons.** Material Components include the standard Material
-icon set as glyphs (`Material.Icons.*` font icons). For the port:
-- Back, star/favorite, search, settings, history, folders, etc. → `Material.Icons.*`
-  glyphs (no PNG/SVG assets needed; they render at any density)
-- Preferred glyph names: arrow_back, star / star_border, search,
-  library_books (dicts), folder (groups), history, bookmark (favorites),
-  search_in_docs (FTS), dark_mode / light_mode, close, add, delete.
-- Prerequisite: the `qtquickcontrols2materialstyleimpl` archive ships the
-  icon font; verify `Material.Icons` resolves after the module install.
+**D6 — Material icons (verified against Qt 6.6).** The Qt 6.6 Material style
+does NOT provide an `Icons` namespace or an icon font: `plugins.qmltypes` for
+`QtQuick.Controls.Material` registers only the attached `Material` type
+(`theme`, `primary`, `accent`, `elevation`, `iconColor`, `rippleColor`, ...) —
+the `Material.Icons.*` glyph enum from Qt 5 was removed in the Qt 6 port.
+So icons must come from an app-supplied source. Two options:
+
+- **(a) Bundle the Material Icons font.** Ship `MaterialIcons-Regular.ttf`
+  (Apache-2.0) as a Qt resource, register it with `QFontDatabase`, and render
+  the glyph codepoints on `Text`/`IconImage` where a Material font family is set.
+  Canonical Material Design 3 look; any density; ~1–2 MB APK cost. Codepoints
+  come from the font's official mapping (arrow_back, star / star_border, search,
+  library_books, folder, history, bookmark, close, add, delete, dark_mode, ...).
+- **(b) Reuse the engine's bundled SVG icon set** (already staged under
+  `android/assets/icons/`). Zero new assets, but the icons are GoldenDict's
+  style, not Material.
+
+   Recommended: (a) for the app chrome (NavigationBar, IconButton, top-bar
+   actions) to get the Material look; (b) remains for in-article chrome where
+   the engine's own assets are already referenced by article HTML.
+
+   Prerequisite (a): fetch `MaterialIcons-Regular.ttf`, add to a `.qrc`, expose
+   a font family, and map the plan's icon names (arrow_back, star, etc.) to
+   codepoints in one QML helper.
 
 ### Risks / Trade-offs
 

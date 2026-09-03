@@ -1,6 +1,6 @@
 ## 1. Prerequisite: install QtQuick.Controls2 on the android kits
 
-- [ ] 1.1 Check availability: `aqt list-qt windows android --archives 6.6.3 android_arm64_v8a` for `qtquickcontrols2` in the base archives, or `aqt list-qt windows android --modules 6.6.3 android_arm64_v8a` for it as a module.
+- [ ] 1.1 Check availability: `aqt list-qt windows android --archives 6.8.3 android_arm64_v8a` for `qtquickcontrols2` in the base archives, or `aqt list-qt windows android --modules 6.8.3 android_arm64_v8a` for it as a module.
 - [ ] 1.2 Install on `android_arm64_v8a`, `android_x86_64`, and `msvc2019_64` (host). If not available via aqt, install via the Qt online installer or copy the `qml/QtQuick/Controls/` + `libQt6QuickControls2*` from the desktop kit.
 - [ ] 1.3 Verify: `qml/QtQuick/Controls/` directory exists in the android kit with `qmldir` + plugin .so files.
 - [ ] 1.4 Verify: `import QtQuick.Controls` compiles in a test QML file (add a minimal `Button {}` to the experiment's main.qml, build, deploy, check no "module not installed" error).
@@ -40,9 +40,15 @@
 - [ ] 5.2 Highlight the current pane in the NavigationBar.
 - [ ] 5.3 Verify: one-tap access to any pane, no cycling.
 
-## 6. Polish
+## 7. Material icons (design D6)
 
-- [ ] 6.1 Add `ProgressBar` for FTS index building (visible when `engine.buildingFts`).
-- [ ] 6.2 Add `FloatingActionButton` on the Dicts pane for "Add dictionaries" (opens the staged-folder scan or SAF flow).
-- [ ] 6.3 Add `ToolTip` on the icon buttons (Accessibilty).
-- [ ] 6.4 On-device verification: all panes functional, Material animations visible, dark/light switching works, NavigationBar navigation works, no bare-QtQuick primitives remain.
+- [ ] 7.1 Bundle the Material Icons font: download `MaterialIcons-Regular.ttf` (Apache-2.0) into a `qrc`, register with `QFontDatabase`, define the Material icon font family.
+- [ ] 7.2 Add a QML icon helper mapping the plan's icon names (arrow_back, star, star_border, search, library_books, folder, history, bookmark, close, add, delete, dark_mode) to font codepoints.
+- [ ] 7.3 Use the icon helper on all IconButton/NavigationBar/actions from sections 4.x/5.x (verified on-device glyph rendering).
+
+## 8. Polish
+
+- [ ] 8.1 Add `ProgressBar` for FTS index building (visible when `engine.buildingFts`).
+- [ ] 8.2 Add `FloatingActionButton` on the Dicts pane for "Add dictionaries" (opens the staged-folder scan or SAF flow).
+- [ ] 8.3 Add `ToolTip` on the icon buttons (Accessibilty).
+- [ ] 8.4 On-device verification: all panes functional, Material animations visible, dark/light switching works, NavigationBar navigation works, no bare-QtQuick primitives remain.
