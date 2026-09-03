@@ -25,15 +25,21 @@ the UI should look native before the app replaces the Compose UI.
 
 ### Decisions
 
-**D1 — Install the full Qt android kit.** The aqt carve-subset install was used
-to minimize the toolchain during the experiment. For the port, install the full
-Qt 6.6.3 android kit (or at minimum, add the `qtquickcontrols2` archive). The
-`qt_add_qml_module` + `find_package(Qt6 COMPONENTS QuickControls2)` wiring is
-standard. The desktop host kit (`msvc2019_64`) also needs the module for QML
-tooling (`qmlcachegen`, `qmllint`).
+**D1 — QtQuick.Controls2 is already bundled in the kits.** Verified 2026-09-03:
+`android_arm64_v8a/qml/QtQuick/Controls`, full CMake packages
+(`Qt6QuickControls2`, `Qt6QuickControls2Material`, `Qt6QuickControls2MaterialStyleImpl`, ...),
+and `libQt6QuickControls2_arm64-v8a.so` / `plugins/styles/qandroidstyle` are all
+present in the local `C:\Qt\6.6.3` kits (2024-03-19 prebuilds, shipped by the
+original full-Qt install; the later aqt module adds layered on top). The aqt
+android channel's own archive list is lean and does not carry
+`qtquickcontrols2`, but that is irrelevant locally — the kit already has it.
+No installation prerequisite. (The original experiment's D8 premise — "carve
+subset lacks Controls2" — does not hold for these kits.)
 
-Alternative considered: community QML Material libraries — rejected (unmaintained,
-uncertain Qt 6.6 compatibility).
+**D1b — Kit origin note.** The kits under `C:\Qt\6.6.3` were originally
+installed by the Qt Online Installer (full package set, hence Controls2 for
+both desktop + android); later aqt installs layered the extra modules onto
+that same root.
 
 **D2 — Material style (not Universal).** Material Design 3 is the native Android
 look; Universal is a cross-platform compromise. Material gives us:
@@ -55,11 +61,18 @@ This doesn't scale — replace it with a `NavigationBar` (Material bottom bar) o
 
 Alternative considered: keep the cycle button — rejected (doesn't scale, poor UX).
 
-**D4 — Theme switching: Material built-in, not manual palette.** Remove all
-`engine.darkMode ? X : Y` ternaries from QML. Instead, set
-`Material.theme: Material.System` at the root and let the Material style handle
-light/dark switching automatically. The manual toggle (from the shipped app)
-overrides `Material.theme: Material.Dark / Material.Light` via a two-way binding.
+**D4 — Theme switching: Material built-in palette + JNI system-dark read.**
+Remove the `engine.darkMode ? X : Y` ternaries; the Material style drives the
+palette. Qt 6.6's Android QPA does not read the system dark-mode setting into
+`Material.theme` (the Android dark-mode integration landed in Qt 6.7/6.8), so
+"follow system" is implemented the same way the storage access works today:
+- Java: `(resources.configuration.uiMode & UI_MODE_NIGHT_MASK)
+  == UI_MODE_NIGHT_YES` (or `isNightModeActive()`), surfaced as a C++ bool
+  property via `QJniObject`, with the activity's `onConfigurationChanged`
+  notifying for live switching.
+- Binding: `Material.theme: engine.systemDark ? Material.Dark : Material.Light`.
+- The manual D toggle (existing) overrides the system value (user wants dark
+  while system light) via a `userDarkOverride` flag.
 
 **D5 — Form components.** Replace all bare-QtQuick primitives:
 - `TextInput` → `TextField` (Material outlined or filled)
@@ -95,28 +108,29 @@ So icons must come from an app-supplied source. Two options:
 
 ### Risks / Trade-offs
 
-- [Material style may not be available on the aqt android install] → Verify by
-  installing the `qtquickcontrols2` archive. If unavailable, fall back to the
-  full Qt online-installer kit or the Windows desktop kit's `qml/` directory.
-- [Material default colors may not match Aurelex branding] → Use Material defaults
-  for the experiment; add custom `Material.primary` / `Material.accent` colors in
-  the port polish.
-- [Material theme switching may not re-render the WebView content] → The dark
-  mode toggle already calls `gd_set_dark_mode` + re-looks-up (which re-emits the
-  article CSS). The QML palette switching is handled by Material automatically.
+- [Resolved] Material style availability on the android kit → Controls2 is already
+  present (D1); a straight `find_package` + `import` works.
+- [Resolved] Theme switching may not read the Android system dark mode on Qt 6.6 →
+  implemented via JNI (D4) instead of `Material.theme: Material.System`.
+- [Remaining] The Material restyle is a careful mechanical pass over the current
+  QML (which has grown: membership editor, article bridge, confirm dialog,
+  storage opt-in). The per-pane task list stays valid; implement against current
+  `main.qml`, not older assumptions.
+- [Remaining] `Material.theme` toggling does not re-render the WebView article
+  by itself — the dark-mode toggle already calls `gd_set_dark_mode` + re-lookups
+  (re-emits article CSS); the QML palette switch is handled by Material
+  automatically. Keep that behavior.
 
 ### Migration Plan
 
-1. Install `qtquickcontrols2` on the kits (prerequisite).
-2. Update `CMakeLists.txt`: add `QuickControls2` to `find_package`.
-3. Update `main.qml`: add `import QtQuick.Controls`, set `Material.style`/`Material.theme`, replace all primitives.
-4. Verify on-device: all six panes still work, dark/light switching works, Material ripple animations visible.
+1. Turn on the Material style: `find_package`/link `QuickControls2` (already in
+   the kits), `import QtQuick.Controls`, set `Material.theme`.
+2. Add the JNI system-dark read + `userDarkOverride`, bind `Material.theme`.
+3. Replace primitives pane-by-pane per the task list, using the current QML.
+4. Verify on-device: all panes, dark/light switching (system + manual), ripple.
 
 ### Open Questions
 
-- Whether the `qtquickcontrols2` archive is available via `aqt` for android
-  arm64-v8a / x86_64 at Qt 6.6.3 (earlier `--archives` listing showed it as a
-  base archive; the `--modules` listing showed it as unavailable). May need to
-  use the full online-installer kit or build from source.
-- Whether the Material style requires a separate `qtquickcontrols2materialstyleimpl`
-  archive (it was previously installed but didn't provide the base module).
+- None blocking — the distribution blocker is resolved (Controls2 in kit) and
+  dark-follow has a concrete JNI path. Remaining decisions are cosmetic
+  (icon font vs SVG, D6).

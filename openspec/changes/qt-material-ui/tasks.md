@@ -1,9 +1,9 @@
-## 1. Prerequisite: install QtQuick.Controls2 on the android kits
+## 1. Prerequisite: confirm QtQuick.Controls2 present in the kits (no install needed)
 
-- [ ] 1.1 Check availability: `aqt list-qt windows android --archives 6.8.3 android_arm64_v8a` for `qtquickcontrols2` in the base archives, or `aqt list-qt windows android --modules 6.8.3 android_arm64_v8a` for it as a module.
-- [ ] 1.2 Install on `android_arm64_v8a`, `android_x86_64`, and `msvc2019_64` (host). If not available via aqt, install via the Qt online installer or copy the `qml/QtQuick/Controls/` + `libQt6QuickControls2*` from the desktop kit.
-- [ ] 1.3 Verify: `qml/QtQuick/Controls/` directory exists in the android kit with `qmldir` + plugin .so files.
-- [ ] 1.4 Verify: `import QtQuick.Controls` compiles in a test QML file (add a minimal `Button {}` to the experiment's main.qml, build, deploy, check no "module not installed" error).
+- [ ] 1.1 Verify `C:\Qt\6.6.3\android_arm64_v8a\qml\QtQuick\Controls` exists with a Material dir + plugin .so (confirmed 2026-09-03; re-verify after any kit churn).
+- [ ] 1.2 Same check for `android_x86_64` and `msvc2019_64` (host, for qmllint).
+- [ ] 1.3 Verify `libQt6QuickControls2_arm64-v8a.so` / `plugins/styles/qandroidstyle` present in the android kit.
+- [ ] 1.4 Sanity: `import QtQuick.Controls` + a minimal `Button {}` compiles and loads on-device (no "module not installed").
 
 ## 2. CMake + project wiring
 
@@ -16,12 +16,13 @@
   ```qml
   import QtQuick.Controls.Material
   ApplicationWindow {
-      Material.theme: Material.System  // follows system dark/light
-      // Manual override: Material.theme: engine.darkMode ? Material.Dark : Material.Light
+      Material.theme: engine.userDarkOverride ? Material.Dark
+        : (engine.systemDark ? Material.Dark : Material.Light)
   }
   ```
-- [ ] 3.2 Remove all hardcoded color ternaries (`engine.darkMode ? X : Y`) from QML — Material handles light/dark automatically.
-- [ ] 3.3 Verify on-device: dark mode toggle switches the entire UI palette (not just the article body), light mode restores light colors.
+- [ ] 3.2 Remove all hardcoded color ternaries (`engine.darkMode ? X : Y`) from QML — the Material palette drives light/dark.
+- [ ] 3.3 JNI system-dark read (Qt 6.6 can't detect it natively): Java `configuration.uiMode & UI_MODE_NIGHT_MASK` → C++ `systemDark` property via `QJniObject`, update on the activity's `onConfigurationChanged`; keep a `userDarkOverride` for the manual D toggle. (Pattern: same as `isAllFilesAccessGranted`.)
+- [ ] 3.4 Verify on-device: system dark/light switch re-palettes the app; the manual toggle overrides it.
 
 ## 4. Replace bare-QtQuick primitives with Material components
 

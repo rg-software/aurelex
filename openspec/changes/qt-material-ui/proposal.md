@@ -13,14 +13,16 @@ headers, `NavigationBar` / `TabBar` for pane navigation, `Switch` / `Dialog`
 for settings, and automatic **light/dark theme switching** (built into the
 Material style — no custom palette code needed).
 
-This change installs `QtQuick.Controls2` on the android kits, replaces the
-bare-QtQuick primitives with Material Design 3 components, and activates the
-built-in Material theme so the app looks native on Android out of the box.
+This change activates the Material Design 3 style that ships with the kits'
+already-installed `QtQuick.Controls2`, replaces the bare-QtQuick primitives with
+Material Design 3 components, and drives the theme so the app looks native on
+Android out of the box.
 
 ## What Changes
 
-- **Install `QtQuick.Controls2`** on the android arm64-v8a + x86_64 kits (via
-  `aqt install-qt --archives qtquickcontrols2` or the full Qt kit).
+- **Install/activate `QtQuick.Controls2`** — already present in the local
+  `C:\Qt\6.6.3` kits (verified 2026-09-03); wire `find_package` + link, no
+  install needed. Cloud builder (B.6/CI) may need the module added when built.
 - **Replace all bare-QtQuick UI primitives** with their Material equivalents:
   | Current (bare QtQuick) | Replacement (Material) |
   | --- | --- |
