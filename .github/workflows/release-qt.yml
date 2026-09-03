@@ -105,6 +105,10 @@ jobs:
       - name: Install Qt 6.6.3 (host + android kits)
         shell: pwsh
         run: |
+          # Pin py7zr==1.1.0: the 1.1.3 path-sanitization change (miurahr/py7zr#743)
+          # raises Bad7zFile on spurious './' archive members, breaking aqt install
+          # (same pin as engine-smoke.yml).
+          pip install "py7zr==1.1.0"
           pip install aqtinstall
           # MinGW host kit: windows-latest runners don't ship Visual Studio,
           # and the Qt android target uses the NDK's own clang so the host
