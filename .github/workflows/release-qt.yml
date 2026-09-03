@@ -89,18 +89,21 @@ jobs:
           #   <sdk>/cmdline-tools/latest/bin/sdkmanager.bat
           New-Item -ItemType Directory -Force -Path "$env:ANDROID_SDK_ROOT\cmdline-tools\latest" | Out-Null
           Get-ChildItem (Join-Path $tmp "cmdline-tools") -Force | Move-Item -Destination "$env:ANDROID_SDK_ROOT\cmdline-tools\latest" -Force
-          & "$env:ANDROID_SDK_ROOT\cmdline-tools\latest\bin\sdkmanager.bat" --sdk_root="$env:ANDROID_SDK_ROOT" `
-            "platforms;android-34" "build-tools;35.0.0" "build-tools;36.0.0" "platform-tools"
-
-      - name: Accept SDK licenses
-        shell: pwsh
-        run: |
+          # Accept licenses BEFORE sdkmanager: it prompts interactively (and
+          # fails non-interactively, silently skipping build-tools) if the
+          # license hash files are absent.
           $licensesDir = "$env:ANDROID_SDK_ROOT\licenses"
           New-Item -ItemType Directory -Force -Path $licensesDir | Out-Null
           $sdkLicense = "24333f8a63b6825ea9c5514f83c2829b004d1fee`n84831b9409646a918e30573bab4c9c91346d8abd"
           Set-Content -Path "$licensesDir\android-sdk-license" -Value $sdkLicense -Encoding ASCII
           $previewLicense = "8933bad161af4178b1185d1a37fbf41ea5269c55"
           Add-Content -Path "$licensesDir\android-sdk-preview-license" -Value $previewLicense -Encoding ASCII
+          & "$env:ANDROID_SDK_ROOT\cmdline-tools\latest\bin\sdkmanager.bat" --sdk_root="$env:ANDROID_SDK_ROOT" `
+            "platforms;android-34" "build-tools;35.0.0" "build-tools;36.0.0" "platform-tools"
+          if ($LASTEXITCODE -ne 0) { throw "sdkmanager failed (exit $LASTEXITCODE)" }
+          if (-not (Test-Path "$env:ANDROID_SDK_ROOT\build-tools\36.0.0")) {
+            throw "build-tools/36.0.0 not installed under $env:ANDROID_SDK_ROOT"
+          }
 
       - name: Install Qt 6.6.3 (host + android kits)
         shell: pwsh
