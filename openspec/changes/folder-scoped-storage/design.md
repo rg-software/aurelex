@@ -25,11 +25,11 @@ brings that model to QtQuick.
 - Remove the All-Files-Access path entirely.
 
 **Non-Goals:**
-- Recursive dictionary scanning (carve stays top-level-only; nested folders in a
-  picked location are a documented limitation). **Tracked as a separate follow-up
-  task** (see tasks.md section 6) — not part of this change's acceptance.
 - Cloud-provider browsing UX (unresolvable providers are stage-copied).
 - Copying large `.mdd` for resolvable folders (in-place scan avoids duplication).
+
+**In scope:** recursive dictionary scanning (a picked source folder is scanned
+recursively so dictionaries in nested subfolders load — see D5/D7 and tasks 6.x).
 
 ## Decisions
 
@@ -98,6 +98,16 @@ source-driven rather than AFA-gated.
 path/staged indicator) with a remove action; removing a source triggers the
 "Remove a source" spec scenario (dicts vanish from list/lookup/FTS).
 
+### D7. Recursive dictionary scan
+The picked source folder is scanned recursively so dictionaries in nested
+subfolders load (e.g. `GoldenDict/English/`, `GoldenDict/Japanese/`). Two levels:
+- **Carve** (`collectFiles`): switch `QDir::entryInfoList(Files)` to
+  `QDirIterator(..., QDirIterator::Subdirectories)` so `gd_scan_dicts` includes
+  dicts in subfolders (top-level-only was a real limitation — the on-device
+  GoldenDict has language subfolders).
+- **Staging** (`stageTree` in Java): recurse the `DocumentFile` tree so staged
+  copies mirror nested subfolders and their dict files, preserving relative paths.
+
 ## Risks / Trade-offs
 
 - [Qt's `onActivityResult` may not be invoked in some Qt 6.6 Android lifecycles]
@@ -107,8 +117,7 @@ path/staged indicator) with a remove action; removing a source triggers the
 - [Secondary-volume `/storage/<id>/<path>` guess is wrong on some devices]
   → Treat as unresolvable (empty path) → stage-copy, which is always safe.
 - [Top-level-only carve scan misses dictionaries in nested folders of a picked
-  location] → Documented limitation; the picker's "use this folder" + plain
-  guidance mirrors the old port; recursion is a future carve change.
+  location] → **Resolved by D7** (recursive `collectFiles` + recursive staging); fixtures verified.
 - [Staging large `.mdd` doubles disk usage] → Staging is required for every
   source (scoped storage blocks in-place reads); index cache stays in app-private
   storage. Accepted for v1, matching the archived Kotlin design.

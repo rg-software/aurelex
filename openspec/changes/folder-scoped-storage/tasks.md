@@ -34,14 +34,13 @@
 - [x] 5.6 Rescan re-pulls the ORIGINAL folders, not the staging (`rescan` → Java `refreshSources` → incremental `stageTree` → `refresh.xml` → `runScan`). **Verified**: unchanged source → `copied=0`, marker consumed, scan re-runs.
 - [x] 5.7 Remove a source deletes its staged private copy. **Verified**: `removing staged copy <dir>` + dir gone, dicts unloaded (`setDictionaries count=0`). The original user folder is never touched.
 
-## 6. Follow-up: recursive dictionary scan (carve)
+## 6. Recursive dictionary scan (in-scope)
 
-Planned as a distinct item, deliberately NOT part of this change's acceptance.
-Nested subfolders (e.g. `GoldenDict/English/`) are currently skipped because the
-carve's `collectFiles` (`carve/gd_boundary.cc`) scans a directory top-level only
-(`QDir::entryInfoList(..., QDir::Files)`, no `Subdirectories`).
+Nested subfolders (e.g. `GoldenDict/English/`, `GoldenDict/Japanese/`) must load
+too. This is a carve/boundary change (recursive `collectFiles`) plus the staged
+copy must mirror nesting — see design D7.
 
-- [ ] 6.1 Make the carve `collectFiles` recursive (`QDir::entryInfoList` → `QDirIterator` with `QDirIterator::Subdirectories`), so a scanned folder includes dictionaries in nested folders.
-- [ ] 6.2 Update the CI engine-smoke expectations (fixture uses flat dirs, so `gd_scan_dicts -> N` still holds; add a nested fixture to assert recursion) and the carve/goldendict.h doc comment.
-- [ ] 6.3 Re-verify on-device: picking a folder whose dicts live in subfolders loads them.
-    Note: this is a carve/boundary change → also touch `patches/` + smoke per the repo golden rules.
+- [x] 6.1 Make the carve `collectFiles` recursive (`QDir::entryInfoList(Files)` → `QDirIterator` with `QDirIterator::Subdirectories`) so `gd_scan_dicts` includes dictionaries in nested subfolders.
+- [x] 6.2 Make Java `stageTree` recurse the `DocumentFile` tree, staging nested subfolders' files into matching relative subdirs of `files/staged/<sourceId>/`.
+- [x] 6.3 Update the CI engine-smoke expectations (add a nested fixture that asserts recursion loads subfolder dicts) and the `carve/goldendict.h` doc comment.
+- [x] 6.4 Re-verify on-device: picking a folder whose dicts live in subfolders loads them.

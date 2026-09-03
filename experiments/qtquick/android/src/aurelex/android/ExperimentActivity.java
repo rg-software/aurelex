@@ -232,41 +232,57 @@ public class ExperimentActivity extends QtActivity {
     }
 
     /**
-     * Copies the supported dictionary files (top level only, matching the carve
-     * scan) from a SAF tree into app-private storage INCREMENTALLY: files whose
-     * destination already exists with the same size and close last-modified
-     * time are skipped, and copied files get the source's timestamp so a later
-     * refresh can compare cheaply. Returns the number of files copied, or -1 on
-     * failure.
+     * Copies the supported dictionary files from a SAF tree into app-private
+     * storage INCREMENTALLY, recursing into nested subfolders (relative paths
+     * preserved) so the staged copy mirrors the picked folder tree. Files whose
+     * destination already exists with the same size and close last-modified time
+     * are skipped; copied files get the source's timestamp so a later refresh can
+     * compare cheaply. Returns the number of files copied, or -1 on failure.
      */
     static int stageTree(android.net.Uri treeUri, String destDir) {
+        final android.content.ContentResolver cr;
         try {
-            final java.io.File dir = new java.io.File(destDir);
-            if (!dir.exists() && !dir.mkdirs()) return -1;
+            cr = QtNative.activity().getContentResolver();
+        } catch (Exception e) {
+            return -1;
+        }
+        final java.io.File dir = new java.io.File(destDir);
+        if (!dir.exists() && !dir.mkdirs()) return -1;
+        return stageTreeInto(treeUri, cr, dir);
+    }
+
+    private static int stageTreeInto(android.net.Uri treeUri,
+                                     android.content.ContentResolver cr,
+                                     java.io.File destDir) {
+        final String[] cols = {
+                android.provider.DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+                android.provider.DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+                android.provider.DocumentsContract.Document.COLUMN_MIME_TYPE,
+                android.provider.DocumentsContract.Document.COLUMN_SIZE,
+                android.provider.DocumentsContract.Document.COLUMN_LAST_MODIFIED };
+        int copied = 0;
+        try {
             final String treeDocId = android.provider.DocumentsContract.getTreeDocumentId(treeUri);
             final android.net.Uri childrenUri =
                     android.provider.DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, treeDocId);
-            final String[] cols = {
-                    android.provider.DocumentsContract.Document.COLUMN_DOCUMENT_ID,
-                    android.provider.DocumentsContract.Document.COLUMN_DISPLAY_NAME,
-                    android.provider.DocumentsContract.Document.COLUMN_MIME_TYPE,
-                    android.provider.DocumentsContract.Document.COLUMN_SIZE,
-                    android.provider.DocumentsContract.Document.COLUMN_LAST_MODIFIED };
-            final android.content.ContentResolver cr =
-                    QtNative.activity().getContentResolver();
-            int copied = 0;
             try (android.database.Cursor c = cr.query(childrenUri, cols, null, null, null)) {
                 while (c != null && c.moveToNext()) {
                     final String docId = c.getString(0);
                     final String name = c.getString(1);
                     final String mime = c.getString(2);
+                    if (name == null) continue;
                     if (android.provider.DocumentsContract.Document.MIME_TYPE_DIR.equals(mime)) {
-                        continue; // top level only, matching the carve scan
+                        // Recurse into the subfolder, preserving the relative path.
+                        final java.io.File sub = new java.io.File(destDir, name);
+                        final android.net.Uri subTree = android.provider.DocumentsContract
+                                .buildDocumentUriUsingTree(treeUri, docId);
+                        copied += stageTreeInto(subTree, cr, sub);
+                        continue;
                     }
-                    if (name == null || !isSupportedDictionaryName(name)) continue;
+                    if (!isSupportedDictionaryName(name)) continue;
                     final long srcSize = c.isNull(3) ? -1 : c.getLong(3);
                     final long srcModified = c.isNull(4) ? 0 : c.getLong(4);
-                    final java.io.File out = new java.io.File(dir, name);
+                    final java.io.File out = new java.io.File(destDir, name);
                     if (out.exists() && out.isFile()
                             && srcSize >= 0 && out.length() == srcSize
                             && (srcModified <= 0
@@ -287,8 +303,8 @@ public class ExperimentActivity extends QtActivity {
             }
             return copied;
         } catch (Exception e) {
-            android.util.Log.w(TAG, "stageTree failed: " + e);
-            return -1;
+            android.util.Log.w(TAG, "stageTreeInto failed: " + e);
+            return copied;
         }
     }
 

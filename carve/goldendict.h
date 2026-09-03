@@ -8,7 +8,8 @@
 //                 cached. Returns 1 on success, 0 if already initialized.
 // - gd_scan_dicts: scan `folder` for supported dictionaries (.mdx/.mdd,
 //                 .dsl/.dsl.dz, .ifo), build indexes into index_dir, append to
-//                 the loaded set. Returns the number of dictionaries loaded in
+//                 the loaded set. Scans recursively (nested subfolders are
+//                 included). Returns the number of dictionaries loaded in
 //                 this call, or -1 on error.
 // - gd_suggest:   prefix-match suggestions for `word`. Fills out (NUL-terminated
 //                 string) up to out_size with newline-separated headwords.

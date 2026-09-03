@@ -23,6 +23,7 @@
 #include <QCoreApplication>
 #include <QGuiApplication>
 #include <QDir>
+#include <QDirIterator>
 #include <QEventLoop>
 #include <QTimer>
 #include <QUrl>
@@ -87,10 +88,14 @@ std::mutex g_engineMutex;
 vector< string > collectFiles( const QString & dirPath, const QStringList & filters )
 {
   vector< string > out;
-  QDir dir( dirPath );
-  const QFileInfoList entries = dir.entryInfoList( filters, QDir::Files | QDir::NoDotAndDotDot );
-  for ( const QFileInfo & i : entries ) {
-    out.push_back( QDir::toNativeSeparators( i.absoluteFilePath() ).toStdString() );
+  // Recursive: a picked source folder is scanned including nested subfolders
+  // (e.g. GoldenDict/English/, GoldenDict/Japanese/) so dictionaries in them
+  // load. See folder-scoped-storage design D7.
+  QDirIterator it( dirPath, filters,
+                   QDir::Files | QDir::NoDotAndDotDot,
+                   QDirIterator::Subdirectories );
+  while ( it.hasNext() ) {
+    out.push_back( QDir::toNativeSeparators( it.next() ).toStdString() );
   }
   return out;
 }

@@ -67,6 +67,11 @@ to a physical path.
 - **THEN** the app copies its supported dictionary files into app-private storage
   and scans those copies
 
+#### Scenario: Nested subfolders are scanned
+- **WHEN** a source folder contains dictionaries in nested subfolders
+- **THEN** the app scans the whole tree recursively (both in-place and staged
+  copies), so dictionaries in subfolders load
+
 #### Scenario: Missing or revoked source
 - **WHEN** a previously added source's folder is no longer accessible (e.g. the
   grant was revoked or the media is unmounted)

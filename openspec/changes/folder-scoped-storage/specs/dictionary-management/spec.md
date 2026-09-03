@@ -37,6 +37,13 @@ location MUST NOT be treated as dictionaries.
   app-private storage and scans those copies, so the dictionaries load regardless
   of where the source folder lives (device storage or a cloud provider)
 
+#### Scenario: Dictionaries in nested subfolders load
+- **WHEN** a source folder contains supported dictionary files in nested
+  subfolders (e.g. the source root has language subfolders, each holding `.mdx`/
+  `.dsl`/`.ifo` files)
+- **THEN** the app loads those dictionaries too (scan covers subfolders
+  recursively), so the whole picked location is searchable
+
 #### Scenario: Removed a dictionary and re-scans the same source
 - **WHEN** the user removes a dictionary and then re-scans its source
 - **THEN** the dictionary is added back as a fresh entry (re-scan is not blocked
