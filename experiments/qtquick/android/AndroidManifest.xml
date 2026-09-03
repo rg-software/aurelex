@@ -6,6 +6,12 @@
     android:versionName="0.0.1">
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Bulk FTS indexing (bulk-fts-indexing): lets the IndexingService run
+         as a foreground service so a long index build survives the app being
+         backgrounded. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-feature android:glEsVersion="0x00020000" android:required="true" />
 
     <application
@@ -58,6 +64,15 @@
                 <action android:name="android.service.quicksettings.action.QS_TILE" />
             </intent-filter>
         </service>
+
+        <!-- Bulk FTS indexing foreground service (bulk-fts-indexing): keeps the
+             process foreground with an "Indexing..." notification while the
+             automatic bulk index build runs, so long builds survive the app
+             being backgrounded. Started/stopped by ExperimentActivity. -->
+        <service
+            android:name=".IndexingService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
 
         <!-- Home-screen search widget -->
         <receiver

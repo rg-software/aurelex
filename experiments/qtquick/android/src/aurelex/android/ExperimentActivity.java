@@ -406,6 +406,31 @@ public class ExperimentActivity extends QtActivity {
         }).start();
     }
 
+    /**
+     * Bulk FTS indexing (bulk-fts-indexing): started by EngineController via
+     * JNI before the automatic bulk index build and stopped when it completes.
+     * The foreground IndexingService keeps the process alive long enough for
+     * the in-process C++ worker to finish the build even when the app is
+     * backgrounded, and shows an "Indexing..." notification.
+     */
+    public static void startIndexing() {
+        try {
+            final android.app.Activity a = QtNative.activity();
+            if (a != null) IndexingService.start(a.getApplicationContext());
+        } catch (Exception e) {
+            android.util.Log.w(TAG, "startIndexing failed: " + e);
+        }
+    }
+
+    public static void stopIndexing() {
+        try {
+            final android.app.Activity a = QtNative.activity();
+            if (a != null) IndexingService.stop(a.getApplicationContext());
+        } catch (Exception e) {
+            android.util.Log.w(TAG, "stopIndexing failed: " + e);
+        }
+    }
+
     private static boolean isSupportedDictionaryName(String name) {
         final String lower = name.toLowerCase(java.util.Locale.ROOT);
         return lower.endsWith(".mdx") || lower.endsWith(".mdd")

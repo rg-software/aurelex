@@ -234,6 +234,11 @@ private:
     // original SAF folders via shared_prefs/refresh.xml.
     bool peekPendingRefreshFlag() const;
     void removePendingRefreshFile();
+    // Bulk FTS indexing: the Android IndexingService writes a completion marker
+    // (shared_prefs/indexing.xml) when it stops; consume it here so a leftover
+    // marker never re-triggers stale indexing state on a later tick.
+    bool peekPendingIndexingDone() const;
+    void removePendingIndexingFile();
 
     // Android system dark-mode (Qt 6.6 QPA doesn't expose it); sampled via JNI
     // on the poller tick. Recomputes and applies the effective dark mode.

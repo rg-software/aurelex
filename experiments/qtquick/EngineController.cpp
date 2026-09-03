@@ -142,6 +142,15 @@ void EngineController::autoIndexMissing()
     if (missing.isEmpty()) return;
     qInfo() << "[aurelex] auto-indexing" << missing.size() << "dictionaries";
     setBuildingFts(true);
+#if defined(Q_OS_ANDROID)
+    // Long builds (large dictionaries) run on a foreground IndexingService so
+    // they survive the app being backgrounded; the service shows a notification
+    // and keeps the in-process worker alive. Stopped when the batch completes.
+    QJniObject::callStaticMethod<void>(
+        "aurelex/android/ExperimentActivity",
+        "startIndexing",
+        "()V");
+#endif
     QFuture<void> f = QtConcurrent::run([missing]{
         for (int idx : missing)
             gd_fts_index(idx);
@@ -149,6 +158,12 @@ void EngineController::autoIndexMissing()
     auto *w = new QFutureWatcher<void>(this);
     connect(w, &QFutureWatcher<void>::finished, this, [this, missing, w]{
         qInfo() << "[aurelex] auto-index done";
+#if defined(Q_OS_ANDROID)
+        QJniObject::callStaticMethod<void>(
+            "aurelex/android/ExperimentActivity",
+            "stopIndexing",
+            "()V");
+#endif
         for (int idx : missing)
             emit ftsIndexChanged(idx);
         setBuildingFts(false);
@@ -834,6 +849,33 @@ void EngineController::removePendingRefreshFile()
     f.remove();
 }
 
+bool EngineController::peekPendingIndexingDone() const
+{
+    if (m_appDir.isEmpty()) return false;
+    const QString path = m_appDir + QStringLiteral("/../shared_prefs/indexing.xml");
+    QFile f(path);
+    if (!f.open(QIODevice::ReadOnly)) return false;
+    const QString xml = QString::fromUtf8(f.readAll());
+    f.close();
+    QXmlStreamReader xr(xml);
+    while (!xr.atEnd()) {
+        const auto tok = xr.readNext();
+        if (tok == QXmlStreamReader::StartElement
+            && xr.name() == QStringLiteral("boolean")
+            && xr.attributes().value(QStringLiteral("name")) == QStringLiteral("indexingDone")) {
+            return xr.attributes().value(QStringLiteral("value")) == QStringLiteral("true");
+        }
+    }
+    return false;
+}
+
+void EngineController::removePendingIndexingFile()
+{
+    if (m_appDir.isEmpty()) return;
+    QFile f(m_appDir + QStringLiteral("/../shared_prefs/indexing.xml"));
+    f.remove();
+}
+
 void EngineController::ingestPendingSource()
 {
     if (m_appDir.isEmpty() || !m_ready) return;
@@ -1061,6 +1103,12 @@ void EngineController::pollPendingLookup()
         removePendingRefreshFile();
         if (m_ready) runScan();
         return;
+    }
+
+    // The IndexingService finished its stop (marker written when the bulk build
+    // completed). Consume it so a stale marker never re-triggers later.
+    if (peekPendingIndexingDone()) {
+        removePendingIndexingFile();
     }
 
     // A concrete word (share / PROCESS_TEXT / deep link) takes priority over
