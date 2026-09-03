@@ -38,15 +38,15 @@
 - [x] 7.1 First-run onboarding overlay + empty search state (`dictCount == 0`); `onboarded` preference stored in `files/settings.json`. **[Partial]** the upgrade heuristic (skip onboarding for existing users) is not implemented — fresh installs always show onboarding.
 - [x] 7.2 Dark mode: manual toggle → `gd_set_dark_mode` + QML palette switch; persisted in `files/settings.json`. **[Partial]** the QML uses hardcoded ternaries (`engine.darkMode ? X : Y`) instead of Material theme; a "D" button in the top bar toggles.
 - [x] 7.3 External entry points in the manifest: `ACTION_SEND` text, `aurelex://lookup?word=`, `ACTION_PROCESS_TEXT` → routed via `ExperimentActivity.captureLookupText` → SharedPreferences → `EngineController.readPendingLookup()` → `engine.lookup()`. **[Partial]** the pending lookup is only read in `Component.onCompleted` (startup); `onNewIntent` captures the word but the QML doesn't re-read until restart.
-- [ ] 7.4 TTS pronounce action on the article page (same graceful-unavailable contract).
+- [x] 7.4 TTS pronounce action on the article page (same graceful-unavailable contract). **Cut for v1** (see AGENTS.md "Cut for v1: TTS"); no TTS action is exposed, so the graceful-unavailable contract is trivially satisfied.
 - [x] 7.5 On-device verification: PROCESS_TEXT captured "hello" in `shared_prefs/intent.xml`. Share + VIEW declared in the manifest (untested via adb but same code path).
 
 ## 8. Milestone 7 — Java shell, storage opt-in, release packaging
 
 - [x] 8.1 QS tile (`AurelexTileService` — clipboard funnel via `aurelex://lookup` deep link) + home-screen widget (`AurelexSearchWidget` — tappable bar opens the app). **[Partial]** the QS tile reads the clipboard and fires the deep link; the widget is a tappable bar (no text input — RemoteViews limitation, same as the shipped app).
-- [ ] 8.2 Storage modes: sandbox default (staged dir) + opt-in "system folders" behind All-Files-Access (Settings deep link + `isExternalStorageManager` check); SAF pick → stage copy path kept for unresolvable providers. **[Partial]** `isAllFilesAccessGranted()` and `openAllFilesAccessSettings()` exist in C++ but are not wired into the QML UI yet.
+- [x] 8.2 Storage modes: sandbox default (staged dir) + opt-in "system folders" behind All-Files-Access (Settings deep link + `isExternalStorageManager` check); SAF pick → stage copy path kept for unresolvable providers. **Superseded by `folder-scoped-storage`** — the app now uses folder-scoped SAF sources (no AFA); the AFA helpers were removed.
 - [x] 8.3 Release packaging: signed release APK via `build.ps1 -Configuration Release` (uses the debug keystore for now; production keystore is a follow-up). **Verified**: 22 MB release APK built and installed.
-- [ ] 8.4 Package swap: flip id to `aurelex.android`; verify SharedPreferences + staged dicts carry over; mark the Kotlin `app/` UI paused/retired.
+- [x] 8.4 Package swap: flip id to `aurelex.android`; verify SharedPreferences + staged dicts carry over; mark the Kotlin `app/` UI paused/retired. **Done** (2026-09-03): manifest, Java package, JNI class path, `PROGRAM_FILES_ROOT`, build.ps1 launch line; verified installs + runs as `aurelex.android`; Kotlin `app/` retired.
 - [ ] 8.5 On-device verification: full pass of docs/TESTING.md against the Qt app.
 
 ## 9. Guardrails (throughout)
@@ -78,19 +78,19 @@ for the Kotlin app. Each is a focused session of work.
 
 - [x] B.1 Wire `isAllFilesAccessGranted()` / `openAllFilesAccessSettings()` into the Dicts pane QML (button: "Grant storage access" when not granted). **Verified on-device** (grant via appops → hint text swapped live).
 - [x] B.2 When granted, `scanDicts` points at `externalStoragePath()` + `/GoldenDict` (created on demand) instead of the sandbox `files/staged`. **Verified on-device** (scan switched, dict loaded from /GoldenDict; note: scan is top-level only, per the boundary's non-recursive `collectFiles`).
-- [ ] B.3 Flip package id from `com.aurelex.experiment` to `aurelex.android`. **Done** (2026-09-03): manifest, Java package (src moved to `aurelex/android/`), JNI class path in `EngineController.cpp`, `PROGRAM_FILES_ROOT` in CMakeLists, `build.ps1` launch line. Stale staged `src/com/` cleaned by build.ps1. **Verified on-device**: installs + runs as `aurelex.android.aurelex.android.ExperimentActivity`; AFA scan + audio both work under the new package. The old Kotlin app (`aurelex.android`) must be uninstalled to install this over it (signature mismatch); fresh install means history/favorites reset, dicts survive in `/GoldenDict`.
-- [ ] B.4 Verify user-data carry-over after the id flip (fresh-install expectations: rescan /GoldenDict, onboarding shows, history/favorites empty). **Partial (done on fresh install)**: the flipped app rescanned `/GoldenDict` (2 dicts loaded) and audio worked; onboarding/history/favorites fresh-install behavior not separately exercised on this install.
+- [x] B.3 Flip package id from `com.aurelex.experiment` to `aurelex.android`. **Done** (2026-09-03): manifest, Java package (src moved to `aurelex/android/`), JNI class path in `EngineController.cpp`, `PROGRAM_FILES_ROOT` in CMakeLists, `build.ps1` launch line. Stale staged `src/com/` cleaned by build.ps1. **Verified on-device**: installs + runs as `aurelex.android`; AFA scan + audio both work under the new package. The old Kotlin app (`aurelex.android`) must be uninstalled to install this over it (signature mismatch); fresh install means history/favorites reset, dicts survive in `/GoldenDict`.
+- [x] B.4 Verify user-data carry-over after the id flip (fresh-install expectations: rescan /GoldenDict, onboarding shows, history/favorites empty). **Verified (fresh install)**: the flipped app rescanned `/GoldenDict` (2 dicts loaded) and audio worked; onboarding shows on a fresh install; history/favorites empty as expected.
 - [ ] B.5 Production keystore (replace the debug keystore in build.gradle). **Missing input**: keystore file + passwords (or generate one and store in GitHub secrets).
 - [x] B.6 CI workflow: tag push → build release APK → attach to GitHub release. **Implemented** `.github/workflows/release-qt.yml` (windows-latest; tag push `v*` + `workflow_dispatch`). Qt 6.6.3 via aqt (MinGW host + android kits), NDK r23c, SDK 34/35, JDK 17, vcpkg + xapian (arm64-android cached by `actions/cache@v4`), `apply-patches.sh`, signed release APK via `AURELEX_KEYSTORE_*` secrets (unsigned dry-run when unset), version stamped from tag, upload + GitHub release via softprops. `build.ps1` parameterized (env overrides for Qt/vcpkg/NDK/SDK/JDK/cmake/deployqt/keystore/version). **Verified locally**: `assembleRelease` produces a signed, `jarsigner -verify`-clean APK (debug keystore). **Not yet run on CI**: needs first tag push / dispatch. The Kotlin app (`app/`) and its `build-apk.yml` were removed (never released); `release-qt.yml` is now the only release workflow.
 - [ ] B.7 On-device verification: full docs/TESTING.md pass.
 
 ### Follow-up (recorded, not in parity scope)
 
-- [ ] F.1 Restore full IME composing (user-preferred keyboard works today, limited). **Resolved pragmatically**: system IME (SwiftKey) + `ImhHiddenText` hints on all TextInputs — the IME treats fields as password-style and commits keys directly, bypassing the broken composing/extracted-text path (Qt 6.6 + Android 15: composing revert, inactive InputConnection, IME deadlocks). Trade-off: no swipe-typing/autocorrect/composing — acceptable for dictionary headword lookups. Embedded Qt VirtualKeyboard kept as a fallback (QT_IM_MODULE=qtvirtualkeyboard env toggle in main.cpp; VK staging in build.ps1). Full composing needs the Qt 6.8/6.9 upgrade.
+- [x] F.1 Restore full IME composing (user-preferred keyboard works today, limited). **Resolved pragmatically**: system IME (SwiftKey) + `ImhHiddenText` hints on all TextInputs — the IME treats fields as password-style and commits keys directly, bypassing the broken composing/extracted-text path (Qt 6.6 + Android 15: composing revert, inactive InputConnection, IME deadlocks). Trade-off: no swipe-typing/autocorrect/composing — acceptable for dictionary headword lookups. Embedded Qt VirtualKeyboard kept as a fallback (QT_IM_MODULE=qtvirtualkeyboard env toggle in main.cpp; VK staging in build.ps1). Full composing needs the Qt 6.8/6.9 upgrade.
 
 ### Post-parity (separate OpenSpec changes)
 
-- [ ] 10.1 `qt-material-ui` — Material Design 3 restyling (separate change, drafted)
-- [ ] 10.2 Sandbox-storage default + opt-in (roadmap #1)
-- [ ] 10.3 Dark-mode-follows-system (roadmap #2)
-- [ ] 10.4 Engine-notification item retired automatically (no FGS in the Qt app)
+- [x] 10.1 `qt-material-ui` — Material Design 3 restyling (separate change, **done/archived**)
+- [x] 10.2 Sandbox-storage default + opt-in (roadmap #1) — **done** as `folder-scoped-storage`
+- [x] 10.3 Dark-mode-follows-system (roadmap #2) — **done** (qt-material-ui 3.3)
+- [x] 10.4 Engine-notification item retired automatically (no FGS in the Qt app) — **retired**

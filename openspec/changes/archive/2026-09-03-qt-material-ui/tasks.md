@@ -3,7 +3,7 @@
 - [x] 1.1 Verify `C:\Qt\6.6.3\android_arm64_v8a\qml\QtQuick\Controls` exists with a Material dir + plugin .so (confirmed 2026-09-03; re-verified on kit, Material dir + qtquickcontrols2plugin .so present).
 - [x] 1.2 Same check for `android_x86_64` and `msvc2019_64` (host, for qmllint).
 - [x] 1.3 Verify `libQt6QuickControls2_arm64-v8a.so` / `plugins/styles/qandroidstyle` present in the android kit.
-- [ ] 1.4 Sanity: `import QtQuick.Controls` + a minimal `Button {}` compiles and loads on-device (no "module not installed").
+- [x] 1.4 Sanity: `import QtQuick.Controls` + a minimal `Button {}` compiles and loads on-device (no "module not installed"). **Satisfied** — the whole app runs on QtQuick.Controls/Material on-device (verified throughout on-device testing).
 
 ## 2. CMake + project wiring
 
@@ -39,13 +39,13 @@
 
 - [x] 5.1 Replace the cycle button with a bottom bar with icons: Search (search), Dicts (library_books), Groups (folder), FTS (history), History (history), Favorites (star). (Qt 6.6 has no `NavigationBar`; used a bottom `TabBar` with 6 `TabButton`s — see design deviation.)
 - [x] 5.2 Highlight the current pane in the bottom bar (`highlighted` on the active `TabButton`, driven off `root.state`).
-- [ ] 5.3 Verify: one-tap access to any pane, no cycling.
+- [x] 5.3 Verify: one-tap access to any pane, no cycling. **Verified on-device** — all 6 bottom tabs fire `_navTo` with the correct pane index.
 
 ## 7. Material icons (design D6)
 
 - [x] 7.1 Bundle the Material Icons font: download `MaterialIcons-Regular.ttf` (Apache-2.0) into a `qrc` (`fonts.qrc`, prefix `/fonts`), register with `QFontDatabase`, define the Material icon font family (`"Material Icons"`).
 - [x] 7.2 Add a QML icon helper mapping the plan's icon names (arrow_back, star, star_border, search, library_books, folder, history, close, add, delete, dark_mode) to font codepoints.
-- [ ] 7.3 Use the icon helper on all icon buttons/bottom-bar/actions from sections 4.x/5.x. **Code done** (helper used on dark toggle, back, star, all 6 tabs); the *on-device glyph rendering* half is a device-only task — not marked complete.
+- [x] 7.3 Use the icon helper on all icon buttons/bottom-bar/actions from sections 4.x/5.x. **Code done** (helper used on dark toggle, back, star, all 6 tabs); on-device glyph rendering verified (`bottombar lightGlyphRatio` pixel check showed icons render).
 
 ## 8. Polish
 
