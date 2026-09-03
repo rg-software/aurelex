@@ -13,6 +13,9 @@ The system SHALL build a searchable full-text index for each loaded dictionary
 that supports it, using the dictionary's article bodies, and SHALL maintain
 that index so it reflects the loaded dictionary content. The system shall
 report per-dictionary indexing state so the user knows what is available.
+The system SHALL build missing indexes automatically, in bulk, after
+dictionaries are added or scanned, without requiring a per-dictionary manual
+index action.
 
 #### Scenario: Index build on demand
 - **WHEN** the user loads a dictionary and initiates a full-text search on it
@@ -31,6 +34,17 @@ report per-dictionary indexing state so the user knows what is available.
 #### Scenario: Dictionary without FTS support
 - **WHEN** a loaded dictionary does not support full-text indexing
 - **THEN** the app documents it as not full-text-searchable and does not search it
+
+#### Scenario: Automatic bulk indexing on add
+- **WHEN** the user adds one or more dictionaries that lack a full-text index
+- **THEN** the app builds their indexes automatically in bulk, with no per-dictionary
+  manual Index action, and each dictionary becomes searchable as its index completes
+
+#### Scenario: Index build survives app backgrounding
+- **WHEN** a full-text index build for a large dictionary is still running and the
+  app is moved to the background
+- **THEN** the build continues on a background service rather than being cancelled,
+  so the index still completes
 
 ### Requirement: Full-text search query
 The system SHALL let the user run a full-text search across the active group's
@@ -87,5 +101,5 @@ being built and shall not block the rest of the app while indexing runs.
 
 #### Scenario: Large dictionary
 - **WHEN** a very large dictionary is indexed
-- **THEN** the app remains responsive and the index completes or the app reports
-  why it could not
+- **THEN** the app remains responsive, the build runs on a background service, and
+  the index completes or the app reports why it could not
