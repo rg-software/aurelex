@@ -256,10 +256,11 @@ echo "== installing =="
 # install-exec puts libxapian.a (and the bins) in place. Skip install-data:
 # it recurses into install-man1, which fails because makemanpage mangles the
 # "xapian-check" basename to "xapia.-check" under the Windows toolchain. We
-# only need the static library + headers, so copy the public header manually.
+# only need the static library + headers, so copy the whole include/ tree
+# (xapian.h + xapian/ subdir with version.h etc.) manually.
 $MAKE_BIN $MAKE_SHELL install-exec
 mkdir -p "${PREFIX}/include"
-install -m 644 include/xapian.h "${PREFIX}/include/xapian.h"
+cp -R include/. "${PREFIX}/include/"
 
 echo "== done: ${PREFIX}/include/xapian.h, ${PREFIX}/lib/libxapian.a =="
 ls -l "${PREFIX}/include/xapian.h" "${PREFIX}/lib/libxapian.a"
