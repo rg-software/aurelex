@@ -121,6 +121,38 @@ void EngineController::runScan() {
             refreshDictionaries();
             refreshGroups();
         }
+        // Auto-build full-text indexes for any dictionary that lacks one, so
+        // search + FTS work without a manual per-dict "Index" button. Runs
+        // sequentially off-thread; the UI's buildingFts progress bar covers it.
+        autoIndexMissing();
+    });
+    w->setFuture(f);
+}
+
+void EngineController::autoIndexMissing()
+{
+    if (!m_ready || m_buildingFts) return;
+    QList<int> missing;
+    const int n = gd_dict_count();
+    for (int i = 0; i < n; ++i) {
+        int state = -1;
+        if (gd_fts_index_state(i, &state) == 0 && state == 1)
+            missing.append(i);
+    }
+    if (missing.isEmpty()) return;
+    qInfo() << "[aurelex] auto-indexing" << missing.size() << "dictionaries";
+    setBuildingFts(true);
+    QFuture<void> f = QtConcurrent::run([missing]{
+        for (int idx : missing)
+            gd_fts_index(idx);
+    });
+    auto *w = new QFutureWatcher<void>(this);
+    connect(w, &QFutureWatcher<void>::finished, this, [this, missing, w]{
+        qInfo() << "[aurelex] auto-index done";
+        for (int idx : missing)
+            emit ftsIndexChanged(idx);
+        setBuildingFts(false);
+        w->deleteLater();
     });
     w->setFuture(f);
 }
@@ -585,16 +617,15 @@ void EngineController::ftsIndex(int dictIndex)
     w->setFuture(f);
 }
 
-QVariantList EngineController::ftsSearch(const QString &query, int mode, int groupId)
+QVariantList EngineController::ftsSearch(const QString &query, int mode, int groupId, bool wholeWords)
 {
     if (!m_ready) return QVariantList();
     if (query.isEmpty()) return QVariantList();
-    // Always prefix-search (no separate wildcard mode): in Xapian's wildcard
-    // mode a term without a trailing `*` matches exactly, so `boo` misses
-    // `book`. Normalize every term to end with `*` unless the user already
-    // supplied a wildcard, making plain queries behave like prefix searches.
+    // In Xapian's wildcard mode a term without a trailing `*` matches exactly,
+    // so `boo` misses `book`. By default (prefix search) we append a `*` to
+    // terms lacking one; with wholeWords=true we leave the query exact.
     QString norm = query;
-    if (mode == 2) {
+    if (mode == 2 && !wholeWords) {
         QStringList parts;
         const QStringList toks = query.split(QLatin1Char(' '), Qt::SkipEmptyParts);
         for (const QString &t : toks) {

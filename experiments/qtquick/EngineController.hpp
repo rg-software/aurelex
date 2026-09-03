@@ -115,7 +115,10 @@ public:
     Q_INVOKABLE void ftsIndex(int dictIndex);
     Q_INVOKABLE int ftsIndexState(int dictIndex) const;
     Q_INVOKABLE QVariantList ftsIndexStates() const;
-    Q_INVOKABLE QVariantList ftsSearch(const QString &query, int mode, int groupId = 0);
+    // Whole-words: when true (exact), the query matches exact terms; when false
+    // (default), each term is treated as a prefix (a trailing * is appended).
+    Q_INVOKABLE QVariantList ftsSearch(const QString &query, int mode, int groupId = 0,
+                                       bool wholeWords = false);
 
     // History + favorites persistence. The carve's engine has no built-in
     // history/favorites; we use a small JSON file in AppLocalDataLocation
@@ -203,6 +206,7 @@ signals:
 
 private:
     void runScan();
+    void autoIndexMissing();
     void setDictCount(int n);
     void setReady(bool r);
     void setLastError(const QString &e);

@@ -125,9 +125,10 @@ ApplicationWindow {
         state = 6
     }
     function _runFts() {
-        // Single v1 mode: Wildcards (FTS::SearchMode=2); the engine additionally
-        // prefix-normalizes the query so plain terms match prefixes.
-        engine.ftsSearch(ftsInput.text, 2, engine.activeGroupId)
+        // Single v1 mode: Wildcards (FTS::SearchMode=2). By default each term is
+        // treated as a prefix (boo -> boo*); the "Match whole words" checkbox
+        // switches to exact-term matching.
+        engine.ftsSearch(ftsInput.text, 2, engine.activeGroupId, ftsWholeWords.checked)
     }
     // Navigation labels/icons for the bottom TabBar.
     property var navItems: [
@@ -486,7 +487,8 @@ ApplicationWindow {
                         }
                     }
 
-                    // 4.2: Up/Down/Index/Remove as ToolButtons in a RowLayout.
+                    // 4.2: Up/Down/Remove as ToolButtons in a RowLayout (FTS indexes are built
+                    // automatically when dictionaries are added).
                     RowLayout {
                         anchors {
                             right: parent.right
@@ -511,10 +513,6 @@ ApplicationWindow {
                                 const target = Math.min(engine.dictionaries.length - 1, idx + 1)
                                 if (target !== idx) engine.moveDictionary(idx, target)
                             }
-                        }
-                        ToolButton {
-                            text: "Index"
-                            onClicked: engine.ftsIndex(dictRow.dictIndex)
                         }
                         ToolButton {
                             text: "Remove"
@@ -1143,14 +1141,16 @@ ApplicationWindow {
                 TextField {
                     id: ftsInput
                     Layout.fillWidth: true
-                    placeholderText: "Full-text prefix search"
+                    placeholderText: "Full-text search"
                     font.pixelSize: 18
                     enabled: !engine.buildingFts
                     onAccepted: { ftsInput.focus = false; root._runFts() }
                 }
-                // 4.4: single search mode. Query terms are always treated as
-                // prefixes (the engine appends a wildcard to each term); there
-                // is no separate wildcard/plain mode.
+                CheckBox {
+                    id: ftsWholeWords
+                    text: "Whole words"
+                    Layout.alignment: Qt.AlignVCenter
+                }
             }
 
             // 8.1: index-build progress bar.
