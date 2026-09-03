@@ -13,7 +13,7 @@
 
 ## 3. Milestone 2 — dictionary management
 
-- [x] 3.1 Dictionaries page: list from `gd_dict_info`, count display, remove (`gd_remove_dict`) with confirm dialog, reorder (`gd_move_dict`). **[Partial]** the per-row confirm is not shown in the experiment (removed triggers immediately); the production port will add a confirm step.
+- [x] 3.1 Dictionaries page: list from `gd_dict_info`, count display, remove (`gd_remove_dict`) with confirm dialog, reorder (`gd_move_dict`). Confirm dialog added to the Dicts pane (Remove opens an overlay with Cancel/Remove; Cancel verified on-device, Remove reuses the tested `removeDictionary` path).
 - [x] 3.2 Add-dictionaries flow (sandbox mode): scan the staged folder (`gd_scan_dicts(files/staged)`); message when nothing supported found. (SAF/opt-in flow is milestone 7.)
 - [x] 3.3 On-device verification: add staged folder → count/list updates; remove → gone from lookups; reorder → article order follows; dedup on re-scan. **Verified on-device** (`setDictionaries count=1 names="Aurelex Basic"`).
 
