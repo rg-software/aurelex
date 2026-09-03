@@ -102,6 +102,16 @@ Get-ChildItem -Path "$KitRoot\plugins" -Recurse -Filter "libplugins_*.so" -Error
 $cppShared = "$NdkRoot\toolchains\llvm\prebuilt\windows-x86_64\sysroot\usr\lib\aarch64-linux-android\libc++_shared.so"
 if (Test-Path $cppShared) { Copy-Item $cppShared $LibOut -Force }
 
+# Qt Android bindings jars (QtNative etc.) live under <kit>/jar/. androiddeployqt
+# in the carve-subset --no-build path does not copy them into apk/libs, so the
+# Java compile can't find org.qtproject...QtNative. Stage them into libs/ (the
+# build.gradle `implementation fileTree(dir:'libs')` picks them up).
+$KitJarDir = "$KitRoot\jar"
+if (Test-Path $KitJarDir) {
+    Get-ChildItem -Path $KitJarDir -Filter "*.jar" -ErrorAction SilentlyContinue |
+        Copy-Item -Destination "$ApkDir\libs\" -Force
+}
+
 Write-Host "== [4/5] androiddeployqt (stage + generate project, --no-build) ==" -ForegroundColor Cyan
 $settings = Join-Path $BuildDir "android-aurelex_exp-deployment-settings.json"
 # --no-build: stage Qt libs/assets and generate the gradle project, but do NOT
