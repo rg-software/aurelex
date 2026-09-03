@@ -6,9 +6,11 @@ This file tells agents and contributors how to work in this repository safely. R
 
 Aurelex is an Android port of [goldendict-ng](https://github.com/xiaoyifang/goldendict-ng).
 It reuses the upstream C++ dictionary engine (rendered via Android WebView) rather than reimplementing
-dictionary formats. Design is tracked with OpenSpec in `openspec/changes/goldendict-mobile-port/`
-(`proposal.md`, `design.md`, `specs/`). The project is currently in the **planning phase** — code
-implementation has not started.
+dictionary formats. The app is a Qt Quick/WebView Android app (`experiments/qtquick/`) that consumes
+the carved engine in-process via the `gd_*` C boundary. Main is the shipping branch; the earlier
+Kotlin/Compose UI was removed. Design is tracked with OpenSpec: the main specs live in
+`openspec/specs/` and work-in-progress changes in `openspec/changes/` (see `docs/ROADMAP.md` for the
+milestone tracker).
 
 ## Golden rules
 
@@ -19,17 +21,19 @@ implementation has not started.
 2. **Do not shim Qt types.** The carve compiles with real Qt 6 (Core/XML/Concurrent) for Android.
    Do not write `QString`/`QList`/`QXmlStreamReader` reimplementations on std:: — that would make
    every upstream merge expensive. Reconsidering this is a design decision (see design.md D1), not
-   something an agent may do to make a build pass.
+   something an agent may do to make a build pass. (D1 lives in the archived goldendict-mobile-port
+   design under `openspec/changes/archive/`.)
 3. **The boundary is the C API.** The Qt app talks to the engine only through the `gd_*` C boundary
-   (`gd_init`, `gd_scan_dicts`, `gd_lookup`, `gd_suggest`, `gd_get_resource`, `gd_get_audio`,
-   `gd_cleanup`) plus whatever the boundary later grows to. New features either:
+   (the core set in `carve/goldendict.h`, e.g. `gd_init`, `gd_scan_dicts`, `gd_lookup`, `gd_suggest`,
+   `gd_get_resource`, `gd_get_audio`, `gd_cleanup`, plus the dict/group/FTS functions it has grown)
+   plus whatever the boundary later grows to. New features either:
    - touch the boundary / carve → go through the patch pipeline (`patches/` + CI smoke), or
    - are pure UI/QML → can be added anytime without engine involvement.
 
 ## Repository layout (target)
 
 - `engine/` — goldendict-ng submodule, pinned at a release tag, never edited.
-- `patches/` — the only deviations from upstream (icon stubs and glue). Keep < ~3 files if possible.
+- `patches/` — the only deviations from upstream (3 patches: dsl svg-drop, android home, fts wildcard cap). Keep it small.
 - `carve/` — the `gd_*` C boundary (`goldendict.h`, `gd_boundary.cc`) + selected engine sources
   compiled once as an object library, shared by the Qt app and the CI smoke tool.
 - `experiments/qtquick/` — the Qt app (QML + WebView, Android) that consumes the carve in-process.
@@ -39,18 +43,21 @@ implementation has not started.
 
 - **v1 formats:** mdict (`.mdx`/`.mdd`), DSL (`.dsl`/`.dsl.dz`), StarDict (`.ifo`). Other formats are
   converted on a computer (e.g. pyglossary) and copied to the phone.
-- **Cut for v1:** network dictionary sources, full-text search (xapian), Zim/EPWING/Aard/SLOB/BGL/
-  SDict/GLS/XDXF natively, scan popup, system tray, global hotkeys, TTS, print/PDF. See
-  `design.md` — Cut scope register for the full (a)/(b) lists.
+- **Cut for v1:** network dictionary sources, Zim/EPWING/Aard/SLOB/BGL/SDict/GLS/XDXF natively,
+  scan popup, system tray, global hotkeys, TTS, print/PDF. See the v1 design's cut-scope register
+  (archived `goldendict-mobile-port` design under `openspec/changes/archive/`) and
+  `docs/ROADMAP.md`.
 - **Audio:** ogg/mp3/wav play; speex (`.spx`) is unsupported-but-graceful in v1.
+- **Storage:** dictionaries are added via folder-scoped SAF pickers; supported files are
+  stage-copied into app-private `files/staged/` and scanned recursively. No `MANAGE_EXTERNAL_STORAGE`.
 
 ## OpenSpec commands
 
 ```bash
 openspec list --json
-openspec status --change goldendict-mobile-port --json
-openspec instructions <artifact-id> --change goldendict-mobile-port --json
-openspec validate goldendict-mobile-port
+openspec status --change <change-name> --json
+openspec instructions <artifact-id> --change <change-name> --json
+openspec validate <change-name>
 ```
 
 The schema is `spec-driven`. Spec scenario/requirement format is strict (4-hashtag scenarios,
