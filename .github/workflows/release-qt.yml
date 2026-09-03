@@ -1,8 +1,8 @@
 name: release build (Qt)
 
-# On tag push (vX.Y.Z) builds a SIGNED release APK from the Qt experiment
-# (experiments/qtquick/) and attaches it to a GitHub release. The Kotlin app's
-# release workflow lives in build-apk.yml (Ubuntu) and is independent.
+# On tag push (vX.Y.Z) builds a SIGNED release APK from the Qt app
+# (experiments/qtquick/) and attaches it to a GitHub release. The Kotlin app
+# (app/) was removed; this is the only release workflow.
 #
 # Why Windows: experiments/qtquick/build.ps1 targets a Windows aqt 6.6.3
 # layout. The carve (engine/) compiles under the same script. Build time is

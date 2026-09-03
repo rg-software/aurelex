@@ -10,7 +10,7 @@ on:
     paths:
       - "engine/**"
       - "patches/**"
-      - "app/src/main/cpp/**"
+      - "carve/**"
       - ".github/workflows/**"
   workflow_dispatch:
     inputs:
@@ -71,7 +71,7 @@ jobs:
       - name: Configure host smoke build
         shell: bash
         run: |
-          cmake -S app/src/main/cpp/engine -B build-gh -G "Visual Studio 17 2022" -A x64 \
+          cmake -S carve -B build-gh -G "Visual Studio 17 2022" -A x64 \
             -DQT_BASE="${{ github.workspace }}/qt/${{ env.QT_VERSION }}/msvc2019_64" \
             -DQT_HOST_PATH="${{ github.workspace }}/qt/${{ env.QT_VERSION }}/msvc2019_64" \
             -DVCPKG_BASE="${{ env.VCPKG_ROOT }}" \

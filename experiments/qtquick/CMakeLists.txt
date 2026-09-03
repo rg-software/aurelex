@@ -51,7 +51,7 @@ link_directories("${VCPKG_ANDROID_ROOT}/lib")
 
 # Reuse the carve object library (real Qt engine). Its CMake requires the same
 # -D QT_BASE/QT_HOST_PATH/VCPKG_BASE and the android ABI it already handles.
-set(CARVE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../app/src/main/cpp/engine")
+set(CARVE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../carve")
 add_subdirectory("${CARVE_DIR}" carve)
 
 set(ENGINE_SRC "${CMAKE_CURRENT_SOURCE_DIR}/../../../../engine")

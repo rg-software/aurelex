@@ -4,9 +4,9 @@ A mobile dictionary app for Android that reuses the [goldendict-ng](https://gith
 dictionary engine. Look up words offline in your mdict / DSL / StarDict dictionaries, rendered in a
 clean mobile interface.
 
-> **Status: in development.** The engine carve, C/JNI boundary, and the v1 app (search, article
-> rendering, dictionary management) are implemented and buildable (`./gradlew :app:assembleDebug`).
-> A release APK signing pipeline is in CI. Tracks are open for on-device validation.
+> **Status: in development.** The all-Qt UI (search, article rendering, dictionary management,
+> history, favorites) drives the carved engine in-process via the `gd_*` C boundary. A release APK
+> signing pipeline is in CI. Tracks are open for on-device validation.
 
 ## Why another dictionary app
 
@@ -65,19 +65,21 @@ conversion needed.
 
 ## Building the app
 
-Requirements: JDK 17+, Android SDK/NDK 23.2, Qt 6.6.3 android + desktop kits, vcpkg deps
-(`zlib bzip2 liblzma lzo fmt tomlplusplus`). Machine paths go in `local.properties`
-(`aurelex.qt.base`, `aurelex.qt.host`, `aurelex.vcpkg.root`); apply the engine patches first
-(`.\scripts\apply-patches.ps1` or `./scripts/apply-patches.sh`), then:
+The app is a Qt Quick/WebView Android app built from `experiments/qtquick/` (the carved engine is
+consumed in-process via the `gd_*` C boundary). Requirements: JDK 17, Android SDK + NDK r23c,
+Qt 6.6.3 android + desktop kits, vcpkg deps (`zlib bzip2 liblzma lzo fmt xapian`). Apply the engine
+patches first, then run the one-shot build script:
 
-```bash
-./gradlew :app:assembleDebug
+```powershell
+.\scripts\apply-patches.ps1
+.\experiments\qtquick\build.ps1 -Configuration Release
 ```
 
-The result is `app/build/outputs/apk/debug/app-debug.apk`. A signed release APK and AAB are produced
-by the CI workflow (`.github/workflows/build-apk.yml`) on `vX.Y.Z` tag pushes, using
-`AURELEX_KEYSTORE_*` secrets; `versionName`/`versionCode` come from the tag. See `docs/SIGNING.md`
-for the Google Play / F-Droid signing split.
+`build.ps1` derives its toolchain from `AURELEX_*` env vars (or local defaults); pass `-Install` to
+adb-install the result. A signed release APK is produced by the CI workflow
+(`.github/workflows/release-qt.yml`) on `vX.Y.Z` tag pushes, using `AURELEX_KEYSTORE_*` secrets;
+`versionName`/`versionCode` come from the tag. See `docs/SIGNING.md` for the Google Play / F-Droid
+signing split.
 
 ## Upstream & maintenance
 
@@ -90,7 +92,8 @@ Planning artifacts live in `openspec/`. Design, scope, and the cut register are 
 `openspec/changes/goldendict-mobile-port/design.md`.
 
 Layout: `engine/` (pinned upstream submodule, never edited in place), `patches/` (the only
-deviations, applied by `scripts/apply-patches.*`), `app/` (Kotlin UI + JNI + the `gd_*` C boundary).
+deviations, applied by `scripts/apply-patches.*`), `carve/` (the `gd_*` C boundary + selected engine
+sources, shared by the Qt app and the CI smoke tool), `experiments/qtquick/` (the Qt app).
 
 ## License
 

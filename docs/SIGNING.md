@@ -7,17 +7,19 @@ signatures.
 
 ## Artifacts produced by CI
 
-On a `vX.Y.Z` tag push, CI (`.github/workflows/build-apk.yml`) builds two signed
-artifacts and attaches them to a GitHub release:
+On a `vX.Y.Z` tag push, CI (`.github/workflows/release-qt.yml`, windows-latest)
+builds a signed release APK from the Qt app (`experiments/qtquick/`) and
+attaches it to a GitHub release:
 
 | Artifact | Path | Used by |
 | --- | --- | --- |
-| `.aab` | `app/build/outputs/bundle/release/app-release.aab` | Google Play (upload) |
-| `.apk` | `app/build/outputs/apk/release/app-release.apk` | GitHub releases / F-Droid / sideload |
+| `.apk` | `build-qtquick/apk/build/outputs/apk/release/aurelex-exp-release.apk` | GitHub releases / F-Droid / sideload |
 
+(An AAB is not produced: the Qt app is released via APK on GitHub/F-Droid; if a
+Play upload is ever wanted, `bundleRelease` can be added to the same build.)
 `versionName` is the tag (`vX.Y.Z` → `X.Y.Z`); `versionCode` is derived
 deterministically as `major*10000 + minor*100 + patch`. Locally (no props)
-builds fall back to `versionCode 1` / `versionName 0.1.0`.
+builds fall back to `versionCode 1` / `versionName 0.0.1`.
 
 ## Google Play — Play App Signing (cloud signing)
 
@@ -86,7 +88,7 @@ updates compatible with GitHub/Play-upload sideloads.
 
 ### App icon
 The launcher icon is an adaptive icon (`mipmap-anydpi-v26/ic_launcher.xml`,
-`app/src/main/res/`) with background, foreground, and monochrome layers; the
+`experiments/qtquick/android/res/`) with background, foreground, and monochrome layers; the
 same vector foreground is reused in the engine notification and the home-screen
 widget. `minSdk 28` (API 26+) means no legacy PNG fallback is needed.
 

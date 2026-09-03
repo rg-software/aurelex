@@ -63,10 +63,11 @@ mobile") plus later proposals.
   the in-app search field (or starts lookup directly), reusing the tile's
   clipboard-read path. Needs an on-device check that the clipboard read happens
   in the foreground activity (Android 10+), same as the tile.
-- 🔵 **Distribution & polish** — signed release APK + AAB (Google Play / F-Droid
-  signing), GitHub releases, app icon, onboarding/empty state.
-  In progress: OpenSpec change `distribution-and-polish` — code done through
-  task 5.1; remaining on-device (5.2) and CI release-artifact (5.3) verification.
+- ✅ **Distribution & polish** — signed release APK (GitHub / F-Droid), GitHub
+  releases, app icon, onboarding/empty state.
+  Done: OpenSpec change `distribution-and-polish` (code) + `release-qt.yml` CI
+  (tag-push signed APK) in the all-Qt port; the signed-release path is exercised
+  by the `v*` tag push on the Qt app.
 
 ## Priority queue (not yet proposed)
 

@@ -1,5 +1,9 @@
 # TESTING — Aurelex v1 manual verification
 
+> This checklist predates the all-Qt UI (the Kotlin Compose app it described was
+> removed). The recipes remain broadly valid for the Qt app but were re-verified
+> on the Qt build in `openspec/changes/all-qt-ui-port/tasks.md` (A.5, B.3, B.4).
+
 Living, manual test checklist for the v1 feature set. Each item is a concrete
 recipe: how to trigger it, and what to expect. Mark items with their current
 status as you verify them so this doc stays the single source of truth for
@@ -9,15 +13,16 @@ Status legend: ✅ verified on device · ⬜ not yet verified · 🔶 known gap
 
 ## Build & install
 
-Before testing, the native library and APK must build. The project currently
-**fails to build under JDK 25** (Gradle 8.7 + Kotlin DSL 1.9.22 compatible
-with JDK 17–21 only). Use JDK 21:
+Before testing, the native library and APK must build. Apply the engine
+patches and build the Qt app (JDK 17, see `experiments/qtquick/build.ps1`):
 
 ```powershell
-$env:JAVA_HOME = "C:\Program Files\OpenJDK\jdk-21.0.2"
-./gradlew :app:assembleDebug
-adb install -r app/build/outputs/apk/debug/app-debug.apk
+.\scripts\apply-patches.ps1
+.\experiments\qtquick\build.ps1 -Configuration Debug -Install
 ```
+
+This adb-installs the result (`-Install`); without it the APK lands in
+`build-qtquick/apk/build/outputs/apk/debug/`.
 
 ## Dictionary management
 

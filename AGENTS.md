@@ -20,17 +20,19 @@ implementation has not started.
    Do not write `QString`/`QList`/`QXmlStreamReader` reimplementations on std:: — that would make
    every upstream merge expensive. Reconsidering this is a design decision (see design.md D1), not
    something an agent may do to make a build pass.
-3. **The boundary is the C API.** Kotlin talks to the engine only through the `gd_*` JNI boundary
+3. **The boundary is the C API.** The Qt app talks to the engine only through the `gd_*` C boundary
    (`gd_init`, `gd_scan_dicts`, `gd_lookup`, `gd_suggest`, `gd_get_resource`, `gd_get_audio`,
    `gd_cleanup`) plus whatever the boundary later grows to. New features either:
    - touch the boundary / carve → go through the patch pipeline (`patches/` + CI smoke), or
-   - are pure Kotlin → can be added anytime without engine involvement.
+   - are pure UI/QML → can be added anytime without engine involvement.
 
 ## Repository layout (target)
 
 - `engine/` — goldendict-ng submodule, pinned at a release tag, never edited.
 - `patches/` — the only deviations from upstream (icon stubs and glue). Keep < ~3 files if possible.
-- `app/` — Android app (Kotlin, Compose, WebView) + JNI boundary + C API header.
+- `carve/` — the `gd_*` C boundary (`goldendict.h`, `gd_boundary.cc`) + selected engine sources
+  compiled once as an object library, shared by the Qt app and the CI smoke tool.
+- `experiments/qtquick/` — the Qt app (QML + WebView, Android) that consumes the carve in-process.
 - `openspec/` — OpenSpec planning artifacts (the design is the source of truth for scope).
 
 ## Scope constraints

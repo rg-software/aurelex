@@ -19,13 +19,13 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 
-set(ENGINE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../../../engine")
+set(ENGINE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../engine")
 
 # App-private file root for PROGRAM_DATA_DIR.
 set(PROGRAM_FILES_ROOT "/data/data/aurelex.android/files")
 
-# Qt kit + vcpkg base, passed from Gradle (machine-local paths come from
-# local.properties, see app/build.gradle.kts).
+# Qt kit + vcpkg base, passed from the consuming build (build.ps1 / CI) via
+# QT_BASE / QT_HOST_PATH / VCPKG_BASE.
 if(NOT QT_BASE)
     message(FATAL_ERROR "QT_BASE must be set (gradle arg)")
 endif()
@@ -164,22 +164,6 @@ target_link_libraries(aurelex_carve PRIVATE ${AURELEX_CARVE_LIBS})
 if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
     target_compile_options(aurelex_carve PRIVATE -Wall -Wextra)
 endif()
-
-add_library(aurelex SHARED
-    $<TARGET_OBJECTS:aurelex_carve>
-    ${CMAKE_CURRENT_SOURCE_DIR}/../jni/jni_bridge.cc
-)
-set_target_properties(aurelex PROPERTIES OUTPUT_NAME aurelex)
-target_include_directories(aurelex PRIVATE ${AURELEX_CARVE_INCLUDES})
-# The JNI bridge includes QtCore private headers (qjnihelpers_p.h for
-# QtAndroidPrivate::initJNI); add the versioned QtCore include root so both
-# "private/qjnihelpers_p.h" and "QtCore/private/qglobal_p.h" resolve.
-if(QT_ANDROID_ROOT AND Qt6Core_VERSION)
-    target_include_directories(aurelex PRIVATE
-        "${QT_ANDROID_ROOT}/include/QtCore/${Qt6Core_VERSION}/QtCore"
-        "${QT_ANDROID_ROOT}/include/QtCore/${Qt6Core_VERSION}")
-endif()
-target_link_libraries(aurelex PRIVATE aurelex_carve ${AURELEX_CARVE_LIBS})
 
 # Host smoke tool (task 1.6 spike): only built when requested.
 option(AURELEX_BUILD_SMOKE "Build the host gd_* smoke tool" OFF)

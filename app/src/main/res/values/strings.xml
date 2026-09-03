@@ -1,7 +1,0 @@
-<resources>
-    <string name="app_name">Aurelex</string>
-    <string name="quick_lookup_tile_label">Look up clipboard</string>
-    <string name="widget_search_label">Aurelex search</string>
-    <string name="widget_search_description">Look up a word in your dictionaries</string>
-    <string name="widget_search_hint">Search dictionaries</string>
-</resources>
