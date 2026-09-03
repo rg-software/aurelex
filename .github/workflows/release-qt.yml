@@ -64,6 +64,19 @@ jobs:
           Write-Host "cmake at: $cmake"
           "AURELEX_CMAKE_EXE=$cmake" >> $env:GITHUB_ENV
 
+      - name: Install Gradle (for the carve-subset androiddeployqt which stages no wrapper)
+        shell: pwsh
+        run: |
+          # androiddeployqt --no-build in the carve-subset kit generates no
+          # gradlew.bat / gradle-wrapper.jar; build.ps1 falls back to a Gradle
+          # install pointed at by AURELEX_GRADLE_HOME. Use the same 8.3 the
+          # wrapper properties pin.
+          $zip = "$env:RUNNER_TEMP\gradle.zip"
+          $dst = "$env:RUNNER_TEMP\gradle-dist"
+          Invoke-WebRequest -UseBasicParsing -Uri "https://services.gradle.org/distributions/gradle-8.3-bin.zip" -OutFile $zip
+          Expand-Archive -Path $zip -DestinationPath $dst -Force
+          "AURELEX_GRADLE_HOME=$dst\gradle-8.3" >> $env:GITHUB_ENV
+
       - name: Install NDK r23c
         shell: pwsh
         run: |
