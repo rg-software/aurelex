@@ -35,6 +35,11 @@ class EngineController : public QObject
     Q_PROPERTY(bool userDarkOverride READ userDarkOverride WRITE setUserDarkOverride NOTIFY userDarkOverrideChanged)
     Q_PROPERTY(bool onboarded READ onboarded WRITE setOnboarded NOTIFY onboardedChanged)
     Q_PROPERTY(bool buildingFts READ buildingFts NOTIFY buildingFtsChanged)
+    // Folder-scoped dictionary sources (SAF). Each entry is a QVariantMap
+    // { uri, path, staged }: uri is the persisted SAF tree, path is the physical
+    // dir to scan (resolved external path, or an app-private staged subdir when
+    // the provider is unresolvable), staged=true for the staged case.
+    Q_PROPERTY(QVariantList sources READ sources NOTIFY sourcesChanged)
 public:
     explicit EngineController(QObject *parent = nullptr);
     ~EngineController() override;
@@ -53,6 +58,7 @@ public:
     void setUserDarkOverride(bool on);
     bool onboarded() const { return m_onboarded; }
     void setOnboarded(bool v);
+    QVariantList sources() const { return m_sources; }
 
     // Cycle the manual dark override: when following system, force dark; when
     // forcing dark, return to following system. Drives Material.theme + the
@@ -135,13 +141,6 @@ public:
     // bridge) and returns it. Empty when the clipboard has no text.
     Q_INVOKABLE QString clipboardText();
 
-    // Milestone 7: storage opt-in. Returns true when the app has All-Files-Access
-    // (the user granted it in Settings). When granted, the controller scans the
-    // real external storage path instead of the private staged dir.
-    Q_INVOKABLE bool isAllFilesAccessGranted() const;
-    Q_INVOKABLE void openAllFilesAccessSettings();
-    Q_INVOKABLE QString externalStoragePath() const;
-
     bool buildingFts() const { return m_buildingFts; }
 
     // Lookup a word. `articleLoaded(word, html)` on success, or
@@ -171,6 +170,14 @@ public:
     Q_INVOKABLE void playAudio(const QString &url);
     Q_INVOKABLE void stopAudio();
 
+    // Folder-scoped storage (SAF). addDictionaryFolder() launches the Android
+    // folder picker via the Java shell; the picked source (resolved physical
+    // path, or a staged copy) arrives through the poller and is added to
+    // sources() then rescanned. removeSource() drops a persisted source (and
+    // releases its SAF grant) and rescans.
+    Q_INVOKABLE void addDictionaryFolder();
+    Q_INVOKABLE void removeSource(int index);
+
 signals:
     void dictCountChanged();
     void readyChanged();
@@ -192,6 +199,7 @@ signals:
     void articleBaseUrlChanged();
     void systemDarkChanged();
     void userDarkOverrideChanged();
+    void sourcesChanged();
 
 private:
     void runScan();
@@ -213,6 +221,15 @@ private:
     void pollPendingLookup();
     QString peekPendingLookup() const;
     bool peekPendingClipboardFlag() const;
+    // Folder-scoped storage: consume a source written by the Java shell
+    // (shared_prefs/source.xml) and add it to sources(), or return it raw.
+    void ingestPendingSource();
+    QString peekPendingSourceUri() const;
+    void removePendingSourceFile();
+    // Rescan flow: Java signals completion of the incremental re-pull from the
+    // original SAF folders via shared_prefs/refresh.xml.
+    bool peekPendingRefreshFlag() const;
+    void removePendingRefreshFile();
 
     // Android system dark-mode (Qt 6.6 QPA doesn't expose it); sampled via JNI
     // on the poller tick. Recomputes and applies the effective dark mode.
@@ -239,5 +256,6 @@ private:
     bool m_onboarded = false;
     QString m_appDir;
     QString m_stagedDir;
+    QVariantList m_sources;
     QPointer<ArticleServer> m_articleServer;
 };

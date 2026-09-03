@@ -354,7 +354,6 @@ ApplicationWindow {
         visible: root.state === 1
 
         Component.onCompleted: engine.refreshDictionaries()
-        property bool storageGranted: engine.isAllFilesAccessGranted()
         property int removeIndex: -1
         property string removeName: ""
         function _requestRemove(index, name) { removeIndex = index; removeName = name }
@@ -365,12 +364,6 @@ ApplicationWindow {
             removeName = ""
         }
         function _cancelRemove() { removeIndex = -1; removeName = "" }
-        Timer {
-            interval: 1000
-            repeat: true
-            running: root.state === 1
-            onTriggered: dictsPane.storageGranted = engine.isAllFilesAccessGranted()
-        }
         Connections {
             target: engine
             function onDictionariesChanged() { dictsList.model = engine.dictionaries }
@@ -390,47 +383,73 @@ ApplicationWindow {
                     text: "Rescan"
                     onClicked: engine.rescan()
                 }
-                // 8.2: "Add dictionaries" action (Qt 6.6 RoundButton stands in
-                // for the Material 3 FloatingActionButton, which Qt 6.6 lacks).
+                // 8.2: "Add dictionaries" (folder-scoped SAF picker). Qt 6.6
+                // RoundButton stands in for the Material 3 FloatingActionButton.
                 RoundButton {
                     text: "Add dictionaries"
                     highlighted: true
-                    onClicked: {
-                        if (!dictsPane.storageGranted) {
-                            engine.openAllFilesAccessSettings()
-                        } else {
-                            engine.rescan()
-                        }
-                    }
+                    onClicked: engine.addDictionaryFolder()
                 }
             }
 
-            Pane {
+            Label {
                 Layout.fillWidth: true
-                visible: !dictsPane.storageGranted
-                padding: 12
-                contentItem: ColumnLayout {
-                    spacing: 8
-                    Label {
-                        Layout.fillWidth: true
-                        text: "Add dictionaries: grant storage access"
-                        wrapMode: Text.Wrap
-                        color: Material.primaryTextColor
+                text: engine.sources.length > 0 ? "Sources" : ""
+                color: root.uiSubFg
+                font.pixelSize: 13
+                visible: engine.sources.length > 0
+            }
+
+            ListView {
+                Layout.fillWidth: true
+                Layout.preferredHeight: Math.min(engine.sources.length, 3) * 44
+                visible: engine.sources.length > 0
+                clip: true
+                model: engine.sources
+                spacing: 2
+                delegate: ItemDelegate {
+                    id: srcRow
+                    property var srcIndex: index
+                    property var srcData: modelData
+                    width: ListView.view.width
+                    height: 44
+                    padding: 4
+
+                    contentItem: ColumnLayout {
+                        spacing: 0
+                        Label {
+                            text: srcRow.srcData.orig && srcRow.srcData.orig.length > 0
+                                  ? srcRow.srcData.orig
+                                  : srcRow.srcData.path
+                            font.pixelSize: 13
+                            elide: Text.ElideMiddle
+                            Layout.fillWidth: true
+                        }
+                        Label {
+                            text: srcRow.srcData.staged ? "(staged into app storage)" : "folder"
+                            color: root.uiSubFg
+                            font.pixelSize: 10
+                        }
                     }
-                    Button {
-                        text: "Open settings"
-                        onClicked: engine.openAllFilesAccessSettings()
+
+                    ToolButton {
+                        anchors {
+                            right: parent.right
+                            rightMargin: 4
+                            verticalCenter: parent.verticalCenter
+                        }
+                        text: "Remove"
+                        onClicked: engine.removeSource(srcRow.srcIndex)
                     }
                 }
             }
 
             Label {
                 Layout.fillWidth: true
-                visible: dictsPane.storageGranted
                 color: root.uiSubFg
                 font.pixelSize: 12
                 wrapMode: Text.Wrap
-                text: "Storage access granted. Copy dictionary files (.mdx, .dsl, .dsl.dz, .ifo) into the GoldenDict folder on the device storage, then tap Rescan."
+                text: "Tap Add dictionaries to pick a folder containing dictionary files (.mdx, .dsl, .dsl.dz, .ifo). The folder stays accessible via a scoped grant; no system-wide storage access is needed."
             }
 
             ListView {
@@ -1214,7 +1233,7 @@ ApplicationWindow {
             Label {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
-                text: "Add dictionaries by copying supported files (.mdx, .dsl, .dsl.dz, .ifo) into the app's data folder, then open Dicts and tap Rescan. Use the bottom bar to switch between Search, Dictionaries, Groups, FTS, History and Favorites."
+                text: "Add dictionaries by tapping Add dictionaries in the Dicts tab and picking a folder with dictionary files (.mdx, .dsl, .dsl.dz, .ifo) — the app keeps that folder saved via a scoped grant (no system-wide file access needed). Use the bottom bar to switch between Search, Dictionaries, Groups, FTS, History and Favorites."
                 font.pixelSize: 15
                 wrapMode: Text.Wrap
                 horizontalAlignment: Text.AlignHCenter

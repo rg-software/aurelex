@@ -83,20 +83,33 @@ void EngineController::setBuildingFts(bool b) {
 }
 
 void EngineController::runScan() {
-    // Sandbox default: the staged dir. With All-Files-Access granted, scan the
-    // conventional /GoldenDict folder on external storage (created on demand so
-    // the user has a predictable drop location).
-    QString dir = m_stagedDir;
-    if (isAllFilesAccessGranted()) {
-        const QString gd = externalStoragePath() + QStringLiteral("/GoldenDict");
-        QDir().mkpath(gd);
-        dir = gd;
-        qInfo() << "[aurelex] scanning external dir" << dir;
-    }
-    QFuture<QPair<int, int>> f = QtConcurrent::run([dir]{
-        const int rc = gd_scan_dicts(dir.toLocal8Bit().constData());
-        // The scan result counts newly-added dicts; the UI shows the total.
-        return QPair<int, int>(rc, gd_dict_count());
+    // Scan every source dir plus the sandbox staged root. The carve scans one
+    // directory at a time (top-level only, accumulating into the engine), so we
+    // loop: default staged dir first, then each persisted source's physical path
+    // (a resolved external folder or a staged subdir). Unavailable/revoked
+    // sources are skipped without failing the scan of the rest.
+    const QVariantList sourcesSnapshot = m_sources;
+    const QString stagedBase = m_stagedDir;
+    QFuture<QPair<int, int>> f = QtConcurrent::run([sourcesSnapshot, stagedBase]{
+        int added = 0;
+        int total = 0;
+        QStringList dirs;
+        dirs << stagedBase;
+        for (const QVariant &v : sourcesSnapshot) {
+            const QVariantMap s = v.toMap();
+            const QString path = s.value("path").toString();
+            if (!path.isEmpty()) dirs << path;
+        }
+        for (const QString &dir : dirs) {
+            if (!QDir(dir).exists()) {
+                qInfo() << "[aurelex] source unavailable, skipping" << dir;
+                continue;
+            }
+            const int rc = gd_scan_dicts(dir.toLocal8Bit().constData());
+            added += rc;
+            total = gd_dict_count();
+        }
+        return QPair<int, int>(added, total);
     });
     auto *w = new QFutureWatcher<QPair<int, int>>(this);
     connect(w, &QFutureWatcher<QPair<int, int>>::finished, this, [this, w]{
@@ -145,7 +158,19 @@ void EngineController::initialize(const QString &appDir, const QString &stagedDi
 
 void EngineController::rescan() {
     if (!m_ready) return;
+    // The staging dir is only ever written by us, so a plain scan of it is a
+    // no-op. The meaningful refresh is re-reading the ORIGINAL folders through
+    // their SAF grants: Java does an incremental stage-copy (skipping unchanged
+    // files by size+mtime), then writes shared_prefs/refresh.xml; the poller
+    // picks it up and runs runScan() over the refreshed staging.
+#if defined(Q_OS_ANDROID)
+    QJniObject::callStaticMethod<void>(
+        "aurelex/android/ExperimentActivity",
+        "refreshSources",
+        "()V");
+#else
     runScan();
+#endif
 }
 
 void EngineController::refreshDictionaries() {
@@ -706,6 +731,103 @@ void EngineController::applyEffectiveDark()
     emit darkModeChanged();
 }
 
+QString EngineController::peekPendingSourceUri() const
+{
+    if (m_appDir.isEmpty()) return QString();
+    const QString path = m_appDir + QStringLiteral("/../shared_prefs/source.xml");
+    QFile f(path);
+    if (!f.open(QIODevice::ReadOnly)) return QString();
+    const QString xml = QString::fromUtf8(f.readAll());
+    f.close();
+
+    QXmlStreamReader xr(xml);
+    while (!xr.atEnd()) {
+        const auto tok = xr.readNext();
+        if (tok == QXmlStreamReader::StartElement
+            && xr.name() == QStringLiteral("string")
+            && xr.attributes().value(QStringLiteral("name")) == QStringLiteral("sourceUri")) {
+            return xr.readElementText();
+        }
+    }
+    return QString();
+}
+
+void EngineController::removePendingSourceFile()
+{
+    if (m_appDir.isEmpty()) return;
+    QFile f(m_appDir + QStringLiteral("/../shared_prefs/source.xml"));
+    f.remove();
+}
+
+bool EngineController::peekPendingRefreshFlag() const
+{
+    if (m_appDir.isEmpty()) return false;
+    const QString path = m_appDir + QStringLiteral("/../shared_prefs/refresh.xml");
+    QFile f(path);
+    if (!f.open(QIODevice::ReadOnly)) return false;
+    const QString xml = QString::fromUtf8(f.readAll());
+    f.close();
+    QXmlStreamReader xr(xml);
+    while (!xr.atEnd()) {
+        const auto tok = xr.readNext();
+        if (tok == QXmlStreamReader::StartElement
+            && xr.name() == QStringLiteral("boolean")
+            && xr.attributes().value(QStringLiteral("name")) == QStringLiteral("refreshDone")) {
+            return xr.attributes().value(QStringLiteral("value")) == QStringLiteral("true");
+        }
+    }
+    return false;
+}
+
+void EngineController::removePendingRefreshFile()
+{
+    if (m_appDir.isEmpty()) return;
+    QFile f(m_appDir + QStringLiteral("/../shared_prefs/refresh.xml"));
+    f.remove();
+}
+
+void EngineController::ingestPendingSource()
+{
+    if (m_appDir.isEmpty() || !m_ready) return;
+    const QString path = m_appDir + QStringLiteral("/../shared_prefs/source.xml");
+    QFile f(path);
+    if (!f.open(QIODevice::ReadOnly)) return;
+    const QString xml = QString::fromUtf8(f.readAll());
+    f.close();
+
+    QXmlStreamReader xr(xml);
+    QString uri, p, display;
+    bool staged = false;
+    while (!xr.atEnd()) {
+        const auto tok = xr.readNext();
+        if (tok == QXmlStreamReader::StartElement) {
+            const auto n = xr.name();
+            const auto attr = xr.attributes().value(QStringLiteral("name"));
+            if (n == QStringLiteral("string") && attr == QStringLiteral("sourceUri"))
+                uri = xr.readElementText();
+            else if (n == QStringLiteral("string") && attr == QStringLiteral("sourcePath"))
+                p = xr.readElementText();
+            else if (n == QStringLiteral("string") && attr == QStringLiteral("sourceDisplay"))
+                display = xr.readElementText();
+            else if (n == QStringLiteral("boolean") && attr == QStringLiteral("sourceStaged"))
+                staged = xr.attributes().value(QStringLiteral("value")) == QStringLiteral("true");
+        }
+    }
+    if (uri.isEmpty()) return;
+    removePendingSourceFile();
+    qInfo() << "[aurelex] source added:" << display << "staged at" << p;
+
+    QVariantMap src;
+    src.insert("uri", uri);
+    src.insert("path", p);
+    src.insert("orig", display);
+    src.insert("staged", staged);
+    m_sources.append(src);
+    saveSettings();
+    emit sourcesChanged();
+    runScan();
+}
+
 void EngineController::setOnboarded(bool v)
 {
     if (m_onboarded == v) return;
@@ -713,8 +835,12 @@ void EngineController::setOnboarded(bool v)
     QFile f(m_appDir + "/settings.json");
     if (f.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
         QJsonObject obj;
-        obj.insert("darkMode", m_darkMode);
+        obj.insert("userDarkOverride", m_userDarkOverride);
         obj.insert("onboarded", v);
+        QJsonArray src;
+        for (const QVariant &s : m_sources)
+            src.append(QJsonObject::fromVariantMap(s.toMap()));
+        obj.insert("sources", src);
         f.write(QJsonDocument(obj).toJson(QJsonDocument::Compact));
     }
     emit onboardedChanged();
@@ -734,9 +860,18 @@ void EngineController::loadSettings()
         m_userDarkOverride = obj.value("userDarkOverride").toBool(false);
     else if (obj.value("darkMode").toBool(false))
         m_userDarkOverride = true;
+    // Restore folder-scoped sources. After the AFA removal the app cannot read
+    // arbitrary /storage/emulated/0 folders without a SAF grant, so existing
+    // data is NOT auto-migrated here — the user re-picks the folder (c.f.
+    // design.md "Migration Plan" step 2 / risks: sources start empty).
+    m_sources.clear();
+    const QJsonArray arr = obj.value("sources").toArray();
+    for (const QJsonValue &v : arr)
+        m_sources.append(v.toObject().toVariantMap());
     saveSettings();
     applyEffectiveDark();
     emit onboardedChanged();
+    emit sourcesChanged();
 }
 
 void EngineController::saveSettings()
@@ -746,6 +881,10 @@ void EngineController::saveSettings()
     QJsonObject obj;
     obj.insert("userDarkOverride", m_userDarkOverride);
     obj.insert("onboarded", m_onboarded);
+    QJsonArray src;
+    for (const QVariant &s : m_sources)
+        src.append(QJsonObject::fromVariantMap(s.toMap()));
+    obj.insert("sources", src);
     f.write(QJsonDocument(obj).toJson(QJsonDocument::Compact));
 }
 
@@ -860,6 +999,22 @@ void EngineController::pollPendingLookup()
     // and this poll (500ms) picks it up for a near-immediate re-palette.
     updateSystemDark();
 
+    // A newly picked dictionary source (SAF) takes priority. ingestPendingSource
+    // returns without consuming when the engine isn't ready yet, so this retries
+    // on a later tick.
+    if (!peekPendingSourceUri().isEmpty()) {
+        ingestPendingSource();
+        return;
+    }
+
+    // A completed refresh (engine.rescan -> Java refreshSources) marks that the
+    // re-pull from the original SAF folders is done; rescan the refreshed staging.
+    if (peekPendingRefreshFlag()) {
+        removePendingRefreshFile();
+        if (m_ready) runScan();
+        return;
+    }
+
     // A concrete word (share / PROCESS_TEXT / deep link) takes priority over
     // the clipboard marker; each Java capture clears the prefs file, so at most
     // one request is ever pending.
@@ -901,34 +1056,70 @@ QString EngineController::clipboardText()
 }
 
 
-// ---------- Milestone 7: storage opt-in ----------
+// ---------- Folder-scoped storage (SAF) ----------
 
-bool EngineController::isAllFilesAccessGranted() const
+void EngineController::addDictionaryFolder()
 {
-    return QJniObject::callStaticMethod<jboolean>(
-        "android/os/Environment",
-        "isExternalStorageManager",
-        "()Z");
+#if defined(Q_OS_ANDROID)
+    QJniObject::callStaticMethod<void>(
+        "aurelex/android/ExperimentActivity",
+        "pickDictionaryFolder",
+        "()V");
+#else
+    qInfo() << "[aurelex] addDictionaryFolder: SAF picker is Android-only";
+#endif
 }
 
-void EngineController::openAllFilesAccessSettings()
+void EngineController::removeSource(int index)
 {
-    QJniObject activity = QJniObject::callStaticObjectMethod(
-        "org/qtproject/qt/android/QtNative",
-        "activity",
-        "()Landroid/app/Activity;");
-    if (!activity.isValid()) return;
+    if (index < 0 || index >= m_sources.size()) return;
+    const QVariantMap src = m_sources.takeAt(index).toMap();
+    const QString removedPath = src.value("path").toString();
+    saveSettings();
+    // Release the persisted SAF grant for physical sources so the folder isn't
+    // held forever (staged copies are app-private and need no release).
+    const QString uri = src.value("uri").toString();
+    if (!uri.isEmpty()) {
+#if defined(Q_OS_ANDROID)
+        QJniObject::callStaticMethod<void>(
+            "aurelex/android/ExperimentActivity",
+            "releaseSourcePermission",
+            "(Ljava/lang/String;)V",
+            QJniObject::fromString(uri).object());
+#endif
+    }
+    emit sourcesChanged();
+    qInfo() << "[aurelex] removed source" << index << removedPath;
 
-    QJniObject intent(
-        "android/content/Intent",
-        "(Ljava/lang/String;)V",
-        QJniObject::fromString(
-            QStringLiteral("android.settings.MANAGE_ALL_FILES_ACCESS_PERMISSION")).object());
-    activity.callMethod<void>("startActivity",
-                              "(Landroid/content/Intent;)V", intent.object());
-}
-
-QString EngineController::externalStoragePath() const
-{
-    return QStringLiteral("/storage/emulated/0");
+    // Unload every dictionary backed by the removed source (matches the spec:
+    // "dictionaries from that source no longer appear in the list, lookups, or
+    // full-text search"). gd_remove_dict takes the engine mutex, so run off-thread.
+    if (!removedPath.isEmpty()) {
+        const QVariantList snapshot = m_dictionaries;
+        QFuture<void> f = QtConcurrent::run([snapshot, removedPath]{
+            // High-to-low so indices stay valid across removals.
+            for (int i = snapshot.size() - 1; i >= 0; --i) {
+                const QString s = snapshot.at(i).toMap().value("source").toString();
+                if (s == removedPath || s.startsWith(removedPath + "/"))
+                    gd_remove_dict(i);
+            }
+        });
+        auto *w = new QFutureWatcher<void>(this);
+        connect(w, &QFutureWatcher<void>::finished, this, [this, w, removedPath]{
+            w->deleteLater();
+            refreshDictionaries();
+            refreshGroups();
+            // Delete the staged copy from the private area (the original folder
+            // is untouched — this is just our snapshot). Only nested staged dirs
+            // are removed, never the sandbox root.
+            const QString stagedRoot = m_stagedDir;
+            if (!removedPath.isEmpty()
+                    && removedPath.startsWith(stagedRoot + QLatin1Char('/'))) {
+                qInfo() << "[aurelex] removing staged copy" << removedPath;
+                QDir(removedPath).removeRecursively();
+            }
+        });
+        w->setFuture(f);
+    }
+    runScan();
 }
