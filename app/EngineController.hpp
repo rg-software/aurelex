@@ -86,7 +86,7 @@ public:
     // Group CRUD. `name` is required for create; rename/replace take a new
     // string; delete and setActive act on the integer group id returned by
     // gd_group_create (and listed in groups()). Membership / reordering is
-    // deferred to a follow-up: for the experiment gate, the groups list + active
+    // deferred to a follow-up: for the v1 gate, the groups list + active
     // toggle prove the UI/controller pattern; dict-in-group wiring (Q_INVOKABLE
     // wrappers around gd_group_add/remove/move_dict) is the next slice.
     Q_INVOKABLE void createGroup(const QString &name);
@@ -132,7 +132,7 @@ public:
     Q_INVOKABLE void removeHistory(const QString &word);
     Q_INVOKABLE void clearHistory();
 
-    // Milestone 6: incoming lookup intents. The Java shell (ExperimentActivity)
+    // Milestone 6: incoming lookup intents. The Java shell (AurelexActivity)
     // writes the captured word into shared_prefs/intent.xml on every
     // onCreate/onNewIntent (share sheet, aurelex://, PROCESS_TEXT, QS tile).
     // A poller (m_pollTimer) consumes the file as soon as the engine is ready
@@ -168,7 +168,7 @@ public:
     // In-app audio playback. `url` is a loopback gdau URL the ArticleServer
     // serves (http://127.0.0.1:PORT/gdau/<dictId>/<file>.wav). The QML WebView
     // intercepts the anchor before navigation and hands it here; the bytes are
-    // played via the Android MediaPlayer in ExperimentActivity.playAudio, so
+    // played via the Android MediaPlayer in AurelexActivity.playAudio, so
     // the article stays on screen. Mirrors the shipped app's AudioPlayer.
     Q_INVOKABLE void playAudio(const QString &url);
     Q_INVOKABLE void stopAudio();

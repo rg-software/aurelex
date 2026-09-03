@@ -21,7 +21,7 @@
 EngineController::EngineController(QObject *parent)
     : QObject(parent)
 {
-    // Incoming-lookup poller: ExperimentActivity writes shared_prefs/intent.xml
+    // Incoming-lookup poller: AurelexActivity writes shared_prefs/intent.xml
     // for every share/deep-link/PROCESS_TEXT/tile intent (cold or warm). Consume
     // it here as soon as the engine is ready; words arriving before gd_init
     // completes stay in the file and are picked up on a later tick.
@@ -147,7 +147,7 @@ void EngineController::autoIndexMissing()
     // they survive the app being backgrounded; the service shows a notification
     // and keeps the in-process worker alive. Stopped when the batch completes.
     QJniObject::callStaticMethod<void>(
-        "aurelex/android/ExperimentActivity",
+        "aurelex/android/AurelexActivity",
         "startIndexing",
         "()V");
 #endif
@@ -160,7 +160,7 @@ void EngineController::autoIndexMissing()
         qInfo() << "[aurelex] auto-index done";
 #if defined(Q_OS_ANDROID)
         QJniObject::callStaticMethod<void>(
-            "aurelex/android/ExperimentActivity",
+            "aurelex/android/AurelexActivity",
             "stopIndexing",
             "()V");
 #endif
@@ -212,7 +212,7 @@ void EngineController::rescan() {
     // picks it up and runs runScan() over the refreshed staging.
 #if defined(Q_OS_ANDROID)
     QJniObject::callStaticMethod<void>(
-        "aurelex/android/ExperimentActivity",
+        "aurelex/android/AurelexActivity",
         "refreshSources",
         "()V");
 #else
@@ -507,11 +507,11 @@ QString EngineController::articleBaseUrl() const {
 
 void EngineController::playAudio(const QString &url) {
 #if defined(Q_OS_ANDROID)
-    // JNI passthrough to ExperimentActivity.playAudio(String) — Android's
+    // JNI passthrough to AurelexActivity.playAudio(String) — Android's
     // MediaPlayer plays the loopback URL so the WebView keeps the article.
     const QJniObject javaUrl = QJniObject::fromString(url);
     QJniObject::callStaticMethod<void>(
-        "aurelex/android/ExperimentActivity",
+        "aurelex/android/AurelexActivity",
         "playAudio",
         "(Ljava/lang/String;)V",
         javaUrl.object<jstring>());
@@ -523,7 +523,7 @@ void EngineController::playAudio(const QString &url) {
 void EngineController::stopAudio() {
 #if defined(Q_OS_ANDROID)
     QJniObject::callStaticMethod<void>(
-        "aurelex/android/ExperimentActivity",
+        "aurelex/android/AurelexActivity",
         "stopAudio",
         "()V");
 #endif
@@ -765,7 +765,7 @@ bool EngineController::readSystemDark() const
 {
 #if defined(Q_OS_ANDROID)
     return QJniObject::callStaticMethod<jboolean>(
-        "aurelex/android/ExperimentActivity",
+        "aurelex/android/AurelexActivity",
         "isNightModeActive",
         "()Z");
 #else
@@ -1158,7 +1158,7 @@ void EngineController::addDictionaryFolder()
 {
 #if defined(Q_OS_ANDROID)
     QJniObject::callStaticMethod<void>(
-        "aurelex/android/ExperimentActivity",
+        "aurelex/android/AurelexActivity",
         "pickDictionaryFolder",
         "()V");
 #else
@@ -1178,7 +1178,7 @@ void EngineController::removeSource(int index)
     if (!uri.isEmpty()) {
 #if defined(Q_OS_ANDROID)
         QJniObject::callStaticMethod<void>(
-            "aurelex/android/ExperimentActivity",
+            "aurelex/android/AurelexActivity",
             "releaseSourcePermission",
             "(Ljava/lang/String;)V",
             QJniObject::fromString(uri).object());

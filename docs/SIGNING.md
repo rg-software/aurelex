@@ -8,12 +8,12 @@ signatures.
 ## Artifacts produced by CI
 
 On a `vX.Y.Z` tag push, CI (`.github/workflows/release-qt.yml`, windows-latest)
-builds a signed release APK from the Qt app (`experiments/qtquick/`) and
+builds a signed release APK from the Qt app (`app/`) and
 attaches it to a GitHub release:
 
 | Artifact | Path | Used by |
 | --- | --- | --- |
-| `.apk` | `build-qtquick/apk/build/outputs/apk/release/aurelex-exp-release.apk` | GitHub releases / F-Droid / sideload |
+| `.apk` | `build-qtquick/apk/build/outputs/apk/release/aurelex-release.apk` | GitHub releases / F-Droid / sideload |
 
 (An AAB is not produced: the Qt app is released via APK on GitHub/F-Droid; if a
 Play upload is ever wanted, `bundleRelease` can be added to the same build.)
@@ -88,7 +88,7 @@ updates compatible with GitHub/Play-upload sideloads.
 
 ### App icon
 The launcher icon is an adaptive icon (`mipmap-anydpi-v26/ic_launcher.xml`,
-`experiments/qtquick/android/res/`) with background, foreground, and monochrome layers; the
+`app/android/res/`) with background, foreground, and monochrome layers; the
 same vector foreground is reused in the home-screen widget. `minSdk 28` (API 26+)
 means no legacy PNG fallback is needed.
 

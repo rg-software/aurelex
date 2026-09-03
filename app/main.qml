@@ -17,7 +17,7 @@ ApplicationWindow {
     width: 480
     height: 800
     visible: true
-    title: "AurelexExp"
+    title: "Aurelex"
 
     // Material accent drives highlights; theme follows system dark with the
     // manual D-toggle override (see EngineController userDarkOverride/systemDark).

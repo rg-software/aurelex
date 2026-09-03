@@ -21,8 +21,8 @@ import androidx.core.content.ContextCompat;
  * thread; this service's job is to hold a foreground notification so the
  * process is not starved/suspended while a long build runs, and to show the
  * user that indexing is in progress. It is started by {@link
- * ExperimentActivity#startIndexing} (called from EngineController via JNI)
- * before the bulk build and stopped by {@link ExperimentActivity#stopIndexing}
+ * AurelexActivity#startIndexing} (called from EngineController via JNI)
+ * before the bulk build and stopped by {@link AurelexActivity#stopIndexing}
  * when the build completes.
  *
  * Completion is also mirrored to the C++ side through the existing
@@ -31,7 +31,7 @@ import androidx.core.content.ContextCompat;
  * EngineController's poller consumes it.
  */
 public class IndexingService extends Service {
-    private static final String TAG = "AurelexExp";
+    private static final String TAG = "Aurelex";
     private static final String CHANNEL_ID = "fts-indexing";
     private static final String CHANNEL_NAME = "Full-text indexing";
     private static final int NOTIFICATION_ID = 1001;
@@ -114,7 +114,7 @@ public class IndexingService extends Service {
     }
 
     private Notification buildNotification() {
-        final Intent open = new Intent(this, ExperimentActivity.class);
+        final Intent open = new Intent(this, AurelexActivity.class);
         open.addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP);
         final PendingIntent pi = PendingIntent.getActivity(this, 0, open,
                 PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
@@ -122,7 +122,7 @@ public class IndexingService extends Service {
                 ? new Notification.Builder(this, CHANNEL_ID)
                 : new Notification.Builder(this);
         return builder
-                .setContentTitle("AurelexExp")
+                .setContentTitle("Aurelex")
                 .setContentText("Indexing dictionaries\u2026")
                 .setSmallIcon(android.R.drawable.ic_menu_search)
                 .setContentIntent(pi)

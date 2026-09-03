@@ -40,7 +40,7 @@ as [pyglossary](https://github.com/ilius/pyglossary), then copy to your phone.
 ## Installing
 
 Install the APK on your Android phone (a release APK is produced on tag pushes; dev builds come from
-`experiments/qtquick/build.ps1`). Grant the app access to the folder you keep your dictionaries in
+`app/build.ps1`). Grant the app access to the folder you keep your dictionaries in
 when it asks — a scoped grant, not blanket storage access.
 
 ## Getting dictionaries onto the phone

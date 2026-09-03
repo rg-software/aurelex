@@ -20,8 +20,8 @@ import org.qtproject.qt.android.QtNative;
  * MainActivity.handleLookupIntent routing, minus the direct engine call (the
  * Qt process owns the engine here).
  */
-public class ExperimentActivity extends QtActivity {
-    private static final String TAG = "AurelexExp";
+public class AurelexActivity extends QtActivity {
+    private static final String TAG = "Aurelex";
 
     private static final int REQUEST_PICK_DICTIONARY_FOLDER = 2001;
 

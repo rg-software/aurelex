@@ -17,13 +17,13 @@
     <application
         android:name="org.qtproject.qt.android.bindings.QtApplication"
         android:hardwareAccelerated="true"
-        android:label="AurelexExp"
+        android:label="Aurelex"
         android:allowBackup="true"
         android:networkSecurityConfig="@xml/network_security_config">
         <activity
-            android:name=".ExperimentActivity"
+            android:name=".AurelexActivity"
             android:configChanges="orientation|uiMode|screenLayout|screenSize|smallestScreenSize|layoutDirection|locale|fontScale|keyboard|keyboardHidden|navigation|mcc|mnc|density"
-            android:label="AurelexExp"
+            android:label="Aurelex"
             android:launchMode="singleInstance"
             android:screenOrientation="unspecified"
             android:exported="true">
@@ -31,7 +31,7 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
-            <!-- "Look up in AurelexExp" from other apps' share sheets -->
+            <!-- "Look up in Aurelex" from other apps' share sheets -->
             <intent-filter>
                 <action android:name="android.intent.action.SEND" />
                 <category android:name="android.intent.category.DEFAULT" />
@@ -43,20 +43,20 @@
                 <category android:name="android.intent.category.DEFAULT" />
                 <data android:scheme="aurelex" android:host="lookup" />
             </intent-filter>
-            <!-- Selection-toolbar lookup: "Look up in AurelexExp" on selected text -->
+            <!-- Selection-toolbar lookup: "Look up in Aurelex" on selected text -->
             <intent-filter>
                 <action android:name="android.intent.action.PROCESS_TEXT" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <data android:mimeType="text/plain" />
             </intent-filter>
-            <meta-data android:name="android.app.lib_name" android:value="aurelex_exp" />
+            <meta-data android:name="android.app.lib_name" android:value="aurelex" />
             <meta-data android:name="android.app.extract_android_style" android:value="minimal" />
         </activity>
 
         <!-- QS tile: clipboard lookup funnel -->
         <service
             android:name=".AurelexTileService"
-            android:label="AurelexExp Lookup"
+            android:label="Aurelex Lookup"
             android:icon="@android:drawable/ic_menu_search"
             android:permission="android.permission.BIND_QUICK_SETTINGS_TILE"
             android:exported="true">
@@ -68,7 +68,7 @@
         <!-- Bulk FTS indexing foreground service (bulk-fts-indexing): keeps the
              process foreground with an "Indexing..." notification while the
              automatic bulk index build runs, so long builds survive the app
-             being backgrounded. Started/stopped by ExperimentActivity. -->
+             being backgrounded. Started/stopped by AurelexActivity. -->
         <service
             android:name=".IndexingService"
             android:exported="false"
@@ -77,7 +77,7 @@
         <!-- Home-screen search widget -->
         <receiver
             android:name=".AurelexSearchWidget"
-            android:label="AurelexExp Search"
+            android:label="Aurelex Search"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />

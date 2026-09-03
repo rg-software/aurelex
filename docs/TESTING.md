@@ -5,7 +5,7 @@ is a concrete recipe: how to trigger it, and what to expect. Mark items with
 their status as you verify them so this doc stays the single source of truth for
 "what works".
 
-Target: `experiments/qtquick/` — the Qt Quick/WebView all-Qt UI that drives the
+Target: `app/` — the Qt Quick/WebView all-Qt UI that drives the
 carved engine in-process via the `gd_*` C boundary. (Earlier iterations of this
 doc described the removed Kotlin/Compose app; the recipes below target the Qt
 UI.)
@@ -15,11 +15,11 @@ Status legend: ✅ verified on device · ⬜ not yet verified · 🔶 known gap
 ## Build & install
 
 Before testing, the native library and APK must build. Apply the engine
-patches and build the Qt app (JDK 17, see `experiments/qtquick/build.ps1`):
+patches and build the Qt app (JDK 17, see `app/build.ps1`):
 
 ```powershell
 .\scripts\apply-patches.ps1
-.\experiments\qtquick\build.ps1 -Configuration Debug -Install
+.\app\build.ps1 -Configuration Debug -Install
 ```
 
 This adb-installs the result (`-Install`); without it the APK lands in

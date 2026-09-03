@@ -1,9 +1,8 @@
 cmake_minimum_required(VERSION 3.18)
-project(aurelex_exp_qtquick LANGUAGES C CXX)
+project(aurelex LANGUAGES C CXX)
 
-# Experiment: an all-Qt (Qt Quick/WebView) Android app that drives the carve
-# IN-PROCESS (no :engine process, no JNI bridge). Opt-in; never wired into the
-# shipped Gradle build. See OpenSpec change `qt-quick-frontend`.
+# The all-Qt (Qt Quick/WebView) Android app that drives the carve IN-PROCESS
+# (no :engine process, no JNI bridge).
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
@@ -31,7 +30,7 @@ elseif(ANDROID_ABI STREQUAL "x86_64")
     set(QT_ANDROID_ROOT "${QT_BASE}/android_x86_64")
     set(VCPKG_TRIPLET "x64-android")
 else()
-    message(FATAL_ERROR "experiment builds for android ABIs only")
+    message(FATAL_ERROR "the app builds for android ABIs only")
 endif()
 
 set(Qt6_DIR           "${QT_ANDROID_ROOT}/lib/cmake/Qt6"           CACHE PATH "" FORCE)
@@ -55,19 +54,19 @@ link_directories("${VCPKG_ANDROID_ROOT}/lib")
 
 # Reuse the carve object library (real Qt engine). Its CMake requires the same
 # -D QT_BASE/QT_HOST_PATH/VCPKG_BASE and the android ABI it already handles.
-set(CARVE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../carve")
+set(CARVE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../carve")
 add_subdirectory("${CARVE_DIR}" carve)
 
-set(ENGINE_SRC "${CMAKE_CURRENT_SOURCE_DIR}/../../../../engine")
+set(ENGINE_SRC "${CMAKE_CURRENT_SOURCE_DIR}/../engine")
 
-qt_add_executable(aurelex_exp
+qt_add_executable(aurelex
     main.cpp
     EngineController.cpp
     ArticleServer.cpp
     fonts.qrc
     $<TARGET_OBJECTS:aurelex_carve>
 )
-target_include_directories(aurelex_exp PRIVATE
+target_include_directories(aurelex PRIVATE
     "${CARVE_DIR}"
     "${ENGINE_SRC}/src"
     "${ENGINE_SRC}/src/common"
@@ -78,14 +77,14 @@ target_include_directories(aurelex_exp PRIVATE
 )
 # In-process engine deps: the carve's own private deps must be re-listed for the
 # final link (they are not propagated from an OBJECT library).
-target_link_libraries(aurelex_exp PRIVATE
+target_link_libraries(aurelex PRIVATE
     Qt6::Core Qt6::Gui Qt6::Xml Qt6::Concurrent
     Qt6::Qml Qt6::Quick Qt6::QuickControls2 Qt6::WebView Qt6::Network
     xapian z bz2 lzma lzo2 fmt
 )
 
-qt_add_qml_module(aurelex_exp
-    URI AurelexExp
+qt_add_qml_module(aurelex
+    URI Aurelex
     VERSION 1.0
     QML_FILES
         main.qml
@@ -104,9 +103,9 @@ if(EXISTS "${_ndk_inc}/iconv.h")
     target_include_directories(aurelex_carve PRIVATE "${_ndk_inc}")
 endif()
 
-set_target_properties(aurelex_exp PROPERTIES
+set_target_properties(aurelex PROPERTIES
     QT_ANDROID_PACKAGE_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/android"
 )
 # NOTE: qt_add_apk_target is absent from the installed Qt 6.6.3 carve subset
 # (no Qt6AndroidDeployQt cmake package). The APK is packaged manually with
-# androiddeployqt (see README/experiment notes).
+# androiddeployqt (see README notes).

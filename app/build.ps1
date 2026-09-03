@@ -1,4 +1,4 @@
-# Aurelex Qt experiment / port build script.
+# Aurelex Qt build script.
 # One command: cmake configure -> ninja -> stage .so -> androiddeployqt ->
 # gradle overrides -> gradle assembleDebug.
 #
@@ -22,8 +22,8 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-$RepoRoot   = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
-$ExpDir     = $PSScriptRoot
+$RepoRoot   = Split-Path -Parent $PSScriptRoot
+$AppDir     = $PSScriptRoot
 $BuildDir   = Join-Path $RepoRoot "build-qtquick"
 $ApkDir     = Join-Path $BuildDir "apk"
 
@@ -55,7 +55,7 @@ $gradleTask = "assemble$Configuration"
 
 Write-Host "== [1/5] cmake configure ($Abi, $Configuration) ==" -ForegroundColor Cyan
 if (-not $SkipConfigure) {
-    & $CmakeExe -S $ExpDir -B $BuildDir -G Ninja `
+    & $CmakeExe -S $AppDir -B $BuildDir -G Ninja `
         "-DCMAKE_TOOLCHAIN_FILE=$QtBase/android_arm64_v8a/lib/cmake/Qt6/qt.toolchain.cmake" `
         "-DANDROID_ABI=$Abi" `
         "-DANDROID_PLATFORM=android-30" `
@@ -72,11 +72,11 @@ if (-not $SkipConfigure) {
 }
 
 Write-Host "== [2/5] ninja build ==" -ForegroundColor Cyan
-& $CmakeExe --build $BuildDir --target aurelex_exp -j 8
+& $CmakeExe --build $BuildDir --target aurelex -j 8
 if ($LASTEXITCODE -ne 0) { throw "ninja build failed" }
 
 Write-Host "== [3/5] stage app .so + Qt runtime/QML libs into apk libs ==" -ForegroundColor Cyan
-$soName = "libaurelex_exp_$Abi.so"
+$soName = "libaurelex_$Abi.so"
 $soPath = Join-Path $BuildDir $soName
 if (-not (Test-Path $soPath)) { throw "built .so not found: $soPath" }
 $LibOut = "$ApkDir\libs\$Abi"
@@ -113,7 +113,7 @@ if (Test-Path $KitJarDir) {
 }
 
 Write-Host "== [4/5] androiddeployqt (stage + generate project, --no-build) ==" -ForegroundColor Cyan
-$settings = Join-Path $BuildDir "android-aurelex_exp-deployment-settings.json"
+$settings = Join-Path $BuildDir "android-aurelex-deployment-settings.json"
 # --no-build: stage Qt libs/assets and generate the gradle project, but do NOT
 # let androiddeployqt invoke gradle itself (its internal run uses the Unity SDK
 # + wrong JDK). We apply overrides, then build with gradle under JDK 17.
@@ -122,7 +122,7 @@ $settings = Join-Path $BuildDir "android-aurelex_exp-deployment-settings.json"
 # androiddeployqt regenerates AndroidManifest.xml from its template and does
 # not merge the package-source manifest (custom activity / intent-filters /
 # Java sources). Re-copy them after the deploy step.
-Copy-Item (Join-Path $ExpDir "android\AndroidManifest.xml") (Join-Path $ApkDir "AndroidManifest.xml") -Force
+Copy-Item (Join-Path $AppDir "android\AndroidManifest.xml") (Join-Path $ApkDir "AndroidManifest.xml") -Force
 # Version stamping for release builds (CI sets AURELEX_VERSION_NAME / _CODE
 # from the tag; local builds keep the manifest's 0.0.1 / 1 defaults).
 if ($env:AURELEX_VERSION_NAME) {
@@ -135,7 +135,7 @@ if ($env:AURELEX_VERSION_NAME) {
     Set-Content $mPath $m -NoNewline
     Write-Host "Stamped manifest versionName=$env:AURELEX_VERSION_NAME versionCode=$env:AURELEX_VERSION_CODE" -ForegroundColor Yellow
 }
-if (Test-Path (Join-Path $ExpDir "android\src")) {
+if (Test-Path (Join-Path $AppDir "android\src")) {
     $stageSrc = Join-Path $ApkDir "src"
     New-Item -ItemType Directory -Force -Path $stageSrc | Out-Null
     # androiddeployqt may have left stale Java sources from a previous build
@@ -143,18 +143,18 @@ if (Test-Path (Join-Path $ExpDir "android\src")) {
     # compiles.
     if (Test-Path (Join-Path $stageSrc "com")) { Remove-Item (Join-Path $stageSrc "com") -Recurse -Force }
     if (Test-Path (Join-Path $stageSrc "aurelex")) { Remove-Item (Join-Path $stageSrc "aurelex") -Recurse -Force }
-    Copy-Item (Join-Path $ExpDir "android\src\*") $stageSrc -Recurse -Force
+    Copy-Item (Join-Path $AppDir "android\src\*") $stageSrc -Recurse -Force
 }
-if (Test-Path (Join-Path $ExpDir "android\res")) {
+if (Test-Path (Join-Path $AppDir "android\res")) {
     New-Item -ItemType Directory -Force -Path (Join-Path $ApkDir "res") | Out-Null
-    Copy-Item (Join-Path $ExpDir "android\res\*") (Join-Path $ApkDir "res\") -Recurse -Force
+    Copy-Item (Join-Path $AppDir "android\res\*") (Join-Path $ApkDir "res\") -Recurse -Force
 }
 # Article asset mirror (engine qrc:/// -> APK assets/). androiddeployqt in the
 # carve-subset kit does not always propagate QT_ANDROID_PACKAGE_SOURCE_DIR/assets
 # into the gradle staging tree, so copy explicitly.
-if (Test-Path (Join-Path $ExpDir "android\assets")) {
+if (Test-Path (Join-Path $AppDir "android\assets")) {
     New-Item -ItemType Directory -Force -Path (Join-Path $ApkDir "assets") | Out-Null
-    Copy-Item (Join-Path $ExpDir "android\assets\*") (Join-Path $ApkDir "assets\") -Recurse -Force
+    Copy-Item (Join-Path $AppDir "android\assets\*") (Join-Path $ApkDir "assets\") -Recurse -Force
 }
 # QML module source overlay (qt-material-ui). androiddeployqt's createRCC path in
 # the aqt carve subset does not reliably stage the imported QML module sources
@@ -206,7 +206,7 @@ qtTargetSdkVersion=33
 }
 # settings.gradle must scope this build away from the repo's settings.gradle.kts
 if (-not (Test-Path (Join-Path $ApkDir "settings.gradle"))) {
-    Set-Content (Join-Path $ApkDir "settings.gradle") 'rootProject.name = "aurelex-exp"'
+    Set-Content (Join-Path $ApkDir "settings.gradle") 'rootProject.name = "aurelex"'
 }
 
 # For Release builds: inject a signing config. Local builds use the debug
@@ -416,6 +416,6 @@ Write-Host "== DONE: $($apk.FullName) ($([math]::Round($apk.Length/1MB,1)) MB) =
 if ($Install) {
     $adb = "$RealSdk\platform-tools\adb.exe"
     & $adb install -r $apk.FullName
-    & $adb shell "am start -n aurelex.android/.ExperimentActivity"
+    & $adb shell "am start -n aurelex.android/.AurelexActivity"
     Write-Host "Installed + launched." -ForegroundColor Green
 }

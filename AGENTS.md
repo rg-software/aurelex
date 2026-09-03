@@ -6,7 +6,7 @@ This file tells agents and contributors how to work in this repository safely. R
 
 Aurelex is an Android port of [goldendict-ng](https://github.com/xiaoyifang/goldendict-ng).
 It reuses the upstream C++ dictionary engine (rendered via Android WebView) rather than reimplementing
-dictionary formats. The app is a Qt Quick/WebView Android app (`experiments/qtquick/`) that consumes
+dictionary formats. The app is a Qt Quick/WebView Android app (`app/`) that consumes
 the carved engine in-process via the `gd_*` C boundary. Main is the shipping branch; the earlier
 Kotlin/Compose UI was removed. Design is tracked with OpenSpec: the main specs live in
 `openspec/specs/` and work-in-progress changes in `openspec/changes/` (see `docs/ROADMAP.md` for the
@@ -36,7 +36,7 @@ milestone tracker).
 - `patches/` — the only deviations from upstream (3 patches: dsl svg-drop, android home, fts wildcard cap). Keep it small.
 - `carve/` — the `gd_*` C boundary (`goldendict.h`, `gd_boundary.cc`) + selected engine sources
   compiled once as an object library, shared by the Qt app and the CI smoke tool.
-- `experiments/qtquick/` — the Qt app (QML + WebView, Android) that consumes the carve in-process.
+- `app/` — the Qt app (QML + WebView, Android) that consumes the carve in-process.
 - `openspec/` — OpenSpec planning artifacts (the design is the source of truth for scope).
 
 ## Scope constraints

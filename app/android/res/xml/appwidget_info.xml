@@ -8,4 +8,4 @@
     android:resizeMode="horizontal|vertical"
     android:initialLayout="@layout/widget_search"
     android:widgetCategory="home_screen"
-    android:label="AurelexExp" />
+    android:label="Aurelex" />

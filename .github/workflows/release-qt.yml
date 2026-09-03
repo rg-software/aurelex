@@ -1,10 +1,11 @@
 name: release build (Qt)
 
 # On tag push (vX.Y.Z) builds a SIGNED release APK from the Qt app
-# (experiments/qtquick/) and attaches it to a GitHub release. The Kotlin app
-# (app/) was removed; this is the only release workflow.
+# (app/) and attaches it to a GitHub release. The Kotlin app
+# (app/ — historically the Compose UI) was removed; this is the only release
+# workflow.
 #
-# Why Windows: experiments/qtquick/build.ps1 targets a Windows aqt 6.6.3
+# Why Windows: app/build.ps1 targets a Windows aqt 6.6.3
 # layout. The carve (engine/) compiles under the same script. Build time is
 # ~25-40 min on a 4-vcpu windows-latest runner (xapian dominates; cached on
 # the 2nd run, see the vcpkg cache step below).
@@ -213,11 +214,11 @@ jobs:
         run: |
           if (Test-Path "$env:AURELEX_KEYSTORE_PATH") {
             Write-Host "=== signed build ==="
-            & "$env:GITHUB_WORKSPACE\experiments\qtquick\build.ps1" -Configuration Release
+            & "$env:GITHUB_WORKSPACE\app\build.ps1" -Configuration Release
             if ($LASTEXITCODE -ne 0) { throw "build.ps1 failed" }
           } else {
             Write-Host "=== AURELEX_KEYSTORE_PATH not present; building unsigned release APK for dry-run ===" -ForegroundColor Yellow
-            & "$env:GITHUB_WORKSPACE\experiments\qtquick\build.ps1" -Configuration Release
+            & "$env:GITHUB_WORKSPACE\app\build.ps1" -Configuration Release
             if ($LASTEXITCODE -ne 0) { throw "build.ps1 failed" }
           }
 

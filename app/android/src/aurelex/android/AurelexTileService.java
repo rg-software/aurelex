@@ -11,7 +11,7 @@ import android.util.Log;
 /**
  * QS tile: reads the clipboard and opens the app with the word (mirrors the
  * shipped app's QuickLookupTileService). The tile click funnels through
- * ExperimentActivity's aurelex://lookup deep link, which captureLookupText
+ * AurelexActivity's aurelex://lookup deep link, which captureLookupText
  * picks up and routes into the engine via readPendingLookup().
  */
 public class AurelexTileService extends TileService {
@@ -47,7 +47,7 @@ public class AurelexTileService extends TileService {
                     .authority("lookup")
                     .appendQueryParameter("clipboard", "1")
                     .build();
-            Intent intent = new Intent(Intent.ACTION_VIEW, uri, this, ExperimentActivity.class);
+            Intent intent = new Intent(Intent.ACTION_VIEW, uri, this, AurelexActivity.class);
             intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP);
             launchFromTile(intent);
 

@@ -35,7 +35,7 @@ public class AurelexSearchWidget extends AppWidgetProvider {
     }
 
     private void appendPendingIntent(Context context, AppWidgetManager manager, int appWidgetId) {
-        Intent search = new Intent(context, ExperimentActivity.class);
+        Intent search = new Intent(context, AurelexActivity.class);
         PendingIntent pending = PendingIntent.getActivity(
                 context, appWidgetId, search,
                 PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);

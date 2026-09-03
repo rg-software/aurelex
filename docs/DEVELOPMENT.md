@@ -9,7 +9,7 @@ Aurelex. If you are a user, see the top-level `README.md` instead.
 - `patches/` — the only deviations from upstream (`.patch` files), applied by `scripts/apply-patches.*`.
 - `carve/` — the `gd_*` C boundary (`goldendict.h`, `gd_boundary.cc`) + selected engine
   sources compiled once as an object library, shared by the Qt app and the CI smoke tool.
-- `experiments/qtquick/` — the Qt app (QML + WebView, Android) that consumes the carve in-process.
+- `app/` — the Qt app (QML + WebView, Android) that consumes the carve in-process.
 - `openspec/` — planning artifacts (proposals, specs, design, tasks); the design is the source
   of truth for scope.
 - `docs/` — in-repo guidance: `TESTING.md`, `SIGNING.md`, `ROADMAP.md`, `UPSTREAM.md`.
@@ -26,14 +26,14 @@ The repository rules for agents and contributors live in `AGENTS.md`. Key rules:
 
 ## Building the app
 
-The app is a Qt Quick/WebView Android app built from `experiments/qtquick/`.
+The app is a Qt Quick/WebView Android app built from `app/`.
 Requirements: JDK 17, Android SDK + NDK r23c, Qt 6.6.3 android + desktop kits, vcpkg deps
 (`zlib bzip2 liblzma lzo fmt xapian`). Apply the engine patches first, then run the one-shot
 build script:
 
 ```powershell
 .\scripts\apply-patches.ps1
-.\experiments\qtquick\build.ps1 -Configuration Release
+.\app\build.ps1 -Configuration Release
 ```
 
 `build.ps1` derives its toolchain from `AURELEX_*` env vars (or local defaults); pass `-Install`

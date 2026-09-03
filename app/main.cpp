@@ -43,7 +43,7 @@ int main(int argc, char *argv[])
 
     QQmlApplicationEngine qengine;
     qengine.rootContext()->setContextProperty("engine", &engine);
-    qengine.load(QUrl(QStringLiteral("qrc:/AurelexExp/main.qml")));
+    qengine.load(QUrl(QStringLiteral("qrc:/Aurelex/main.qml")));
     if (qengine.rootObjects().isEmpty())
         return -1;
 
