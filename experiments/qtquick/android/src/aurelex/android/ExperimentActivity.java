@@ -248,12 +248,18 @@ public class ExperimentActivity extends QtActivity {
         }
         final java.io.File dir = new java.io.File(destDir);
         if (!dir.exists() && !dir.mkdirs()) return -1;
-        return stageTreeInto(treeUri, cr, dir);
+        // The stage root holds every source's dir: files/staged/<sourceId>. An
+        // intersecting pick (e.g. GoldenDict + GoldenDict/English) can stage the
+        // same dictionary under two source dirs; without this the engine would
+        // load it twice (ids hash the file path). Dedup by (name, size, mtime).
+        final java.io.File stageRoot = dir.getParentFile();
+        return stageTreeInto(treeUri, cr, dir, stageRoot);
     }
 
     private static int stageTreeInto(android.net.Uri treeUri,
                                      android.content.ContentResolver cr,
-                                     java.io.File destDir) {
+                                     java.io.File destDir,
+                                     java.io.File stageRoot) {
         final String[] cols = {
                 android.provider.DocumentsContract.Document.COLUMN_DOCUMENT_ID,
                 android.provider.DocumentsContract.Document.COLUMN_DISPLAY_NAME,
@@ -276,7 +282,7 @@ public class ExperimentActivity extends QtActivity {
                         final java.io.File sub = new java.io.File(destDir, name);
                         final android.net.Uri subTree = android.provider.DocumentsContract
                                 .buildDocumentUriUsingTree(treeUri, docId);
-                        copied += stageTreeInto(subTree, cr, sub);
+                        copied += stageTreeInto(subTree, cr, sub, stageRoot);
                         continue;
                     }
                     if (!isSupportedDictionaryName(name)) continue;
@@ -288,6 +294,13 @@ public class ExperimentActivity extends QtActivity {
                             && (srcModified <= 0
                                 || Math.abs(out.lastModified() - srcModified) < 5000)) {
                         continue; // unchanged since we staged it
+                    }
+                    // Intersecting pick (same dictionary under another source):
+                    // if an identical (name, size, mtime) copy already exists
+                    // elsewhere in the stage root, skip it so the engine doesn't
+                    // load a path-hashed duplicate id twice.
+                    if (hasStagedCopy(stageRoot, name, srcSize, srcModified, destDir)) {
+                        continue;
                     }
                     final android.net.Uri child = android.provider.DocumentsContract
                             .buildDocumentUriUsingTree(treeUri, docId);
@@ -306,6 +319,29 @@ public class ExperimentActivity extends QtActivity {
             android.util.Log.w(TAG, "stageTreeInto failed: " + e);
             return copied;
         }
+    }
+
+    /**
+     * True when a file with the same name/size/close-mtime already exists
+     * somewhere under the stage root (other than the current source's dir).
+     * Prevents intersecting picks from staging the same dictionary twice.
+     */
+    private static boolean hasStagedCopy(java.io.File stageRoot, String name,
+                                         long size, long modified, java.io.File skipDir) {
+        if (stageRoot == null || !stageRoot.isDirectory()) return false;
+        final java.io.File[] children = stageRoot.listFiles();
+        if (children == null) return false;
+        for (java.io.File child : children) {
+            if (child.equals(skipDir)) continue;
+            if (child.isDirectory()) {
+                if (hasStagedCopy(child, name, size, modified, null)) return true;
+            } else if (child.isFile() && name.equals(child.getName())) {
+                if (size >= 0 && child.length() == size
+                        && (modified <= 0 || Math.abs(child.lastModified() - modified) < 5000))
+                    return true;
+            }
+        }
+        return false;
     }
 
     private static volatile boolean sRefreshRunning = false;
