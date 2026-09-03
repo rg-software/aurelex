@@ -68,6 +68,16 @@ overrides `Material.theme: Material.Dark / Material.Light` via a two-way binding
 - `Text` (label) → `Label` (Material typography)
 - `Rectangle` (divider) → `MenuSeparator` / `ToolBar`
 
+**D6 — Material icons.** Material Components include the standard Material
+icon set as glyphs (`Material.Icons.*` font icons). For the port:
+- Back, star/favorite, search, settings, history, folders, etc. → `Material.Icons.*`
+  glyphs (no PNG/SVG assets needed; they render at any density)
+- Preferred glyph names: arrow_back, star / star_border, search,
+  library_books (dicts), folder (groups), history, bookmark (favorites),
+  search_in_docs (FTS), dark_mode / light_mode, close, add, delete.
+- Prerequisite: the `qtquickcontrols2materialstyleimpl` archive ships the
+  icon font; verify `Material.Icons` resolves after the module install.
+
 ### Risks / Trade-offs
 
 - [Material style may not be available on the aqt android install] → Verify by

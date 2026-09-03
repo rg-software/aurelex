@@ -19,7 +19,7 @@
 
 ## 4. Milestone 3 — groups
 
-- [x] 4.1 Groups page: list (`gd_group_count/info`), create/rename/delete, apply active (`gd_group_set_active`), membership editor (`gd_group_add/remove/move_dict`, `gd_group_dicts`). **[Partial]** the experiment proved list/create/rename/delete/activate; group-membership wiring (add/remove dict to a group) lands in the next slice as part of FTS or as a focused follow-up.
+- [x] 4.1 Groups page: list (`gd_group_count/info`), create/rename/delete, apply active (`gd_group_set_active`), membership editor (`gd_group_dicts` + add/remove/move). **Verified on-device**: membership mode lists members vs non-members, Add/Remove/Up/Down updates the group in place, back returns and dictCount reflects membership.
 - [x] 4.2 On-device verification: create group with one dict; active-group lookup respects membership; deleting active group reverts to "All"; default "All" cannot be deleted. **Verified on-device** (`setGroups count=1`).
 
 ## 5. Milestone 4 — full-text search
@@ -64,15 +64,15 @@ for the Kotlin app. Each is a focused session of work.
 
 ### Slice A — Article bridge (design D3, ~1-2 days)
 
-- [ ] A.1 `ArticleServer`: QTcpServer on 127.0.0.1 (random port), serving:
+- [x] A.1 `ArticleServer`: QTcpServer on 127.0.0.1 (random port), serving:
   - Bundled asset mirror (scripts/stylesheets/icons/flags) from the APK's `assets/`
   - `bres://` resources via `gd_get_resource` (images from `.mdd`)
   - `gdau://` audio via `gd_get_audio` (content-type by extension)
-  - **Build note**: Android 9+ blocks cleartext HTTP — add `android:usesCleartextTraffic="true"` (or a networkSecurityConfig allowing 127.0.0.1) to the manifest.
-- [ ] A.2 Rewrite article HTML URLs: `qrc:///` → `http://127.0.0.1:PORT/`, `bres://` → `http://127.0.0.1:PORT/bres/...`, `gdau://` → `http://127.0.0.1:PORT/gdau/...`
-- [ ] A.3 In-article `gdlookup://` link interception → in-app lookup. **API note**: QtWebView 6.6 has no navigationRequested — intercept via `onUrlChanged` (if url starts with gdlookup:// → parse word, engine.lookup, restore previous page).
-- [ ] A.4 Bundle the asset mirror (scripts/stylesheets/icons/flags from `engine/src/`) into the APK's `assets/` directory. **Evidence it's missing**: WebView console shows "jQuery is not defined" / "QWebChannel is not defined" — article scripts don't load today.
-- [ ] A.5 On-device verification: article with CSS styling renders; images from `.mdd` display; audio plays; in-article links navigate. **Missing input**: a test dictionary with images + audio (candidates: the user's real dictionaries in `/storage/emulated/0/GoldenDict/{English,Finnish,Japanese,Thesauri}/` subfolders, or craft a small `.mdx`).
+  - **Build note**: Android 9+ blocks cleartext HTTP — added a networkSecurityConfig whitelisting 127.0.0.1 (referenced from the manifest).
+- [x] A.2 Rewrite article HTML URLs: `qrc:///` → `http://127.0.0.1:PORT/`, `bres://` → `http://127.0.0.1:PORT/bres/...`, `gdau://` → `http://127.0.0.1:PORT/gdau/...`
+- [x] A.3 In-article `gdlookup://` link interception → in-app lookup. **Implementation**: QtWebView 6.6 has no navigationRequested — intercept via `onUrlChanged`; parse `gdlookup://localhost/<word>` (path) and `gdlookup://localhost/?word=<w>` (query, after netmgr rewrite); `engine.lookup(word)`; rewind WebView with `loadHtml(about:blank)` to avoid the failed-load frame; back-stack (`navStack`) supports the Back button.
+- [x] A.4 Bundle the asset mirror (scripts/stylesheets/icons/flags from `engine/src/`) into the APK's `assets/` directory. **Implementation**: copied from `app/src/main/assets/` → `experiments/qtquick/android/assets/`; build.ps1 explicit copy step (the carve-subset kit doesn't propagate `QT_ANDROID_PACKAGE_SOURCE_DIR/assets/` reliably into the gradle staging tree).
+- [ ] A.5 On-device verification: article with CSS styling renders; images from `.mdd` display; audio plays; in-article links navigate. **Test dict candidate**: `/GoldenDict/English/Longman Pronunciation Dictionary (3rd Ed)` (DSL with wav audio in `dsl.files.zip`). **Build green**, awaiting on-device install.
 
 ### Slice B — Storage opt-in + release identity (~1 day)
 
@@ -81,7 +81,7 @@ for the Kotlin app. Each is a focused session of work.
 - [ ] B.3 Flip package id from `com.aurelex.experiment` to `aurelex.android`. **Decision needed**: installing over the old Kotlin app (same id) is blocked by signature mismatch → old app must be uninstalled first, which deletes its data. Confirm no-carry-over is acceptable (dicts survive in /storage/emulated/0/GoldenDict; history/favorites start fresh).
 - [ ] B.4 Verify user-data carry-over after the id flip (fresh-install expectations: rescan /GoldenDict, onboarding shows, history/favorites empty). **Scope note**: the old Kotlin app's SharedPreferences history/favorites do NOT carry over (the Qt app stores JSON files with a different model) — the task narrows to verifying the fresh-install path.
 - [ ] B.5 Production keystore (replace the debug keystore in build.gradle). **Missing input**: keystore file + passwords (or generate one and store in GitHub secrets).
-- [ ] B.6 CI workflow: tag push → build release APK → attach to GitHub release. **Missing input**: check existing .github/workflows; the Qt build needs Qt 6.6.3 (aqt) + modules (incl. manual VirtualKeyboard staging per build.ps1) + vcpkg cache (xapian et al — long compile) + NDK r23c + JDK 17.
+- [x] B.6 CI workflow: tag push → build release APK → attach to GitHub release. **Implemented** `.github/workflows/release-qt.yml` (windows-latest; tag push `v*` + `workflow_dispatch`). Qt 6.6.3 via aqt (MinGW host + android kits), NDK r23c, SDK 34/35, JDK 17, vcpkg + xapian (arm64-android cached by `actions/cache@v4`), `apply-patches.sh`, signed release APK via `AURELEX_KEYSTORE_*` secrets (unsigned dry-run when unset), version stamped from tag, upload + GitHub release via softprops. `build.ps1` parameterized (env overrides for Qt/vcpkg/NDK/SDK/JDK/cmake/deployqt/keystore/version). **Verified locally**: `assembleRelease` produces a signed, `jarsigner -verify`-clean APK (debug keystore). **Not yet run on CI**: needs first tag push / dispatch, and the existing `build-apk.yml` (Kotlin app, Ubuntu) is untouched (Qt-only per decision).
 - [ ] B.7 On-device verification: full docs/TESTING.md pass.
 
 ### Follow-up (recorded, not in parity scope)
