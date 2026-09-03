@@ -172,11 +172,22 @@ $gpPath = Join-Path $ApkDir "gradle.properties"
 # a fresh tree (it exists locally only because a prior run left it behind). If
 # absent, write one with our pinned values; otherwise patch the existing file.
 if (-not (Test-Path $gpPath)) {
-    @'
-androidCompileSdkVersion=android-34
+    $qtAndroidDir = if ($env:AURELEX_QT_BASE) { "$($env:AURELEX_QT_BASE)/android_arm64_v8a/./src/android/java" } else { "C:/Qt/6.6.3/android_arm64_v8a/./src/android/java" }
+    # .properties treats \x sequences as escapes; use forward slashes only.
+    $qtAndroidDir = $qtAndroidDir -replace '\\', '/'
+    @"
+org.gradle.jvmargs=-Xmx2500m -XX:MaxMetaspaceSize=768m -Dfile.encoding=UTF-8
+android.useAndroidX=true
 androidBuildToolsVersion=35.0.0
-org.gradle.jvmargs=-Xmx2g
-'@ | Set-Content $gpPath -NoNewline
+androidCompileSdkVersion=android-34
+androidNdkVersion=23.2.8568313
+buildDir=build
+qt5AndroidDir=$qtAndroidDir
+qtAndroidDir=$qtAndroidDir
+qtMinSdkVersion=23
+qtTargetAbiList=arm64-v8a
+qtTargetSdkVersion=33
+"@ | Set-Content $gpPath -NoNewline
 } else {
     $gp = Get-Content $gpPath -Raw
     $gp = $gp -replace 'androidCompileSdkVersion=android-\d+', 'androidCompileSdkVersion=android-34'
@@ -211,8 +222,8 @@ if ($Configuration -eq "Release") {
         if (Test-Path $bgPath) { $bg = Get-Content $bgPath -Raw }
         if ($bg.Trim().Length -eq 0) {
             # The carve-subset androiddeployqt --no-build may not generate
-            # build.gradle on a fresh tree. Write a minimal complete one with
-            # the signing config already embedded.
+            # build.gradle on a fresh tree. Write a complete one matching the
+            # Qt androiddeployqt template (values come from gradle.properties).
             $bg = @"
 buildscript {
     repositories { google(); mavenCentral() }
@@ -221,35 +232,61 @@ buildscript {
 repositories { google(); mavenCentral() }
 apply plugin: 'com.android.application'
 
-signingConfigs {
-    release {
-        storeFile file("$($ksPath -replace '\\', '/')")
-        storePassword "$ksPass"
-        keyAlias "$ksAlias"
-        keyPassword "$ksKeyPass"
-    }
+dependencies {
+    implementation fileTree(dir: 'libs', include: ['*.jar', '*.aar'])
+    implementation 'androidx.core:core:1.10.1'
 }
+
 android {
-    compileSdkVersion 34
-    buildToolsVersion "35.0.0"
-    defaultConfig {
-        applicationId 'aurelex.android'
-        minSdkVersion 28
-        targetSdkVersion 34
-        versionCode 1
-        versionName '0.0.1'
-        ndk { abiFilters 'arm64-v8a' 'x86_64' }
+    compileSdkVersion androidCompileSdkVersion
+    buildToolsVersion androidBuildToolsVersion
+    ndkVersion androidNdkVersion
+
+    packagingOptions.jniLibs.useLegacyPackaging true
+
+    sourceSets {
+        main {
+            manifest.srcFile 'AndroidManifest.xml'
+            java.srcDirs = [qtAndroidDir + '/src', 'src', 'java']
+            aidl.srcDirs = [qtAndroidDir + '/src', 'src', 'aidl']
+            res.srcDirs = [qtAndroidDir + '/res', 'res']
+            resources.srcDirs = ['resources']
+            renderscript.srcDirs = ['src']
+            assets.srcDirs = ['assets']
+            jniLibs.srcDirs = ['libs']
+        }
     }
+
+    lintOptions { abortOnError false }
+
+    aaptOptions { noCompress 'rcc' }
+
+    signingConfigs {
+        release {
+            storeFile file("$($ksPath -replace '\\', '/')")
+            storePassword "$ksPass"
+            keyAlias "$ksAlias"
+            keyPassword "$ksKeyPass"
+        }
+    }
+
     buildTypes {
         release {
             minifyEnabled false
             signingConfig signingConfigs.release
         }
     }
+
+    defaultConfig {
+        resConfig "en"
+        minSdkVersion qtMinSdkVersion
+        targetSdkVersion qtTargetSdkVersion
+        ndk.abiFilters = qtTargetAbiList.split(",")
+    }
 }
 "@
             Set-Content $bgPath $bg -NoNewline
-            Write-Host "Wrote minimal build.gradle (carve-subset fresh tree)." -ForegroundColor Yellow
+            Write-Host "Wrote complete build.gradle (carve-subset fresh tree)." -ForegroundColor Yellow
         }
         if ($bg -notmatch "signingConfigs") {
             # Insert signing config before the android { } block
@@ -288,23 +325,49 @@ buildscript {
 }
 repositories { google(); mavenCentral() }
 apply plugin: 'com.android.application'
+
+dependencies {
+    implementation fileTree(dir: 'libs', include: ['*.jar', '*.aar'])
+    implementation 'androidx.core:core:1.10.1'
+}
+
 android {
-    compileSdkVersion 34
-    buildToolsVersion "35.0.0"
-    defaultConfig {
-        applicationId 'aurelex.android'
-        minSdkVersion 28
-        targetSdkVersion 34
-        versionCode 1
-        versionName '0.0.1'
-        ndk { abiFilters 'arm64-v8a' 'x86_64' }
+    compileSdkVersion androidCompileSdkVersion
+    buildToolsVersion androidBuildToolsVersion
+    ndkVersion androidNdkVersion
+
+    packagingOptions.jniLibs.useLegacyPackaging true
+
+    sourceSets {
+        main {
+            manifest.srcFile 'AndroidManifest.xml'
+            java.srcDirs = [qtAndroidDir + '/src', 'src', 'java']
+            aidl.srcDirs = [qtAndroidDir + '/src', 'src', 'aidl']
+            res.srcDirs = [qtAndroidDir + '/res', 'res']
+            resources.srcDirs = ['resources']
+            renderscript.srcDirs = ['src']
+            assets.srcDirs = ['assets']
+            jniLibs.srcDirs = ['libs']
+        }
     }
+
+    lintOptions { abortOnError false }
+
+    aaptOptions { noCompress 'rcc' }
+
     buildTypes {
         release { minifyEnabled false }
     }
+
+    defaultConfig {
+        resConfig "en"
+        minSdkVersion qtMinSdkVersion
+        targetSdkVersion qtTargetSdkVersion
+        ndk.abiFilters = qtTargetAbiList.split(",")
+    }
 }
 "@ | Set-Content $bgPath -NoNewline
-            Write-Host "Wrote minimal unsigned build.gradle (fresh tree)." -ForegroundColor Yellow
+            Write-Host "Wrote complete unsigned build.gradle (fresh tree)." -ForegroundColor Yellow
         }
     }
 }
