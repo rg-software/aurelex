@@ -71,17 +71,20 @@ if [ ! -d "${NDK_BIN}" ]; then
   exit 2
 fi
 
-# autoconf's configure cannot run toolchain binaries whose paths contain
-# spaces: it word-splits `CC="C:/Program Files/.../clang.exe"` at the space
-# ("C:/Program: No such file or directory"). When the NDK lives at a
-# spaces-free path (CI checks out to ${{ github.workspace }}/ndk) we use the
-# NDK wrappers directly; otherwise we drop thin POSIX-sh wrappers into
-# ${WORK}/bin (a spaces-free location) that `exec` the real tools with the
-# system path quoted. That mirrors what the NDK's own `-clang.cmd` wrapper does
-# (adds --target=<triple>) without relying on cmd/mklink quirks.
-case "${NDK_BIN}" in
-  *' '*) WITH_SPACES=1 ;;
-  *)     WITH_SPACES=0 ;;
+# autoconf/libtool run the compiler from a POSIX shell ("$(SHELL) ./depcomp",
+# "$(SHELL) ./libtool"). On Windows this breaks in two ways:
+#   1. Toolchain paths containing spaces get word-split by configure
+#      ("C:/Program: No such file or directory").
+#   2. The NDK ships clang/ar/ranlib/strip as .cmd batch files. A POSIX sh
+#      (MSYS2 or Git Bash) cannot directly exec a .cmd file, so libtool fails
+#      with "D:/.../clang++.cmd: No such file or directory".
+# Both are solved by dropping thin POSIX-sh wrappers into ${WORK}/bin (a
+# spaces-free location) that exec the real .exe tools with --target= added,
+# mirroring what the NDK's own -clang.cmd wrapper does. We always do this on
+# Windows hosts so the behaviour is uniform regardless of NDK path spaces.
+WITH_SPACES=0
+case "${HOST_TRIPLE}" in
+  windows*) WITH_SPACES=1 ;;
 esac
 
 if [ "${WITH_SPACES}" = "1" ]; then
@@ -90,9 +93,14 @@ if [ "${WITH_SPACES}" = "1" ]; then
   wrap_tool() {
     local name="$1" exe="$2" extra="$3"
     if [ ! -e "${TOOL_DIR}/${name}" ]; then
+      # MSYS2 sh executes a POSIX-slashed path cleanly (/d/...); Windows
+      # drive paths (D:/...) as an exec target are hit-or-miss under MSYS2's
+      # path handling, so convert. conv=$(cygpath -m ...) would give D:/; we
+      # want /d/ which is what `cygpath` gives by default on MSYS2.
+      local unix="$(cygpath -u "${NDK_BIN}/${exe}" 2>/dev/null || echo "${NDK_BIN}/${exe}")"
       cat > "${TOOL_DIR}/${name}" <<EOF
 #!/bin/sh
-exec "${NDK_BIN}/${exe}" ${extra} "\$@"
+exec "${unix}" ${extra} "\$@"
 EOF
       chmod +x "${TOOL_DIR}/${name}"
     fi
@@ -179,9 +187,13 @@ cd "${SRC_DIR}"
 # "C:/Program: No such file or directory". Prefer a spaces-free sh so those
 # $(SHELL) calls work. MSYS2 (C:/msys64) qualifies if present; otherwise fall
 # back to whatever sh is on PATH.
+# MSYS2_ARG_CONV_EXCL='*' stops MSYS2's automatic path rewriting from
+# mangling the NDK tool paths (D:/a/... -> D:a...) when libtool execs the
+# .cmd wrappers.
 FREE_SHELL=""
 case "$(uname -s)" in
   MINGW* | MSYS* | CYGWIN*)
+    export MSYS2_ARG_CONV_EXCL='*'
     for cand in /c/msys64/usr/bin/sh.exe /c/tools/msys64/usr/bin/sh.exe "$(command -v sh)"; do
       if [ -n "$cand" ] && [ -x "$cand" ]; then
         case "$cand" in
