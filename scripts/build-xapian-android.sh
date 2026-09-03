@@ -179,13 +179,14 @@ cd "${SRC_DIR}"
 # "C:/Program: No such file or directory". Prefer a spaces-free sh so those
 # $(SHELL) calls work. MSYS2 (C:/msys64) qualifies if present; otherwise fall
 # back to whatever sh is on PATH.
+FREE_SHELL=""
 case "$(uname -s)" in
   MINGW* | MSYS* | CYGWIN*)
     for cand in /c/msys64/usr/bin/sh.exe /c/tools/msys64/usr/bin/sh.exe "$(command -v sh)"; do
       if [ -n "$cand" ] && [ -x "$cand" ]; then
         case "$cand" in
           *' '*) continue ;;   # skip spaced shells
-          *) export SHELL="$cand"; echo "using spaces-free shell: $SHELL"; break ;;
+          *) FREE_SHELL="$cand"; echo "using spaces-free shell: $FREE_SHELL"; break ;;
         esac
       fi
     done
@@ -214,9 +215,11 @@ if [ ! -f "config.status" ]; then
 fi
 
 echo "== building =="
-make -j"${XAPIAN_JOBS:-$(nproc 2>/dev/null || echo 4)}"
+MAKE_SHELL=""
+if [ -n "$FREE_SHELL" ]; then MAKE_SHELL="SHELL=$FREE_SHELL"; fi
+make $MAKE_SHELL -j"${XAPIAN_JOBS:-$(nproc 2>/dev/null || echo 4)}"
 echo "== installing =="
-make install
+make $MAKE_SHELL install
 
 echo "== done: ${PREFIX}/include/xapian.h, ${PREFIX}/lib/libxapian.a =="
 ls -l "${PREFIX}/include/xapian.h" "${PREFIX}/lib/libxapian.a"
