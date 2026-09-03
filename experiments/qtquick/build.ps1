@@ -207,7 +207,50 @@ if ($Configuration -eq "Release") {
         $ksAlias   = if ($env:AURELEX_KEY_ALIAS)         { $env:AURELEX_KEY_ALIAS }         else { "androiddebugkey" }
         $ksKeyPass = if ($env:AURELEX_KEY_PASSWORD)      { $env:AURELEX_KEY_PASSWORD }      else { "android" }
         $bgPath = Join-Path $ApkDir "build.gradle"
-        $bg = Get-Content $bgPath -Raw
+        $bg = ""
+        if (Test-Path $bgPath) { $bg = Get-Content $bgPath -Raw }
+        if ($bg.Trim().Length -eq 0) {
+            # The carve-subset androiddeployqt --no-build may not generate
+            # build.gradle on a fresh tree. Write a minimal complete one with
+            # the signing config already embedded.
+            $bg = @"
+buildscript {
+    repositories { google(); mavenCentral() }
+    dependencies { classpath 'com.android.tools.build:gradle:7.4.1' }
+}
+repositories { google(); mavenCentral() }
+apply plugin: 'com.android.application'
+
+signingConfigs {
+    release {
+        storeFile file("$($ksPath -replace '\\', '/')")
+        storePassword "$ksPass"
+        keyAlias "$ksAlias"
+        keyPassword "$ksKeyPass"
+    }
+}
+android {
+    compileSdkVersion 34
+    buildToolsVersion "35.0.0"
+    defaultConfig {
+        applicationId 'aurelex.android'
+        minSdkVersion 28
+        targetSdkVersion 34
+        versionCode 1
+        versionName '0.0.1'
+        ndk { abiFilters 'arm64-v8a' 'x86_64' }
+    }
+    buildTypes {
+        release {
+            minifyEnabled false
+            signingConfig signingConfigs.release
+        }
+    }
+}
+"@
+            Set-Content $bgPath $bg -NoNewline
+            Write-Host "Wrote minimal build.gradle (carve-subset fresh tree)." -ForegroundColor Yellow
+        }
         if ($bg -notmatch "signingConfigs") {
             # Insert signing config before the android { } block
             $signBlock = @"
@@ -235,6 +278,34 @@ if ($Configuration -eq "Release") {
         }
     } else {
         Write-Host "No release keystore available; building unsigned release APK." -ForegroundColor Yellow
+        $bgPath = Join-Path $ApkDir "build.gradle"
+        if (-not (Test-Path $bgPath)) {
+            # Fresh carve-subset tree without androiddeployqt's build.gradle.
+            @"
+buildscript {
+    repositories { google(); mavenCentral() }
+    dependencies { classpath 'com.android.tools.build:gradle:7.4.1' }
+}
+repositories { google(); mavenCentral() }
+apply plugin: 'com.android.application'
+android {
+    compileSdkVersion 34
+    buildToolsVersion "35.0.0"
+    defaultConfig {
+        applicationId 'aurelex.android'
+        minSdkVersion 28
+        targetSdkVersion 34
+        versionCode 1
+        versionName '0.0.1'
+        ndk { abiFilters 'arm64-v8a' 'x86_64' }
+    }
+    buildTypes {
+        release { minifyEnabled false }
+    }
+}
+"@ | Set-Content $bgPath -NoNewline
+            Write-Host "Wrote minimal unsigned build.gradle (fresh tree)." -ForegroundColor Yellow
+        }
     }
 }
 
