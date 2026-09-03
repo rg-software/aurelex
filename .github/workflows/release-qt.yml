@@ -79,15 +79,16 @@ jobs:
         shell: pwsh
         run: |
           $cli = "$env:RUNNER_TEMP\cmdline-tools.zip"
+          $tmp = "$env:RUNNER_TEMP\cmdline-tools-extract"
           Invoke-WebRequest -UseBasicParsing -Uri "https://dl.google.com/android/repository/commandlinetools-win-11076708_latest.zip" -OutFile $cli
           New-Item -ItemType Directory -Force -Path "$env:ANDROID_SDK_ROOT\cmdline-tools" | Out-Null
-          Expand-Archive -Path $cli -DestinationPath "$env:ANDROID_SDK_ROOT\cmdline-tools" -Force
-          # Flatten cmdline-tools/version/... -> cmdline-tools/latest/...
-          $inner = Get-ChildItem "$env:ANDROID_SDK_ROOT\cmdline-tools" -Directory | Where-Object { $_.Name -ne "latest" }
-          foreach ($d in $inner) {
-            Move-Item (Join-Path $d.FullName "*") "$env:ANDROID_SDK_ROOT\cmdline-tools\latest" -Force
-            Remove-Item $d.FullName -Recurse -Force
-          }
+          if (Test-Path $tmp) { Remove-Item $tmp -Recurse -Force }
+          Expand-Archive -Path $cli -DestinationPath $tmp -Force
+          # The zip extracts to <tmp>/cmdline-tools/bin/sdkmanager.bat; rename
+          # that single inner dir to "latest" so the SDK layout is:
+          #   <sdk>/cmdline-tools/latest/bin/sdkmanager.bat
+          New-Item -ItemType Directory -Force -Path "$env:ANDROID_SDK_ROOT\cmdline-tools\latest" | Out-Null
+          Get-ChildItem (Join-Path $tmp "cmdline-tools") -Force | Move-Item -Destination "$env:ANDROID_SDK_ROOT\cmdline-tools\latest" -Force
           & "$env:ANDROID_SDK_ROOT\cmdline-tools\latest\bin\sdkmanager.bat" --sdk_root="$env:ANDROID_SDK_ROOT" `
             "platforms;android-34" "build-tools;35.0.0" "build-tools;36.0.0" "platform-tools"
 
