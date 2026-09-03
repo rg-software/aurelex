@@ -15,6 +15,9 @@
 #include <QJsonValue>
 #include <QXmlStreamReader>
 #include <QGuiApplication>
+#if defined(Q_OS_ANDROID)
+#include <QJniObject>
+#endif
 EngineController::EngineController(QObject *parent)
     : QObject(parent)
 {
@@ -327,30 +330,134 @@ void EngineController::setActiveGroup(int groupId) {
     w->setFuture(f);
 }
 
+void EngineController::groupDicts(int groupId) {
+    if (!m_ready) return;
+    QFuture<QVariantList> f = QtConcurrent::run([groupId]{
+        QVariantList list;
+        const int n = gd_dict_count();
+        if (n < 0) return list;
+        std::vector<int> members(static_cast<size_t>(n + 1));
+        int memberCount = 0;
+        const int rc = gd_group_dicts(groupId, members.data(), n + 1);
+        if (rc >= 0) memberCount = rc;
+        std::vector<char> name(256);
+        std::vector<char> file(512);
+        for (int i = 0; i < n; ++i) {
+            if (gd_dict_info(i, name.data(), static_cast<int>(name.size()),
+                             file.data(), static_cast<int>(file.size())) != 0) continue;
+            QVariantMap m;
+            m.insert("index", i);
+            m.insert("name", QString::fromLocal8Bit(name.data()));
+            m.insert("source", QString::fromLocal8Bit(file.data()));
+            QVector<int> idx; // position within the group's ordered membership
+            for (int k = 0; k < memberCount; ++k) if (members[k] == i) idx << k;
+            m.insert("member", !idx.isEmpty());
+            m.insert("memberIndex", idx.isEmpty() ? -1 : idx.first());
+            list.append(m);
+        }
+        return list;
+    });
+    auto *w = new QFutureWatcher<QVariantList>(this);
+    connect(w, &QFutureWatcher<QVariantList>::finished, this, [this, groupId, w]{
+        emit groupDictsReady(groupId, w->result());
+        w->deleteLater();
+    });
+    w->setFuture(f);
+}
+
+void EngineController::groupAddDict(int groupId, int dictIndex) {
+    if (!m_ready) return;
+    QFuture<int> f = QtConcurrent::run([groupId, dictIndex]{
+        return gd_group_add_dict(groupId, dictIndex);
+    });
+    auto *w = new QFutureWatcher<int>(this);
+    connect(w, &QFutureWatcher<int>::finished, this, [this, groupId, w]{
+        const int rc = w->result();
+        qInfo() << "[aurelex] groupAddDict group=" << groupId << "rc=" << rc;
+        if (rc != 0) setLastError(QStringLiteral("group_add_dict failed (rc=%1)").arg(rc));
+        w->deleteLater();
+    });
+    w->setFuture(f);
+}
+
+void EngineController::groupRemoveDict(int groupId, int dictIndex) {
+    if (!m_ready) return;
+    QFuture<int> f = QtConcurrent::run([groupId, dictIndex]{
+        return gd_group_remove_dict(groupId, dictIndex);
+    });
+    auto *w = new QFutureWatcher<int>(this);
+    connect(w, &QFutureWatcher<int>::finished, this, [this, groupId, w]{
+        const int rc = w->result();
+        qInfo() << "[aurelex] groupRemoveDict group=" << groupId << "rc=" << rc;
+        if (rc != 0) setLastError(QStringLiteral("group_remove_dict failed (rc=%1)").arg(rc));
+        w->deleteLater();
+    });
+    w->setFuture(f);
+}
+
+void EngineController::groupMoveDict(int groupId, int from, int to) {
+    if (!m_ready) return;
+    QFuture<int> f = QtConcurrent::run([groupId, from, to]{
+        return gd_group_move_dict(groupId, from, to);
+    });
+    auto *w = new QFutureWatcher<int>(this);
+    connect(w, &QFutureWatcher<int>::finished, this, [this, groupId, w]{
+        const int rc = w->result();
+        qInfo() << "[aurelex] groupMoveDict rc=" << rc;
+        if (rc != 0) setLastError(QStringLiteral("group_move_dict failed (rc=%1)").arg(rc));
+        w->deleteLater();
+    });
+    w->setFuture(f);
+}
+
 QString EngineController::rewriteArticleUrls(const QString &html) const {
     if (!m_articleServer || !m_articleServer->isRunning()) {
-        // Server hasn't bound yet (cold start, before EngineController's ctor
-        // finished). Return the raw HTML — the WebView will render unstyled
-        // and retry when the base URL becomes available. QML re-loads on
-        // articleBaseUrlChanged if needed.
         return html;
     }
     const QString base = m_articleServer->baseUrl(); // e.g. http://127.0.0.1:54321
     QString out = html;
-    // Order matters: bres/gdau MUST be replaced before the bare qrc:// since
-    // they share no syntax. The two URL forms in upstream HTML:
-    //   href="qrc:///scripts/jquery-3.6.0.slim.min.js"
-    //   src="bres://<dictId>/<path-in-mdd>"
-    //   href="gdau://<dictId>/<path>"
-    // All become absolute http URLs against the loopback server.
+    const int gdlookupBefore = out.count(QStringLiteral("gdlookup://localhost/"));
+    const int gdauBefore = out.count(QStringLiteral("gdau://"));
+    const int bresBefore = out.count(QStringLiteral("bres://"));
+    const int qrcBefore = out.count(QStringLiteral("qrc:///"));
+    out.replace(QStringLiteral("gdlookup://localhost/"), base + QStringLiteral("/gdlookup/"));
     out.replace(QStringLiteral("bres://"), base + QStringLiteral("/bres/"));
     out.replace(QStringLiteral("gdau://"), base + QStringLiteral("/gdau/"));
     out.replace(QStringLiteral("qrc:///"), base + QStringLiteral("/"));
+    qInfo() << "[article-rewrite]" << base
+            << "gdlookup:" << gdlookupBefore
+            << "gdau:" << gdauBefore
+            << "bres:" << bresBefore
+            << "qrc:" << qrcBefore;
     return out;
 }
 
 QString EngineController::articleBaseUrl() const {
     return (m_articleServer && m_articleServer->isRunning()) ? m_articleServer->baseUrl() : QString();
+}
+
+void EngineController::playAudio(const QString &url) {
+#if defined(Q_OS_ANDROID)
+    // JNI passthrough to ExperimentActivity.playAudio(String) — Android's
+    // MediaPlayer plays the loopback URL so the WebView keeps the article.
+    const QJniObject javaUrl = QJniObject::fromString(url);
+    QJniObject::callStaticMethod<void>(
+        "com/aurelex/experiment/ExperimentActivity",
+        "playAudio",
+        "(Ljava/lang/String;)V",
+        javaUrl.object<jstring>());
+#else
+    Q_UNUSED(url);
+#endif
+}
+
+void EngineController::stopAudio() {
+#if defined(Q_OS_ANDROID)
+    QJniObject::callStaticMethod<void>(
+        "com/aurelex/experiment/ExperimentActivity",
+        "stopAudio",
+        "()V");
+#endif
 }
 
 void EngineController::lookup(const QString &word) {

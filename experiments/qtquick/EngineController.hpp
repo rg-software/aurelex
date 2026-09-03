@@ -79,6 +79,16 @@ public:
     Q_INVOKABLE void deleteGroup(int groupId);
     Q_INVOKABLE void setActiveGroup(int groupId);
 
+    // Group membership editing. `dictIndex` is the GLOBAL dictionary index as
+    // listed in dictionaries(); the engine maps it into group membership.
+    // groupDicts(groupId) emits groupDictsReady(groupId, list) where each item
+    // is {index, memberIndex, name, source, member}. Group 0 ("All") owns every
+    // dict in global order and is not editable (the engine rejects id 0).
+    Q_INVOKABLE void groupDicts(int groupId);
+    Q_INVOKABLE void groupAddDict(int groupId, int dictIndex);
+    Q_INVOKABLE void groupRemoveDict(int groupId, int dictIndex);
+    Q_INVOKABLE void groupMoveDict(int groupId, int from, int to);
+
     // Full-text search. Index build (`gd_fts_index`) is heavy and runs on the
     // worker thread; the controller's `buildingFts` Q_PROPERTY flips while it's
     // in flight and `ftsIndexChanged(dictIndex)` fires on completion. State queries
@@ -144,6 +154,14 @@ public:
     Q_PROPERTY(QString articleBaseUrl READ articleBaseUrl NOTIFY articleBaseUrlChanged)
     QString articleBaseUrl() const;
 
+    // In-app audio playback. `url` is a loopback gdau URL the ArticleServer
+    // serves (http://127.0.0.1:PORT/gdau/<dictId>/<file>.wav). The QML WebView
+    // intercepts the anchor before navigation and hands it here; the bytes are
+    // played via the Android MediaPlayer in ExperimentActivity.playAudio, so
+    // the article stays on screen. Mirrors the shipped app's AudioPlayer.
+    Q_INVOKABLE void playAudio(const QString &url);
+    Q_INVOKABLE void stopAudio();
+
 signals:
     void dictCountChanged();
     void readyChanged();
@@ -157,6 +175,7 @@ signals:
     void ftsIndexChanged(int dictIndex);
     void ftsSearchReady(const QString &query, const QVariantList &results);
     void buildingFtsChanged();
+    void groupDictsReady(int groupId, const QVariantList &dicts);
     void historyChanged();
     void favoritesChanged();
     void darkModeChanged();

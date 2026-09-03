@@ -150,22 +150,28 @@ void ArticleServer::handle(QTcpSocket *socket, const QString &method, const QStr
             socket->disconnectFromHost();
             return;
         }
-        // APK sandbox: assets are exposed via qrc:/AurelexExp/assets/<suffix>
-        // for the QML/JS side, and via "assets:/<suffix>" for the asset
-        // provider — the C++ side uses QFile("assets:/<path>") which Qt
-        // resolves against the deployed APK assets on Android.
-        const QString rel = route.suffix;
-        const QStringList tried = {
+        // Mirror the shipped app's qrc:// -> assets resolution
+        // (ArticleWebView.serveQrc). The qrc URLs the engine emits are:
+        //   qrc:///scripts/jquery-3.6.0.slim.min.js   -> assets/scripts/...
+        //   qrc:///qtwebchannel/qwebchannel.js        -> assets/qtwebchannel/...
+        //   qrc:///icons/playsound.svg                -> assets/icons/...
+        //   qrc:///flags/<cc>.png                     -> assets/flags/...
+        //   qrc:///article-style.css                  -> assets/stylesheets/... (bare css)
+        //   qrc:///article-style-st-modern.css        -> assets/stylesheets/...
+        QString rel = route.suffix;
+        if (rel.endsWith(QStringLiteral(".css"), Qt::CaseInsensitive) && !rel.contains(QChar('/'))) {
+            rel = QStringLiteral("stylesheets/") + rel;
+        }
+        // Try the exact assets subdir first, then bare.
+        const QStringList candidates = {
             QStringLiteral("assets:/%1").arg(rel),
-            QStringLiteral(":/qt-project/aurelex_exp/assets/%1").arg(rel),
+            QStringLiteral("assets:/stylesheets/%1").arg(rel),
         };
         QByteArray body;
-        QString resolved;
-        for (const QString &candidate : tried) {
+        for (const QString &candidate : candidates) {
             QFile f(candidate);
             if (f.exists() && f.open(QIODevice::ReadOnly)) {
                 body = f.readAll();
-                resolved = candidate;
                 f.close();
                 break;
             }
@@ -217,6 +223,7 @@ void ArticleServer::handle(QTcpSocket *socket, const QString &method, const QStr
         // gdau paths often lack an extension; default to mp3 when unknown.
         contentType = QStringLiteral("audio/mpeg");
     }
+    qInfo() << "[article-server] GET" << route.suffix << "->" << sz << "bytes" << contentType;
     writeReply(socket, 200, QStringLiteral("OK"), contentType, QByteArray(buf.data(), sz),
                method == QStringLiteral("HEAD") ? 0 : -1);
     socket->disconnectFromHost();

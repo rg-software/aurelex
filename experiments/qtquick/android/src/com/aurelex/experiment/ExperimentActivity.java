@@ -3,6 +3,7 @@ package com.aurelex.experiment;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.media.MediaPlayer;
 import android.os.Bundle;
 
 import org.qtproject.qt.android.bindings.QtActivity;
@@ -19,6 +20,62 @@ import org.qtproject.qt.android.bindings.QtActivity;
  */
 public class ExperimentActivity extends QtActivity {
     private static final String TAG = "AurelexExp";
+
+    private static MediaPlayer sAudioPlayer = null;
+
+    /**
+     * Plays pronunciation audio from the loopback ArticleServer URL
+     * (http://127.0.0.1:PORT/gdau/<dictId>/<file>.wav). Mirrors the shipped
+     * app's AudioPlayer (MediaPlayer backend, wav/ogg/mp3; speex unsupported).
+     * Called from the native side via QAndroidJniObject on the UI thread.
+     */
+    public static void playAudio(String url) {
+        try {
+            if (sAudioPlayer != null) {
+                stopAudio();
+            }
+            if (url == null || url.isEmpty()) {
+                return;
+            }
+            if (url.endsWith(".spx")) {
+                android.util.Log.w(TAG, "speex audio unsupported: " + url);
+                return;
+            }
+            final MediaPlayer p = new MediaPlayer();
+            p.setDataSource(url);
+            p.setOnPreparedListener(mp -> mp.start());
+            p.setOnCompletionListener(mp -> releaseAudioPlayer());
+            p.setOnErrorListener((mp, what, extra) -> {
+                android.util.Log.e(TAG, "MediaPlayer error " + what + "/" + extra + " for " + url);
+                releaseAudioPlayer();
+                return true;
+            });
+            p.prepareAsync();
+            sAudioPlayer = p;
+            android.util.Log.i(TAG, "playing " + url);
+        } catch (Exception e) {
+            android.util.Log.e(TAG, "playAudio failed: " + e);
+        }
+    }
+
+    public static void stopAudio() {
+        try {
+            if (sAudioPlayer != null) {
+                sAudioPlayer.stop();
+                releaseAudioPlayer();
+            }
+        } catch (Exception e) {
+            android.util.Log.w(TAG, "stopAudio: " + e);
+        }
+    }
+
+    private static void releaseAudioPlayer() {
+        try {
+            if (sAudioPlayer != null) sAudioPlayer.release();
+        } catch (Exception ignored) {
+        }
+        sAudioPlayer = null;
+    }
 
     @Override
     public void onCreate(Bundle savedInstanceState) {

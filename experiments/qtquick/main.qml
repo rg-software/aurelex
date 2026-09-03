@@ -436,14 +436,46 @@ Window {
         color: root.bg
         visible: root.state === 3
 
+        // Membership editor state. editingGroup === -1 shows the group list;
+        // otherwise the group's dict membership editor is shown.
+        property int editingGroup: -1
+        property string editingGroupName: ""
+        property var groupMembers: []
+        property var groupNonMembers: []
+
+        function _openMembership(id, name) {
+            editingGroup = id
+            editingGroupName = name
+            engine.groupDicts(id)
+        }
+        function _refreshMembership() {
+            if (editingGroup !== -1) {
+                engine.groupDicts(editingGroup)
+                engine.refreshGroups()
+            }
+        }
+
         Component.onCompleted: engine.refreshGroups()
         Connections {
             target: engine
             function onGroupsChanged() { groupsList.model = engine.groups }
             function onReadyChanged() { if (engine.ready) engine.refreshGroups() }
+            function onGroupDictsReady(groupId, dicts) {
+                if (groupId !== groupsPane.editingGroup) return
+                const m = []
+                const nm = []
+                for (let i = 0; i < dicts.length; i++) {
+                    if (dicts[i].member) m.push(dicts[i])
+                    else nm.push(dicts[i])
+                }
+                groupsPane.groupMembers = m
+                groupsPane.groupNonMembers = nm
+            }
         }
 
+        // --- group list mode ---
         Column {
+            visible: groupsPane.editingGroup === -1
             anchors.fill: parent
             anchors.margins: 12
             spacing: 8
@@ -494,7 +526,7 @@ Window {
 
                         Column {
                             anchors.verticalCenter: parent.verticalCenter
-                            width: parent.width - 280
+                            width: parent.width - 470
                             spacing: 0
                             Text {
                                 text: groupRow.groupData.name + " (" + groupRow.groupData.dictCount + ")"
@@ -504,6 +536,19 @@ Window {
                             Text { text: "id=" + groupRow.groupData.id; color: root.subFg; font.pixelSize: 11 }
                         }
 
+                        Rectangle {
+                            width: 70
+                            height: 28
+                            anchors.verticalCenter: parent.verticalCenter
+                            visible: groupRow.groupData.id !== 0
+                            color: "#3a3a3a"
+                            Text { anchors.centerIn: parent; text: "Dicts"; color: "white"; font.pixelSize: 12 }
+                            MouseArea {
+                                anchors.fill: parent
+                                onClicked: groupsPane._openMembership(groupRow.groupData.id, groupRow.groupData.name)
+                            }
+                        }
+
                         Repeater {
                             model: [
                                 { label: "Active", op: "activate" },
@@ -511,7 +556,7 @@ Window {
                                 { label: "Delete", op: "delete" }
                             ]
                             delegate: Rectangle {
-                                width: 80
+                                width: 70
                                 height: 28
                                 color: modelData.op === "delete" ? "#882222"
                                     : modelData.op === "activate" ? "#224488" : "#3a3a3a"
@@ -526,6 +571,125 @@ Window {
                                         else if (op === "delete") engine.deleteGroup(id)
                                     }
                                 }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // --- membership editor mode ---
+        Column {
+            visible: groupsPane.editingGroup !== -1
+            anchors.fill: parent
+            anchors.margins: 12
+            spacing: 8
+
+            Row {
+                spacing: 10
+                height: 36
+                width: parent.width
+
+                Rectangle {
+                    width: 80
+                    height: 32
+                    anchors.verticalCenter: parent.verticalCenter
+                    color: "#555555"
+                    Text { anchors.centerIn: parent; text: "<- Back"; color: "white"; font.pixelSize: 13 }
+                    MouseArea { anchors.fill: parent; onClicked: groupsPane.editingGroup = -1 }
+                }
+
+                Text {
+                    anchors.verticalCenter: parent.verticalCenter
+                    color: root.fg
+                    font.pixelSize: 16; font.bold: true
+                    text: "Group: " + groupsPane.editingGroupName
+                }
+            }
+
+            Text { text: "In this group (" + groupsPane.groupMembers.length + ")"; color: root.subFg; font.pixelSize: 13 }
+
+            ListView {
+                id: memberList
+                width: parent.width
+                height: 190
+                clip: true
+                model: groupsPane.groupMembers
+                spacing: 4
+                delegate: Rectangle {
+                    id: memberRow
+                    property var rowData: modelData
+                    width: ListView.view.width
+                    height: 40
+                    color: root.card
+                    border.color: root.cardBorder
+                    Text {
+                        anchors.verticalCenter: parent.verticalCenter
+                        anchors.left: parent.left; anchors.leftMargin: 10
+                        width: parent.width - 250
+                        elide: Text.ElideMiddle
+                        text: memberRow.rowData.name; color: root.fg; font.pixelSize: 14
+                    }
+                    Row {
+                        anchors.right: parent.right; anchors.rightMargin: 6
+                        anchors.verticalCenter: parent.verticalCenter
+                        spacing: 6
+                        Repeater {
+                            model: ["Up", "Down", "Remove"]
+                            delegate: Rectangle {
+                                width: 70; height: 28
+                                color: modelData === "Remove" ? "#882222" : "#3a3a3a"
+                                Text { anchors.centerIn: parent; text: modelData; color: "white"; font.pixelSize: 12 }
+                                MouseArea {
+                                    anchors.fill: parent
+                                    onClicked: {
+                                        const pos = memberRow.rowData.memberIndex
+                                        const op = modelData
+                                        if (op === "Up" && pos > 0) engine.groupMoveDict(groupsPane.editingGroup, pos, pos - 1)
+                                        else if (op === "Down" && pos < groupsPane.groupMembers.length - 1) engine.groupMoveDict(groupsPane.editingGroup, pos, pos + 1)
+                                        else if (op === "Remove") engine.groupRemoveDict(groupsPane.editingGroup, memberRow.rowData.index)
+                                        groupsPane._refreshMembership()
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            Text { text: "Add dictionaries"; color: root.subFg; font.pixelSize: 13 }
+
+            ListView {
+                width: parent.width
+                height: parent.height - 36 - 190 - 60
+                clip: true
+                model: groupsPane.groupNonMembers
+                spacing: 4
+                delegate: Rectangle {
+                    id: nonMemberRow
+                    property var rowData: modelData
+                    width: ListView.view.width
+                    height: 40
+                    color: root.card
+                    border.color: root.cardBorder
+                    Text {
+                        anchors.verticalCenter: parent.verticalCenter
+                        anchors.left: parent.left; anchors.leftMargin: 10
+                        width: parent.width - 100
+                        elide: Text.ElideMiddle
+                        text: nonMemberRow.rowData.name; color: root.fg; font.pixelSize: 14
+                    }
+                    Rectangle {
+                        width: 70; height: 28
+                        anchors.right: parent.right; anchors.rightMargin: 6
+                        anchors.verticalCenter: parent.verticalCenter
+                        color: "#224488"
+                        Text { anchors.centerIn: parent; text: "Add"; color: "white"; font.pixelSize: 12 }
+                        MouseArea {
+                            anchors.fill: parent
+                            onClicked: {
+                                engine.groupAddDict(groupsPane.editingGroup, nonMemberRow.rowData.index)
+                                groupsPane._refreshMembership()
                             }
                         }
                     }
@@ -590,12 +754,30 @@ Window {
             // articleLoaded handler then sets state=2 and re-loads.
             onUrlChanged: {
                 const u = url.toString()
+                const base = engine.articleBaseUrl
+                if (base.length > 0 && u.indexOf(base + "/gdlookup/") === 0) {
+                    const word = _parseGdlookupHttpUrl(u, base)
+                    if (word.length > 0) {
+                        _gdlookupInFlight = word
+                        engine.lookup(word)
+                    }
+                    view.loadHtml("<html><body></body></html>", engine.articleBaseUrl)
+                    return
+                }
                 if (u.indexOf("gdlookup://") === 0) {
                     const word = _parseGdlookupUrl(u)
                     if (word.length > 0) {
                         _gdlookupInFlight = word
                         engine.lookup(word)
                     }
+                    view.loadHtml("<html><body></body></html>", engine.articleBaseUrl)
+                    return
+                }
+                if (base.length > 0 && u.indexOf(base + "/gdau/") === 0) {
+                    // Audio anchor: the ArticleServer serves the wav over
+                    // loopback. Play via Android MediaPlayer (in-app) instead of
+                    // navigating the WebView away from the article.
+                    engine.playAudio(u)
                     view.loadHtml("<html><body></body></html>", engine.articleBaseUrl)
                     return
                 }
@@ -633,6 +815,25 @@ Window {
     // Tracks the in-flight lookup triggered by a gdlookup click so we don't
     // re-trigger on the resulting onUrlChanged for the about:blank rewind.
     property string _gdlookupInFlight: ""
+
+    // Parse the loopback-rewritten form of a gdlookup link. rewriteArticleUrls
+    // maps gdlookup://localhost/<word> to http://127.0.0.1:PORT/gdlookup/<word>
+    // and gdlookup://localhost/?word=x&group=... to .../gdlookup/?word=x&group=...
+    function _parseGdlookupHttpUrl(u, base) {
+        const rest = u.substring((base + "/gdlookup/").length)
+        const q = rest.indexOf("?")
+        if (q >= 0) {
+            const params = rest.substring(q + 1).split("&")
+            for (let i = 0; i < params.length; ++i) {
+                const kv = params[i].split("=")
+                if (kv.length === 2 && kv[0] === "word") {
+                    return decodeURIComponent(kv[1].replace(/\+/g, " "))
+                }
+            }
+            return ""
+        }
+        return decodeURIComponent(rest)
+    }
 
     // --- history view ---
     Rectangle {
