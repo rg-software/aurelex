@@ -589,10 +589,27 @@ QVariantList EngineController::ftsSearch(const QString &query, int mode, int gro
 {
     if (!m_ready) return QVariantList();
     if (query.isEmpty()) return QVariantList();
-    qInfo() << "[aurelex] ftsSearch query='" << query << "' mode=" << mode << " group=" << groupId;
-    QFuture<QVariantList> f = QtConcurrent::run([query, mode, groupId]{
+    // Always prefix-search (no separate wildcard mode): in Xapian's wildcard
+    // mode a term without a trailing `*` matches exactly, so `boo` misses
+    // `book`. Normalize every term to end with `*` unless the user already
+    // supplied a wildcard, making plain queries behave like prefix searches.
+    QString norm = query;
+    if (mode == 2) {
+        QStringList parts;
+        const QStringList toks = query.split(QLatin1Char(' '), Qt::SkipEmptyParts);
+        for (const QString &t : toks) {
+            QString term = t;
+            if (!term.endsWith(QLatin1Char('*')) && !term.endsWith(QLatin1Char('?')))
+                term += QLatin1Char('*');
+            parts.append(term);
+        }
+        norm = parts.join(QLatin1Char(' '));
+    }
+    qInfo() << "[aurelex] ftsSearch query='" << query << "' norm='" << norm
+            << "' mode=" << mode << " group=" << groupId;
+    QFuture<QVariantList> f = QtConcurrent::run([norm, mode, groupId]{
         std::vector<char> buf(1 << 20);
-        const int n = gd_fts_search(query.toLocal8Bit().constData(), mode, groupId,
+        const int n = gd_fts_search(norm.toLocal8Bit().constData(), mode, groupId,
                                     buf.data(), static_cast<int>(buf.size()));
         qInfo() << "[aurelex]   gd_fts_search rc=" << n;
         if (n < 0) return QVariantList();

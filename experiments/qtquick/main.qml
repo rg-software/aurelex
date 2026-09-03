@@ -125,7 +125,8 @@ ApplicationWindow {
         state = 6
     }
     function _runFts() {
-        // Single v1 mode: Wildcards (FTS::SearchMode=2). See full-text-search.
+        // Single v1 mode: Wildcards (FTS::SearchMode=2); the engine additionally
+        // prefix-normalizes the query so plain terms match prefixes.
         engine.ftsSearch(ftsInput.text, 2, engine.activeGroupId)
     }
     // Navigation labels/icons for the bottom TabBar.
@@ -1142,15 +1143,14 @@ ApplicationWindow {
                 TextField {
                     id: ftsInput
                     Layout.fillWidth: true
-                    placeholderText: "Full-text query (supports * wildcards)"
+                    placeholderText: "Full-text prefix search"
                     font.pixelSize: 18
                     enabled: !engine.buildingFts
                     onAccepted: { ftsInput.focus = false; root._runFts() }
                 }
-                // 4.4: single search mode. Wildcards (FTS::SearchMode=2) is the
-                // mode that parses `read*`-style prefixes and matches a plain
-                // term exactly; Xapian-syntax/Plain/Regexp were cut for v1 (see
-                // full-text-search spec — Wildcards subsumes plain matching).
+                // 4.4: single search mode. Query terms are always treated as
+                // prefixes (the engine appends a wildcard to each term); there
+                // is no separate wildcard/plain mode.
             }
 
             // 8.1: index-build progress bar.
