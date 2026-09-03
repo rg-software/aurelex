@@ -1,39 +1,74 @@
-# ROADMAP
+# Aurelex Roadmap
 
-Ordered feature backlog for the Aurelex Android dictionary app. Each item
-flows through the normal OpenSpec change pipeline (propose → specs → design →
-tasks) before implementation; this doc records intended order and priority
-only. Source of truth for scope is the v1 design's cut-scope register
-(`openspec/changes/archive/2026-08-31-goldendict-mobile-port/design.md`).
+Working milestones for the mobile port of goldendict-ng. Implemented scope is in
+`openspec/changes/archive/` (the archived changes) and the main specs under
+`openspec/specs/`. This file tracks **candidate** next milestones so nothing is
+lost; each is picked up through a new OpenSpec change (proposal → design →
+specs → tasks) before implementation.
 
-## In progress
+Status legend: 🟢 planned · 🔵 in progress · ✅ done · ⏸ parked
 
-- `distribution-and-polish`: signed CI releases (AAB + APK), versioning,
-  signing strategy, app icon, onboarding + empty states.
+## Completed (baseline)
 
-## Done (shipped via archived changes)
+- ✅ Mobile MVP: search + article rendering + dictionary management (mdict/DSL/
+  StarDict), separate-process engine, SAF scanning, dark mode, engine smoke CI.
+  See `openspec/changes/archive/2026-08-31-goldendict-mobile-port/`.
+- ✅ Everyday usability (utilities) — share-sheet / intent lookup, clipboard
+  lookup, history, favorites, TTS, settings persistence. `everyday-usability-utilities`
+  archived 2026-08-31 (14/14).
+- ✅ Multi-group management — group CRUD + reorder via the boundary.
+  `multi-group-management` archived 2026-09-01 (12/12).
+- ✅ Full-text search (xapian) — FTS in the carve, `gd_fts_*` boundary calls,
+  FTS UI. Prefix matching (`read*`), auto index build, active-group scoping
+  verified on-device. `full-text-search` archived 2026-09-01. Wildcard
+  expansion is handled by `patches/0003-fts-wildcards-expansion-cap.patch`
+  (upstream caps at 1 term → raised to 100), applied and verified on-device.
+- ✅ Quick-settings tile / home-screen widget. `quick-lookup-shortcuts` archived
+  2026-09-01 (17/20; tile clipboard lookup + widget verified on-device).
+  ⚠️ The widget is a styled shortcut, not a search field (RemoteViews cannot
+  capture typed text); tapping it opens the search screen.
+- ✅ Distribution & polish — signed release APK, GitHub/F-Droid, app icon,
+  onboarding/empty state. `distribution-and-polish` + `release-qt.yml` CI.
+- ✅ Dark mode — manual toggle + follows-system (JNI system-dark read),
+  Material palette. `qt-material-ui` archived (code done; the on-device
+  dark/light re-palette task 3.4 was not re-run before archive).
+- ✅ Folder-scoped storage — SAF folder picker, sources model, recursive scan,
+  staged private copies, no All-Files-Access, intersecting-source dedup.
+  `folder-scoped-storage`, archived 2026-09-03 (24/25; 5.5 partial).
 
-- Lookup, dictionary management (mdict / DSL / StarDict), groups
-- Multi-group management
-- Full-text search (xapian re-enabled)
-- Launcher shortcuts: Quick Settings tile + home-screen search widget
-- History, favorites, text-to-speech, clipboard lookup
-- Share-sheet / intent lookup and `ACTION_PROCESS_TEXT` selection lookup
-- Dark mode for the article view (WebView reload on same-word HTML change;
-  verified on-device)
+## In progress (not yet archived)
 
-## Priority queue (not yet proposed)
+- 🔵 **Bulk FTS indexing background service** (`bulk-fts-indexing`, 6/11
+  done): auto-index-missing on scan + dropping the per-dict Index button are
+  done; remaining: the foreground `IndexingService` (3.1–3.3) so a long build
+  survives backgrounding, and the on-device verification pass (4.1–4.4).
 
-| # | Feature | Boundary/engine? | Notes |
-| --- | --- | --- | --- |
-| 1 | **Dictionary storage: sandbox folder by default, system-wide as explicit opt-in** | pure Kotlin (storage/SAF) | On Android 15 the system folder picker only lets an app use folders once the user grants "All files access" (Settings → All files access). Dictionary files can be arbitrary and live anywhere, so default to a **private sandbox** the user can reach (expose app storage via a FileProvider/DocumentsProvider `content://` URI so the Files app can copy dictionaries in, plus a "Scan sandbox" action). Optionally keep **system-wide file locations** as a user-granted setting that wakes the full folder picker. Model: sandbox = default & safe; full access = explicit, user-granted. |
-| 2 | **Dark mode follows system setting** | pure Kotlin | Currently dark is only a manual in-app toggle. Make it default to / follow the system `isSystemInDarkTheme()`, keeping the manual override. |
-| 3 | **Remove the persistent engine notification; keep it only during indexing** | Kotlin (service lifecycle) | **Problem:** the app always shows a foreground-service notification ("engine running") even when the user is just looking up words. The engine is a separate process (`EngineService` runs under `android:process=":engine"`) because the carve links real Qt 6 (`libQt6Gui`) and loading it into the Compose/WebView UI process previously broke HWUI rendering (blank UI — see commit `2b106f2`, and the "Do not shim Qt types" rule in AGENTS.md). That separation forces *some* host component (a Service) to own the engine's lifecycle, but it does **not** require a persistent notification. **Fix (recommended):** make `EngineService` a **bound** service (`BIND_AUTO_CREATE`) bound from the app/UI process, and only elevate it to a foreground service **during long-running work** — first dictionary scan/index and FTS index builds (`startForegroundService` + `startForeground()` at task start, `stopForeground()` at completion). Steady-state lookups then run with no notification; when the user backgrounds the app, Android may kill the engine process and the existing `MainViewModel.resumeScan` re-scans the staged folder on return (self-healing, though a large bundle re-inits). **Rejected alternatives:** (a) merging the engine into the UI/Application process via JNI to skip the Service entirely is **not viable as-is** — it reintroduces Qt-into-UI-process crashes and needs a carve/architecture design decision first; (b) coupling `bind`/`unbind` strictly to the Activity lifecycle would re-init the engine on every Home/Recents round-trip, which is worse for everyday use. |
-| 4 | Translate-later / word-list export | pure Kotlin | Collect words, share/export a list. |
-| 5 | Pre-built desktop-generated index caches | boundary (cache format) | Copy index caches along with dictionaries. |
+## Candidate future milestones
 
-## Parked (cut for v1, may return)
+- 🟢 **Translate-later / word-list export** — extract headwords/definitions to
+  a file/anki. (Not yet proposed.)
+- 🟢 **Pre-built desktop-generated index caches** — copy indexes along with
+  dictionaries to skip on-device indexing. Boundary (cache format). (Not yet
+  proposed.)
+- 🟢 **Widget fills search with clipboard** — alternative to the widget-as-
+  shortcut limitation: tapping the widget copies the clipboard text into the
+  in-app search field (or starts lookup directly), reusing the tile's
+  clipboard-read path. Needs an on-device check that the clipboard read happens
+  in the foreground activity (Android 10+), same as the tile.
 
-Remaining (b)-list items from the cut-scope register not yet queued above.
-(a)-list items (tray, hotkeys, scan popup, print/PDF, desktop preferences
-surface) are cut permanently on mobile.
+## Cut permanently (no future plans)
+
+See the v1 design's cut-scope register (`(a) No sense on mobile`): system tray,
+global hotkeys, scan/hover popup, mouse gestures, external-program integration,
+print/PDF, full desktop preferences surface.
+
+## How to pick the next milestone
+
+1. Open a new OpenSpec change (`openspec new change <name>`).
+2. Draft proposal → design → specs → tasks (default `spec-driven` schema).
+3. Implement via the OpenSpec apply workflow.
+4. Verify on-device, archive, then update this file.
+
+Engine-touching milestones (FTS wildcard patch, pre-built index caches) go
+through the patch pipeline (`patches/` + CI smoke); pure-QML milestones
+(word-list export, widget clipboard) do not.
