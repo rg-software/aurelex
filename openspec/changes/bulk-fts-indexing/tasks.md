@@ -1,12 +1,12 @@
 ## 1. Automatic bulk indexing
 
-- [ ] 1.1 Add `autoIndexMissing()` to `EngineController`: list dicts where `gd_fts_index_state==1`, build them sequentially in one `QtConcurrent::run` while `buildingFts` stays true, emit `ftsIndexChanged` per dict as each completes, then clear `buildingFts`.
-- [ ] 1.2 Call `autoIndexMissing()` from the `runScan` completion handler (after refreshDictionaries/refreshGroups), so it runs on initial load and every rescan; skip when `buildingFts` is already set.
+- [x] 1.1 Add `autoIndexMissing()` to `EngineController`: list dicts where `gd_fts_index_state==1`, build them sequentially in one `QtConcurrent::run` while `buildingFts` stays true, emit `ftsIndexChanged` per dict as each completes, then clear `buildingFts`.
+- [x] 1.2 Call `autoIndexMissing()` from the `runScan` completion handler (after refreshDictionaries/refreshGroups), so it runs on initial load and every rescan; skip when `buildingFts` is already set.
 
 ## 2. UI: drop the per-dict Index button
 
-- [ ] 2.1 Remove the per-dictionary "Index" ToolButton from the Dicts pane row (indexing is automatic now).
-- [ ] 2.2 Keep the FTS pane's single indeterminate `buildingFts` ProgressBar ("Indexing..." label) covering the bulk build; verify it appears during a build.
+- [x] 2.1 Remove the per-dictionary "Index" ToolButton from the Dicts pane row (indexing is automatic now).
+- [x] 2.2 Keep the FTS pane's single indeterminate `buildingFts` ProgressBar ("Indexing..." label) covering the bulk build; verify it appears during a build.
 
 ## 3. Background service for long builds
 
