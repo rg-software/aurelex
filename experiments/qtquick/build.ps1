@@ -168,10 +168,21 @@ $sdkDir = if ($env:AURELEX_ANDROID_SDK) { $env:AURELEX_ANDROID_SDK } else { "C:\
 $sdkProp = ($sdkDir -replace '\\', '/') -replace ':', '\:'
 Set-Content (Join-Path $ApkDir "local.properties") "sdk.dir=$sdkProp" -NoNewline
 $gpPath = Join-Path $ApkDir "gradle.properties"
-$gp = Get-Content $gpPath -Raw
-$gp = $gp -replace 'androidCompileSdkVersion=android-\d+', 'androidCompileSdkVersion=android-34'
-$gp = $gp -replace 'androidBuildToolsVersion=[\d.]+', 'androidBuildToolsVersion=35.0.0'
-Set-Content $gpPath $gp -NoNewline
+# androiddeployqt in the carve-subset kit may not generate gradle.properties on
+# a fresh tree (it exists locally only because a prior run left it behind). If
+# absent, write one with our pinned values; otherwise patch the existing file.
+if (-not (Test-Path $gpPath)) {
+    @'
+androidCompileSdkVersion=android-34
+androidBuildToolsVersion=35.0.0
+org.gradle.jvmargs=-Xmx2g
+'@ | Set-Content $gpPath -NoNewline
+} else {
+    $gp = Get-Content $gpPath -Raw
+    $gp = $gp -replace 'androidCompileSdkVersion=android-\d+', 'androidCompileSdkVersion=android-34'
+    $gp = $gp -replace 'androidBuildToolsVersion=[\d.]+', 'androidBuildToolsVersion=35.0.0'
+    Set-Content $gpPath $gp -NoNewline
+}
 # settings.gradle must scope this build away from the repo's settings.gradle.kts
 if (-not (Test-Path (Join-Path $ApkDir "settings.gradle"))) {
     Set-Content (Join-Path $ApkDir "settings.gradle") 'rootProject.name = "aurelex-exp"'
