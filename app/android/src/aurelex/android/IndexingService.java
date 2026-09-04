@@ -53,7 +53,14 @@ public class IndexingService extends Service {
         try {
             final Context app = context.getApplicationContext();
             final Intent intent = new Intent(app, IndexingService.class);
-            ContextCompat.startForegroundService(app, intent);
+            // Use startService (allowed while the app is foreground) instead of
+            // startForegroundService: the latter requires startForeground() within
+            // ~5s of the call, which on a cold start can be delayed past the limit
+            // by Qt/engine main-thread init -> ForegroundServiceDidNotStartInTime
+            // -> the crash-relaunch loop we've hit. Our onCreate() calls
+            // startForeground() immediately, so the service is a proper FGS by the
+            // time the system checks.
+            app.startService(intent);
             android.util.Log.i(TAG, "IndexingService starting");
         } catch (Exception e) {
             android.util.Log.e(TAG, "IndexingService.start failed: " + e);

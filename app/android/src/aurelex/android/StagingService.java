@@ -56,7 +56,13 @@ public class StagingService extends Service {
             final Intent intent = new Intent(app, StagingService.class);
             intent.putExtra(EXTRA_TREE_URI, treeUri.toString());
             intent.putExtra(EXTRA_DISPLAY, display == null ? "" : display);
-            ContextCompat.startForegroundService(app, intent);
+            // Use startService (allowed while the app is foreground) instead of
+            // startForegroundService: the latter requires startForeground() within
+            // ~5s of the call, which on a cold start can be delayed past the limit
+            // by Qt/engine main-thread init -> ForegroundServiceDidNotStartInTime.
+            // Our onCreate() calls startForeground() immediately, so the service
+            // is always a proper FGS by the time it matters.
+            app.startService(intent);
             android.util.Log.i(TAG, "StagingService starting for " + display);
             return true;
         } catch (Exception e) {
