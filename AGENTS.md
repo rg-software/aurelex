@@ -48,8 +48,10 @@ milestone tracker).
   (archived `goldendict-mobile-port` design under `openspec/changes/archive/`) and
   `docs/ROADMAP.md`.
 - **Audio:** ogg/mp3/wav play; speex (`.spx`) is unsupported-but-graceful in v1.
-- **Storage:** dictionaries are added via folder-scoped SAF pickers; supported files are
-  stage-copied into app-private `files/staged/` and scanned recursively. No `MANAGE_EXTERNAL_STORAGE`.
+- **Storage:** dictionaries are imported one-off via folder-scoped SAF pickers:
+  supported files are stage-copied into app-private `files/staged/` and scanned
+  recursively. There is no persistent "sources" list and no Rescan; removing a
+  dictionary permanently deletes its staged copy and index. No `MANAGE_EXTERNAL_STORAGE`.
 
 ## OpenSpec commands
 

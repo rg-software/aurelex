@@ -32,9 +32,10 @@ Status legend: 🟢 planned · 🔵 in progress · ✅ done · ⏸ parked
 - ✅ Dark mode — manual toggle + follows-system (JNI system-dark read),
   Material palette. `qt-material-ui` archived (code done; the on-device
   dark/light re-palette task 3.4 was not re-run before archive).
-- ✅ Folder-scoped storage — SAF folder picker, sources model, recursive scan,
-  staged private copies, no All-Files-Access, intersecting-source dedup.
-  `folder-scoped-storage`, archived 2026-09-03 (24/25; 5.5 partial).
+- ✅ Folder-scoped storage — SAF folder picker, one-off import model, recursive
+  scan, staged private copies, no All-Files-Access, intersecting-source dedup.
+  `folder-scoped-storage`, archived 2026-09-03 (24/25; 5.5 partial); the
+  sources/Rescan model was later replaced by one-off import (`one-off-dictionary-import`).
 
 ## In progress (not yet archived)
 

@@ -25,19 +25,18 @@ patches and build the Qt app (JDK 17, see `app/build.ps1`):
 This adb-installs the result (`-Install`); without it the APK lands in
 `build-qtquick/apk/build/outputs/apk/debug/`. The package is `aurelex.android`.
 
-## Dictionary management (folder-scoped SAF)
+## Dictionary management (one-off import, folder-scoped SAF)
 
 | # | How to test | Expected | Status |
 | --- | --- | --- | --- |
 | 1 | Dictionaries tab → "Add dictionaries" | The Android folder picker (SAF) opens; pick a folder with mdx / dsl(.dz) / ifo files | ✅ |
-| 2 | After picking, check the Dictionaries list | Files scanned recursively (subfolders included); entries listed with filename | ✅ |
-| 3 | The source appears under "Sources" | Shows the picked folder (path) + "(staged into app storage)" badge | ✅ |
-| 4 | Add an intersecting folder (e.g. a subfolder of an existing source) | The same dictionary is not duplicated (staged-copy dedup) | ✅ |
-| 5 | Re-add the same folder again | No duplicate entries (dedup by id), count unchanged | ✅ |
-| 6 | Reorder with ↑/↓ | List order changes; article dictionary order follows | ✅ |
-| 7 | Remove a source (Remove button on a Sources row) | Its dictionaries vanish from list/lookup/FTS; the staged copies are deleted; the original folder is untouched | ✅ |
-| 8 | Remove a dictionary (confirm dialog) | Entry removed; search no longer returns its words | ✅ |
-| 9 | Remove the only source / no dictionaries | Empty search state / onboarding hint appears | ✅ |
+| 2 | After picking, check the Dictionaries list | Files scanned recursively (subfolders included); entries listed once imported | ✅ |
+| 3 | Watch the Dicts banner during import | "Preparing dictionaries…" → "Scanning dictionaries…" → progress bars while indexing | ✅ |
+| 4 | Add an intersecting folder (e.g. a subfolder of an already-imported folder) | The same dictionary is not duplicated (staged-copy dedup) | ✅ |
+| 5 | Re-import the same folder again | No duplicate entries (dedup by id), count unchanged | ✅ |
+| 6 | Reorder within a group (Groups tab) | Group article order follows membership order | ✅ |
+| 7 | Remove a dictionary (confirm dialog) | Entry removed; search no longer returns its words; its staged copy + index are deleted (Reload after removal confirms it's gone) | ✅ |
+| 8 | No dictionaries / import a folder with none | Empty state / onboarding hint appears; "no supported dictionaries" is shown | ✅ |
 
 ## Groups
 
