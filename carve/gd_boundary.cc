@@ -27,7 +27,9 @@
 #include <QEventLoop>
 #include <QTimer>
 #include <QUrl>
+#include <QStringList>
 #include <cstring>
+#include <exception>
 #include <mutex>
 #include <string>
 #include <vector>
@@ -68,6 +70,18 @@ struct EngineState
   unsigned activeGroupId   = 0;
   unsigned nextGroupId     = 1;
   vector< GroupDef > groupDefs;
+
+  // Primary dictionary files that failed to load in the most recent
+  // gd_scan_dicts calls (a corrupt/truncated/unparseable source). Consumed by
+  // gd_scan_failures() so the app can surface exactly which dictionaries are
+  // broken and tell the user to re-add the folder.
+  QStringList lastScanFailures;
+
+  // Dictionary currently being full-text indexed, kept alive by a shared ref
+  // so a progress reader (UI poller) can sample getIndexingFtsProgress() even
+  // while gd_fts_index is mid-build. Guarded by g_ftsProgressMutex (never by
+  // g_engineMutex, so the poller never blocks behind a long build).
+  sptr< Dictionary::Class > ftsProgressDict;
 };
 
 // Minimal Dictionary::Initializing — indexing progress is surfaced by the
@@ -84,6 +98,12 @@ EngineState * g_state = nullptr;
 // Kotlin calls through JNI on a background dispatcher, so serialize every
 // entry point here. All gd_* functions are blocking and share g_state.
 std::mutex g_engineMutex;
+
+// Separate mutex for the FTS-progress slot. A long gd_fts_index build holds
+// g_engineMutex for the whole run; a progress reader must be able to read the
+// current build's percentage WITHOUT blocking behind it, so it never touches
+// g_engineMutex. Lock order is always g_engineMutex -> g_ftsProgressMutex.
+std::mutex g_ftsProgressMutex;
 
 vector< string > collectFiles( const QString & dirPath, const QStringList & filters )
 {
@@ -226,33 +246,68 @@ int gd_scan_dicts( const char * folder )
   for ( const auto & d : g_state->dictionaries )
     loadedIds.insert( QString::fromStdString( d->getId() ) );
 
-  auto stardicts = Stardict::makeDictionaries( files, idxPath, sink, 500000 );
-  auto mdxs      = Mdx::makeDictionaries( files, idxPath, sink );
-  auto dsls      = Dsl::makeDictionaries( files, idxPath, sink, 500000 );
-
-  auto keepIfNew = [ &loadedIds ]( auto & v ) {
-    auto it = std::remove_if( v.begin(), v.end(), [ &loadedIds ]( const auto & d ) {
-      return loadedIds.contains( QString::fromStdString( d->getId() ) );
-    } );
-    v.erase( it, v.end() );
-    for ( auto & d : v )
-      loadedIds.insert( QString::fromStdString( d->getId() ) );
+  // Load the dictionary backends ONE PRIMARY FILE at a time, each wrapped in
+  // its own try/catch. A corrupt or truncated source (a killed stage-copy, a
+  // truncated .mdx/.dsl.dz, a bad .ifo) must never crash the process NOR hide
+  // the good dictionaries sitting next to it. Upstream batches a whole format
+  // into one makeDictionaries call and aborts the batch on the first throw;
+  // here one bad file is isolated, recorded, and the scan continues. This is
+  // the ONLY boundary deviation from upstream (never editing engine sources).
+  auto loadPrimary = [ & ]( const string & primary, auto factory ) {
+    vector< sptr< Dictionary::Class > > made;
+    try {
+      made = factory();
+    }
+    catch ( const std::exception & e ) {
+      qWarning( "GD: dictionary load failed for %s: %s", primary.c_str(), e.what() );
+      g_state->lastScanFailures.append( QString::fromLocal8Bit( primary.c_str() ) );
+      return;
+    }
+    catch ( ... ) {
+      qWarning( "GD: dictionary load failed for %s (unknown error)", primary.c_str() );
+      g_state->lastScanFailures.append( QString::fromLocal8Bit( primary.c_str() ) );
+      return;
+    }
+    // An unopenable/truncated primary does NOT throw in every backend — some
+    // (mdx) just fail to open and return nothing. Treat a primary that produced
+    // zero dictionaries as broken too, so the user is told it is missing. The
+    // only legitimately-empty primaries are abbreviation files ("*_abrv"), which
+    // the backends skip on purpose; never flag those.
+    const bool isAbbreviation =
+      QString::fromLocal8Bit( primary.c_str() ).toLower().contains( QLatin1String( "_abrv" ) );
+    if ( made.empty() && !isAbbreviation ) {
+      qWarning( "GD: dictionary failed to load (unreadable or no entries): %s", primary.c_str() );
+      g_state->lastScanFailures.append( QString::fromLocal8Bit( primary.c_str() ) );
+      return;
+    }
+    for ( auto & d : made ) {
+      const QString id = QString::fromStdString( d->getId() );
+      if ( loadedIds.contains( id ) )
+        continue;
+      loadedIds.insert( id );
+      d->setFTSParameters( g_state->cfg.preferences.fts );
+      g_state->dictionaries.push_back( std::move( d ) );
+    }
   };
-  keepIfNew( stardicts );
-  keepIfNew( mdxs );
-  keepIfNew( dsls );
 
-  for ( auto & d : stardicts ) {
-    d->setFTSParameters( g_state->cfg.preferences.fts );
-    g_state->dictionaries.push_back( std::move( d ) );
-  }
-  for ( auto & d : mdxs ) {
-    d->setFTSParameters( g_state->cfg.preferences.fts );
-    g_state->dictionaries.push_back( std::move( d ) );
-  }
-  for ( auto & d : dsls ) {
-    d->setFTSParameters( g_state->cfg.preferences.fts );
-    g_state->dictionaries.push_back( std::move( d ) );
+  for ( const auto & f : files ) {
+    const QString fn = QString::fromUtf8( f.c_str() );
+    if ( fn.endsWith( QLatin1String( ".mdx" ), Qt::CaseInsensitive ) ) {
+      loadPrimary( f, [ & ] {
+        return Mdx::makeDictionaries( vector< string >{ f }, idxPath, sink );
+      } );
+    }
+    else if ( fn.endsWith( QLatin1String( ".dsl.dz" ), Qt::CaseInsensitive )
+              || fn.endsWith( QLatin1String( ".dsl" ), Qt::CaseInsensitive ) ) {
+      loadPrimary( f, [ & ] {
+        return Dsl::makeDictionaries( vector< string >{ f }, idxPath, sink, 500000 );
+      } );
+    }
+    else if ( fn.endsWith( QLatin1String( ".ifo" ), Qt::CaseInsensitive ) ) {
+      loadPrimary( f, [ & ] {
+        return Stardict::makeDictionaries( vector< string >{ f }, idxPath, sink, 500000 );
+      } );
+    }
   }
 
   g_state->articleMaker =
@@ -261,18 +316,50 @@ int gd_scan_dicts( const char * folder )
   return static_cast< int >( g_state->dictionaries.size() - before );
 }
 
+int gd_scan_failures( char * out, int out_size )
+{
+  std::lock_guard< std::mutex > lock( g_engineMutex );
+  if ( !g_state )
+    return -1;
+  if ( g_state->lastScanFailures.isEmpty() )
+    return 0;
+  if ( !out || out_size <= 0 )
+    return -1;
+  const QStringList list = g_state->lastScanFailures;
+  g_state->lastScanFailures.clear(); // consume
+  QString joined = list.join( QLatin1Char( '\n' ) );
+  if ( joined.size() + 1 > out_size )
+    return -2;
+  std::memcpy( out, joined.toLocal8Bit().constData(), joined.size() + 1 );
+  return list.size();
+}
+
 int gd_suggest( const char * word, char * out, int out_size )
 {
   std::lock_guard< std::mutex > lock( g_engineMutex );
   if ( !g_state || !out || out_size <= 0 )
     return -1;
 
+  // Suggest only within the active group (0 = "All"), matching gd_lookup's
+  // scoping so the Search tab's selected group scopes suggestions too. groups[0]
+  // is always "All"; group i (>=1) corresponds to groupDefs[i-1].
+  const vector< sptr< Dictionary::Class > > * dicts = &g_state->dictionaries;
+  const unsigned active = g_state->activeGroupId;
+  if ( active != 0 ) {
+    for ( size_t i = 0; i < g_state->groupDefs.size(); ++i ) {
+      if ( g_state->groupDefs[ i ].id == active ) {
+        dicts = &g_state->groups[ i + 1 ].dictionaries;
+        break;
+      }
+    }
+  }
+
   WordFinder wf( nullptr );
   bool done = false;
   QObject::connect( &wf, &WordFinder::finished, &wf, [ &done ]() {
     done = true;
   } );
-  wf.prefixMatch( QString::fromUtf8( word ), g_state->dictionaries, 100 );
+  wf.prefixMatch( QString::fromUtf8( word ), *dicts, 100 );
 
   // Drive the async search to completion with a real event loop (WordFinder
   // uses a 1s results timer + queued signals). Bounded at ~10s.
@@ -309,6 +396,37 @@ int gd_lookup( const char * word, char * out, int out_size )
 
   // ArticleRequest delivers via queued signals; pump a real event loop
   // (bounded). Keep req alive until it is truly finished.
+  QEventLoop loop;
+  QTimer::singleShot( 15000, &loop, &QEventLoop::quit );
+  QObject::connect( req.get(), &Dictionary::Request::finished, &loop, &QEventLoop::quit );
+  if ( !req->isFinished() )
+    loop.exec();
+
+  if ( !req->isFinished() )
+    return -3;
+
+  const auto & data = req->getFullData();
+  if ( out_size <= static_cast< int >( data.size() ) )
+    return -4;
+
+  std::memcpy( out, data.data(), data.size() );
+  out[ data.size() ] = '\0';
+  return static_cast< int >( data.size() );
+}
+
+int gd_lookup_in_group( const char * word, int group_id, char * out, int out_size )
+{
+  std::lock_guard< std::mutex > lock( g_engineMutex );
+  if ( !g_state || !out || out_size <= 0 || group_id < 0 )
+    return -1;
+
+  const QString w = QString::fromUtf8( word );
+  // Scope to an explicit group (0 = "All"), independent of the active group —
+  // used so a result from a scoped context (e.g. FTS tab) opens in the same
+  // group it was found in.
+  auto req = g_state->articleMaker->makeDefinitionFor(
+    w, static_cast< unsigned >( group_id ), QMap< QString, QString >(), QSet< QString >(), QStringList(), false );
+
   QEventLoop loop;
   QTimer::singleShot( 15000, &loop, &QEventLoop::quit );
   QObject::connect( req.get(), &Dictionary::Request::finished, &loop, &QEventLoop::quit );
@@ -419,6 +537,20 @@ int gd_dict_info( int index, char * name, int name_size, char * file, int file_s
     return -1;
   std::memcpy( file, f.c_str(), f.size() + 1 );
 
+  return 0;
+}
+
+int gd_dict_id( int index, char * out, int out_size )
+{
+  if ( !g_state || !out || out_size <= 0 )
+    return -1;
+  std::lock_guard< std::mutex > lock( g_engineMutex );
+  if ( index < 0 || index >= static_cast< int >( g_state->dictionaries.size() ) )
+    return -1;
+  const string id = g_state->dictionaries[ index ]->getId();
+  if ( static_cast< int >( id.size() ) + 1 > out_size )
+    return -1;
+  std::memcpy( out, id.c_str(), id.size() + 1 );
   return 0;
 }
 
@@ -695,17 +827,50 @@ int gd_fts_index( int dict_index )
   if ( !d.canFTS() )
     return -1; // not full-text searchable
 
+  // Register the current build so a UI poller can sample live progress via
+  // gd_fts_progress. Guarded by g_ftsProgressMutex (not g_engineMutex), so the
+  // poller never blocks behind the long build; the sptr keeps the dict alive
+  // even if the app concurrently rescans/removes it.
+  {
+    std::lock_guard< std::mutex > plock( g_ftsProgressMutex );
+    g_state->ftsProgressDict = g_state->dictionaries[ dict_index ];
+  }
+
   // makeFTSIndex() is the dict backend's virtual override (builds or reuses
   // the xapian index). Blocking by design (D4): Kotlin drives it on the
   // engine's single worker thread and shows a "building" state itself.
   QAtomicInt isCancelled;
+  int rc = 0;
   try {
     d.makeFTSIndex( isCancelled );
   }
   catch ( std::exception & ) {
-    return -1;
+    rc = -1;
   }
-  return 0;
+
+  {
+    std::lock_guard< std::mutex > plock( g_ftsProgressMutex );
+    g_state->ftsProgressDict.reset();
+  }
+  return rc;
+}
+
+int gd_fts_progress( int * out_percent )
+{
+  if ( !out_percent )
+    return -1;
+  *out_percent = 0;
+  sptr< Dictionary::Class > dict;
+  {
+    std::lock_guard< std::mutex > plock( g_ftsProgressMutex );
+    if ( g_state )
+      dict = g_state->ftsProgressDict;
+  }
+  if ( !dict )
+    return 0; // no build in flight
+  int pct = dict->getIndexingFtsProgress();
+  *out_percent = pct < 0 ? 0 : ( pct > 100 ? 100 : pct );
+  return 1;
 }
 
 int gd_fts_index_state( int dict_index, int * out )

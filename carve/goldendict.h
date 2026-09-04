@@ -19,6 +19,9 @@
 //                 including the qrc:/// resource header). Returns byte count
 //                 (written to out, NUL-terminated), -1 invalid args, -3 engine
 //                 timeout, -4 buffer too small.
+// - gd_lookup_in_group: same as gd_lookup but scoped to the dictionaries of the
+//                 group `group_id` (0 = "All"), independent of the active group.
+//                 Same return contract as gd_lookup.
 // - gd_get_resource: fetch a dictionary embedded resource named by a bres://
 //                 or gdau:// URL (images, audio from .mdd). Returns byte count,
 //                 -1 invalid args, -2 not found, -3 timeout, -4 buffer too small.
@@ -90,12 +93,26 @@ extern "C" {
 
 int gd_init( const char * config_dir, const char * index_dir );
 int gd_scan_dicts( const char * folder );
+// Report the primary dictionary files that failed to load in the most recent
+// gd_scan_dicts call(s). Fills `out` (capacity out_size) with a NUL-terminated,
+// newline-separated list of the offending paths and returns the count; the
+// recorded list is consumed (cleared) by this call. Returns 0 when everything
+// loaded, 1+ with the number of broken files, -1 uninitialized/invalid args,
+// -2 buffer too small.
+int gd_scan_failures( char * out, int out_size );
 int gd_suggest( const char * word, char * out, int out_size );
 int gd_lookup( const char * word, char * out, int out_size );
+int gd_lookup_in_group( const char * word, int group_id, char * out, int out_size );
 int gd_get_resource( const char * url, char * out, int out_size );
 int gd_get_audio( const char * url, char * out, int out_size );
 int gd_dict_count();
 int gd_dict_info( int index, char * name, int name_size, char * file, int file_size );
+// Return the engine dictionary id (MD5 hex) for `index`. The engine uses this
+// id as the prefix for the dictionary's index cache files (files/index<id>,
+// files/index<id>_FTS_x), which the app deletes when the dictionary is removed
+// permanently. Fills `out` (capacity out_size) with a NUL-terminated id.
+// Returns 0 on success, -1 on invalid args / out-of-range / buffer too small.
+int gd_dict_id( int index, char * out, int out_size );
 int gd_move_dict( int from, int to );
 int gd_remove_dict( int dict_index );
 int gd_group_count();
@@ -114,6 +131,11 @@ int gd_group_active( int * id_out );
 int gd_group_set_active( int id );
 int gd_set_dark_mode( int on );
 int gd_fts_index( int dict_index );
+// Report live full-text index progress of the dictionary currently being built
+// by gd_fts_index (safe to call from another thread while the build runs).
+// Fills *out_percent with 0..100. Returns 1 if a build is in flight, 0 if idle
+// (out_percent=0), -1 on invalid args.
+int gd_fts_progress( int * out_percent );
 int gd_fts_index_state( int dict_index, int * out );
 int gd_fts_search( const char * query, int mode, int group_id, char * out, int out_size );
 void gd_cleanup();
