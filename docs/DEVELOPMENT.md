@@ -28,13 +28,27 @@ The repository rules for agents and contributors live in `AGENTS.md`. Key rules:
 
 The app is a Qt Quick/WebView Android app built from `app/`.
 Requirements: JDK 17, Android SDK + NDK r23c, Qt 6.6.3 android + desktop kits, vcpkg deps
-(`zlib bzip2 liblzma lzo fmt xapian`). Apply the engine patches first, then run the one-shot
-build script:
+(`zlib bzip2 liblzma lzo fmt xapian`), and **PowerShell 7 (`pwsh`)** — the script
+uses PS7-only syntax and UTF-8 characters; running it under the legacy
+`powershell` 5.1 misdecodes the UTF-8 and fails to parse. Apply the engine
+patches first, then run the one-shot build script:
 
 ```powershell
-.\scripts\apply-patches.ps1
-.\app\build.ps1 -Configuration Release
+pwsh -File .\app\build.ps1 -Configuration Release   # signed/shippable
 ```
+
+**Iterative on-device flow.** For local device testing and debugging, use the
+Debug build with install, so each edit is built, pushed, and launched in one
+step:
+
+```powershell
+pwsh -File .\app\build.ps1 -Configuration Debug -Install
+pwsh -File .\app\build.ps1 -Configuration Debug -SkipConfigure -Install   # skip cmake reconfigure on repeat runs
+```
+
+On a fresh tree the Debug path is self-contained: `build.ps1` packages the Qt
+`res/values/libs.xml` (QtLoader resources) and writes a complete `build.gradle`
+for non-Release configs, so `assembleDebug` works without extra setup.
 
 `build.ps1` derives its toolchain from `AURELEX_*` env vars (or local defaults); pass `-Install`
 to adb-install the result. A signed release APK is produced by the CI workflow
