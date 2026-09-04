@@ -103,6 +103,31 @@ ApplicationWindow {
     property bool inlineArticle: false
     // The lazily-created inline WebView (null when no inline article is showing).
     property var inlineWv: null
+    // Set by a short timer once the Search tab is on-screen and measured, so the
+    // inline WebView is created with a correct (band-sized) native surface rather
+    // than a full-window one.
+    property bool inlineWebReady: false
+    Timer {
+        id: inlineWebTimer
+        interval: 420
+        repeat: false
+        running: root.state === 0
+        onTriggered: root.inlineWebReady = true
+    }
+    onStateChanged: {
+        if (root.state !== 0) {
+            root.inlineWebReady = false
+            root.inlineWebTimer.stop()
+        }
+    }
+    function _clearInlineArticle() {
+        root.inlineArticle = false
+        root.currentWord = ""
+        root.currentHtml = ""
+        root.navStack = []
+        if (root.inlineWv && engine.articleBaseUrl.length > 0)
+            root.inlineWv.loadHtml("<html><body></body></html>", engine.articleBaseUrl)
+    }
     function _showArticle(word, html) {
         if (currentWord !== "" && currentWord !== word) {
             navStack.push({ word: currentWord, html: currentHtml })
@@ -124,9 +149,7 @@ ApplicationWindow {
             // No more articles in the stack.
             if (root.inlineArticle) {
                 // Clear inline article and return to pure suggestions view.
-                root.inlineArticle = false
-                root.currentWord = ""
-                root.currentHtml = ""
+                root._clearInlineArticle()
                 return
             }
             state = 0
@@ -195,10 +218,7 @@ ApplicationWindow {
         if (idx === 0) { _blurActive(); state = 0; return }
         // Leaving the search tab: clear any inline article state.
         if (root.inlineArticle) {
-            root.inlineArticle = false
-            root.currentWord = ""
-            root.currentHtml = ""
-            navStack = []
+            root._clearInlineArticle()
         }
         if (idx === 1) { _openDicts(); return }
         if (idx === 3) { _openGroups(); return }
@@ -334,10 +354,7 @@ ApplicationWindow {
             }
             // When the user types a new query, clear any inline article.
             if (root.inlineArticle) {
-                root.inlineArticle = false
-                root.currentWord = ""
-                root.currentHtml = ""
-                navStack = []
+                root._clearInlineArticle()
             }
             engine.suggest(t)
         }
@@ -423,10 +440,7 @@ ColumnLayout {
             ListView {
                 id: suggestionList
                 Layout.fillWidth: true
-                // When an article is showing inline, cap the suggestion list
-                // so the article WebView has room below.
-                Layout.fillHeight: !root.inlineArticle
-                Layout.preferredHeight: root.inlineArticle ? Math.min(count * 44, searchPane.height * 0.35) : 0
+                Layout.fillHeight: true
                 clip: true
                 model: []
                 Accessible.name: "Search suggestions"
@@ -441,15 +455,20 @@ ColumnLayout {
                 }
             }
 
-            // Inline article area: visible when an article is loaded in search mode.
+            // Inline article area: a permanent browser pane at the bottom of the Search
+            // tab. It is always present while on this tab (never hidden while a
+            // WebView is alive — a hidden-but-alive native WebView overlays the
+            // whole screen on Android), and is destroyed when leaving the tab so
+            // it never covers the other panes. The bottom band keeps the article
+            // WebView warm for near-instant re-renders.
             Rectangle {
                 id: searchArticleArea
                 Layout.fillWidth: true
-                Layout.fillHeight: true
-                visible: root.state === 0 && root.inlineArticle && root.currentHtml.length > 0
+                Layout.preferredHeight: 300
                 color: root.uiBg
 
                 Rectangle {
+                    id: inlineArticleToolbar
                     width: parent.width
                     height: 40
                     color: root.uiCard
@@ -465,15 +484,18 @@ ColumnLayout {
                             text: root.icon("arrow_back")
                             font.family: root.iconFontFamily
                             font.pixelSize: 22
+                            enabled: root.inlineArticle
                             Accessible.name: "Back"
                             Accessible.role: Accessible.Button
                             onClicked: root._backFromArticle()
                         }
                         ToolButton {
-                            property bool active: engine.favorites.indexOf(root.currentWord) >= 0
+                            property bool active: root.inlineArticle
+                                && engine.favorites.indexOf(root.currentWord) >= 0
                             text: root.icon(active ? "star" : "star_border")
                             font.family: root.iconFontFamily
                             font.pixelSize: 22
+                            enabled: root.inlineArticle
                             Material.foreground: active ? Material.primary : root.uiSubFg
                             Accessible.name: active ? "Remove from favorites" : "Add to favorites"
                             Accessible.role: Accessible.Button
@@ -481,10 +503,10 @@ ColumnLayout {
                         }
                         Label {
                             Layout.fillWidth: true
-                            text: root.currentWord
+                            text: root.inlineArticle ? root.currentWord : "Dictionary article"
                             elide: Text.ElideRight
+                            color: root.inlineArticle ? root.uiFg : root.uiSubFg
                             font.pixelSize: 14
-                            color: root.uiFg
                         }
                     }
                 }
@@ -492,12 +514,18 @@ ColumnLayout {
                 Loader {
                     id: searchArticleLoader
                     anchors { top: parent.top; topMargin: 40; left: parent.left; right: parent.right; bottom: parent.bottom }
-                    // Only create the inline WebView while an article is actually
-                    // showing in search mode. On Android, an instantiated WebView
-                    // attaches an opaque native surface even when hidden; keeping
-                    // it alive unconditionally blanked the whole UI.
-                    active: root.state === 0 && root.inlineArticle && root.currentHtml.length > 0
-                    onLoaded: root.inlineWv = item
+                    // Defer WebView creation until the scene is measured.
+                    // On Android, a WebView created before layout runs locks its
+                    // native surface to a wrong (full-window) size that then
+                    // overtakes the whole screen. inlineWebReady is set by a
+                    // short timer once the Search tab is actually visible.
+                    active: root.state === 0 && root.inlineWebReady
+                    onLoaded: {
+                        root.inlineWv = item
+                        // Re-render an already-loaded article when returning to
+                        // the tab (the WebView was just recreated).
+                        if (root.currentHtml.length > 0) articleLoadTimer.restart()
+                    }
                     onActiveChanged: if (!active) root.inlineWv = null
                     sourceComponent: Component {
                         WebView {
