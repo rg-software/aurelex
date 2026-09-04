@@ -42,6 +42,9 @@ ApplicationWindow {
     // so the Back button can pop to the previous article without losing scroll
     // position (we re-render the prior article's HTML).
     property var navStack: []
+    // True while the foreground StagingService is copy-staging a picked folder.
+    // Drives the Dicts-tab "Preparing dictionaries…" banner.
+    property bool _stagingActive: engine.stagingActive
 
     // Material icon font family (registered from fonts.qrc in main.cpp) + the
     // icon-name -> codepoint helper (qt-material-ui task 7.2).
@@ -127,8 +130,12 @@ ApplicationWindow {
     function _runFts() {
         // Single v1 mode: Wildcards (FTS::SearchMode=2). By default each term is
         // treated as a prefix (boo -> boo*); the "Match whole words" checkbox
-        // switches to exact-term matching.
-        engine.ftsSearch(ftsInput.text, 2, engine.activeGroupId, ftsWholeWords.checked)
+        // switches to exact-term matching. The scope is the group selected in
+        // the FTS tab's dropdown (All by default).
+        let gid = 0
+        if (ftsGroupCombo.currentIndex >= 0 && engine.groups.length > 0)
+            gid = engine.groups[ftsGroupCombo.currentIndex].id
+        engine.ftsSearch(ftsInput.text, 2, gid, ftsWholeWords.checked)
     }
     // Navigation labels/icons for the bottom TabBar.
     property var navItems: [
@@ -173,7 +180,7 @@ ApplicationWindow {
                 elide: Text.ElideRight
                 text: root.state === 0 ? "Search"
                     : root.state === 1 ? "Dictionaries (" + engine.dictCount + ")"
-                    : root.state === 3 ? "Groups (" + engine.groups.length + ", active=" + engine.activeGroupId + ")"
+                    : root.state === 3 ? "Groups (" + engine.groups.length + ")"
                     : root.state === 4 ? "FTS (" + root.ftsResults.length + ")"
                     : root.state === 5 ? "History (" + engine.history.length + ")"
                     : root.state === 6 ? "Favorites (" + engine.favorites.length + ")"
@@ -290,10 +297,29 @@ ApplicationWindow {
             }
         }
 
-        ColumnLayout {
+ColumnLayout {
             anchors.fill: parent
-            anchors.margins: 16
+            anchors.margins: 12
             spacing: 8
+
+            // Group scope for lookups. "All" (index 0) is first and selected by
+            // default; choosing a group scopes every lookup (search bar,
+            // suggestions, history/favorites taps) to that group's dictionaries.
+            ComboBox {
+                id: searchGroupCombo
+                Layout.fillWidth: true
+                model: engine.groups
+                textRole: "name"
+                // Dismiss the search field's IME when the dropdown opens, else
+                // the keyboard obscures/blocks the popup while typing.
+                popup.onOpened: input.focus = false
+                onActivated: (index) => {
+                    const g = engine.groups[index]
+                    if (g) engine.setActiveGroup(g.id)
+                    // Re-run suggestions for the newly selected group's scope.
+                    if (input.text.trim().length > 0) searchPane._doSuggest()
+                }
+            }
 
             RowLayout {
                 Layout.fillWidth: true
@@ -377,14 +403,76 @@ ApplicationWindow {
             anchors.margins: 12
             spacing: 8
 
+            // Processing banner: surfaces BOTH long-running phases after you
+            // add a folder — the stage copy (foreground StagingService) and the
+            // automatic full-text index build (foreground IndexingService). Both
+            // run in the background, so without this the Dicts tab looks frozen
+            // for tens of seconds while dictionaries "quietly" load.
+            Rectangle {
+                Layout.fillWidth: true
+                visible: root._stagingActive || engine.scanningActive || engine.buildingFts
+                color: Material.color(Material.Purple, Material.Shade50)
+                radius: 4
+                height: processingCol.implicitHeight + 20
+
+                ColumnLayout {
+                    id: processingCol
+                    anchors.fill: parent
+                    anchors.margins: 10
+                    spacing: 6
+
+                    // Header carries the currently-indexing dictionary (1-based).
+                    Label {
+                        Layout.fillWidth: true
+                        text: root._stagingActive ? "Preparing dictionaries…"
+                            : engine.scanningActive ? "Scanning dictionaries…"
+                            : "Indexing (" + (engine.ftsIndexDone + 1) + " of "
+                              + engine.ftsIndexTotal + "): " + engine.ftsCurrentDictName
+                        font.pixelSize: 13
+                        font.bold: true
+                        color: Material.color(Material.Purple)
+                        elide: Text.ElideMiddle
+                        wrapMode: Text.Wrap
+                    }
+
+                    // Top bar: this dictionary's own progress (resumes where it
+                    // left off after an interrupted build).
+                    ProgressBar {
+                        Layout.fillWidth: true
+                        visible: engine.buildingFts
+                        indeterminate: false
+                        from: 0
+                        to: 1
+                        value: engine.ftsDictFraction
+                    }
+
+                    // Bottom bar: all-dictionaries progress (no caption).
+                    ProgressBar {
+                        Layout.fillWidth: true
+                        visible: engine.buildingFts
+                        indeterminate: false
+                        from: 0
+                        to: 1
+                        value: engine.ftsIndexFraction
+                    }
+
+                    Label {
+                        Layout.fillWidth: true
+                        visible: !engine.buildingFts
+                        text: root._stagingActive
+                              ? "Copying dictionary files into app storage. Your dictionaries will appear here when it's done."
+                              : "Reading dictionary files…"
+                        color: root.uiSubFg
+                        font.pixelSize: 11
+                        wrapMode: Text.Wrap
+                    }
+                }
+            }
+
             RowLayout {
                 Layout.fillWidth: true
                 spacing: 8
 
-                Button {
-                    text: "Rescan"
-                    onClicked: engine.rescan()
-                }
                 // 8.2: "Add dictionaries" (folder-scoped SAF picker). Qt 6.6
                 // RoundButton stands in for the Material 3 FloatingActionButton.
                 RoundButton {
@@ -396,62 +484,56 @@ ApplicationWindow {
 
             Label {
                 Layout.fillWidth: true
-                text: engine.sources.length > 0 ? "Sources" : ""
-                color: root.uiSubFg
-                font.pixelSize: 13
-                visible: engine.sources.length > 0
-            }
-
-            ListView {
-                Layout.fillWidth: true
-                Layout.preferredHeight: Math.min(engine.sources.length, 3) * 44
-                visible: engine.sources.length > 0
-                clip: true
-                model: engine.sources
-                spacing: 2
-                delegate: ItemDelegate {
-                    id: srcRow
-                    property var srcIndex: index
-                    property var srcData: modelData
-                    width: ListView.view.width
-                    height: 44
-                    padding: 4
-
-                    contentItem: ColumnLayout {
-                        spacing: 0
-                        Label {
-                            text: srcRow.srcData.orig && srcRow.srcData.orig.length > 0
-                                  ? srcRow.srcData.orig
-                                  : srcRow.srcData.path
-                            font.pixelSize: 13
-                            elide: Text.ElideMiddle
-                            Layout.fillWidth: true
-                        }
-                        Label {
-                            text: srcRow.srcData.staged ? "(staged into app storage)" : "folder"
-                            color: root.uiSubFg
-                            font.pixelSize: 10
-                        }
-                    }
-
-                    ToolButton {
-                        anchors {
-                            right: parent.right
-                            rightMargin: 4
-                            verticalCenter: parent.verticalCenter
-                        }
-                        text: "Remove"
-                        onClicked: engine.removeSource(srcRow.srcIndex)
-                    }
-                }
-            }
-
-            Label {
-                Layout.fillWidth: true
                 color: root.uiSubFg
                 font.pixelSize: 12
                 wrapMode: Text.Wrap
-                text: "Tap Add dictionaries to pick a folder containing dictionary files (.mdx, .dsl, .dsl.dz, .ifo). The folder stays accessible via a scoped grant; no system-wide storage access is needed."
+                text: "Tap Add dictionaries to import a folder containing dictionary files (.mdx, .dsl, .dsl.dz, .ifo). The folder is copied into the app once; no system-wide storage access is needed."
+            }
+
+            // Dictionaries that failed to load in the last scan (corrupt or
+            // truncated source files). Surface them so the user knows a
+            // dictionary is missing; the fix is to re-add the folder, which
+            // wipes the old copy and re-stages it.
+            Rectangle {
+                Layout.fillWidth: true
+                visible: engine.scanFailures.length > 0
+                color: Material.color(Material.Red, Material.Shade50)
+                radius: 4
+                height: failuresCol.implicitHeight + 16
+
+                ColumnLayout {
+                    id: failuresCol
+                    anchors { left: parent.left; right: parent.right; top: parent.top; topMargin: 8 }
+                    anchors.leftMargin: 10; anchors.rightMargin: 10
+                    spacing: 4
+
+                    Label {
+                        Layout.fillWidth: true
+                        text: engine.scanFailures.length + " dictionary file(s) failed to load"
+                        font.pixelSize: 13
+                        font.bold: true
+                        color: Material.color(Material.Red)
+                        wrapMode: Text.Wrap
+                    }
+                    Repeater {
+                        model: engine.scanFailures
+                        delegate: Label {
+                            Layout.fillWidth: true
+                            text: modelData.file
+                            font.pixelSize: 11
+                            elide: Text.ElideMiddle
+                            color: root.uiSubFg
+                            wrapMode: Text.Wrap
+                        }
+                    }
+                    Label {
+                        Layout.fillWidth: true
+                        text: "The file may be incomplete or corrupt. Tap Add dictionaries and pick the same folder again to re-copy it."
+                        font.pixelSize: 11
+                        color: root.uiSubFg
+                        wrapMode: Text.Wrap
+                    }
+                }
             }
 
             ListView {
@@ -487,37 +569,16 @@ ApplicationWindow {
                         }
                     }
 
-                    // 4.2: Up/Down/Remove as ToolButtons in a RowLayout (FTS indexes are built
-                    // automatically when dictionaries are added).
-                    RowLayout {
+                    // Ordering within the All list is not user-relevant; per-group
+                    // ordering lives in the Groups tab. Only Remove stays.
+                    ToolButton {
                         anchors {
                             right: parent.right
                             rightMargin: 4
                             verticalCenter: parent.verticalCenter
                         }
-                        spacing: 2
-                        visible: dictRow.hovered || true
-
-                        ToolButton {
-                            text: "Up"
-                            onClicked: {
-                                const idx = dictRow.dictIndex
-                                const target = Math.max(0, idx - 1)
-                                if (target !== idx) engine.moveDictionary(idx, target)
-                            }
-                        }
-                        ToolButton {
-                            text: "Down"
-                            onClicked: {
-                                const idx = dictRow.dictIndex
-                                const target = Math.min(engine.dictionaries.length - 1, idx + 1)
-                                if (target !== idx) engine.moveDictionary(idx, target)
-                            }
-                        }
-                        ToolButton {
-                            text: "Remove"
-                            onClicked: dictsPane._requestRemove(dictRow.dictIndex, dictRow.dictData.name)
-                        }
+                        text: "Remove"
+                        onClicked: dictsPane._requestRemove(dictRow.dictIndex, dictRow.dictData.name)
                     }
                 }
             }
@@ -543,7 +604,7 @@ ApplicationWindow {
                 Label {
                     Layout.fillWidth: true
                     color: root.uiSubFg
-                    text: "It will be unloaded from the app. The file stays on disk."
+                    text: "It will be permanently removed: the app's copy of the dictionary files and its search index will be deleted. The original folder is never touched."
                     wrapMode: Text.Wrap
                 }
             }
@@ -577,6 +638,15 @@ ApplicationWindow {
                 engine.refreshGroups()
             }
         }
+        function _createGroup() {
+            const name = newGroupInput.text.trim()
+            if (name.length === 0) return
+            engine.createGroup(name)
+            newGroupInput.text = ""
+            // Keep focus + re-open the IME so the user can immediately type the
+            // next group name.
+            newGroupInput.forceActiveFocus()
+        }
 
         Component.onCompleted: engine.refreshGroups()
         Connections {
@@ -603,16 +673,21 @@ ApplicationWindow {
             anchors.margins: 12
             spacing: 8
 
-            TextField {
-                id: newGroupInput
+            RowLayout {
                 Layout.fillWidth: true
-                placeholderText: "New group name"
-                font.pixelSize: 18
-                onAccepted: {
-                    if (text.trim().length > 0) {
-                        engine.createGroup(text.trim())
-                        text = ""
-                    }
+                spacing: 8
+
+                TextField {
+                    id: newGroupInput
+                    Layout.fillWidth: true
+                    placeholderText: "New group name"
+                    font.pixelSize: 18
+                    onAccepted: groupsPane._createGroup()
+                }
+                Button {
+                    text: "Create"
+                    highlighted: true
+                    onClicked: groupsPane._createGroup()
                 }
             }
 
@@ -629,9 +704,6 @@ ApplicationWindow {
                     width: ListView.view.width
                     height: 56
                     padding: 4
-
-                    // 4.3: active-group highlight via Material.primary.
-                    highlighted: groupRow.groupData.id === engine.activeGroupId
 
                     contentItem: ColumnLayout {
                         spacing: 0
@@ -656,12 +728,6 @@ ApplicationWindow {
                         }
                         spacing: 2
 
-                        ToolButton {
-                            text: "Active"
-                            visible: groupRow.groupData.id !== engine.activeGroupId
-                            enabled: groupRow.groupData.id !== 0
-                            onClicked: engine.setActiveGroup(groupRow.groupData.id)
-                        }
                         ToolButton {
                             text: "Dicts"
                             visible: groupRow.groupData.id !== 0
@@ -1153,19 +1219,25 @@ ApplicationWindow {
                 }
             }
 
-            // 8.1: index-build progress bar.
-            ProgressBar {
+            // Group scope for full-text search. "All" (index 0) is first and
+            // selected by default; choosing a group searches only that group's
+            // dictionaries.
+            ComboBox {
+                id: ftsGroupCombo
                 Layout.fillWidth: true
-                visible: engine.buildingFts
-                indeterminate: true
+                model: engine.groups
+                textRole: "name"
+                // Dismiss the FTS field's IME when the dropdown opens.
+                popup.onOpened: ftsInput.focus = false
+                // Re-run the FTS for the newly selected group's scope.
+                onActivated: (index) => {
+                    if (ftsInput.text.trim().length > 0) root._runFts()
+                }
             }
-            Label {
-                Layout.fillWidth: true
-                visible: engine.buildingFts
-                color: root.uiSubFg
-                font.pixelSize: 13
-                text: "Indexing..."
-            }
+
+            // 8.1: index-build progress is shown in the Dicts tab banner; the
+            // FTS pane only disables its controls while building (no duplicate
+            // bars).
 
             RowLayout {
                 Layout.fillWidth: true
@@ -1203,7 +1275,12 @@ ApplicationWindow {
                         Label { text: modelData.headword; font.pixelSize: 16; font.bold: true }
                         Label { text: modelData.dictName; color: root.uiSubFg; font.pixelSize: 11 }
                     }
-                    onClicked: engine.lookup(modelData.headword)
+                    onClicked: {
+                        let gid = 0
+                        if (ftsGroupCombo.currentIndex >= 0 && engine.groups.length > 0)
+                            gid = engine.groups[ftsGroupCombo.currentIndex].id
+                        engine.lookupInGroup(modelData.headword, gid)
+                    }
                 }
             }
         }
@@ -1233,7 +1310,7 @@ ApplicationWindow {
             Label {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
-                text: "Add dictionaries by tapping Add dictionaries in the Dicts tab and picking a folder with dictionary files (.mdx, .dsl, .dsl.dz, .ifo) — the app keeps that folder saved via a scoped grant (no system-wide file access needed). Use the bottom bar to switch between Search, Dictionaries, Groups, FTS, History and Favorites."
+                text: "Add dictionaries by tapping Add dictionaries in the Dicts tab and picking a folder with dictionary files (.mdx, .dsl, .dsl.dz, .ifo) — the folder is copied into the app once (no system-wide file access needed). Use the bottom bar to switch between Search, Dictionaries, Groups, FTS, History and Favorites."
                 font.pixelSize: 15
                 wrapMode: Text.Wrap
                 horizontalAlignment: Text.AlignHCenter

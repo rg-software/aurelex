@@ -74,6 +74,16 @@
             android:exported="false"
             android:foregroundServiceType="dataSync" />
 
+        <!-- Dictionary-staging foreground service (folder-scoped-storage):
+             copies a newly picked folder into app-private storage with a
+             "Preparing dictionaries..." notification, so a large copy is not
+             killed when the app is backgrounded. Started by AurelexActivity,
+             stops itself when the copy + source registration complete. -->
+        <service
+            android:name=".StagingService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+
         <!-- Home-screen search widget -->
         <receiver
             android:name=".AurelexSearchWidget"

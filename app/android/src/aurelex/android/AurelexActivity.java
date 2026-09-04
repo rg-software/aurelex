@@ -10,6 +10,9 @@ import android.os.Bundle;
 import org.qtproject.qt.android.bindings.QtActivity;
 import org.qtproject.qt.android.QtNative;
 
+import java.util.HashSet;
+import java.util.Set;
+
 /**
  * Gate-3 + M6 bridge: the QtActivity subclass captures incoming lookup intents
  * (share sheet / aurelex:// / PROCESS_TEXT) and writes the word into a
@@ -104,6 +107,30 @@ public class AurelexActivity extends QtActivity {
         });
 
         captureLookupText(getIntent());
+        maybeRequestNotificationPermission();
+    }
+
+    private static final int REQUEST_POST_NOTIFICATIONS = 2002;
+
+    /**
+     * On Android 13+ (API 33) POST_NOTIFICATIONS is a RUNTIME permission. The
+     * manifest declares it, but without a runtime grant the system silently
+     * drops the foreground-service notifications (IndexingService /
+     * StagingService), so the user would never see "Indexing…"/"Preparing…"
+     * while the app is backgrounded. Ask for it once at launch.
+     */
+    private void maybeRequestNotificationPermission() {
+        try {
+            if (android.os.Build.VERSION.SDK_INT >= 33
+                    && checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS)
+                            != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                requestPermissions(
+                        new String[]{android.Manifest.permission.POST_NOTIFICATIONS},
+                        REQUEST_POST_NOTIFICATIONS);
+            }
+        } catch (Exception e) {
+            android.util.Log.w(TAG, "maybeRequestNotificationPermission failed: " + e);
+        }
     }
 
     @Override
@@ -143,8 +170,8 @@ public class AurelexActivity extends QtActivity {
     /**
      * SAF dictionary folder picker (folder-scoped storage, no All-Files-Access).
      * Called from the native side via QJniObject. The result arrives in
-     * {@link #onActivityResult}; the picked tree is persisted, resolved (or
-     * staged), and written to shared_prefs/source.xml for the C++ poller.
+     * {@link #onActivityResult}; the picked folder is one-off imported: staged
+     * into app-private storage and then scanned + indexed by the C++ side.
      */
     public static void pickDictionaryFolder() {
         try {
@@ -153,8 +180,7 @@ public class AurelexActivity extends QtActivity {
             android.content.Intent intent =
                     new android.content.Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
             intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION
-                    | Intent.FLAG_GRANT_WRITE_URI_PERMISSION
-                    | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
+                    | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
             activity.startActivityForResult(intent, REQUEST_PICK_DICTIONARY_FOLDER);
         } catch (Exception e) {
             android.util.Log.w(TAG, "pickDictionaryFolder failed: " + e);
@@ -171,38 +197,36 @@ public class AurelexActivity extends QtActivity {
         }
         try {
             final android.net.Uri treeUri = data.getData();
-            final android.content.ContentResolver cr = getContentResolver();
-            cr.takePersistableUriPermission(treeUri,
-                    Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
-
-            // ALWAYS stage-copy into app-private storage. Scoped storage blocks
-            // direct path reads of /storage/emulated/0 for apps without AFA, so
-            // scanning the resolved physical path would find nothing; the engine
-            // can only read files the app can reach by path, which means copying
-            // the picked tree's supported files through the SAF URIs (the grant
-            // we hold) into files/staged/<sourceId>. The resolved path is kept
-            // as a display label only.
-            final String sourceId = Integer.toHexString(treeUri.toString().hashCode());
-            final String stagedDir = new java.io.File(getFilesDir(),
-                    "staged/" + sourceId).getAbsolutePath();
-            final int copied = stageTree(treeUri, stagedDir);
-            if (copied <= 0) {
-                android.util.Log.w(TAG, "no supported files staged from " + treeUri);
-                return;
-            }
             final String display = resolveTreePath(treeUri); // may be empty (cloud)
 
-            // Write the source for the C++ poller (mirrors intent.xml pattern).
-            final SharedPreferences prefs = getSharedPreferences("source", Context.MODE_PRIVATE);
-            prefs.edit().clear()
-                    .putString("sourceUri", treeUri.toString())
-                    .putString("sourcePath", stagedDir)
-                    .putString("sourceDisplay", display)
-                    .putBoolean("sourceStaged", true)
-                    .commit();
-            android.util.Log.i(TAG, "dictionary source added: " + display
-                    + " staged=" + copied + " files into " + stagedDir);
+            // One-off import: ALWAYS stage-copy into app-private storage.
+            // Scoped storage blocks direct path reads of /storage/emulated/0 for
+            // apps without AFA, so the engine can only read files the app can
+            // reach by path — which means copying the picked tree's supported
+            // files through the transient SAF grant into files/staged/<sourceId>.
+            // No persistable grant is taken (the staged copy is authoritative and
+            // there is no live "source" to re-sync).
+            //
+            // The copy runs on the foreground StagingService (with a "Preparing
+            // dictionaries…" notification) so a large copy survives the app being
+            // backgrounded. StagingService clears the staging marker when the copy
+            // completes; the C++ poller sees that and scans the staged root.
+            //
+            // If a copy is ALREADY running, don't drop this pick: queue it and
+            // let StagingService drain the queue after the current copy finishes.
+            if (sStagingRunning) {
+                android.util.Log.i(TAG, "staging in progress; queueing " + display);
+                synchronized (sPendingPicks) {
+                    sPendingPicks.addLast(new String[]{ treeUri.toString(), display });
+                }
+                return;
+            }
+            sStagingRunning = true;
+            if (!StagingService.start(getApplicationContext(), treeUri, display)) {
+                sStagingRunning = false;
+            }
         } catch (Exception e) {
+            sStagingRunning = false;
             android.util.Log.w(TAG, "onActivityResult source handling failed: " + e);
         }
     }
@@ -238,13 +262,38 @@ public class AurelexActivity extends QtActivity {
      * destination already exists with the same size and close last-modified time
      * are skipped; copied files get the source's timestamp so a later refresh can
      * compare cheaply. Returns the number of files copied, or -1 on failure.
+     * Dedup scope is the destination's parent (a staged subdir's sibling root).
      */
     static int stageTree(android.net.Uri treeUri, String destDir) {
+        return stageTree(treeUri, destDir, new java.io.File(destDir).getParentFile());
+    }
+
+    /**
+     * stageTree variant with an explicit dedup scope — the copy is compared
+     * against {@code stageRoot} (typically {@code files/staged}) so an
+     * intersecting pick never stages the same dictionary twice, even when the
+     * copy itself lands in a temp dir outside that root.
+     */
+    static int stageTree(android.net.Uri treeUri, String destDir, java.io.File stageRoot) {
+        return stageTree(treeUri, destDir, stageRoot, null);
+    }
+
+    /**
+     * stageTree variant that obtains the ContentResolver from an explicit
+     * Context instead of QtNative.activity() — used by StagingService, which
+     * keeps copying even when no Activity is reachable (backgrounded app).
+     */
+    static int stageTree(android.net.Uri treeUri, String destDir, java.io.File stageRoot,
+                         android.content.Context ctx) {
         final android.content.ContentResolver cr;
-        try {
-            cr = QtNative.activity().getContentResolver();
-        } catch (Exception e) {
-            return -1;
+        if (ctx != null) {
+            cr = ctx.getContentResolver();
+        } else {
+            try {
+                cr = QtNative.activity().getContentResolver();
+            } catch (Exception e) {
+                return -1;
+            }
         }
         final java.io.File dir = new java.io.File(destDir);
         if (!dir.exists() && !dir.mkdirs()) return -1;
@@ -252,14 +301,39 @@ public class AurelexActivity extends QtActivity {
         // intersecting pick (e.g. GoldenDict + GoldenDict/English) can stage the
         // same dictionary under two source dirs; without this the engine would
         // load it twice (ids hash the file path). Dedup by (name, size, mtime).
-        final java.io.File stageRoot = dir.getParentFile();
-        return stageTreeInto(treeUri, cr, dir, stageRoot);
+        return stageTreeInto(treeUri,
+                android.provider.DocumentsContract.getTreeDocumentId(treeUri),
+                cr, dir, stageRoot, 0, new StageVisited());
+    }
+
+    /**
+     * Recursively deletes a file or directory tree (File.delete() only removes
+     * empty dirs). Used to discard incomplete staging copies.
+     */
+    static void deleteRecursively(java.io.File f) {
+        if (f == null || !f.exists()) return;
+        if (f.isDirectory()) {
+            java.io.File[] children = f.listFiles();
+            if (children != null) {
+                for (java.io.File c : children) deleteRecursively(c);
+            }
+        }
+        f.delete();
+    }
+
+    /** Mutable traversal state shared across the stageTreeInto recursion. */
+    private static final class StageVisited {
+        final Set<java.io.File> files = new HashSet<>();
+        final Set<String> uris = new HashSet<>();
     }
 
     private static int stageTreeInto(android.net.Uri treeUri,
+                                     String currentDocId,
                                      android.content.ContentResolver cr,
                                      java.io.File destDir,
-                                     java.io.File stageRoot) {
+                                     java.io.File stageRoot,
+                                     int depth,
+                                     StageVisited state) {
         final String[] cols = {
                 android.provider.DocumentsContract.Document.COLUMN_DOCUMENT_ID,
                 android.provider.DocumentsContract.Document.COLUMN_DISPLAY_NAME,
@@ -268,9 +342,27 @@ public class AurelexActivity extends QtActivity {
                 android.provider.DocumentsContract.Document.COLUMN_LAST_MODIFIED };
         int copied = 0;
         try {
-            final String treeDocId = android.provider.DocumentsContract.getTreeDocumentId(treeUri);
+            // Depth cap as a hard backstop against pathological providers.
+            if (depth > 64) return 0;
+            // Physical-path guard: refuse to re-enter a destination dir we have
+            // already staged into (a provider that yields a parent as a child
+            // would otherwise recurse forever -> StackOverflowError).
+            if (destDir != null) {
+                try {
+                    destDir = destDir.getCanonicalFile();
+                } catch (java.io.IOException ignored) {
+                }
+                if (state.files.contains(destDir)) return 0;
+                state.files.add(destDir);
+            }
+            // List the CURRENT folder's children. IMPORTANT: children are
+            // resolved against the root TREE uri using each folder's full
+            // document id (e.g. "primary:GoldenDict/Finnish/<sub>"); do NOT
+            // build a per-folder document uri and call getTreeDocumentId() on
+            // it — that returns the root tree id and would re-list the root
+            // forever (the "no supported files staged" / stack-overflow bug).
             final android.net.Uri childrenUri =
-                    android.provider.DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, treeDocId);
+                    android.provider.DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, currentDocId);
             try (android.database.Cursor c = cr.query(childrenUri, cols, null, null, null)) {
                 while (c != null && c.moveToNext()) {
                     final String docId = c.getString(0);
@@ -279,10 +371,18 @@ public class AurelexActivity extends QtActivity {
                     if (name == null) continue;
                     if (android.provider.DocumentsContract.Document.MIME_TYPE_DIR.equals(mime)) {
                         // Recurse into the subfolder, preserving the relative path.
+                        // The SAME root treeUri is kept; only the folder's document
+                        // id changes, so the next level lists the right children.
                         final java.io.File sub = new java.io.File(destDir, name);
-                        final android.net.Uri subTree = android.provider.DocumentsContract
-                                .buildDocumentUriUsingTree(treeUri, docId);
-                        copied += stageTreeInto(subTree, cr, sub, stageRoot);
+                        // Create the physical subdir FIRST, or the file writes
+                        // below throw FileNotFoundException: ENOENT (the parent
+                        // of a nested dict file does not exist yet).
+                        if (!sub.exists() && !sub.mkdirs()) {
+                            android.util.Log.w(TAG, "stageTreeInto: cannot mkdir " + sub);
+                            continue;
+                        }
+                        copied += stageTreeInto(treeUri, docId, cr, sub, stageRoot,
+                                depth + 1, state);
                         continue;
                     }
                     if (!isSupportedDictionaryName(name)) continue;
@@ -344,66 +444,21 @@ public class AurelexActivity extends QtActivity {
         return false;
     }
 
-    private static volatile boolean sRefreshRunning = false;
+    static volatile boolean sStagingRunning = false;
 
     /**
-     * Re-pulls all persisted dictionary sources from their ORIGINAL SAF folders
-     * (incremental stageTree), then signals the C++ poller via
-     * shared_prefs/refresh.xml so it rescans the refreshed staging. Called from
-     * EngineController.rescan() over JNI; the copy runs on a background thread so
-     * the UI thread is not blocked on large dictionaries.
+     * Queue of folder picks that arrived while a stage copy was already running.
+     * Each entry is {treeUriString, display}. Pops are peeked by StagingService
+     * (which drains the queue on its worker thread). Guarded by synchronizing on
+     * the deque itself.
      */
-    public static void refreshSources() {
-        if (sRefreshRunning) return;
-        sRefreshRunning = true;
-        new Thread(() -> {
-            try {
-                final java.io.File f = new java.io.File(QtNative.activity().getFilesDir(), "settings.json");
-                if (!f.exists()) {
-                    android.util.Log.i(TAG, "refreshSources: no settings.json");
-                } else {
-                    final String raw =
-                            new String(java.nio.file.Files.readAllBytes(f.toPath()),
-                                       java.nio.charset.StandardCharsets.UTF_8);
-                    final org.json.JSONObject obj = new org.json.JSONObject(raw);
-                    final org.json.JSONArray arr = obj.optJSONArray("sources");
-                    if (arr == null) {
-                        android.util.Log.i(TAG, "refreshSources: no sources in settings");
-                    } else {
-                        for (int i = 0; i < arr.length(); i++) {
-                            final org.json.JSONObject s = arr.getJSONObject(i);
-                            final String uriStr = s.optString("uri");
-                            final String path = s.optString("path");
-                            if (uriStr.isEmpty() || path.isEmpty()) continue;
-                            final android.content.ContentResolver cr =
-                                    QtNative.activity().getContentResolver();
-                            // Best-effort: a revoked/unmounted source just fails quietly.
-                            try { cr.takePersistableUriPermission(
-                                    android.net.Uri.parse(uriStr),
-                                    Intent.FLAG_GRANT_READ_URI_PERMISSION
-                                            | Intent.FLAG_GRANT_WRITE_URI_PERMISSION); } catch (Exception ignored) {}
-                            final int n = stageTree(android.net.Uri.parse(uriStr), path);
-                            android.util.Log.i(TAG, "refreshSources [" + i + "] copied=" + n
-                                    + " " + path);
-                        }
-                    }
-                }
-            } catch (Exception e) {
-                android.util.Log.w(TAG, "refreshSources failed: " + e);
-            } finally {
-                try {
-                    final android.app.Activity a = QtNative.activity();
-                    if (a != null) {
-                        final android.content.SharedPreferences prefs =
-                                a.getSharedPreferences("refresh", android.content.Context.MODE_PRIVATE);
-                        prefs.edit().clear().putBoolean("refreshDone", true).commit();
-                    }
-                } catch (Exception e) {
-                    android.util.Log.w(TAG, "refreshSources marker failed: " + e);
-                }
-                sRefreshRunning = false;
-            }
-        }).start();
+    static final java.util.ArrayDeque<String[]> sPendingPicks = new java.util.ArrayDeque<>();
+
+    /** Pops and returns the next queued pick, or null when empty. */
+    static String[] nextPendingPick() {
+        synchronized (sPendingPicks) {
+            return sPendingPicks.pollFirst();
+        }
     }
 
     /**
@@ -431,22 +486,32 @@ public class AurelexActivity extends QtActivity {
         }
     }
 
+    /**
+     * Pushes live FTS progress into the IndexingService's foreground
+     * notification: "Indexing (2 of 5): <name>" + a determinate bar for the
+     * overall batch. Called over JNI from
+     * EngineController.pollFtsProgress on each poll.
+     *
+     * @param currentIndex 1-based number of the dictionary currently indexing
+     * @param total        dictionaries in the batch
+     * @param name         display name of the current dictionary
+     * @param dictPercent  this dictionary's own 0..100 progress
+     */
+    public static void updateIndexingProgress(int currentIndex, int total,
+                                              String name, int dictPercent) {
+        try {
+            IndexingService.updateProgress(currentIndex, total, name, dictPercent);
+        } catch (Exception e) {
+            android.util.Log.w(TAG, "updateIndexingProgress failed: " + e);
+        }
+    }
+
     private static boolean isSupportedDictionaryName(String name) {
         final String lower = name.toLowerCase(java.util.Locale.ROOT);
         return lower.endsWith(".mdx") || lower.endsWith(".mdd")
                 || lower.endsWith(".dsl") || lower.endsWith(".dsl.dz")
                 || lower.endsWith(".ifo");
-    }
-
-    static void releaseSourcePermission(String uriStr) {
-        try {
-            final android.net.Uri uri = android.net.Uri.parse(uriStr);
-            QtNative.activity().getContentResolver().releasePersistableUriPermission(uri,
-                    Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
-        } catch (Exception e) {
-            android.util.Log.w(TAG, "releaseSourcePermission failed: " + e);
-        }
-    }
+}
 
     @Override
     protected void onResume() {

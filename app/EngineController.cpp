@@ -28,6 +28,21 @@ EngineController::EngineController(QObject *parent)
     connect(&m_pollTimer, &QTimer::timeout, this, &EngineController::pollPendingLookup);
     m_pollTimer.start(500);
 
+    // FTS batch completion arrives from the index-build worker thread; deliver
+    // it into the UI-thread properties via a queued connection (same-object
+    // connect resolves to queued when the emitter thread differs from this
+    // object's affinity thread).
+    connect(this, &EngineController::ftsIndexBatchProgress,
+            this, [this](int completed, int total, const QString &name){
+        setFtsIndexProgress(completed, total, name);
+    });
+
+    // Smooth in-flight progress: while a batch builds, sample the engine's own
+    // per-dictionary percent so the bar fills even for a single huge dict.
+    m_ftsProgressTimer.setInterval(400);
+    m_ftsProgressTimer.setTimerType(Qt::VeryCoarseTimer);
+    connect(&m_ftsProgressTimer, &QTimer::timeout, this, &EngineController::pollFtsProgress);
+
     // Article bridge: start the loopback HTTP server as soon as the controller
     // exists so the WebView (and its URL rewriter) can rely on the base URL
     // being available by the time the first article renders. The server binds
@@ -79,44 +94,151 @@ void EngineController::setActiveGroupId(int id) {
 void EngineController::setBuildingFts(bool b) {
     if (m_buildingFts == b) return;
     m_buildingFts = b;
+    if (b) {
+        m_ftsProgressTimer.start();
+    } else {
+        m_ftsProgressTimer.stop();
+        setFtsFraction(0.0, 0.0);
+        setFtsIndexProgress(0, 0, QString());
+    }
     emit buildingFtsChanged();
 }
 
+void EngineController::setFtsFraction(qreal allFraction, qreal dictFraction) {
+    bool changed = false;
+    if (!qFuzzyCompare(m_ftsIndexFraction, allFraction)) {
+        m_ftsIndexFraction = allFraction;
+        changed = true;
+    }
+    if (!qFuzzyCompare(m_ftsDictFraction, dictFraction)) {
+        m_ftsDictFraction = dictFraction;
+        changed = true;
+    }
+    if (changed)
+        emit ftsIndexProgressChanged();
+}
+
+void EngineController::pollFtsProgress() {
+    if (!m_buildingFts) return;
+    // Per-dictionary progress (the engine's getIndexingFtsProgress; on a
+    // resumed build it continues from where it left off, never from 0).
+    int pct = 0;
+    const int st = gd_fts_progress(&pct);
+    qreal dictFrac = 0.0;
+    if (st > 0)
+        dictFrac = qBound<qreal>(0.0, qreal(pct) / 100.0, 1.0);
+    // Overall = completed dicts + the in-flight dict's share of the batch, so
+    // the bottom bar advances proportionally while a single dictionary builds
+    // (e.g. 1 dict at 40% -> bottom = 40%, not a 0->100 jump at the end).
+    qreal overall = 0.0;
+    if (m_ftsIndexTotal > 0) {
+        overall = qBound<qreal>(0.0,
+                                (qreal(m_ftsIndexDone) + dictFrac) / qreal(m_ftsIndexTotal),
+                                1.0);
+    }
+    setFtsFraction(overall, dictFrac);
+    // Push live progress into the foreground-service notification so the user
+    // sees "Indexing (2 of 5): <name>" + a determinate bar in the status bar
+    // too. The notification bar shows the OVERALL batch fraction (monotonic,
+    // includes the in-flight dictionary), while the in-app top bar keeps the
+    // per-dictionary progress.
+#if defined(Q_OS_ANDROID)
+    if (m_ftsIndexTotal > 0) {
+        const int overallPercent = qRound(overall * 100.0);
+        QJniObject::callStaticMethod<void>(
+            "aurelex/android/AurelexActivity",
+            "updateIndexingProgress",
+            "(IILjava/lang/String;I)V",
+            m_ftsIndexDone + 1, m_ftsIndexTotal,
+            QJniObject::fromString(m_ftsCurrentDictName).object<jstring>(),
+            overallPercent);
+    }
+#endif
+}
+
+void EngineController::setFtsIndexProgress(int done, int total, const QString &name) {
+    m_ftsIndexDone = done;
+    m_ftsIndexTotal = total;
+    if (!name.isEmpty())
+        m_ftsCurrentDictName = name;
+    if (total > 0)
+        setFtsFraction(qMin<qreal>(1.0, qreal(done) / qreal(total)), m_ftsDictFraction);
+    else
+        setFtsFraction(0.0, 0.0);
+    qInfo() << "[aurelex] fts progress" << done << "/" << total << name;
+    emit ftsIndexProgressChanged();
+}
+
+void EngineController::setStagingActive(bool b) {
+    if (m_stagingActive == b) return;
+    m_stagingActive = b;
+    emit stagingActiveChanged();
+}
+
+void EngineController::setScanningActive(bool b) {
+    if (m_scanningActive == b) return;
+    m_scanningActive = b;
+    emit scanningActiveChanged();
+}
+
+void EngineController::setScanFailures(const QVariantList &list) {
+    if (m_scanFailures == list) return;
+    m_scanFailures = list;
+    emit scanFailuresChanged();
+}
+
+void EngineController::collectScanFailures() {
+    // gd_scan_failures takes g_engineMutex, held by the FTS worker for the whole
+    // duration of a large dictionary's index build. Never call it on the UI
+    // thread (would freeze the app); enumerate off-thread and set on a watcher.
+    QFuture<QVariantList> f = QtConcurrent::run([]{
+        char buf[16384];
+        const int n = gd_scan_failures(buf, static_cast<int>(sizeof(buf)));
+        QVariantList list;
+        if (n <= 0) return list;
+        const QString joined = QString::fromLocal8Bit(buf);
+        const QStringList lines = joined.split('\n', Qt::SkipEmptyParts);
+        for (const QString &path : lines) {
+            QVariantMap m;
+            m.insert("file", path);
+            list.append(m);
+        }
+        return list;
+    });
+    auto *w = new QFutureWatcher<QVariantList>(this);
+    connect(w, &QFutureWatcher<QVariantList>::finished, this, [this, w]{
+        setScanFailures(w->result());
+        w->deleteLater();
+    });
+    w->setFuture(f);
+}
+
 void EngineController::runScan() {
-    // Scan every source dir plus the sandbox staged root. The carve scans one
-    // directory at a time (top-level only, accumulating into the engine), so we
-    // loop: default staged dir first, then each persisted source's physical path
-    // (a resolved external folder or a staged subdir). Unavailable/revoked
-    // sources are skipped without failing the scan of the rest.
-    const QVariantList sourcesSnapshot = m_sources;
+    // One-off import model: the app-private staged root is the single source of
+    // dictionaries. gd_scan_dicts recurses, so scanning the root picks up every
+    // staged/<sourceId>/... import.
     const QString stagedBase = m_stagedDir;
-    QFuture<QPair<int, int>> f = QtConcurrent::run([sourcesSnapshot, stagedBase]{
-        int added = 0;
+    // Show "Scanning dictionaries…" while the carve loads dicts so the Dicts
+    // processing banner stays visible continuously from folder pick -> staging
+    // -> scan -> indexing.
+    setScanningActive(true);
+    QFuture<QPair<int, int>> f = QtConcurrent::run([stagedBase]{
         int total = 0;
-        QStringList dirs;
-        dirs << stagedBase;
-        for (const QVariant &v : sourcesSnapshot) {
-            const QVariantMap s = v.toMap();
-            const QString path = s.value("path").toString();
-            if (!path.isEmpty()) dirs << path;
-        }
-        for (const QString &dir : dirs) {
-            if (!QDir(dir).exists()) {
-                qInfo() << "[aurelex] source unavailable, skipping" << dir;
-                continue;
-            }
-            const int rc = gd_scan_dicts(dir.toLocal8Bit().constData());
-            added += rc;
-            total = gd_dict_count();
-        }
-        return QPair<int, int>(added, total);
+        if (QDir(stagedBase).exists())
+            gd_scan_dicts(stagedBase.toLocal8Bit().constData());
+        total = gd_dict_count();
+        return QPair<int, int>(0, total);
     });
     auto *w = new QFutureWatcher<QPair<int, int>>(this);
     connect(w, &QFutureWatcher<QPair<int, int>>::finished, this, [this, w]{
         const QPair<int, int> result = w->result();
         qInfo() << "[aurelex] scan ->" << result.first;
         setDictCount(result.second);
+        setScanningActive(false);
         w->deleteLater();
+        // Surface ANY dictionary files that failed to load (corrupt/truncated)
+        // so the user knows a dictionary is missing and can re-import the folder.
+        collectScanFailures();
         if (result.first > 0 || result.second > 0) {
             refreshDictionaries();
             refreshGroups();
@@ -131,17 +253,54 @@ void EngineController::runScan() {
 
 void EngineController::autoIndexMissing()
 {
-    if (!m_ready || m_buildingFts) return;
-    QList<int> missing;
-    const int n = gd_dict_count();
-    for (int i = 0; i < n; ++i) {
-        int state = -1;
-        if (gd_fts_index_state(i, &state) == 0 && state == 1)
-            missing.append(i);
-    }
-    if (missing.isEmpty()) return;
-    qInfo() << "[aurelex] auto-indexing" << missing.size() << "dictionaries";
-    setBuildingFts(true);
+    if (!m_ready) return;
+    // Enumerate missing dictionary IDs OFF the UI thread: gd_dict_count/
+    // gd_fts_index_state/gd_dict_id take g_engineMutex, which the running FTS
+    // worker holds for the whole duration of a large dictionary build. Doing
+    // this on the UI thread would freeze the app. Deliver the list via a watcher
+    // (runs on the UI thread) which then only touches m_ftsQueue (no engine
+    // calls). IDs are stored, not engine indices, so removal mid-run can't
+    // shift/desync the queue (see ensureFtsWorker).
+    QFuture<QStringList> f = QtConcurrent::run([]{
+        QStringList ids;
+        const int n = gd_dict_count();
+        for (int i = 0; i < n; ++i) {
+            int state = -1;
+            if (gd_fts_index_state(i, &state) == 0 && state == 1) {
+                char idb[128] = {0};
+                if (gd_dict_id(i, idb, static_cast<int>(sizeof(idb))) == 0)
+                    ids.append(QString::fromLocal8Bit(idb));
+            }
+        }
+        return ids;
+    });
+    auto *w = new QFutureWatcher<QStringList>(this);
+    connect(w, &QFutureWatcher<QStringList>::finished, this, [this, w]{
+        const QStringList missing = w->result();
+        w->deleteLater();
+        // Enqueue IDs not already queued; start the single worker if idle.
+        // A re-import mid-build appends and the running worker picks them up
+        // (design D1).
+        bool anyNew = false;
+        {
+            QMutexLocker lock(&m_ftsQueueMutex);
+            for (const QString &id : missing) {
+                if (!m_ftsQueue.contains(id)) {
+                    m_ftsQueue.append(id);
+                    anyNew = true;
+                }
+            }
+        }
+        if (anyNew && !m_ftsWorkerRunning)
+            ensureFtsWorker();
+    });
+    w->setFuture(f);
+}
+
+void EngineController::ensureFtsWorker()
+{
+    if (m_ftsWorkerRunning || m_ftsQueue.isEmpty()) return;
+    m_ftsWorkerRunning = true;
 #if defined(Q_OS_ANDROID)
     // Long builds (large dictionaries) run on a foreground IndexingService so
     // they survive the app being backgrounded; the service shows a notification
@@ -151,23 +310,93 @@ void EngineController::autoIndexMissing()
         "startIndexing",
         "()V");
 #endif
-    QFuture<void> f = QtConcurrent::run([missing]{
-        for (int idx : missing)
-            gd_fts_index(idx);
+    // Snapshot the batch total for THIS run (later appends grow the queue and
+    // will be drained by a subsequent run once this one empties; see design D3).
+    int runTotal = 0;
+    {
+        QMutexLocker lock(&m_ftsQueueMutex);
+        runTotal = m_ftsQueue.size();
+    }
+    setFtsIndexProgress(0, runTotal, QString());
+    setBuildingFts(true);
+
+    // The worker drains the shared queue. Each popped ID is re-resolved to the
+    // CURRENT engine index (a dictionary removed mid-run simply no longer
+    // resolves -> counted and skipped), re-checked at pop time so one already
+    // built by an earlier run is skipped (never indexed twice), and ALWAYS
+    // counted toward done — so the overall bar reaches runTotal / 100% when the
+    // batch finishes. The current dictionary's name is published BEFORE the
+    // build so the header shows what's actually being indexed.
+    QFuture<void> f = QtConcurrent::run([this, runTotal]{
+        int done = 0;
+        char idb[128] = {0}, nb[256] = {0}, fb[512] = {0};
+        for (;;) {
+            QString id;
+            {
+                QMutexLocker lock(&m_ftsQueueMutex);
+                if (m_ftsQueue.isEmpty())
+                    break;
+                id = m_ftsQueue.takeFirst();
+            }
+            // Resolve id -> current index (removals shift engine indices).
+            int idx = -1;
+            {
+                const int n = gd_dict_count();
+                for (int i = 0; i < n; ++i) {
+                    if (gd_dict_id(i, idb, static_cast<int>(sizeof(idb))) == 0
+                        && id == QLatin1String(idb)) {
+                        idx = i;
+                        break;
+                    }
+                }
+            }
+            if (idx < 0) {
+                // Removed while queued; count and move on.
+                ++done;
+                emit ftsIndexBatchProgress(done, runTotal, QString());
+                continue;
+            }
+            QString name;
+            if (gd_dict_info(idx, nb, static_cast<int>(sizeof(nb)),
+                             fb, static_cast<int>(sizeof(fb))) == 0)
+                name = QString::fromLocal8Bit(nb);
+            // Publish the CURRENT dictionary + count before the (long) build so
+            // the UI isn't one item behind.
+            emit ftsIndexBatchProgress(done, runTotal, name);
+            int st = -1;
+            if (!(gd_fts_index_state(idx, &st) == 0 && st == 0)) {
+                gd_fts_index(idx);
+            }
+            ++done;
+            emit ftsIndexBatchProgress(done, runTotal, name);
+        }
     });
     auto *w = new QFutureWatcher<void>(this);
-    connect(w, &QFutureWatcher<void>::finished, this, [this, missing, w]{
-        qInfo() << "[aurelex] auto-index done";
+    connect(w, &QFutureWatcher<void>::finished, this, [this, w]{
+        w->deleteLater();
+        m_ftsWorkerRunning = false;
+        qInfo() << "[aurelex] FTS worker finished a drain";
 #if defined(Q_OS_ANDROID)
         QJniObject::callStaticMethod<void>(
             "aurelex/android/AurelexActivity",
             "stopIndexing",
             "()V");
 #endif
-        for (int idx : missing)
-            emit ftsIndexChanged(idx);
-        setBuildingFts(false);
-        w->deleteLater();
+        // If more indices were enqueued during/just after the drain (a re-import
+        // raced the last pop), hand them to a fresh worker so they are not
+        // stranded — keep the indicator on. Only when the queue is genuinely
+        // empty is the batch truly done.
+        bool empty = false;
+        {
+            QMutexLocker lock(&m_ftsQueueMutex);
+            empty = m_ftsQueue.isEmpty();
+        }
+        if (empty) {
+            setFtsIndexProgress(0, 0, QString());
+            setBuildingFts(false);
+        } else {
+            ensureFtsWorker();
+        }
     });
     w->setFuture(f);
 }
@@ -203,23 +432,6 @@ void EngineController::initialize(const QString &appDir, const QString &stagedDi
     w->setFuture(f);
 }
 
-void EngineController::rescan() {
-    if (!m_ready) return;
-    // The staging dir is only ever written by us, so a plain scan of it is a
-    // no-op. The meaningful refresh is re-reading the ORIGINAL folders through
-    // their SAF grants: Java does an incremental stage-copy (skipping unchanged
-    // files by size+mtime), then writes shared_prefs/refresh.xml; the poller
-    // picks it up and runs runScan() over the refreshed staging.
-#if defined(Q_OS_ANDROID)
-    QJniObject::callStaticMethod<void>(
-        "aurelex/android/AurelexActivity",
-        "refreshSources",
-        "()V");
-#else
-    runScan();
-#endif
-}
-
 void EngineController::refreshDictionaries() {
     if (!m_ready) {
         qInfo() << "[aurelex] refreshDictionaries skipped: not ready";
@@ -252,24 +464,101 @@ void EngineController::refreshDictionaries() {
 }
 
 void EngineController::removeDictionary(int index) {
-    if (!m_ready) return;
-    QFuture<QPair<int, int>> f = QtConcurrent::run([index]{
+    if (!m_ready || index < 0 || index >= m_dictionaries.size()) return;
+    // Capture the dictionary id (engine mutex) + its primary source file path
+    // BEFORE gd_remove_dict shifts indices. The id capture runs off-thread so
+    // the UI never blocks behind a long FTS build holding the engine mutex.
+    const QString sourceFile = m_dictionaries.at(index).toMap().value("source").toString();
+    const QString stagedRoot = m_stagedDir;
+    const QString appDir = m_appDir;
+
+    QFuture<QPair<QString, QPair<int, int>>> f = QtConcurrent::run([index]{
+        char idbuf[128] = {0};
+        QString id;
+        if (gd_dict_id(index, idbuf, static_cast<int>(sizeof(idbuf))) == 0)
+            id = QString::fromLocal8Bit(idbuf);
         const int rc = gd_remove_dict(index);
-        return QPair<int, int>(rc, gd_dict_count());
+        return QPair<QString, QPair<int, int>>(id, QPair<int, int>(rc, gd_dict_count()));
     });
-    auto *w = new QFutureWatcher<QPair<int, int>>(this);
-    connect(w, &QFutureWatcher<QPair<int, int>>::finished, this, [this, w]{
-        const QPair<int, int> result = w->result();
-        qInfo() << "[aurelex] remove dict" << result.first;
-        if (result.first == 0) {
+    auto *w = new QFutureWatcher<QPair<QString, QPair<int, int>>>(this);
+    connect(w, &QFutureWatcher<QPair<QString, QPair<int, int>>>::finished, this,
+            [this, w, sourceFile, stagedRoot, appDir]{
+        const QPair<QString, QPair<int, int>> result = w->result();
+        const QString dictId = result.first;
+        const int rc = result.second.first;
+        const int count = result.second.second;
+        qInfo() << "[aurelex] remove dict" << rc;
+        if (rc == 0) {
+            // Permanent delete: remove the app's copy + its index cache.
+            deleteDictionaryFiles(sourceFile, dictId, stagedRoot, appDir);
+            // Also drop the id from the still-running FTS queue so a removed
+            // dictionary is never indexed by a worker that already popped it.
+            if (!dictId.isEmpty()) {
+                QMutexLocker lock(&m_ftsQueueMutex);
+                m_ftsQueue.removeAll(dictId);
+            }
             refreshDictionaries();
-            setDictCount(result.second);
+            refreshGroups();
+            setDictCount(count);
         } else {
-            setLastError(QStringLiteral("remove_dict failed (rc=%1)").arg(result.first));
+            setLastError(QStringLiteral("remove_dict failed (rc=%1)").arg(rc));
         }
         w->deleteLater();
     });
     w->setFuture(f);
+}
+
+void EngineController::deleteDictionaryFiles(const QString &sourceFile,
+                                             const QString &dictId,
+                                             const QString &stagedRoot,
+                                             const QString &appDir) {
+    // Delete the engine's index cache for this dictionary: files/index<id> and
+    // lines/index<id>_FTS_x (and any _temp) live directly in the app dir.
+    if (!dictId.isEmpty() && !appDir.isEmpty()) {
+        QDir dir(appDir);
+        const QStringList matches = dir.entryList(
+            QStringList() << (QStringLiteral("index") + dictId + QLatin1Char('*')));
+        for (const QString &entry : matches) {
+            const QString full = dir.filePath(entry);
+            QFileInfo fi(full);
+            if (fi.isDir()) QDir(full).removeRecursively();
+            else QFile::remove(full);
+        }
+    }
+    // Delete the staged copy's folder (files/staged/<sourceId>) only if no other
+    // loaded dictionary still uses it (a single import folder can hold several
+    // dictionaries; removing one must not delete its siblings).
+    if (!sourceFile.isEmpty() && !stagedRoot.isEmpty()) {
+        const QString stagedDir = stagedAncestor(sourceFile, stagedRoot);
+        if (!stagedDir.isEmpty()) {
+            bool shared = false;
+            for (const QVariant &v : m_dictionaries) {
+                const QString s = v.toMap().value("source").toString();
+                if (s != sourceFile && (s.startsWith(stagedDir + QLatin1Char('/'))
+                                        || s == stagedDir)) {
+                    shared = true;
+                    break;
+                }
+            }
+            if (!shared) {
+                qInfo() << "[aurelex] removing staged copy" << stagedDir;
+                QDir(stagedDir).removeRecursively();
+            }
+        }
+    }
+}
+
+QString EngineController::stagedAncestor(const QString &file, const QString &stagedRoot) {
+    const QDir root(stagedRoot);
+    const QString rootAbs = root.absolutePath();
+    QDir d = QFileInfo(file).dir();
+    while (!d.isRoot()) {
+        const QString parentAbs = QFileInfo(d.absolutePath()).dir().absolutePath();
+        if (parentAbs == rootAbs)
+            return d.absolutePath();
+        d = QFileInfo(d.absolutePath()).dir();
+    }
+    return QString();
 }
 
 void EngineController::moveDictionary(int from, int to) {
@@ -551,6 +840,28 @@ void EngineController::lookup(const QString &word) {
     w->setFuture(f);
 }
 
+void EngineController::lookupInGroup(const QString &word, int groupId) {
+    QFuture<QString> f = QtConcurrent::run([word, groupId]{
+        std::vector<char> buf(1 << 20);
+        const int sz = gd_lookup_in_group(word.toLocal8Bit().constData(), groupId,
+                                          buf.data(), static_cast<int>(buf.size()));
+        if (sz <= 0) return QString();
+        return QString::fromUtf8(buf.data(), sz);
+    });
+    auto *w = new QFutureWatcher<QString>(this);
+    connect(w, &QFutureWatcher<QString>::finished, this, [this, word, w]{
+        const QString html = w->result();
+        if (html.isEmpty()) {
+            emit articleNotFound(word);
+        } else {
+            recordHistory(word);
+            emit articleLoaded(word, html);
+        }
+        w->deleteLater();
+    });
+    w->setFuture(f);
+}
+
 void EngineController::suggest(const QString &prefix) {
     qInfo() << "[aurelex] suggest firing:" << prefix;
     // Only the latest request may emit: while the user keeps typing (or the
@@ -794,61 +1105,6 @@ void EngineController::applyEffectiveDark()
     emit darkModeChanged();
 }
 
-QString EngineController::peekPendingSourceUri() const
-{
-    if (m_appDir.isEmpty()) return QString();
-    const QString path = m_appDir + QStringLiteral("/../shared_prefs/source.xml");
-    QFile f(path);
-    if (!f.open(QIODevice::ReadOnly)) return QString();
-    const QString xml = QString::fromUtf8(f.readAll());
-    f.close();
-
-    QXmlStreamReader xr(xml);
-    while (!xr.atEnd()) {
-        const auto tok = xr.readNext();
-        if (tok == QXmlStreamReader::StartElement
-            && xr.name() == QStringLiteral("string")
-            && xr.attributes().value(QStringLiteral("name")) == QStringLiteral("sourceUri")) {
-            return xr.readElementText();
-        }
-    }
-    return QString();
-}
-
-void EngineController::removePendingSourceFile()
-{
-    if (m_appDir.isEmpty()) return;
-    QFile f(m_appDir + QStringLiteral("/../shared_prefs/source.xml"));
-    f.remove();
-}
-
-bool EngineController::peekPendingRefreshFlag() const
-{
-    if (m_appDir.isEmpty()) return false;
-    const QString path = m_appDir + QStringLiteral("/../shared_prefs/refresh.xml");
-    QFile f(path);
-    if (!f.open(QIODevice::ReadOnly)) return false;
-    const QString xml = QString::fromUtf8(f.readAll());
-    f.close();
-    QXmlStreamReader xr(xml);
-    while (!xr.atEnd()) {
-        const auto tok = xr.readNext();
-        if (tok == QXmlStreamReader::StartElement
-            && xr.name() == QStringLiteral("boolean")
-            && xr.attributes().value(QStringLiteral("name")) == QStringLiteral("refreshDone")) {
-            return xr.attributes().value(QStringLiteral("value")) == QStringLiteral("true");
-        }
-    }
-    return false;
-}
-
-void EngineController::removePendingRefreshFile()
-{
-    if (m_appDir.isEmpty()) return;
-    QFile f(m_appDir + QStringLiteral("/../shared_prefs/refresh.xml"));
-    f.remove();
-}
-
 bool EngineController::peekPendingIndexingDone() const
 {
     if (m_appDir.isEmpty()) return false;
@@ -876,63 +1132,38 @@ void EngineController::removePendingIndexingFile()
     f.remove();
 }
 
-void EngineController::ingestPendingSource()
+bool EngineController::peekStagingActive() const
 {
-    if (m_appDir.isEmpty() || !m_ready) return;
-    const QString path = m_appDir + QStringLiteral("/../shared_prefs/source.xml");
+    if (m_appDir.isEmpty()) return false;
+    const QString path = m_appDir + QStringLiteral("/../shared_prefs/staging.xml");
     QFile f(path);
-    if (!f.open(QIODevice::ReadOnly)) return;
+    if (!f.open(QIODevice::ReadOnly)) return false;
     const QString xml = QString::fromUtf8(f.readAll());
     f.close();
-
     QXmlStreamReader xr(xml);
-    QString uri, p, display;
-    bool staged = false;
     while (!xr.atEnd()) {
         const auto tok = xr.readNext();
-        if (tok == QXmlStreamReader::StartElement) {
-            const auto n = xr.name();
-            const auto attr = xr.attributes().value(QStringLiteral("name"));
-            if (n == QStringLiteral("string") && attr == QStringLiteral("sourceUri"))
-                uri = xr.readElementText();
-            else if (n == QStringLiteral("string") && attr == QStringLiteral("sourcePath"))
-                p = xr.readElementText();
-            else if (n == QStringLiteral("string") && attr == QStringLiteral("sourceDisplay"))
-                display = xr.readElementText();
-            else if (n == QStringLiteral("boolean") && attr == QStringLiteral("sourceStaged"))
-                staged = xr.attributes().value(QStringLiteral("value")) == QStringLiteral("true");
+        if (tok == QXmlStreamReader::StartElement
+            && xr.name() == QStringLiteral("boolean")
+            && xr.attributes().value(QStringLiteral("name")) == QStringLiteral("stagingActive")) {
+            return xr.attributes().value(QStringLiteral("value")) == QStringLiteral("true");
         }
     }
-    if (uri.isEmpty()) return;
-    removePendingSourceFile();
-    qInfo() << "[aurelex] source added:" << display << "staged at" << p;
+    return false;
+}
 
-    QVariantMap src;
-    src.insert("uri", uri);
-    src.insert("path", p);
-    src.insert("orig", display);
-    src.insert("staged", staged);
-    m_sources.append(src);
-    saveSettings();
-    emit sourcesChanged();
-    runScan();
+void EngineController::removeStagingFile()
+{
+    if (m_appDir.isEmpty()) return;
+    QFile f(m_appDir + QStringLiteral("/../shared_prefs/staging.xml"));
+    f.remove();
 }
 
 void EngineController::setOnboarded(bool v)
 {
     if (m_onboarded == v) return;
     m_onboarded = v;
-    QFile f(m_appDir + "/settings.json");
-    if (f.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
-        QJsonObject obj;
-        obj.insert("userDarkOverride", m_userDarkOverride);
-        obj.insert("onboarded", v);
-        QJsonArray src;
-        for (const QVariant &s : m_sources)
-            src.append(QJsonObject::fromVariantMap(s.toMap()));
-        obj.insert("sources", src);
-        f.write(QJsonDocument(obj).toJson(QJsonDocument::Compact));
-    }
+    saveSettings();
     emit onboardedChanged();
 }
 
@@ -950,18 +1181,12 @@ void EngineController::loadSettings()
         m_userDarkOverride = obj.value("userDarkOverride").toBool(false);
     else if (obj.value("darkMode").toBool(false))
         m_userDarkOverride = true;
-    // Restore folder-scoped sources. After the AFA removal the app cannot read
-    // arbitrary /storage/emulated/0 folders without a SAF grant, so existing
-    // data is NOT auto-migrated here — the user re-picks the folder (c.f.
-    // design.md "Migration Plan" step 2 / risks: sources start empty).
-    m_sources.clear();
-    const QJsonArray arr = obj.value("sources").toArray();
-    for (const QJsonValue &v : arr)
-        m_sources.append(v.toObject().toVariantMap());
+    // One-off import model: a persisted "sources" array (from older builds) is
+    // intentionally ignored — the app-private staged copies remain on disk and
+    // are the single source of dictionaries; they re-scan on startup.
     saveSettings();
     applyEffectiveDark();
     emit onboardedChanged();
-    emit sourcesChanged();
 }
 
 void EngineController::saveSettings()
@@ -971,10 +1196,6 @@ void EngineController::saveSettings()
     QJsonObject obj;
     obj.insert("userDarkOverride", m_userDarkOverride);
     obj.insert("onboarded", m_onboarded);
-    QJsonArray src;
-    for (const QVariant &s : m_sources)
-        src.append(QJsonObject::fromVariantMap(s.toMap()));
-    obj.insert("sources", src);
     f.write(QJsonDocument(obj).toJson(QJsonDocument::Compact));
 }
 
@@ -1089,24 +1310,24 @@ void EngineController::pollPendingLookup()
     // and this poll (500ms) picks it up for a near-immediate re-palette.
     updateSystemDark();
 
-    // A newly picked dictionary source (SAF) takes priority. ingestPendingSource
-    // returns without consuming when the engine isn't ready yet, so this retries
-    // on a later tick.
-    if (!peekPendingSourceUri().isEmpty()) {
-        ingestPendingSource();
-        return;
-    }
-
-    // A completed refresh (engine.rescan -> Java refreshSources) marks that the
-    // re-pull from the original SAF folders is done; rescan the refreshed staging.
-    if (peekPendingRefreshFlag()) {
-        removePendingRefreshFile();
-        if (m_ready) runScan();
-        return;
+    // Staging-progress + one-off-import trigger: the StagingService copies a
+    // picked folder into app-private storage and holds its start marker while
+    // doing so (the Dicts tab shows "Preparing dictionaries…"). When the copy
+    // finishes the marker clears; that transition triggers a scan of the staged
+    // root so the imported dictionaries load + are indexed.
+    {
+        const bool active = peekStagingActive();
+        if (active && !m_stagingActive) setStagingActive(true);
+        else if (!active && m_stagingActive) {
+            setStagingActive(false);
+            removeStagingFile();
+            if (m_ready) runScan();
+        }
     }
 
     // The IndexingService finished its stop (marker written when the bulk build
-    // completed). Consume it so a stale marker never re-triggers later.
+    // completed). Consume it so a stale marker never re-triggers later. The
+    // worker's watcher owns buildingFts/reset, so this doesn't touch them.
     if (peekPendingIndexingDone()) {
         removePendingIndexingFile();
     }
@@ -1164,58 +1385,4 @@ void EngineController::addDictionaryFolder()
 #else
     qInfo() << "[aurelex] addDictionaryFolder: SAF picker is Android-only";
 #endif
-}
-
-void EngineController::removeSource(int index)
-{
-    if (index < 0 || index >= m_sources.size()) return;
-    const QVariantMap src = m_sources.takeAt(index).toMap();
-    const QString removedPath = src.value("path").toString();
-    saveSettings();
-    // Release the persisted SAF grant for physical sources so the folder isn't
-    // held forever (staged copies are app-private and need no release).
-    const QString uri = src.value("uri").toString();
-    if (!uri.isEmpty()) {
-#if defined(Q_OS_ANDROID)
-        QJniObject::callStaticMethod<void>(
-            "aurelex/android/AurelexActivity",
-            "releaseSourcePermission",
-            "(Ljava/lang/String;)V",
-            QJniObject::fromString(uri).object());
-#endif
-    }
-    emit sourcesChanged();
-    qInfo() << "[aurelex] removed source" << index << removedPath;
-
-    // Unload every dictionary backed by the removed source (matches the spec:
-    // "dictionaries from that source no longer appear in the list, lookups, or
-    // full-text search"). gd_remove_dict takes the engine mutex, so run off-thread.
-    if (!removedPath.isEmpty()) {
-        const QVariantList snapshot = m_dictionaries;
-        QFuture<void> f = QtConcurrent::run([snapshot, removedPath]{
-            // High-to-low so indices stay valid across removals.
-            for (int i = snapshot.size() - 1; i >= 0; --i) {
-                const QString s = snapshot.at(i).toMap().value("source").toString();
-                if (s == removedPath || s.startsWith(removedPath + "/"))
-                    gd_remove_dict(i);
-            }
-        });
-        auto *w = new QFutureWatcher<void>(this);
-        connect(w, &QFutureWatcher<void>::finished, this, [this, w, removedPath]{
-            w->deleteLater();
-            refreshDictionaries();
-            refreshGroups();
-            // Delete the staged copy from the private area (the original folder
-            // is untouched — this is just our snapshot). Only nested staged dirs
-            // are removed, never the sandbox root.
-            const QString stagedRoot = m_stagedDir;
-            if (!removedPath.isEmpty()
-                    && removedPath.startsWith(stagedRoot + QLatin1Char('/'))) {
-                qInfo() << "[aurelex] removing staged copy" << removedPath;
-                QDir(removedPath).removeRecursively();
-            }
-        });
-        w->setFuture(f);
-    }
-    runScan();
 }

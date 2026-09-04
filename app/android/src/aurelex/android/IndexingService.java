@@ -70,15 +70,47 @@ public class IndexingService extends Service {
         }
     }
 
+    private static IndexingService sInstance = null;
+
     @Override
     public void onCreate() {
         super.onCreate();
+        sInstance = this;
         createChannel();
+        // startForegroundService() requires startForeground() within ~5s, and
+        // Android enforces it from the moment the process starts. Call it as
+        // early as possible (in onCreate, not onStartCommand) so a busy main
+        // thread during cold start can't delay it past the limit and crash with
+        // ForegroundServiceDidNotStartInTimeException. onStartCommand updates it.
+        startForeground(NOTIFICATION_ID, buildNotification(0, 0, null, 0));
+    }
+
+    /** Static access to the live service for cross-thread notification updates. */
+    static IndexingService instance() { return sInstance; }
+
+    /**
+     * Updates the foreground notification with live progress: "Indexing
+     * (current of total): <name>" with a determinate bar for the OVERALL batch
+     * fraction (monotonic). Called over JNI from the C++ side
+     * (EngineController) each poll while indexing runs.
+     */
+    public static void updateProgress(int currentIndex, int total,
+                                      String name, int overallPercent) {
+        try {
+            final IndexingService svc = sInstance;
+            if (svc == null) return;
+            final NotificationManager nm =
+                    (NotificationManager) svc.getSystemService(NOTIFICATION_SERVICE);
+            if (nm == null) return;
+            nm.notify(NOTIFICATION_ID, svc.buildNotification(currentIndex, total, name, overallPercent));
+        } catch (Exception e) {
+            android.util.Log.w(TAG, "updateProgress failed: " + e);
+        }
     }
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
-        startForeground(NOTIFICATION_ID, buildNotification());
+        startForeground(NOTIFICATION_ID, buildNotification(0, 0, null, 0));
         android.util.Log.i(TAG, "IndexingService foreground: bulk FTS indexing running");
         // Not sticky: if the process is killed mid-build, a restart re-scans on
         // next launch and autoIndexMissing rebuilds what is still missing.
@@ -93,6 +125,7 @@ public class IndexingService extends Service {
         } catch (Exception e) {
             android.util.Log.w(TAG, "IndexingService.onDestroy failed: " + e);
         }
+        sInstance = null;
         android.util.Log.i(TAG, "IndexingService stopped");
         super.onDestroy();
     }
@@ -113,7 +146,8 @@ public class IndexingService extends Service {
         }
     }
 
-    private Notification buildNotification() {
+    private Notification buildNotification(int currentIndex, int total,
+                                           String name, int overallPercent) {
         final Intent open = new Intent(this, AurelexActivity.class);
         open.addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP);
         final PendingIntent pi = PendingIntent.getActivity(this, 0, open,
@@ -121,12 +155,22 @@ public class IndexingService extends Service {
         final Notification.Builder builder = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
                 ? new Notification.Builder(this, CHANNEL_ID)
                 : new Notification.Builder(this);
-        return builder
+        final String text = (total > 0 && name != null && !name.isEmpty())
+                ? "Indexing (" + currentIndex + " of " + total + "): " + name
+                : "Indexing dictionaries\u2026";
+        builder
                 .setContentTitle("Aurelex")
-                .setContentText("Indexing dictionaries\u2026")
+                .setContentText(text)
                 .setSmallIcon(android.R.drawable.ic_menu_search)
                 .setContentIntent(pi)
-                .setOngoing(true)
-                .build();
+                .setOnlyAlertOnce(true)
+                .setOngoing(true);
+        if (total > 0) {
+            // Determinate bar for the OVERALL batch progress (0..100).
+            builder.setProgress(100, overallPercent, false);
+        } else {
+            builder.setProgress(0, 0, true); // indeterminate while starting
+        }
+        return builder.build();
     }
 }

@@ -9,6 +9,8 @@
 #include <QFutureWatcher>
 #include <QPointer>
 #include <QTimer>
+#include <QMutex>
+#include <QList>
 
 class ArticleServer;
 
@@ -35,11 +37,33 @@ class EngineController : public QObject
     Q_PROPERTY(bool userDarkOverride READ userDarkOverride WRITE setUserDarkOverride NOTIFY userDarkOverrideChanged)
     Q_PROPERTY(bool onboarded READ onboarded WRITE setOnboarded NOTIFY onboardedChanged)
     Q_PROPERTY(bool buildingFts READ buildingFts NOTIFY buildingFtsChanged)
-    // Folder-scoped dictionary sources (SAF). Each entry is a QVariantMap
-    // { uri, path, staged }: uri is the persisted SAF tree, path is the physical
-    // dir to scan (resolved external path, or an app-private staged subdir when
-    // the provider is unresolvable), staged=true for the staged case.
-    Q_PROPERTY(QVariantList sources READ sources NOTIFY sourcesChanged)
+    // Full-text index batch progress: while buildingFts is true, ftsIndexDone /
+    // ftsIndexTotal report "N of M" dictionaries COMPLETED (0/0 when idle).
+    // ftsCurrentDictIndex is the currently-indexing dictionary number (1-based).
+    Q_PROPERTY(int ftsIndexDone READ ftsIndexDone NOTIFY ftsIndexProgressChanged)
+    Q_PROPERTY(int ftsIndexTotal READ ftsIndexTotal NOTIFY ftsIndexProgressChanged)
+    // All-dictionaries progress as a 0..1 fraction (ftsIndexDone/ftsIndexTotal).
+    Q_PROPERTY(qreal ftsIndexFraction READ ftsIndexFraction NOTIFY ftsIndexProgressChanged)
+    // The currently-indexing dictionary's own progress (0..1) sampled from
+    // gd_fts_progress; on a resumed build it continues from where we left off
+    // (never restarts at 0).
+    Q_PROPERTY(qreal ftsDictFraction READ ftsDictFraction NOTIFY ftsIndexProgressChanged)
+    // Display name of the dictionary currently being indexed.
+    Q_PROPERTY(QString ftsCurrentDictName READ ftsCurrentDictName NOTIFY ftsIndexProgressChanged)
+    // True while the foreground StagingService is copy-staging a picked folder
+    // into app storage. Written by the service via shared_prefs/staging.xml
+    // (start) / <absent> (done); the poller tracks it so the Dicts tab can show
+    // "Preparing dictionaries..." instead of looking frozen.
+    Q_PROPERTY(bool stagingActive READ stagingActive NOTIFY stagingActiveChanged)
+    // True while the carve is scanning (gd_scan_dicts) a newly-staged folder.
+    // Bridges the gap so the processing banner stays visible continuously from
+    // folder pick -> staging -> scan -> indexing.
+    Q_PROPERTY(bool scanningActive READ scanningActive NOTIFY scanningActiveChanged)
+    // List of {file, reason} maps for dictionary files that failed to load in
+    // the last scan (corrupt/truncated source). Filled after each runScan; the
+    // Dicts tab surfaces it so the user knows a dictionary is missing and that
+    // re-adding the folder re-copies it. Empty when everything loaded.
+    Q_PROPERTY(QVariantList scanFailures READ scanFailures NOTIFY scanFailuresChanged)
 public:
     explicit EngineController(QObject *parent = nullptr);
     ~EngineController() override;
@@ -58,7 +82,7 @@ public:
     void setUserDarkOverride(bool on);
     bool onboarded() const { return m_onboarded; }
     void setOnboarded(bool v);
-    QVariantList sources() const { return m_sources; }
+    QVariantList scanFailures() const { return m_scanFailures; }
 
     // Cycle the manual dark override: when following system, force dark; when
     // forcing dark, return to following system. Drives Material.theme + the
@@ -68,7 +92,6 @@ public:
     // Initialise the engine. `configDir`/`indexDir` are usually the same
     // AppLocalDataLocation; `stagedDir` is the dict folder the app stages to.
     Q_INVOKABLE void initialize(const QString &appDir, const QString &stagedDir);
-    Q_INVOKABLE void rescan();
 
     // Refresh the dictionaries list (off-thread; result delivered via
     // dictionariesChanged signal). No-op if the engine isn't ready.
@@ -145,10 +168,21 @@ public:
     Q_INVOKABLE QString clipboardText();
 
     bool buildingFts() const { return m_buildingFts; }
+    int ftsIndexDone() const { return m_ftsIndexDone; }
+    int ftsIndexTotal() const { return m_ftsIndexTotal; }
+    qreal ftsIndexFraction() const { return m_ftsIndexFraction; }
+    qreal ftsDictFraction() const { return m_ftsDictFraction; }
+    QString ftsCurrentDictName() const { return m_ftsCurrentDictName; }
+    bool stagingActive() const { return m_stagingActive; }
+    bool scanningActive() const { return m_scanningActive; }
 
     // Lookup a word. `articleLoaded(word, html)` on success, or
     // `articleNotFound(word)` when the engine returned a "no match" article.
     Q_INVOKABLE void lookup(const QString &word);
+    // Lookup `word` scoped to a specific group (id, 0 = All). Used when a
+    // result from a scoped context (e.g. FTS tab) must open in that group,
+    // independent of the Search tab's active-group selection.
+    Q_INVOKABLE void lookupInGroup(const QString &word, int groupId);
     Q_INVOKABLE void suggest(const QString &prefix);
 
     // Rewrite upstream article asset URLs (qrc:///, bres://, gdau://) to the
@@ -174,12 +208,9 @@ public:
     Q_INVOKABLE void stopAudio();
 
     // Folder-scoped storage (SAF). addDictionaryFolder() launches the Android
-    // folder picker via the Java shell; the picked source (resolved physical
-    // path, or a staged copy) arrives through the poller and is added to
-    // sources() then rescanned. removeSource() drops a persisted source (and
-    // releases its SAF grant) and rescans.
+    // folder picker via the Java shell; the picked folder is stage-copied into
+    // app-private storage and then scanned + indexed (a one-off import).
     Q_INVOKABLE void addDictionaryFolder();
-    Q_INVOKABLE void removeSource(int index);
 
 signals:
     void dictCountChanged();
@@ -194,6 +225,7 @@ signals:
     void ftsIndexChanged(int dictIndex);
     void ftsSearchReady(const QString &query, const QVariantList &results);
     void buildingFtsChanged();
+    void stagingActiveChanged();
     void groupDictsReady(int groupId, const QVariantList &dicts);
     void historyChanged();
     void favoritesChanged();
@@ -202,11 +234,30 @@ signals:
     void articleBaseUrlChanged();
     void systemDarkChanged();
     void userDarkOverrideChanged();
-    void sourcesChanged();
+    void scanFailuresChanged();
+    void ftsIndexProgressChanged();
+    // Emitted from the index-build worker thread after each dictionary finishes
+    // indexing (queued delivery to the UI thread). currentCount = number of
+    // dictionaries COMPLETED so far; total = batch size; name = the dictionary
+    // that was just finished (so the "currently indexing" label can use the
+    // NEXT one). Note the app reads live per-dict progress separately via
+    // gd_fts_progress.
+    void ftsIndexBatchProgress(int currentCount, int total, const QString &name);
+    void scanningActiveChanged();
 
 private:
     void runScan();
     void autoIndexMissing();
+    // Start the single FTS worker if it isn't already draining the queue.
+    void ensureFtsWorker();
+    // Permanently delete an imported dictionary's staged copy (when not shared)
+    // and its engine index cache. Called after gd_remove_dict; indices may have
+    // shifted, so operate on captured paths/ids.
+    void deleteDictionaryFiles(const QString &sourceFile, const QString &dictId,
+                               const QString &stagedRoot, const QString &appDir);
+    // The staged/<sourceId> directory that owns `file` (a direct child of the
+    // staged root), or empty.
+    static QString stagedAncestor(const QString &file, const QString &stagedRoot);
     void setDictCount(int n);
     void setReady(bool r);
     void setLastError(const QString &e);
@@ -214,6 +265,13 @@ private:
     void setGroups(const QVariantList &list);
     void setActiveGroupId(int id);
     void setBuildingFts(bool b);
+    void setStagingActive(bool b);
+    void setScanningActive(bool b);
+    void setFtsIndexProgress(int done, int total, const QString &name);
+    void setFtsFraction(qreal allFraction, qreal dictFraction);
+    void pollFtsProgress();
+    void setScanFailures(const QVariantList &list);
+    void collectScanFailures();
     void setHistory(const QStringList &list);
     void setFavorites(const QStringList &list);
     void loadHistory();
@@ -225,20 +283,16 @@ private:
     void pollPendingLookup();
     QString peekPendingLookup() const;
     bool peekPendingClipboardFlag() const;
-    // Folder-scoped storage: consume a source written by the Java shell
-    // (shared_prefs/source.xml) and add it to sources(), or return it raw.
-    void ingestPendingSource();
-    QString peekPendingSourceUri() const;
-    void removePendingSourceFile();
-    // Rescan flow: Java signals completion of the incremental re-pull from the
-    // original SAF folders via shared_prefs/refresh.xml.
-    bool peekPendingRefreshFlag() const;
-    void removePendingRefreshFile();
     // Bulk FTS indexing: the Android IndexingService writes a completion marker
     // (shared_prefs/indexing.xml) when it stops; consume it here so a leftover
     // marker never re-triggers stale indexing state on a later tick.
     bool peekPendingIndexingDone() const;
     void removePendingIndexingFile();
+    // Dictionary staging: the Android StagingService writes a start marker
+    // (shared_prefs/staging.xml) to show "Preparing dictionaries..." and
+    // clears it when the copy completes (or fails).
+    bool peekStagingActive() const;
+    void removeStagingFile();
 
     // Android system dark-mode (Qt 6.6 QPA doesn't expose it); sampled via JNI
     // on the poller tick. Recomputes and applies the effective dark mode.
@@ -265,6 +319,29 @@ private:
     bool m_onboarded = false;
     QString m_appDir;
     QString m_stagedDir;
-    QVariantList m_sources;
+    QVariantList m_scanFailures;
+    bool m_stagingActive = false;
+    bool m_scanningActive = false;
+    int m_ftsIndexDone = 0;
+    int m_ftsIndexTotal = 0;
+    qreal m_ftsIndexFraction = 0.0;
+    qreal m_ftsDictFraction = 0.0;
+    QString m_ftsCurrentDictName;
+    // Samples gd_fts_progress while a batch is building so ftsDictFraction
+    // reflects the in-flight dictionary's own progress (not just whole dicts).
+    QTimer m_ftsProgressTimer;
+    // Single-index-worker queue (design D1/D2): dictionary IDs still needing a
+    // full-text index. Stored as IDs (not engine indices) so a dictionary
+    // removed mid-build doesn't shift/desync the queue; the worker re-resolves
+    // id -> index at pop time and skips ids that no longer exist. buildingFts
+    // clears only when the queue empties.
+    QList<QString> m_ftsQueue;
+    // Guards m_ftsQueue (written by the UI thread in autoIndexMissing/remove,
+    // read/popped by the worker thread).
+    QMutex m_ftsQueueMutex;
+    // True while the single FTS worker task is draining m_ftsQueue. Controls
+    // whether autoIndexMissing starts a new run; a re-import mid-build appends
+    // to the queue the running worker picks up.
+    bool m_ftsWorkerRunning = false;
     QPointer<ArticleServer> m_articleServer;
 };
