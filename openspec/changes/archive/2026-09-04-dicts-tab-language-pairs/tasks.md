@@ -1,0 +1,23 @@
+# Tasks
+
+- [x] **Boundary: add `gd_dict_meta`** (design D1)
+  - Add `gd_dict_meta(int index, char* lang_from, int lang_from_size, char* lang_to, int lang_to_size)` to `goldendict.h` + `gd_boundary.cc`; fill human language names from `LangCoder::decode(getLangFrom()/getLangTo())` (empty when unknown). Keep `gd_dict_info` intact.
+  - Off-thread safe (engine mutex, like other gd_* calls).
+- [x] **Controller: enrich `dictionaries` rows** (design D1/D2)
+  - In `refreshDictionaries`, query `gd_dict_meta` per dict and add `langFrom`, `langTo`, `sizeBytes` to each row map.
+  - Compute `sizeBytes` by stat-ing the dictionary's staged source file(s) (the `source` path + sibling resource files); do this off-thread.
+  - Suppress `sizeBytes` in the row when the dict's FTS index is not built yet (state != 0); populate once indexed (refresh after indexing).
+- [x] **QML: row secondary line + size formatting**
+  - Replace the file-path label with `Source/Target · <size>` (e.g. `English/Russian · 145 MB`); render `?` for an unknown side; omit size while indexing.
+  - Human-readable size formatting (B/KB/MB/GB) helper in QML or the controller.
+- [x] **QML: By Pair toggle + grouping** (design D3)
+  - Add a "By Pair" toggle (button, highlighted when active) next to Add dictionaries.
+  - Off: flat list sorted alphabetically by name. On: group via `ListView.section` by pair (unknown sides as `?`), pairs sorted, dictionaries sorted by name within a pair; color-highlighted caption rows.
+- [x] **QML: per-pair Remove** (design D4)
+  - Each pair caption row gets a Remove ToolButton that removes every dictionary in that pair (confirm first), reusing `removeDictionary` per index.
+- [x] **QML: multi-select + RemoveSelected** (design D4, small scope)
+  - Tapping a dictionary row toggles selection (row highlight); a selection set is kept.
+  - "RemoveSelected" button next to By Pair: disabled when selection empty, enabled when ≥1 selected; tapping removes all selected (via `removeDictionary`) and clears the selection.
+- [x] **Manual device verification**
+  - Dicts rows show pair + size (no file path); unknown pair shows `?`; size hidden while indexing.
+  - By Pair groups correctly; per-pair Remove works; multi-select + RemoveSelected works and button enables/disables correctly.
