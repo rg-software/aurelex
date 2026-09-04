@@ -100,6 +100,7 @@ ApplicationWindow {
     // an IME query arriving at a focused-but-hidden item can spin the
     // Qt tab-focus-chain walker forever (ANR deadlock with the IME's
     // blocking finishComposingText on the Android main thread).
+    property bool inlineArticle: false
     function _showArticle(word, html) {
         if (currentWord !== "" && currentWord !== word) {
             navStack.push({ word: currentWord, html: currentHtml })
@@ -107,19 +108,38 @@ ApplicationWindow {
         currentWord = word
         currentHtml = html
         _blurActive()
-        state = 2
-        articleLoadTimer.restart()
+        if (state === 0) {
+            // Inline mode: show article below suggestions in the search tab.
+            inlineArticle = true
+            articleLoadTimer.restart()
+        } else {
+            state = 2
+            articleLoadTimer.restart()
+        }
     }
     function _backFromArticle() {
         if (navStack.length === 0) {
+            // No more articles in the stack.
+            if (root.inlineArticle) {
+                // Clear inline article and return to pure suggestions view.
+                root.inlineArticle = false
+                root.currentWord = ""
+                root.currentHtml = ""
+                return
+            }
             state = 0
             return
         }
         const prev = navStack.pop()
         currentWord = prev.word
         currentHtml = prev.html
-        state = 2
-        articleLoadTimer.restart()
+        if (root.inlineArticle) {
+            // Stay in inline mode, re-render the previous article.
+            articleLoadTimer.restart()
+        } else {
+            state = 2
+            articleLoadTimer.restart()
+        }
     }
     function _blurActive() {
         if (root.activeFocusItem && root.activeFocusItem.forceActiveFocus === undefined) return
@@ -171,6 +191,13 @@ ApplicationWindow {
     ]
     function _navTo(idx) {
         if (idx === 0) { _blurActive(); state = 0; return }
+        // Leaving the search tab: clear any inline article state.
+        if (root.inlineArticle) {
+            root.inlineArticle = false
+            root.currentWord = ""
+            root.currentHtml = ""
+            navStack = []
+        }
         if (idx === 1) { _openDicts(); return }
         if (idx === 3) { _openGroups(); return }
         if (idx === 4) { _openFts(); return }
@@ -303,25 +330,25 @@ ApplicationWindow {
                 suggestionList.model = []
                 return
             }
+            // When the user types a new query, clear any inline article.
+            if (root.inlineArticle) {
+                root.inlineArticle = false
+                root.currentWord = ""
+                root.currentHtml = ""
+                navStack = []
+            }
             engine.suggest(t)
         }
 
         property var pendingSuggestions: []
-        Timer {
-            id: suggestApplyTimer
-            interval: 60
-            onTriggered: {
-                suggestionList.model = searchPane.pendingSuggestions
-                suggestionList.forceLayout()
-                suggestionList.positionViewAtBeginning()
-            }
-        }
 
         Connections {
             target: engine
             function onSuggestionsReady(prefix, suggestions) {
                 searchPane.pendingSuggestions = suggestions
-                suggestApplyTimer.restart()
+                suggestionList.model = suggestions
+                suggestionList.forceLayout()
+                suggestionList.positionViewAtBeginning()
             }
             function onArticleNotFound(word) {
                 suggestionList.model = ["(no results for " + word + ")"]
@@ -365,7 +392,7 @@ ColumnLayout {
                     Accessible.name: "Search dictionaries"
                     Accessible.role: Accessible.EditableText
                     font.pixelSize: 18
-                    onDisplayTextChanged: debounce.restart()
+                    onDisplayTextChanged: searchPane._doSuggest()
                     onAccepted: { input.focus = false; engine.lookup(text.trim()) }
                     Component.onCompleted: forceActiveFocus()
                 }
@@ -381,11 +408,7 @@ ColumnLayout {
                 }
             }
 
-            Timer {
-                id: debounce
-                interval: 250
-                onTriggered: searchPane._doSuggest()
-            }
+
 
             Label {
                 Layout.fillWidth: true
@@ -398,7 +421,10 @@ ColumnLayout {
             ListView {
                 id: suggestionList
                 Layout.fillWidth: true
-                Layout.fillHeight: true
+                // When an article is showing inline, cap the suggestion list
+                // so the article WebView has room below.
+                Layout.fillHeight: !root.inlineArticle
+                Layout.preferredHeight: root.inlineArticle ? Math.min(count * 44, searchPane.height * 0.35) : 0
                 clip: true
                 model: []
                 Accessible.name: "Search suggestions"
@@ -410,6 +436,96 @@ ColumnLayout {
                     Accessible.name: modelData
                     Accessible.role: Accessible.ListItem
                     onClicked: engine.lookup(modelData)
+                }
+            }
+
+            // Inline article area: visible when an article is loaded in search mode.
+            Rectangle {
+                id: searchArticleArea
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                visible: root.state === 0 && root.inlineArticle && root.currentHtml.length > 0
+                color: root.uiBg
+
+                Rectangle {
+                    width: parent.width
+                    height: 40
+                    color: root.uiCard
+                    border.color: root.uiBorder
+
+                    RowLayout {
+                        anchors.fill: parent
+                        anchors.leftMargin: 4
+                        anchors.rightMargin: 4
+                        spacing: 4
+
+                        ToolButton {
+                            text: root.icon("arrow_back")
+                            font.family: root.iconFontFamily
+                            font.pixelSize: 22
+                            Accessible.name: "Back"
+                            Accessible.role: Accessible.Button
+                            onClicked: root._backFromArticle()
+                        }
+                        ToolButton {
+                            property bool active: engine.favorites.indexOf(root.currentWord) >= 0
+                            text: root.icon(active ? "star" : "star_border")
+                            font.family: root.iconFontFamily
+                            font.pixelSize: 22
+                            Material.foreground: active ? Material.primary : root.uiSubFg
+                            Accessible.name: active ? "Remove from favorites" : "Add to favorites"
+                            Accessible.role: Accessible.Button
+                            onClicked: engine.toggleFavorite(root.currentWord)
+                        }
+                        Label {
+                            Layout.fillWidth: true
+                            text: root.currentWord
+                            elide: Text.ElideRight
+                            font.pixelSize: 14
+                            color: root.uiFg
+                        }
+                    }
+                }
+
+                WebView {
+                    id: searchArticleView
+                    anchors { top: parent.top; topMargin: 40; left: parent.left; right: parent.right; bottom: parent.bottom }
+                    Accessible.name: "Dictionary article"
+                    Accessible.role: Accessible.WebView
+                    onUrlChanged: {
+                        const u = url.toString()
+                        const base = engine.articleBaseUrl
+                        if (base.length > 0 && u.indexOf(base + "/gdlookup/") === 0) {
+                            const word = _parseGdlookupHttpUrl(u, base)
+                            if (word.length > 0) {
+                                _gdlookupInFlight = word
+                                engine.lookup(word)
+                            }
+                            searchArticleView.loadHtml("<html><body></body></html>", engine.articleBaseUrl)
+                            return
+                        }
+                        if (u.indexOf("gdlookup://") === 0) {
+                            const word = _parseGdlookupUrl(u)
+                            if (word.length > 0) {
+                                _gdlookupInFlight = word
+                                engine.lookup(word)
+                            }
+                            searchArticleView.loadHtml("<html><body></body></html>", engine.articleBaseUrl)
+                            return
+                        }
+                        if (base.length > 0 && u.indexOf(base + "/gdau/") === 0) {
+                            engine.playAudio(u)
+                            searchArticleView.loadHtml("<html><body></body></html>", engine.articleBaseUrl)
+                            return
+                        }
+                    }
+                    onLoadingChanged: console.log("Search WebView loading:", loading, "url:", url)
+                    onHeightChanged: {
+                        if (root.state === 0 && root.inlineArticle
+                            && searchArticleView.height !== root.loadedAtHeight
+                            && root.currentHtml.length > 0)
+                            articleReloader.restart()
+                    }
                 }
             }
         }
@@ -1181,10 +1297,11 @@ ColumnLayout {
         Loader {
             id: articleLoader
             anchors { top: parent.top; topMargin: 44; left: parent.left; right: parent.right; bottom: parent.bottom }
-            // Only create the WebView while the article pane is active, so the
-            // QtWebView native Android view never overlays the other panes.
+            // Only create the full-pane WebView while the article pane is active.
+            // A native Android WebView kept alive while hidden still participates
+            // in the native view hierarchy and swallows touches across the whole
+            // UI (it coexisted with the inline search WebView -> unusable screen).
             active: root.state === 2
-            visible: root.state === 2
             sourceComponent: articleViewComponent
             Accessible.name: "Article content"
             Accessible.role: Accessible.Group
@@ -1395,7 +1512,7 @@ ColumnLayout {
     Connections {
         target: engine
         function onArticleBaseUrlChanged() {
-            if (state === 2 && currentHtml.length > 0)
+            if ((state === 2 || (state === 0 && inlineArticle)) && currentHtml.length > 0)
                 _loadArticleNow()
         }
     }
@@ -1412,19 +1529,28 @@ ColumnLayout {
     }
     property real loadedAtHeight: 0
     function _loadArticleNow() {
+        const html = engine.rewriteArticleUrls(currentHtml)
+        const base = engine.articleBaseUrl.length > 0 ? engine.articleBaseUrl + "/" : ""
+        if (state === 0 && inlineArticle && searchArticleView) {
+            loadedAtHeight = searchArticleView.height
+            searchArticleView.loadHtml(html, base)
+            return
+        }
         if (state !== 2) return
         loadedAtHeight = view.height
-        view.loadHtml(engine.rewriteArticleUrls(currentHtml),
-                      engine.articleBaseUrl.length > 0 ? engine.articleBaseUrl + "/" : "")
+        view.loadHtml(html, base)
     }
     Timer {
         id: articleLinkPoller
         interval: 400
         repeat: true
-        running: root.state === 2
+        running: root.state === 2 || (root.state === 0 && root.inlineArticle)
         onTriggered: {
-            if (view.url.toString().length < 5) return
-            view.runJavaScript(
+            // Pick the active WebView: inline in search or full article pane.
+            const wv = (root.state === 0 && root.inlineArticle && searchArticleView)
+                ? searchArticleView : view
+            if (!wv || wv.url.toString().length < 5) return
+            wv.runJavaScript(
                 "if(!window.__probeInstalled){"
                 + "window.__tapped='';"
                 + "document.addEventListener('click',function(e){"
