@@ -191,6 +191,8 @@ ApplicationWindow {
         id: topBar
         width: parent.width
         z: 5
+        Accessible.name: "Top toolbar"
+        Accessible.role: Accessible.ToolBar
 
         RowLayout {
             anchors.fill: parent
@@ -214,6 +216,8 @@ ApplicationWindow {
                 // Manual dark override D toggle. When following system it forces
                 // dark; when forcing dark it returns to following the system theme.
                 property string _name: "dark_mode"
+                Accessible.name: engine.userDarkOverride || engine.systemDark ? "Light mode" : "Dark mode"
+                Accessible.role: Accessible.Button
                 text: root.icon("dark_mode")
                 font.family: root.iconFontFamily
                 font.pixelSize: 20
@@ -236,6 +240,8 @@ ApplicationWindow {
         // pane (bottom: navBar.top) then collapsed against y=0.
         anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
         z: 5
+        Accessible.name: "Main navigation"
+        Accessible.role: Accessible.TabBar
         // 5.2: highlight the active tab by driving the TabBar's own selection
         // (TabButton has no `highlighted` in Qt 6.6). State -> tab index; the
         // article pane (state 2) has no tab, so clear the selection.
@@ -277,6 +283,8 @@ ApplicationWindow {
                                                              : tabBtn.Material.foreground
                     }
                 }
+                Accessible.name: modelData.label
+                Accessible.role: Accessible.TabButton
                 onClicked: root._navTo(modelData.idx)
             }
         }
@@ -333,6 +341,8 @@ ColumnLayout {
                 Layout.fillWidth: true
                 model: engine.groups
                 textRole: "name"
+                Accessible.name: "Search group scope"
+                Accessible.role: Accessible.ComboBox
                 // Dismiss the search field's IME when the dropdown opens, else
                 // the keyboard obscures/blocks the popup while typing.
                 popup.onOpened: input.focus = false
@@ -352,6 +362,8 @@ ColumnLayout {
                     id: input
                     Layout.fillWidth: true
                     placeholderText: "Search dictionaries"
+                    Accessible.name: "Search dictionaries"
+                    Accessible.role: Accessible.EditableText
                     font.pixelSize: 18
                     onDisplayTextChanged: debounce.restart()
                     onAccepted: { input.focus = false; engine.lookup(text.trim()) }
@@ -360,6 +372,8 @@ ColumnLayout {
 
                 Button {
                     text: "Clipboard"
+                    Accessible.name: "Clipboard"
+                    Accessible.role: Accessible.Button
                     onClicked: {
                         const t = engine.clipboardText()
                         if (t.length > 0) engine.lookup(t)
@@ -387,10 +401,14 @@ ColumnLayout {
                 Layout.fillHeight: true
                 clip: true
                 model: []
+                Accessible.name: "Search suggestions"
+                Accessible.role: Accessible.List
                 delegate: ItemDelegate {
                     width: ListView.view.width
                     height: 44
                     text: modelData
+                    Accessible.name: modelData
+                    Accessible.role: Accessible.ListItem
                     onClicked: engine.lookup(modelData)
                 }
             }
@@ -512,6 +530,7 @@ ColumnLayout {
                         from: 0
                         to: 1
                         value: engine.ftsDictFraction
+                        Accessible.role: Accessible.ProgressBar
                     }
 
                     // Bottom bar: all-dictionaries progress (no caption).
@@ -522,6 +541,7 @@ ColumnLayout {
                         from: 0
                         to: 1
                         value: engine.ftsIndexFraction
+                        Accessible.role: Accessible.ProgressBar
                     }
 
                     Label {
@@ -546,18 +566,24 @@ ColumnLayout {
                 RoundButton {
                     text: "Add dictionaries"
                     highlighted: true
+                    Accessible.name: "Add dictionaries"
+                    Accessible.role: Accessible.Button
                     onClicked: engine.addDictionaryFolder()
                 }
                 // By Pair toggle: group the dictionary list by Source/Target.
                 Button {
                     text: "By Pair"
                     highlighted: dictsPane.byPair
+                    Accessible.name: "By Pair"
+                    Accessible.role: Accessible.Button
                     onClicked: dictsPane.byPair = !dictsPane.byPair
                 }
                 // Multi-select removal (enabled when >=1 row is selected).
                 Button {
                     text: "Remove"
                     enabled: dictsPane.selectedDicts.length > 0
+                    Accessible.name: "Remove"
+                    Accessible.role: Accessible.Button
                     onClicked: dictsPane._removeSelected()
                 }
             }
@@ -625,6 +651,8 @@ ColumnLayout {
                 model: engine.dictionaries
                 spacing: 2
                 visible: !dictsPane.byPair
+                Accessible.name: "Dictionaries list"
+                Accessible.role: Accessible.List
                 delegate: ItemDelegate {
                     id: dictRow
                     property int dictIndex: index
@@ -636,6 +664,9 @@ ColumnLayout {
                     highlighted: dictsPane.selectedDicts.indexOf(dictRow.dictIndex) >= 0
                     // Tap toggles multi-select selection.
                     onClicked: dictsPane._toggleSelect(dictRow.dictIndex)
+
+                    Accessible.name: dictRow.dictData.name
+                    Accessible.role: Accessible.ListItem
 
                     contentItem: RowLayout {
                         spacing: 8
@@ -662,6 +693,8 @@ ColumnLayout {
                         }
                         ToolButton {
                             text: "Remove"
+                            Accessible.name: "Remove"
+                            Accessible.role: Accessible.Button
                             onClicked: dictsPane._requestRemove(dictRow.dictIndex, dictRow.dictData.name)
                         }
                     }
@@ -677,6 +710,8 @@ ColumnLayout {
                 model: dictsPane.groupedModel
                 spacing: 2
                 visible: dictsPane.byPair
+                Accessible.name: "Dictionaries list by pair"
+                Accessible.role: Accessible.List
                 delegate: ItemDelegate {
                     id: bpRow
                     width: ListView.view.width
@@ -685,6 +720,8 @@ ColumnLayout {
                     // Selected (for batch removal) highlight on dict rows.
                     highlighted: modelData.type !== "header"
                         && dictsPane.selectedDicts.indexOf(modelData.dictIndex) >= 0
+                    Accessible.name: modelData.type === "header" ? modelData.pair : modelData.item.name
+                    Accessible.role: Accessible.ListItem
                     contentItem: Loader {
                         anchors.fill: parent
                         sourceComponent: modelData.type === "header" ? headerComp : dictComp
@@ -711,6 +748,8 @@ ColumnLayout {
                             }
                             ToolButton {
                                 text: "Remove"
+                                Accessible.name: "Remove pair"
+                                Accessible.role: Accessible.Button
                                 onClicked: dictsPane._removePair(modelData.pair)
                             }
                         }
@@ -743,6 +782,8 @@ ColumnLayout {
                             }
                             ToolButton {
                                 text: "Remove"
+                                Accessible.name: "Remove"
+                                Accessible.role: Accessible.Button
                                 onClicked: dictsPane._requestRemove(modelData.dictIndex, modelData.item.name)
                             }
                         }
@@ -764,6 +805,8 @@ ColumnLayout {
             modal: true
             title: "Remove dictionary"
             visible: dictsPane.removeIndex >= 0
+            Accessible.name: "Remove dictionary confirmation"
+            Accessible.role: Accessible.Dialog
 
             ColumnLayout {
                 width: parent.width
@@ -854,11 +897,15 @@ ColumnLayout {
                     Layout.fillWidth: true
                     placeholderText: "New group name"
                     font.pixelSize: 18
+                    Accessible.name: "New group name"
+                    Accessible.role: Accessible.EditableText
                     onAccepted: groupsPane._createGroup()
                 }
                 Button {
                     text: "Create"
                     highlighted: true
+                    Accessible.name: "Create"
+                    Accessible.role: Accessible.Button
                     onClicked: groupsPane._createGroup()
                 }
             }
@@ -870,12 +917,16 @@ ColumnLayout {
                 clip: true
                 model: engine.groups
                 spacing: 2
+                Accessible.name: "Groups list"
+                Accessible.role: Accessible.List
                 delegate: ItemDelegate {
                     id: groupRow
                     property var groupData: modelData
                     width: ListView.view.width
                     height: 56
                     padding: 4
+                    Accessible.name: groupRow.groupData.name
+                    Accessible.role: Accessible.ListItem
 
                     contentItem: ColumnLayout {
                         spacing: 0
@@ -903,12 +954,18 @@ ColumnLayout {
                         ToolButton {
                             text: "Dicts"
                             visible: groupRow.groupData.id !== 0
+                            Accessible.name: "Edit group dictionaries"
+                            Accessible.role: Accessible.Button
                             onClicked: groupsPane._openMembership(groupRow.groupData.id, groupRow.groupData.name)
                         }
                         Menu {
                             id: groupMenu
+                            Accessible.name: "Group options menu"
+                            Accessible.role: Accessible.Menu
                             MenuItem {
                                 text: "Rename"
+                                Accessible.name: "Rename"
+                                Accessible.role: Accessible.MenuItem
                                 onTriggered: {
                                     const id = groupRow.groupData.id
                                     if (id !== 0) engine.renameGroup(id, groupRow.groupData.name + "_r")
@@ -916,6 +973,8 @@ ColumnLayout {
                             }
                             MenuItem {
                                 text: "Delete"
+                                Accessible.name: "Delete"
+                                Accessible.role: Accessible.MenuItem
                                 onTriggered: {
                                     const id = groupRow.groupData.id
                                     if (id !== 0) engine.deleteGroup(id)
@@ -925,6 +984,8 @@ ColumnLayout {
                         ToolButton {
                             text: "..."
                             visible: groupRow.groupData.id !== 0
+                            Accessible.name: "Group options"
+                            Accessible.role: Accessible.Button
                             onClicked: groupMenu.popup()
                         }
                     }
@@ -945,6 +1006,8 @@ ColumnLayout {
 
                 Button {
                     text: "<- Back"
+                    Accessible.name: "Back"
+                    Accessible.role: Accessible.Button
                     onClicked: groupsPane.editingGroup = -1
                 }
                 Label {
@@ -965,12 +1028,16 @@ ColumnLayout {
                 clip: true
                 model: groupsPane.groupMembers
                 spacing: 2
+                Accessible.name: "Group members"
+                Accessible.role: Accessible.List
                 delegate: ItemDelegate {
                     id: memberRow
                     property var rowData: modelData
                     width: ListView.view.width
                     height: 44
                     padding: 4
+                    Accessible.name: memberRow.rowData.name
+                    Accessible.role: Accessible.ListItem
 
                     contentItem: Label {
                         text: memberRow.rowData.name
@@ -988,6 +1055,8 @@ ColumnLayout {
                         ToolButton {
                             text: "Up"
                             enabled: memberRow.rowData.memberIndex > 0
+                            Accessible.name: "Move up"
+                            Accessible.role: Accessible.Button
                             onClicked: {
                                 const pos = memberRow.rowData.memberIndex
                                 engine.groupMoveDict(groupsPane.editingGroup, pos, pos - 1)
@@ -997,6 +1066,8 @@ ColumnLayout {
                         ToolButton {
                             text: "Down"
                             enabled: memberRow.rowData.memberIndex < groupsPane.groupMembers.length - 1
+                            Accessible.name: "Move down"
+                            Accessible.role: Accessible.Button
                             onClicked: {
                                 const pos = memberRow.rowData.memberIndex
                                 engine.groupMoveDict(groupsPane.editingGroup, pos, pos + 1)
@@ -1005,6 +1076,8 @@ ColumnLayout {
                         }
                         ToolButton {
                             text: "Remove"
+                            Accessible.name: "Remove from group"
+                            Accessible.role: Accessible.Button
                             onClicked: {
                                 engine.groupRemoveDict(groupsPane.editingGroup, memberRow.rowData.index)
                                 groupsPane._refreshMembership()
@@ -1022,12 +1095,16 @@ ColumnLayout {
                 clip: true
                 model: groupsPane.groupNonMembers
                 spacing: 2
+                Accessible.name: "Available dictionaries to add"
+                Accessible.role: Accessible.List
                 delegate: ItemDelegate {
                     id: nonMemberRow
                     property var rowData: modelData
                     width: ListView.view.width
                     height: 44
                     padding: 4
+                    Accessible.name: nonMemberRow.rowData.name
+                    Accessible.role: Accessible.ListItem
 
                     contentItem: Label {
                         text: nonMemberRow.rowData.name
@@ -1042,6 +1119,8 @@ ColumnLayout {
                             verticalCenter: parent.verticalCenter
                         }
                         text: "Add"
+                        Accessible.name: "Add to group"
+                        Accessible.role: Accessible.Button
                         onClicked: {
                             engine.groupAddDict(groupsPane.editingGroup, nonMemberRow.rowData.index)
                             groupsPane._refreshMembership()
@@ -1077,6 +1156,8 @@ ColumnLayout {
                     text: root.icon("arrow_back")
                     font.family: root.iconFontFamily
                     font.pixelSize: 22
+                    Accessible.name: "Back"
+                    Accessible.role: Accessible.Button
                     ToolTip.visible: hovered
                     ToolTip.text: "Back"
                     onClicked: root._backFromArticle()
@@ -1088,6 +1169,8 @@ ColumnLayout {
                     font.family: root.iconFontFamily
                     font.pixelSize: 22
                     Material.foreground: active ? Material.primary : root.uiSubFg
+                    Accessible.name: active ? "Remove from favorites" : "Add to favorites"
+                    Accessible.role: Accessible.Button
                     ToolTip.visible: hovered
                     ToolTip.text: active ? "Remove from favorites" : "Add to favorites"
                     onClicked: engine.toggleFavorite(root.currentWord)
@@ -1103,6 +1186,8 @@ ColumnLayout {
             active: root.state === 2
             visible: root.state === 2
             sourceComponent: articleViewComponent
+            Accessible.name: "Article content"
+            Accessible.role: Accessible.Group
         }
     }
 
@@ -1110,6 +1195,8 @@ ColumnLayout {
         id: articleViewComponent
         WebView {
             id: view
+            Accessible.name: "Dictionary article"
+            Accessible.role: Accessible.WebView
             onUrlChanged: {
                 const u = url.toString()
                 const base = engine.articleBaseUrl
@@ -1198,6 +1285,8 @@ ColumnLayout {
                 flat: true
                 highlighted: true
                 Material.foreground: Material.color(Material.Red)
+                Accessible.name: "Clear all"
+                Accessible.role: Accessible.Button
                 onClicked: engine.clearHistory()
             }
 
@@ -1207,12 +1296,16 @@ ColumnLayout {
                 clip: true
                 model: engine.history
                 spacing: 2
+                Accessible.name: "Lookup history"
+                Accessible.role: Accessible.List
                 delegate: SwipeDelegate {
                     id: histRow
                     property string word: modelData
                     width: ListView.view.width
                     height: 48
                     text: histRow.word
+                    Accessible.name: histRow.word
+                    Accessible.role: Accessible.ListItem
                     // tap -> lookup
                     onClicked: engine.lookup(histRow.word)
 
@@ -1228,6 +1321,8 @@ ColumnLayout {
                                 Material.foreground: "white"
                                 Layout.fillHeight: true
                                 Layout.fillWidth: true
+                                Accessible.name: "Delete"
+                                Accessible.role: Accessible.Button
                                 onClicked: {
                                     engine.removeHistory(histRow.word)
                                     histRow.swipe.close()
@@ -1253,12 +1348,16 @@ ColumnLayout {
             clip: true
             model: engine.favorites
             spacing: 2
+            Accessible.name: "Favorites"
+            Accessible.role: Accessible.List
             delegate: SwipeDelegate {
                 id: favRow
                 property string word: modelData
                 width: ListView.view.width
                 height: 48
                 text: favRow.word
+                Accessible.name: favRow.word
+                Accessible.role: Accessible.ListItem
                 onClicked: engine.lookup(favRow.word)
 
                 // 4.6: swipe-to-remove.
@@ -1273,6 +1372,8 @@ ColumnLayout {
                             Material.foreground: "white"
                             Layout.fillHeight: true
                             Layout.fillWidth: true
+                            Accessible.name: "Remove"
+                            Accessible.role: Accessible.Button
                             onClicked: {
                                 engine.toggleFavorite(favRow.word)
                                 favRow.swipe.close()
@@ -1382,12 +1483,16 @@ ColumnLayout {
                     placeholderText: "Full-text search"
                     font.pixelSize: 18
                     enabled: !engine.buildingFts
+                    Accessible.name: "Full-text search"
+                    Accessible.role: Accessible.EditableText
                     onAccepted: { ftsInput.focus = false; root._runFts() }
                 }
                 CheckBox {
                     id: ftsWholeWords
                     text: "Whole words"
                     Layout.alignment: Qt.AlignVCenter
+                    Accessible.name: "Whole words"
+                    Accessible.role: Accessible.CheckBox
                 }
             }
 
@@ -1399,6 +1504,8 @@ ColumnLayout {
                 Layout.fillWidth: true
                 model: engine.groups
                 textRole: "name"
+                Accessible.name: "Full-text search group scope"
+                Accessible.role: Accessible.ComboBox
                 // Dismiss the FTS field's IME when the dropdown opens.
                 popup.onOpened: ftsInput.focus = false
                 // Re-run the FTS for the newly selected group's scope.
@@ -1420,6 +1527,8 @@ ColumnLayout {
                     text: "Search"
                     highlighted: true
                     enabled: !engine.buildingFts
+                    Accessible.name: "Search"
+                    Accessible.role: Accessible.Button
                     onClicked: root._runFts()
                 }
             }
@@ -1438,10 +1547,14 @@ ColumnLayout {
                 clip: true
                 model: root.ftsResults
                 spacing: 2
+                Accessible.name: "Full-text search results"
+                Accessible.role: Accessible.List
                 delegate: ItemDelegate {
                     width: ListView.view.width
                     height: 52
                     padding: 8
+                    Accessible.name: modelData.headword
+                    Accessible.role: Accessible.ListItem
                     contentItem: ColumnLayout {
                         spacing: 0
                         Label { text: modelData.headword; font.pixelSize: 16; font.bold: true }
@@ -1467,6 +1580,8 @@ ColumnLayout {
         visible: !engine.onboarded
         padding: 24
         closePolicy: Popup.NoAutoClose
+        Accessible.name: "Welcome"
+        Accessible.role: Accessible.Dialog
 
         contentItem: ColumnLayout {
             anchors.fill: parent
@@ -1492,6 +1607,8 @@ ColumnLayout {
                 Layout.alignment: Qt.AlignHCenter
                 text: "Get started"
                 highlighted: true
+                Accessible.name: "Get started"
+                Accessible.role: Accessible.Button
                 onClicked: engine.onboarded = true
             }
         }

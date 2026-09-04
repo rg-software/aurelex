@@ -72,6 +72,67 @@ SHALL/MUST language) — follow the instructions output before writing any artif
   observable behavior changed (never massage specs to fit a refactor).
 - Work flows through OpenSpec changes first; implementation does not run ahead of the plan.
 
+## Accessible element IDs (for automated testing)
+
+Every interactive QML element in `app/main.qml` has `Accessible.name` and `Accessible.role`
+properties (see `openspec/changes/accessibility-annotations/`). These double as stable element
+IDs for UIAutomator / Appium-based on-device testing — the Android accessibility tree exposes
+them as `content-desc` (name) and `className` (role). Use the `Accessible.name` values to locate
+elements in automated tests:
+
+| Pane | Element | `Accessible.name` |
+|------|---------|-------------------|
+| Nav | TabBar | `"Main navigation"` |
+| Nav | Search tab | `"Search"` |
+| Nav | Dictionaries tab | `"Dictionaries"` |
+| Nav | Groups tab | `"Groups"` |
+| Nav | Full-text search tab | `"Full-text search"` |
+| Nav | History tab | `"History"` |
+| Nav | Favorites tab | `"Favorites"` |
+| Top | ToolBar | `"Top toolbar"` |
+| Top | Dark-mode toggle | `"Light mode"` / `"Dark mode"` (dynamic) |
+| Search | ComboBox | `"Search group scope"` |
+| Search | TextField | `"Search dictionaries"` |
+| Search | Clipboard button | `"Clipboard"` |
+| Search | ListView | `"Search suggestions"` |
+| Dicts | Add dict button | `"Add dictionaries"` |
+| Dicts | By Pair toggle | `"By Pair"` |
+| Dicts | Remove button | `"Remove"` |
+| Dicts | Flat list | `"Dictionaries list"` |
+| Dicts | Grouped list | `"Dictionaries list by pair"` |
+| Dicts | Remove confirmation | `"Remove dictionary confirmation"` |
+| Groups | New group input | `"New group name"` |
+| Groups | Create button | `"Create"` |
+| Groups | ListView | `"Groups list"` |
+| Groups | Edit dicts button | `"Edit group dictionaries"` |
+| Groups | Overflow menu | `"Group options"` |
+| Groups | Menu | `"Group options menu"` |
+| Groups | Rename | `"Rename"` |
+| Groups | Delete | `"Delete"` |
+| Membership | Back button | `"Back"` |
+| Membership | Members list | `"Group members"` |
+| Membership | Move up | `"Move up"` |
+| Membership | Move down | `"Move down"` |
+| Membership | Remove from group | `"Remove from group"` |
+| Membership | Non-members list | `"Available dictionaries to add"` |
+| Membership | Add to group | `"Add to group"` |
+| Article | Back button | `"Back"` |
+| Article | Favorites star | `"Add to favorites"` / `"Remove from favorites"` (dynamic) |
+| Article | Loader | `"Article content"` |
+| Article | WebView | `"Dictionary article"` |
+| FTS | TextField | `"Full-text search"` |
+| FTS | Whole words checkbox | `"Whole words"` |
+| FTS | Group combo | `"Full-text search group scope"` |
+| FTS | Search button | `"Search"` |
+| FTS | Results list | `"Full-text search results"` |
+| History | Clear all | `"Clear all"` |
+| History | ListView | `"Lookup history"` |
+| History | Swipe delete | `"Delete"` |
+| Favorites | ListView | `"Favorites"` |
+| Favorites | Swipe remove | `"Remove"` |
+| Onboarding | Dialog | `"Welcome"` |
+| Onboarding | Get started | `"Get started"` |
+
 ## Git / Commit conventions
 
 Write conventional, structured commit messages so the release pipeline can group them into
