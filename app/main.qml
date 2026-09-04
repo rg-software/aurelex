@@ -101,6 +101,8 @@ ApplicationWindow {
     // Qt tab-focus-chain walker forever (ANR deadlock with the IME's
     // blocking finishComposingText on the Android main thread).
     property bool inlineArticle: false
+    // The lazily-created inline WebView (null when no inline article is showing).
+    property var inlineWv: null
     function _showArticle(word, html) {
         if (currentWord !== "" && currentWord !== word) {
             navStack.push({ word: currentWord, html: currentHtml })
@@ -487,44 +489,57 @@ ColumnLayout {
                     }
                 }
 
-                WebView {
-                    id: searchArticleView
+                Loader {
+                    id: searchArticleLoader
                     anchors { top: parent.top; topMargin: 40; left: parent.left; right: parent.right; bottom: parent.bottom }
-                    Accessible.name: "Dictionary article"
-                    Accessible.role: Accessible.WebView
-                    onUrlChanged: {
-                        const u = url.toString()
-                        const base = engine.articleBaseUrl
-                        if (base.length > 0 && u.indexOf(base + "/gdlookup/") === 0) {
-                            const word = _parseGdlookupHttpUrl(u, base)
-                            if (word.length > 0) {
-                                _gdlookupInFlight = word
-                                engine.lookup(word)
+                    // Only create the inline WebView while an article is actually
+                    // showing in search mode. On Android, an instantiated WebView
+                    // attaches an opaque native surface even when hidden; keeping
+                    // it alive unconditionally blanked the whole UI.
+                    active: root.state === 0 && root.inlineArticle && root.currentHtml.length > 0
+                    onLoaded: root.inlineWv = item
+                    onActiveChanged: if (!active) root.inlineWv = null
+                    sourceComponent: Component {
+                        WebView {
+                            id: searchArticleView
+                            anchors.fill: parent
+                            Accessible.name: "Dictionary article"
+                            Accessible.role: Accessible.WebView
+                            onUrlChanged: {
+                                const u = url.toString()
+                                const base = engine.articleBaseUrl
+                                if (base.length > 0 && u.indexOf(base + "/gdlookup/") === 0) {
+                                    const word = _parseGdlookupHttpUrl(u, base)
+                                    if (word.length > 0) {
+                                        _gdlookupInFlight = word
+                                        engine.lookup(word)
+                                    }
+                                    searchArticleView.loadHtml("<html><body></body></html>", engine.articleBaseUrl)
+                                    return
+                                }
+                                if (u.indexOf("gdlookup://") === 0) {
+                                    const word = _parseGdlookupUrl(u)
+                                    if (word.length > 0) {
+                                        _gdlookupInFlight = word
+                                        engine.lookup(word)
+                                    }
+                                    searchArticleView.loadHtml("<html><body></body></html>", engine.articleBaseUrl)
+                                    return
+                                }
+                                if (base.length > 0 && u.indexOf(base + "/gdau/") === 0) {
+                                    engine.playAudio(u)
+                                    searchArticleView.loadHtml("<html><body></body></html>", engine.articleBaseUrl)
+                                    return
+                                }
                             }
-                            searchArticleView.loadHtml("<html><body></body></html>", engine.articleBaseUrl)
-                            return
-                        }
-                        if (u.indexOf("gdlookup://") === 0) {
-                            const word = _parseGdlookupUrl(u)
-                            if (word.length > 0) {
-                                _gdlookupInFlight = word
-                                engine.lookup(word)
+                            onLoadingChanged: console.log("Search WebView loading:", loading, "url:", url)
+                            onHeightChanged: {
+                                if (root.state === 0 && root.inlineArticle
+                                    && searchArticleView.height !== root.loadedAtHeight
+                                    && root.currentHtml.length > 0)
+                                    articleReloader.restart()
                             }
-                            searchArticleView.loadHtml("<html><body></body></html>", engine.articleBaseUrl)
-                            return
                         }
-                        if (base.length > 0 && u.indexOf(base + "/gdau/") === 0) {
-                            engine.playAudio(u)
-                            searchArticleView.loadHtml("<html><body></body></html>", engine.articleBaseUrl)
-                            return
-                        }
-                    }
-                    onLoadingChanged: console.log("Search WebView loading:", loading, "url:", url)
-                    onHeightChanged: {
-                        if (root.state === 0 && root.inlineArticle
-                            && searchArticleView.height !== root.loadedAtHeight
-                            && root.currentHtml.length > 0)
-                            articleReloader.restart()
                     }
                 }
             }
@@ -1531,9 +1546,9 @@ ColumnLayout {
     function _loadArticleNow() {
         const html = engine.rewriteArticleUrls(currentHtml)
         const base = engine.articleBaseUrl.length > 0 ? engine.articleBaseUrl + "/" : ""
-        if (state === 0 && inlineArticle && searchArticleView) {
-            loadedAtHeight = searchArticleView.height
-            searchArticleView.loadHtml(html, base)
+        if (state === 0 && inlineArticle && root.inlineWv) {
+            loadedAtHeight = root.inlineWv.height
+            root.inlineWv.loadHtml(html, base)
             return
         }
         if (state !== 2) return
@@ -1547,8 +1562,8 @@ ColumnLayout {
         running: root.state === 2 || (root.state === 0 && root.inlineArticle)
         onTriggered: {
             // Pick the active WebView: inline in search or full article pane.
-            const wv = (root.state === 0 && root.inlineArticle && searchArticleView)
-                ? searchArticleView : view
+            const wv = (root.state === 0 && root.inlineArticle && root.inlineWv)
+                ? root.inlineWv : view
             if (!wv || wv.url.toString().length < 5) return
             wv.runJavaScript(
                 "if(!window.__probeInstalled){"
