@@ -255,6 +255,9 @@ private:
     // shifted, so operate on captured paths/ids.
     void deleteDictionaryFiles(const QString &sourceFile, const QString &dictId,
                                const QString &stagedRoot, const QString &appDir);
+    // Remove leftover temporary staging dirs (files/staging-tmp/*) once a
+    // scan+index batch has finished and the staged tree is consistent.
+    void purgeStagingTmp();
     // The staged/<sourceId> directory that owns `file` (a direct child of the
     // staged root), or empty.
     static QString stagedAncestor(const QString &file, const QString &stagedRoot);

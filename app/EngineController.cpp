@@ -394,6 +394,11 @@ void EngineController::ensureFtsWorker()
         if (empty) {
             setFtsIndexProgress(0, 0, QString());
             setBuildingFts(false);
+            // Indexing + scanning finished: at this point the staged tree is
+            // consistent, so purge any leftover temporary staging dirs (partial
+            // copies from a killed/interrupted stage). See the "clear stale
+            // staging leftovers" intent — this is a safe cleanup moment.
+            purgeStagingTmp();
         } else {
             ensureFtsWorker();
         }
@@ -537,7 +542,7 @@ void EngineController::deleteDictionaryFiles(const QString &sourceFile,
                                              const QString &stagedRoot,
                                              const QString &appDir) {
     // Delete the engine's index cache for this dictionary: files/index<id> and
-    // lines/index<id>_FTS_x (and any _temp) live directly in the app dir.
+    // files/index<id>_FTS_x (and any _temp) live directly in the app dir.
     if (!dictId.isEmpty() && !appDir.isEmpty()) {
         QDir dir(appDir);
         const QStringList matches = dir.entryList(
@@ -570,6 +575,18 @@ void EngineController::deleteDictionaryFiles(const QString &sourceFile,
             }
         }
     }
+}
+
+void EngineController::purgeStagingTmp() {
+    // Remove leftover temporary staging dirs (files/staging-tmp/*). These only
+    // ever hold in-progress copies; once scanning + indexing have finished they
+    // are guaranteed stale, so deleting them keeps app storage clean.
+    const QString tmpRoot = m_stagedDir + QStringLiteral("/../staging-tmp");
+    QDir dir(tmpRoot);
+    if (!dir.exists()) return;
+    qInfo() << "[aurelex] purging stale staging-tmp";
+    for (const QString &entry : dir.entryList(QDir::Dirs | QDir::NoDotAndDotDot))
+        QDir(dir.filePath(entry)).removeRecursively();
 }
 
 QString EngineController::stagedAncestor(const QString &file, const QString &stagedRoot) {
