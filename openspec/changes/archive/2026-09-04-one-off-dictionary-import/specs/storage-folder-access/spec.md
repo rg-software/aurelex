@@ -1,29 +1,29 @@
-# storage-folder-access Specification
+## REMOVED Requirements
 
-## Purpose
+### Requirement: Persisted folder grants
+**Reason**: One-off import no longer keeps a live folder source; the SAF grant
+is used only long enough to stage-copy the picked folder into app-private
+storage, so there is no source grant to restore across restarts.
 
-Manages one-off dictionary imports on Android through the Storage Access
-Framework (SAF) folder picker: selecting an allowed folder, stage-copying its
-supported dictionary files into app-private storage via the grant, and scanning
-the copies — without any persistent "sources" list, Rescan, or system-wide
-storage access.
+**Migration**: Existing installs that had sources will, on first launch after
+upgrade, drop the persisted `sources` grant list; their already-staged copies
+in app-private storage remain and are re-scanned normally. New additions use
+the picker to import once.
 
-## Requirements
+### Requirement: Multiple sources
+**Reason**: The concept of multiple *live folder sources* with per-source
+management and removal is replaced by one-off imports; a folder can be imported
+multiple times into app storage, and dictionaries from all imports simply
+coexist in the dictionary list, so no explicit source-management requirement
+remains.
 
-### Requirement: Folder-scoped source selection
-The system SHALL let the user add a dictionary source by picking a folder through
-the Android Storage Access Framework folder picker, SHALL limit access to the
-picked folder (and its subfolders) only, and SHALL NOT request or require
-system-wide storage access (All-Files-Access) for this capability.
+### Requirement: Source resolution and staging
+**Reason**: In-place scanning of a resolvable physical path is removed: every
+pick is always staged-copied into app-private storage (the resolvable path was
+display-only and the engine can't read it under scoped storage anyway). See the
+modified selection/staging requirement below.
 
-#### Scenario: Add a folder from the SAF picker
-- **WHEN** the user taps Add dictionaries
-- **THEN** the Android folder picker opens and the user can select any folder
-  whose location the OS grants access to
-
-#### Scenario: No system-wide permission is required
-- **WHEN** the user adds or browses a dictionary source
-- **THEN** the app does not ask for, and does not depend on, All-Files-Access
+## MODIFIED Requirements
 
 ### Requirement: One-off folder import
 The system SHALL import a dictionary folder by picking it through the Android

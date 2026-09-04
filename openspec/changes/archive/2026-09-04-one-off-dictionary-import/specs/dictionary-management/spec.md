@@ -1,9 +1,5 @@
-# dictionary-management Specification
+## MODIFIED Requirements
 
-## Purpose
-
-Lets a user load offline dictionaries onto an Android device by selecting a dictionary folder, and gives the app a stable, testable contract for which formats are supported and how index caches are built and refreshed on device.
-## Requirements
 ### Requirement: Dictionary folder selection and scanning
 The system SHALL let the user add dictionaries by picking a folder through the
 folder-scoped (SAF) picker and importing it: supported dictionary files (mdict
@@ -55,49 +51,6 @@ simply belong to the app's dictionary set until removed.
   again
 - **THEN** the dictionary is added back as a fresh entry (removal is not blocked)
 
-### Requirement: Index build and validation on device
-The system SHALL build a lookup index for each loaded dictionary on the device when that dictionary's index does not yet exist or is out of date, and SHALL show the user the progress of the build.
-Lookup MUST NOT return results for a dictionary until its index build has finished.
-
-#### Scenario: First-time load triggers indexing
-- **WHEN** the user loads a dictionary whose index has never been built
-- **THEN** the app shows an indexing progress indication and does not offer results from that dictionary until indexing completes
-
-#### Scenario: Index is up to date
-- **WHEN** the user loads a dictionary whose index is already valid
-- **THEN** the app skips indexing and makes that dictionary available immediately
-
-#### Scenario: Index is out of date
-- **WHEN** the underlying dictionary file has changed or the index format version differs from the engine's
-- **THEN** the app rebuilds the index for that dictionary and informs the user that reindexing was needed
-
-### Requirement: Dictionary groups
-The system SHALL let the user organize loaded dictionaries into multiple named groups, each an ordered subset, and SHALL let the user select which group is active for lookups. An implicit "All" group containing every loaded dictionary is always available. Managing groups, their membership, and their order is part of this capability.
-
-#### Scenario: All loaded dictionaries are the default group
-- **WHEN** the user first loads dictionaries without creating any group
-- **THEN** lookups use an implicit "All" group containing every loaded dictionary
-
-#### Scenario: Create a group
-- **WHEN** the user creates a named group and adds some dictionaries to it
-- **THEN** the group appears in the groups list with that membership
-
-#### Scenario: Select the active group
-- **WHEN** the user picks a group as active
-- **THEN** subsequent lookups use only that group's dictionaries, in that group's order
-
-#### Scenario: Reorder dictionaries within a group
-- **WHEN** the user changes the order of dictionaries inside a group
-- **THEN** the combined article for that group respects the new order
-
-#### Scenario: Delete a group
-- **WHEN** the user deletes a group
-- **THEN** the group no longer appears in the list, and lookups fall back to the "All" group (or the next active group), without error
-
-#### Scenario: Delete a group that is active
-- **WHEN** the user deletes the currently active group
-- **THEN** the app falls back to the "All" group so lookups keep working
-
 ### Requirement: Remove a loaded dictionary
 The system SHALL let the user permanently remove an imported dictionary from the
 app, deleting its staged copy and its built indexes, and SHALL remove it
@@ -129,22 +82,3 @@ reference it.
   from it
 - **THEN** the dictionary is imported again as a fresh entry (removal is not
   blocked)
-
-### Requirement: Folder additions are serialized, never dropped
-The system SHALL accept dictionary folder additions requested while a previous
-folder's files are still being staged into app storage, queueing the pending
-folder and processing it immediately after the current copy completes, instead
-of discarding it.
-
-#### Scenario: Second pick during an active stage copy
-- **WHEN** the user picks a second dictionary folder while the first one is
-  still being copied into app storage
-- **THEN** the second folder is not lost: after the first copy finishes, the
-  second is staged and its dictionaries are scanned and indexed
-
-#### Scenario: A single pick that fails is surfaced
-- **WHEN** staging a queued folder fails (e.g. the grant was revoked before the
-  copy ran)
-- **THEN** the app reports the failure and leaves the other dictionaries
-  unaffected, without silently discarding the failed folder
-
