@@ -73,6 +73,29 @@ ApplicationWindow {
     property color uiFg: Material.foreground
     property color uiSubFg: Material.secondaryTextColor
 
+    // Human-readable byte size: 145 MB, 1.2 GB, 500 KB, 42 B.
+    function fmtSize(bytes) {
+        if (!bytes || bytes <= 0) return ""
+        const gb = 1024 * 1024 * 1024
+        const mb = 1024 * 1024
+        const kb = 1024
+        if (bytes >= gb) return (Math.round(bytes * 10 / gb) / 10) + " GB"
+        if (bytes >= mb) return Math.round(bytes / mb) + " MB"
+        if (bytes >= kb) return Math.round(bytes / kb) + " KB"
+        return bytes + " B"
+    }
+    // "English/Russian" with unknown side shown as '?'.
+    function fmtPair(d) {
+        const f = (d.langFrom && d.langFrom.length > 0) ? d.langFrom : "?"
+        const t = (d.langTo && d.langTo.length > 0) ? d.langTo : "?"
+        return f + "/" + t
+    }
+    function fmtSubLine(d) {
+        const pair = root.fmtPair(d)
+        const sz = root.fmtSize(d.sizeBytes)
+        return sz.length > 0 ? pair + " · " + sz : pair
+    }
+
     // All pane switches blur the focused input BEFORE hiding its pane:
     // an IME query arriving at a focused-but-hidden item can spin the
     // Qt tab-focus-chain walker forever (ANR deadlock with the IME's
@@ -384,6 +407,30 @@ ColumnLayout {
         Component.onCompleted: engine.refreshDictionaries()
         property int removeIndex: -1
         property string removeName: ""
+        property bool byPair: false
+        // Indices of selected dictionary rows (for RemoveSelected).
+        property var selectedDicts: []
+        // Flattened model for By-Pair view: entries are either
+        // {type:"header", pair:...} or {type:"dict", ...dict}. Rebuilt whenever
+        // dictionaries or the toggle change.
+        property var groupedModel: []
+        function _rebuildGrouped() {
+            const rows = []
+            const d = engine.dictionaries
+            // group by pair, keep alphabetical-by-name order within each.
+            const byPair = {}
+            for (let i = 0; i < d.length; i++) {
+                const p = root.fmtPair(d[i])
+                if (!byPair[p]) byPair[p] = []
+                byPair[p].push({ index: i, item: d[i] })
+            }
+            const pairs = Object.keys(byPair).sort()
+            for (const p of pairs) {
+                rows.push({ type: "header", pair: p })
+                for (const it of byPair[p]) rows.push({ type: "dict", dictIndex: it.index, item: it.item })
+            }
+            dictsPane.groupedModel = rows
+        }
         function _requestRemove(index, name) { removeIndex = index; removeName = name }
         function _confirmRemove() {
             const idx = removeIndex
@@ -392,9 +439,30 @@ ColumnLayout {
             removeName = ""
         }
         function _cancelRemove() { removeIndex = -1; removeName = "" }
+        function _toggleSelect(idx) {
+            const sel = dictsPane.selectedDicts
+            const i = sel.indexOf(idx)
+            if (i >= 0) sel.splice(i, 1)
+            else sel.push(idx)
+            dictsPane.selectedDicts = sel
+        }
+        function _removeSelected() {
+            // Copy indices high-to-low so removal doesn't shift later ones; then
+            // clear the selection and refresh.
+            const sel = dictsPane.selectedDicts.slice().sort((a,b)=>b-a)
+            for (const idx of sel) engine.removeDictionary(idx)
+            dictsPane.selectedDicts = []
+        }
+        // Per-pair removal: remove every dictionary whose pair == the caption's.
+        function _removePair(pair) {
+            for (let i = engine.dictionaries.length - 1; i >= 0; i--) {
+                if (root.fmtPair(engine.dictionaries[i]) === pair)
+                    engine.removeDictionary(i)
+            }
+        }
         Connections {
             target: engine
-            function onDictionariesChanged() { dictsList.model = engine.dictionaries }
+            function onDictionariesChanged() { dictsList.model = engine.dictionaries; dictsPane.selectedDicts = []; dictsPane._rebuildGrouped() }
             function onReadyChanged() { if (engine.ready) engine.refreshDictionaries() }
         }
 
@@ -480,6 +548,18 @@ ColumnLayout {
                     highlighted: true
                     onClicked: engine.addDictionaryFolder()
                 }
+                // By Pair toggle: group the dictionary list by Source/Target.
+                Button {
+                    text: "By Pair"
+                    highlighted: dictsPane.byPair
+                    onClicked: dictsPane.byPair = !dictsPane.byPair
+                }
+                // Multi-select removal (enabled when >=1 row is selected).
+                Button {
+                    text: "Remove"
+                    enabled: dictsPane.selectedDicts.length > 0
+                    onClicked: dictsPane._removeSelected()
+                }
             }
 
             Label {
@@ -536,6 +616,7 @@ ColumnLayout {
                 }
             }
 
+            // Flat list (By Pair off): alphabetical by name.
             ListView {
                 id: dictsList
                 Layout.fillWidth: true
@@ -543,6 +624,7 @@ ColumnLayout {
                 clip: true
                 model: engine.dictionaries
                 spacing: 2
+                visible: !dictsPane.byPair
                 delegate: ItemDelegate {
                     id: dictRow
                     property int dictIndex: index
@@ -550,35 +632,125 @@ ColumnLayout {
                     width: ListView.view.width
                     height: 76
                     padding: 8
+                    // Selected (for RemoveSelected) highlight.
+                    highlighted: dictsPane.selectedDicts.indexOf(dictRow.dictIndex) >= 0
+                    // Tap toggles multi-select selection.
+                    onClicked: dictsPane._toggleSelect(dictRow.dictIndex)
 
-                    contentItem: ColumnLayout {
-                        spacing: 2
-                        Label {
-                            text: dictRow.dictData.name
-                            font.pixelSize: 16
-                            font.bold: true
-                            elide: Text.ElideMiddle
+                    contentItem: RowLayout {
+                        spacing: 8
+                        ColumnLayout {
                             Layout.fillWidth: true
+                            spacing: 2
+                            Label {
+                                text: dictRow.dictData.name
+                                font.pixelSize: 16
+                                font.bold: true
+                                elide: Text.ElideMiddle
+                                Layout.fillWidth: true
+                            }
+                            Label {
+                                // Source/Target · size; size hidden while indexing.
+                                text: engine.buildingFts
+                                    ? root.fmtPair(dictRow.dictData)
+                                    : root.fmtSubLine(dictRow.dictData)
+                                color: root.uiSubFg
+                                font.pixelSize: 12
+                                elide: Text.ElideMiddle
+                                Layout.fillWidth: true
+                            }
                         }
-                        Label {
-                            text: dictRow.dictData.source
-                            color: root.uiSubFg
-                            font.pixelSize: 12
-                            elide: Text.ElideMiddle
-                            Layout.fillWidth: true
+                        ToolButton {
+                            text: "Remove"
+                            onClicked: dictsPane._requestRemove(dictRow.dictIndex, dictRow.dictData.name)
+                        }
+                    }
+                }
+            }
+
+            // Grouped list (By Pair on): header rows + dict rows from a flattened model.
+            ListView {
+                id: dictsListByPair
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                clip: true
+                model: dictsPane.groupedModel
+                spacing: 2
+                visible: dictsPane.byPair
+                delegate: ItemDelegate {
+                    id: bpRow
+                    width: ListView.view.width
+                    height: modelData.type === "header" ? 34 : 76
+                    padding: 8
+                    // Selected (for batch removal) highlight on dict rows.
+                    highlighted: modelData.type !== "header"
+                        && dictsPane.selectedDicts.indexOf(modelData.dictIndex) >= 0
+                    contentItem: Loader {
+                        anchors.fill: parent
+                        sourceComponent: modelData.type === "header" ? headerComp : dictComp
+                    }
+
+                    Component {
+                        id: headerComp
+                        RowLayout {
+                            anchors.fill: parent
+                            spacing: 8
+                            Rectangle {
+                                Layout.fillWidth: true
+                                Layout.fillHeight: true
+                                color: Material.color(Material.Purple, Material.Shade50)
+                                z: -1
+                            }
+                            Label {
+                                Layout.fillWidth: true
+                                text: modelData.pair
+                                font.pixelSize: 12
+                                font.bold: true
+                                color: root.uiSubFg
+                                verticalAlignment: Text.AlignVCenter
+                            }
+                            ToolButton {
+                                text: "Remove"
+                                onClicked: dictsPane._removePair(modelData.pair)
+                            }
                         }
                     }
 
-                    // Ordering within the All list is not user-relevant; per-group
-                    // ordering lives in the Groups tab. Only Remove stays.
-                    ToolButton {
-                        anchors {
-                            right: parent.right
-                            rightMargin: 4
-                            verticalCenter: parent.verticalCenter
+                    Component {
+                        id: dictComp
+                        RowLayout {
+                            anchors.fill: parent
+                            spacing: 8
+                            ColumnLayout {
+                                Layout.fillWidth: true
+                                spacing: 2
+                                Label {
+                                    text: modelData.item.name
+                                    font.pixelSize: 16
+                                    font.bold: true
+                                    elide: Text.ElideMiddle
+                                    Layout.fillWidth: true
+                                }
+                                Label {
+                                    text: engine.buildingFts
+                                        ? root.fmtPair(modelData.item)
+                                        : root.fmtSubLine(modelData.item)
+                                    color: root.uiSubFg
+                                    font.pixelSize: 12
+                                    elide: Text.ElideMiddle
+                                    Layout.fillWidth: true
+                                }
+                            }
+                            ToolButton {
+                                text: "Remove"
+                                onClicked: dictsPane._requestRemove(modelData.dictIndex, modelData.item.name)
+                            }
                         }
-                        text: "Remove"
-                        onClicked: dictsPane._requestRemove(dictRow.dictIndex, dictRow.dictData.name)
+                    }
+
+                    onClicked: {
+                        if (modelData.type !== "header")
+                            dictsPane._toggleSelect(modelData.dictIndex)
                     }
                 }
             }

@@ -444,6 +444,7 @@ void EngineController::refreshDictionaries() {
         list.reserve(n);
         std::vector<char> name(256);
         std::vector<char> file(512);
+        std::vector<char> lf(128), lt(128);
         for (int i = 0; i < n; ++i) {
             const int rn = gd_dict_info(i, name.data(), static_cast<int>(name.size()),
                                         file.data(), static_cast<int>(file.size()));
@@ -451,8 +452,31 @@ void EngineController::refreshDictionaries() {
             QVariantMap m;
             m.insert("name", QString::fromLocal8Bit(name.data()));
             m.insert("source", QString::fromLocal8Bit(file.data()));
+            // Language pair + approx size (design D1): human names, empty when
+            // unknown (QML renders '?'); size is the summed staged source files.
+            long long sizeBytes = 0;
+            if (gd_dict_meta(i, lf.data(), static_cast<int>(lf.size()),
+                             lt.data(), static_cast<int>(lt.size()),
+                             &sizeBytes) == 0) {
+                const QString from = QString::fromUtf8(lf.data());
+                const QString to = QString::fromUtf8(lt.data());
+                m.insert("langFrom", from);
+                m.insert("langTo", to);
+                m.insert("sizeBytes", sizeBytes);
+                // Section key for By-Pair grouping (unknown side -> '?').
+                m.insert("pair", (from.isEmpty() ? QStringLiteral("?") : from)
+                                 + QLatin1Char('/')
+                                 + (to.isEmpty() ? QStringLiteral("?") : to));
+            }
             list.append(m);
         }
+        // Alphabetical by name (flat view). By-Pair grouping re-groups this on
+        // the QML side; within each group the relative name-order is preserved.
+        std::sort(list.begin(), list.end(),
+                  [](const QVariant &a, const QVariant &b){
+            return a.toMap().value("name").toString().toLower()
+                   < b.toMap().value("name").toString().toLower();
+        });
         return list;
     });
     auto *w = new QFutureWatcher<QVariantList>(this);
