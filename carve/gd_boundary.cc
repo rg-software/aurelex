@@ -17,6 +17,7 @@
 #include "article_maker.hh"
 #include "wordfinder.hh"
 #include "ftshelpers.hh"
+#include "langcoder.hh"
 #include "goldendict.h"
 
 #include <QAtomicInt>
@@ -551,6 +552,40 @@ int gd_dict_id( int index, char * out, int out_size )
   if ( static_cast< int >( id.size() ) + 1 > out_size )
     return -1;
   std::memcpy( out, id.c_str(), id.size() + 1 );
+  return 0;
+}
+
+int gd_dict_meta( int index, char * lang_from, int lang_from_size,
+                  char * lang_to, int lang_to_size, long long * size_bytes )
+{
+  if ( !g_state || !size_bytes || !lang_from || lang_from_size <= 0
+       || !lang_to || lang_to_size <= 0 )
+    return -1;
+  std::lock_guard< std::mutex > lock( g_engineMutex );
+  if ( index < 0 || index >= static_cast< int >( g_state->dictionaries.size() ) )
+    return -1;
+
+  Dictionary::Class & d = *g_state->dictionaries[ index ];
+
+  const QString from = LangCoder::decode( d.getLangFrom() );
+  const QString to   = LangCoder::decode( d.getLangTo() );
+  const QByteArray fb = from.toUtf8(), tb = to.toUtf8();
+  if ( fb.size() + 1 > lang_from_size || tb.size() + 1 > lang_to_size )
+    return -1;
+  std::memcpy( lang_from, fb.constData(), fb.size() + 1 );
+  std::memcpy( lang_to, tb.constData(), tb.size() + 1 );
+
+  // Approximate on-disk size: sum the dictionary's source files (primary +
+  // resource files) as reported by the backend. These are the staged copies the
+  // engine reads, so this is a fair "approx MB/GB".
+  long long total = 0;
+  const auto & files = d.getDictionaryFilenames();
+  for ( const auto & f : files ) {
+    QFileInfo fi( QString::fromUtf8( f.c_str() ) );
+    if ( fi.exists() && fi.isFile() )
+      total += fi.size();
+  }
+  *size_bytes = total;
   return 0;
 }
 

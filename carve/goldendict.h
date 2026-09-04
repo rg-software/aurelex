@@ -113,6 +113,13 @@ int gd_dict_info( int index, char * name, int name_size, char * file, int file_s
 // permanently. Fills `out` (capacity out_size) with a NUL-terminated id.
 // Returns 0 on success, -1 on invalid args / out-of-range / buffer too small.
 int gd_dict_id( int index, char * out, int out_size );
+// Return display metadata for dictionary `index`: the source and target
+// language names (human-readable, empty when unknown) and an approximate on-disk
+// size in bytes. Fills lang_from/lang_to (NUL-terminated, capacity
+// lang_from_size/lang_to_size) and *size_bytes. Returns 0 on success, -1 on
+// invalid args / out-of-range / buffer too small.
+int gd_dict_meta( int index, char * lang_from, int lang_from_size,
+                  char * lang_to, int lang_to_size, long long * size_bytes );
 int gd_move_dict( int from, int to );
 int gd_remove_dict( int dict_index );
 int gd_group_count();
