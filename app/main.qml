@@ -155,26 +155,35 @@ ApplicationWindow {
     // document (id `gd-sugg`, pinned to the top of the article pane). Each
     // entry carries data-w; the articleLinkPoller's click listener reads it and
     // dispatches engine.lookup() directly — no navigation, so the panel simply
-    // collapses when the article loads. Until the WebView exists (it's created
-    // 420 ms after the tab shows), the list is held in _pendingSugg and flushed
-    // by _flushPendingSugg(); _ensureInlineBlank() guarantees the WebView has a
+    // collapses when the article loads. The candidate list is held in
+    // _suggWords (authoritative, NOT consumed on render) and _applySuggestOverlay()
+    // (re)renders it: it whenever safe; _flushPendingSugg() re-applies after any
+    // load-settle, and _ensureInlineBlank() guarantees the WebView has a
     // document to inject into.
-    property var _pendingSugg: []
+    property var _suggWords: []
     property bool _suggVisible: false
-    // True while `inlineWv` is loading a blank base document (fresh WebView or a
-    // cleared article). A suggestion overlay injected before that load finishes
-    // is wiped by the load completion, so _renderSuggestOverlay defers to the
-    // pending-stash while this is set; onLoadingChanged clears it and flushes.
+    // True while `inlineWv` is loading a base document (fresh WebView or a
+    // cleared article). An overlay injected before that load finishes is wiped
+    // by the load completion, so re-apply is deferred while this is set;
+    // onLoadingChanged clears it and flushes.
     property bool _blankPending: false
     function _escHtml(s) {
         return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;")
             .replace(/>/g, "&gt;").replace(/"/g, "&quot;")
     }
     function _renderSuggestOverlay(words) {
-        root._pendingSugg = words
+        root._suggWords = words
         articleLinkPoller._lastSugg = ""
+        root._applySuggestOverlay()
+    }
+    function _applySuggestOverlay() {
+        const words = root._suggWords
         const wv = root.inlineWv
-        if (!wv || root._blankPending) return
+        // Need a live WebView that actually has a loaded document (URL present).
+        // runJavaScript on a doc-less WebView silently does nothing.
+        if (!wv || root._blankPending || words.length === 0) return
+        const url = wv.url.toString()
+        if (url.length < 6) return
         const base = engine.articleBaseUrl
         if (base.length < 5) return
         const dark = engine.darkMode
@@ -206,10 +215,9 @@ ApplicationWindow {
             + JSON.stringify(html) + ';document.body.appendChild(d);})()'
         wv.runJavaScript(script)
         root._suggVisible = true
-        root._pendingSugg = []
     }
     function _hideSuggestOverlay() {
-        root._pendingSugg = []
+        root._suggWords = []
         articleLinkPoller._lastSugg = ""
         if (root.inlineWv && root._suggVisible) {
             root.inlineWv.runJavaScript(
@@ -217,9 +225,11 @@ ApplicationWindow {
         }
         root._suggVisible = false
     }
+    // Called on every load-settle (and after WebView recreation): re-render the
+    // stored candidate list if it's safe to do so.
     function _flushPendingSugg() {
-        if (root.inlineWv && root._pendingSugg.length > 0)
-            root._renderSuggestOverlay(root._pendingSugg)
+        root._blankPending = false
+        root._applySuggestOverlay()
     }
     // Give the freshly-created inline WebView a real (blank) base document so
     // runJavaScript works — until a page is loaded the WebView has an empty URL
@@ -232,6 +242,8 @@ ApplicationWindow {
         }
     }
     function _showArticle(word, html) {
+        // A picked word replaces the candidate list — collapse the dropdown.
+        root._hideSuggestOverlay()
         if (currentWord !== "" && currentWord !== word) {
             navStack.push({ word: currentWord, html: currentHtml })
         }
@@ -321,7 +333,21 @@ ApplicationWindow {
         { idx: 6, label: "Favs",     icon: "star" }
     ]
     function _navTo(idx) {
-        if (idx === 0) { _blurActive(); state = 0; return }
+        if (idx === 0) {
+            _blurActive()
+            // An article left over from another pane (full-pane article opened
+            // from Favs/History/FTS) must not carry into a fresh Search — a
+            // stale article would steal the WebView and the typed query's
+            // suggestions would never show. Inline articles (opened IN Search)
+            // were already wiped above on the way out.
+            if (root.currentHtml.length > 0 && !root.inlineArticle) {
+                root.currentWord = ""
+                root.currentHtml = ""
+                root.navStack = []
+            }
+            state = 0
+            return
+        }
         // Leaving the search tab: clear any inline article state.
         if (root.inlineArticle) {
             root._clearInlineArticle()
@@ -516,7 +542,7 @@ ColumnLayout {
                     Accessible.role: Accessible.EditableText
                     font.pixelSize: 18
                     onDisplayTextChanged: searchPane._doSuggest()
-                    onAccepted: { input.focus = false; engine.lookup(text.trim()) }
+                    onAccepted: { input.focus = false; root._requestedWord = text.trim(); engine.lookup(text.trim()) }
                     Component.onCompleted: forceActiveFocus()
                 }
 
@@ -526,7 +552,7 @@ ColumnLayout {
                     Accessible.role: Accessible.Button
                     onClicked: {
                         const t = engine.clipboardText()
-                        if (t.length > 0) engine.lookup(t)
+                        if (t.length > 0) { root._requestedWord = t; engine.lookup(t) }
                     }
                 }
             }
@@ -632,6 +658,7 @@ ColumnLayout {
                                     const word = _parseGdlookupHttpUrl(u, base)
                                     if (word.length > 0) {
                                         _gdlookupInFlight = word
+                                        root._requestedWord = word
                                         engine.lookup(word)
                                     }
                                     searchArticleView.loadHtml("<html><body></body></html>", engine.articleBaseUrl)
@@ -641,6 +668,7 @@ ColumnLayout {
                                     const word = _parseGdlookupUrl(u)
                                     if (word.length > 0) {
                                         _gdlookupInFlight = word
+                                        root._requestedWord = word
                                         engine.lookup(word)
                                     }
                                     searchArticleView.loadHtml("<html><body></body></html>", engine.articleBaseUrl)
@@ -1463,6 +1491,7 @@ ColumnLayout {
                     const word = _parseGdlookupHttpUrl(u, base)
                     if (word.length > 0) {
                         _gdlookupInFlight = word
+                        root._requestedWord = word
                         engine.lookup(word)
                     }
                     view.loadHtml("<html><body></body></html>", engine.articleBaseUrl)
@@ -1472,6 +1501,7 @@ ColumnLayout {
                     const word = _parseGdlookupUrl(u)
                     if (word.length > 0) {
                         _gdlookupInFlight = word
+                        root._requestedWord = word
                         engine.lookup(word)
                     }
                     view.loadHtml("<html><body></body></html>", engine.articleBaseUrl)
@@ -1482,9 +1512,7 @@ ColumnLayout {
                     view.loadHtml("<html><body></body></html>", engine.articleBaseUrl)
                     return
                 }
-                console.log("WebView url:", u)
             }
-            onLoadingChanged: console.log("WebView loading:", loading, "url:", url)
             onHeightChanged: {
                 if (root.state === 2 && view.height !== root.loadedAtHeight && root.currentHtml.length > 0)
                     articleReloader.restart()
@@ -1509,6 +1537,11 @@ ColumnLayout {
         return decodeURIComponent(u.substring(slash + 1))
     }
     property string _gdlookupInFlight: ""
+    // The most recent word requested via a lookup. engine.lookup is async; a
+    // slow (mutex-contended) lookup for an OLD word can complete after the user
+    // already navigated elsewhere — _showArticle guards against that so a stale
+    // article can't replace the current search/suggestions.
+    property string _requestedWord: ""
 
     function _parseGdlookupHttpUrl(u, base) {
         const rest = u.substring((base + "/gdlookup/").length)
@@ -1566,7 +1599,7 @@ ColumnLayout {
                     Accessible.name: histRow.word
                     Accessible.role: Accessible.ListItem
                     // tap -> lookup
-                    onClicked: engine.lookup(histRow.word)
+                    onClicked: { root._requestedWord = histRow.word; engine.lookup(histRow.word) }
 
                     // 4.5: swipe-to-remove.
                     swipe.right: Rectangle {
@@ -1617,7 +1650,7 @@ ColumnLayout {
                 text: favRow.word
                 Accessible.name: favRow.word
                 Accessible.role: Accessible.ListItem
-                onClicked: engine.lookup(favRow.word)
+                onClicked: { root._requestedWord = favRow.word; engine.lookup(favRow.word) }
 
                 // 4.6: swipe-to-remove.
                 swipe.right: Rectangle {
@@ -1647,6 +1680,10 @@ ColumnLayout {
     Connections {
         target: engine
         function onArticleLoaded(word, html) {
+            // Drop stale lookups: a slow engine reply for a word the user no
+            // longer asked for must not replace the current pane.
+            if (root._requestedWord.length > 0 && word !== root._requestedWord) return
+            root._requestedWord = ""
             root._showArticle(word, html)
         }
     }
@@ -1734,6 +1771,7 @@ ColumnLayout {
                         if (word.length > 0 && word !== articleLinkPoller._lastSugg) {
                             articleLinkPoller._lastSugg = word
                             root._hideSuggestOverlay()
+                            root._requestedWord = word
                             engine.lookup(word)
                         }
                         return
@@ -1757,7 +1795,7 @@ ColumnLayout {
         }
         if (link.indexOf(base + "/gdlookup/") === 0) {
             const word = _parseGdlookupHttpUrl(link, base)
-            if (word.length > 0) engine.lookup(word)
+            if (word.length > 0) { root._requestedWord = word; engine.lookup(word) }
             return
         }
     }
@@ -1870,6 +1908,7 @@ ColumnLayout {
                         let gid = 0
                         if (ftsGroupCombo.currentIndex >= 0 && engine.groups.length > 0)
                             gid = engine.groups[ftsGroupCombo.currentIndex].id
+                        root._requestedWord = modelData.headword
                         engine.lookupInGroup(modelData.headword, gid)
                     }
                 }
