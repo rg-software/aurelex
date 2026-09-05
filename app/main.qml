@@ -66,16 +66,33 @@ ApplicationWindow {
     // so they recreate at the new window geometry (a stale-size native surface
     // would otherwise cover sibling chrome — e.g. the bottom dock in landscape).
     property bool _geometryInvalid: false
+    // Last observed window size, used to detect real orientation flips.
+    // A pure resize (the Android IME showing/hiding resizes the window on
+    // adjustResize) must NOT tear the WebView down — doing so killed the
+    // suggestion overlay mid-typing (typed word, no candidates rendered).
+    property int _lastGeoW: -1
+    property int _lastGeoH: -1
     function _refreshInsets() {
         root._insetDpr = Screen.devicePixelRatio > 0 ? Screen.devicePixelRatio : 1
         root._insetTop = Math.round(engine.systemInsetTop() / root._insetDpr)
         root._insetBottom = Math.round(engine.systemInsetBottom() / root._insetDpr)
-        // Orientation change: both loaders' `active` bindings re-evaluate to
-        // false (destroying the native surfaces), then true again next tick
-        // (recreating them sized to the new window). The inline/currentHtml
-        // survive and re-render via onLoaded; the article pane re-renders too.
-        root._geometryInvalid = true
-        Qt.callLater(function(){ root._geometryInvalid = false })
+        var w = root.width, h = root.height
+        if (root._lastGeoW < 0) {
+            root._lastGeoW = w; root._lastGeoH = h
+            return
+        }
+        var prevLandscape = root._lastGeoW > root._lastGeoH
+        var nowLandscape = w > h
+        root._lastGeoW = w; root._lastGeoH = h
+        // Only a true portrait<->landscape flip needs the WebView teardown:
+        // both loaders' `active` bindings re-evaluate to false (destroying the
+        // native surfaces) then true again next tick (recreating them at the new
+        // window size). The inline currentHtml/overlay survive and re-render via
+        // onLoaded/onLoadingChanged.
+        if (prevLandscape !== nowLandscape) {
+            root._geometryInvalid = true
+            Qt.callLater(function(){ root._geometryInvalid = false })
+        }
     }
     onWidthChanged: root._refreshInsets()
     onHeightChanged: root._refreshInsets()
@@ -943,6 +960,14 @@ ColumnLayout {
                                     if (root.state === 0 && !root.inlineArticle
                                         && input.displayText.trim().length === 0)
                                         root._showHistoryOverlay()
+                                    // A suggestion can land a tick AFTER this flush
+                                    // (e.g. a lookup raced a WebView recreation after
+                                    // returning from another pane). Re-apply on the
+                                    // next event-loop turn so it still renders.
+                                    Qt.callLater(function(){
+                                        root._blankPending = false
+                                        root._applySuggestOverlay()
+                                    })
                                 }
                             }
                             onHeightChanged: {
