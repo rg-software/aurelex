@@ -87,7 +87,6 @@ elements in automated tests:
 | Nav | Dictionaries tab | `"Dictionaries"` |
 | Nav | Groups tab | `"Groups"` |
 | Nav | Full-text search tab | `"Full-text search"` |
-| Nav | History tab | `"History"` |
 | Nav | Favorites tab | `"Favorites"` |
 | Top | ToolBar | `"Top toolbar"` |
 | Top | Dark-mode toggle | `"Light mode"` / `"Dark mode"` (dynamic) |
@@ -117,6 +116,7 @@ elements in automated tests:
 | Membership | Non-members list | `"Available dictionaries to add"` |
 | Membership | Add to group | `"Add to group"` |
 | Article | Back button | `"Back"` |
+| Article | Forward button | `"Forward"` (enabled only when a backed-out article exists) |
 | Article | Favorites star | `"Add to favorites"` / `"Remove from favorites"` (dynamic) |
 | Article | Loader | `"Article content"` |
 | Article | WebView | `"Dictionary article"` |
@@ -125,18 +125,19 @@ elements in automated tests:
 | FTS | Group combo | `"Full-text search group scope"` |
 | FTS | Search button | `"Search"` |
 | FTS | Results list | `"Full-text search results"` |
-| History | Clear all | `"Clear all"` |
-| History | ListView | `"Lookup history"` |
-| History | Swipe delete | `"Delete"` |
+| History | Clear all | Rendered as a `data-action="clear-history"` row *inside* the article WebView when the search field is empty |
+| History | Word rows | Rendered as `data-w` anchors (tap = lookup) with `data-action="remove-history"` per-row buttons in the WebView; no separate Qt list/tab |
 | Favorites | ListView | `"Favorites"` |
-| Favorites | Swipe remove | `"Remove"` |
+| Favorites | Remove button | `"Remove"` (per-row X, no swipe gesture) |
 | Onboarding | Dialog | `"Welcome"` |
 | Onboarding | Get started | `"Get started"` |
 
 ## Git / Commit conventions
 
-Write conventional, structured commit messages so the release pipeline can group them into
-categories (it parses `feat:`/`fix:` prefixes):
+- **Remote / MCP**: this repo is hosted on **GitHub** — use the GitHub MCP server (and `gh`) for
+  issues, PRs, and remote operations. Do NOT use the Gitea MCP server with this repository.
+- Write conventional, structured commit messages so the release pipeline can group them into
+  categories (it parses `feat:`/`fix:` prefixes):
 
 - **Format**: Conventional Commits — use a type prefix such as `feat:`, `fix:`, `docs:`,
   `refactor:`, `chore:`. Use a scoped prefix (e.g. `feat(comics):`, `fix(sidebar):`) when a

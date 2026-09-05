@@ -42,6 +42,10 @@ ApplicationWindow {
     // so the Back button can pop to the previous article without losing scroll
     // position (we re-render the prior article's HTML).
     property var navStack: []
+    // Browser-like redo stack: words the user backed out of, re-opened by the
+    // Forward control. Cleared whenever a fresh lookup happens (any new lookup
+    // invalidates the forward path, like a browser).
+    property var fwdStack: []
     // True while the foreground StagingService is copy-staging a picked folder.
     // Drives the Dicts-tab "Preparing dictionaries…" banner.
     property bool _stagingActive: engine.stagingActive
@@ -57,11 +61,10 @@ ApplicationWindow {
             "library_books": 0xe02f,
             "manage_search": 0xf02f,
             "content_paste_search": 0xea9b,
-            "folder": 0xe2c7,
-            "history": 0xe889,
             "star": 0xe838,
             "star_border": 0xe83a,
             "arrow_back": 0xe5c4,
+            "arrow_forward": 0xe5c8,
             "close": 0xe5cd,
             "add": 0xe145,
             "delete": 0xe872,
@@ -144,6 +147,7 @@ ApplicationWindow {
         root.currentWord = ""
         root.currentHtml = ""
         root.navStack = []
+        root.fwdStack = []
         root._hideSuggestOverlay()
         if (root.inlineWv && engine.articleBaseUrl.length > 0) {
             // A suggestion injected before this blank load finishes gets wiped;
@@ -166,6 +170,10 @@ ApplicationWindow {
     // document to inject into.
     property var _suggWords: []
     property bool _suggVisible: false
+    // What the candidate overlay currently shows: "sugg" (headword suggestions
+    // while typing) or "history" (recent lookups when the field is empty or a
+    // query has no matches). Drives how _applySuggestOverlay builds the rows.
+    property string _suggMode: "sugg"
     // True while `inlineWv` is loading a base document (fresh WebView or a
     // cleared article). An overlay injected before that load finishes is wiped
     // by the load completion, so re-apply is deferred while this is set;
@@ -176,41 +184,79 @@ ApplicationWindow {
             .replace(/>/g, "&gt;").replace(/"/g, "&quot;")
     }
     function _renderSuggestOverlay(words) {
+        root._suggMode = "sugg"
         root._suggWords = words
         articleLinkPoller._lastSugg = ""
         root._applySuggestOverlay()
     }
+    // Show recent lookups in the candidate surface (empty field / no matches).
+    function _showHistoryOverlay() {
+        root._suggMode = "history"
+        articleLinkPoller._lastSugg = ""
+        root._suggWords = engine.history
+        root._applySuggestOverlay()
+    }
     function _applySuggestOverlay() {
-        const words = root._suggWords
         const wv = root.inlineWv
         // Need a live WebView that actually has a loaded document (URL present).
         // runJavaScript on a doc-less WebView silently does nothing.
-        if (!wv || root._blankPending || words.length === 0) return
+        if (!wv || root._blankPending) return
+        const words = root._suggWords
         const url = wv.url.toString()
         if (url.length < 6) return
         const base = engine.articleBaseUrl
         if (base.length < 5) return
+        // The suggestions list can be empty legitimately (a query typed while
+        // results are still pending); a history overlay with no entries is still
+        // worth drawing (empty-state message).
+        if (words.length === 0 && root._suggMode !== "history") return
         const dark = engine.darkMode
         const bg = dark ? "#242526" : "#ffffff"
         const fg = dark ? "#e0e0e0" : "#202124"
         const sep = dark ? "#3a3b3c" : "#eeeeee"
+        const accent = dark ? "#b388ff" : "#6200ee"
         var html = '<div id="gd-sugg" style="position:fixed;top:0;left:0;right:0;'
             + 'z-index:9999;background:' + bg + ';color:' + fg + ';'
             + 'box-shadow:0 2px 10px rgba(0,0,0,0.4);overflow-y:auto;max-height:72%;'
             + 'font-family:Roboto,sans-serif;font-size:16px;text-align:left;">'
-        for (var i = 0; i < words.length; ++i) {
-            const w = words[i]
-            if (w.indexOf("(no results") === 0) {
-                html += '<div style="padding:12px 16px;color:#999;">' + root._escHtml(w) + '</div>'
+        if (root._suggMode === "history") {
+            if (words.length === 0) {
+                html += '<div style="padding:20px 16px;color:#999;text-align:center;">No lookups yet</div>'
             } else {
-                // Entries are plain anchors carrying data-w. The articleLinkPoller
-                // installs a click listener on #gd-sugg that reads data-w and calls
-                // engine.lookup() directly — no navigation, no article-server 404,
-                // no load race with the ensuing article render.
-                html += '<a id="gd-sugg-link" href="javascript:;" data-w="'
-                    + root._escHtml(w) + '" style="display:block;padding:12px 16px;'
-                    + 'border-bottom:1px solid ' + sep + ';text-decoration:none;color:inherit;">'
-                    + root._escHtml(w) + '</a>'
+                // Recent lookups, most recent first, each tap-to-lookup with a
+                // per-row remove; plus a Clear all row. Rows are anchors with
+                // data-w (lookup) and buttons with data-action (remove/clear);
+                // the articleLinkPoller dispatches both.
+                for (var h = 0; h < words.length; ++h) {
+                    const hw = words[h]
+                    html += '<div style="display:flex;align-items:center;border-bottom:1px solid ' + sep + ';">'
+                        + '<a id="gd-sugg-link" href="javascript:;" data-w="' + root._escHtml(hw)
+                        + '" style="flex:1;padding:12px 16px;text-decoration:none;color:inherit;overflow:hidden;'
+                        + 'text-overflow:ellipsis;white-space:nowrap;">' + root._escHtml(hw) + '</a>'
+                        + '<button data-action="remove-history" data-w="' + root._escHtml(hw)
+                        + '" style="border:0;background:none;color:#999;font-size:18px;padding:4px 16px;">✕</button>'
+                        + '</div>'
+                }
+                html += '<div style="padding:6px;text-align:center;border-top:1px solid ' + sep + ';">'
+                    + '<a href="javascript:;" data-action="clear-history" style="display:inline-block;'
+                    + 'padding:8px 16px;color:' + accent + ';text-decoration:none;font-size:14px;">Clear all</a>'
+                    + '</div>'
+            }
+        } else {
+            for (var i = 0; i < words.length; ++i) {
+                const w = words[i]
+                if (w.indexOf("(no results") === 0) {
+                    html += '<div style="padding:12px 16px;color:#999;">' + root._escHtml(w) + '</div>'
+                } else {
+                    // Entries are plain anchors carrying data-w. The articleLinkPoller
+                    // installs a click listener on #gd-sugg that reads data-w and calls
+                    // engine.lookup() directly — no navigation, no article-server 404,
+                    // no load race with the ensuing article render.
+                    html += '<a id="gd-sugg-link" href="javascript:;" data-w="'
+                        + root._escHtml(w) + '" style="display:block;padding:12px 16px;'
+                        + 'border-bottom:1px solid ' + sep + ';text-decoration:none;color:inherit;">'
+                        + root._escHtml(w) + '</a>'
+                }
             }
         }
         html += '</div>'
@@ -221,6 +267,7 @@ ApplicationWindow {
         root._suggVisible = true
     }
     function _hideSuggestOverlay() {
+        root._suggMode = "sugg"
         root._suggWords = []
         articleLinkPoller._lastSugg = ""
         if (root.inlineWv && root._suggVisible) {
@@ -249,7 +296,14 @@ ApplicationWindow {
         // A picked word replaces the candidate list — collapse the dropdown.
         root._hideSuggestOverlay()
         if (currentWord !== "" && currentWord !== word) {
-            navStack.push({ word: currentWord, html: currentHtml })
+            // Reassign a NEW array: push()/pop() on a `property var` don't
+            // notify QML, so a binding on navStack.length would go stale.
+            // (Nothing binds navStack.length today, but keep mutations
+            // non-destructive for consistency.)
+            root.navStack = root.navStack.concat([{ word: currentWord, html: currentHtml }])
+            // A fresh lookup invalidates any forward (redo) path. Reassign too
+            // so the Forward buttons' `enabled` binding re-evaluates to false.
+            root.fwdStack = []
         }
         currentWord = word
         currentHtml = html
@@ -267,21 +321,46 @@ ApplicationWindow {
         if (navStack.length === 0) {
             // No more articles in the stack.
             if (root.inlineArticle) {
-                // Clear inline article and return to pure suggestions view. The
+                // Clear inline article and return to the candidate surface. The
                 // query is still in the field, so re-show its candidates (the
                 // regular typing path doesn't fire — the text didn't change).
                 root._clearInlineArticle()
                 searchPane._doSuggest()
+                root.fwdStack = []
                 return
             }
+            root.fwdStack = []
             state = 0
             return
         }
-        const prev = navStack.pop()
+        // Push the article we're leaving onto the forward stack (new array so
+        // the Forward buttons' enabled binding sees the change).
+        if (root.currentWord.length > 0) {
+            root.fwdStack = root.fwdStack.concat([{ word: currentWord, html: currentHtml }])
+        }
+        const prev = root.navStack[root.navStack.length - 1]
+        root.navStack = root.navStack.slice(0, root.navStack.length - 1)
         currentWord = prev.word
         currentHtml = prev.html
         if (root.inlineArticle) {
             // Stay in inline mode, re-render the previous article.
+            articleLoadTimer.restart()
+        } else {
+            state = 2
+            articleLoadTimer.restart()
+        }
+    }
+    function _forwardFromArticle() {
+        if (root.fwdStack.length === 0) return
+        // Moving forward returns us to where we'd be on the back path.
+        if (root.currentWord.length > 0) {
+            root.navStack = root.navStack.concat([{ word: currentWord, html: currentHtml }])
+        }
+        const next = root.fwdStack[root.fwdStack.length - 1]
+        root.fwdStack = root.fwdStack.slice(0, root.fwdStack.length - 1)
+        currentWord = next.word
+        currentHtml = next.html
+        if (root.inlineArticle) {
             articleLoadTimer.restart()
         } else {
             state = 2
@@ -309,10 +388,6 @@ ApplicationWindow {
         ftsResults = []
         state = 4
     }
-    function _openHistory() {
-        _blurActive()
-        state = 5
-    }
     function _openFavorites() {
         _blurActive()
         state = 6
@@ -333,21 +408,31 @@ ApplicationWindow {
         { idx: 1, label: "Dicts",    icon: "book" },
         { idx: 3, label: "Groups",   icon: "library_books" },
         { idx: 4, label: "FTS",      icon: "manage_search" },
-        { idx: 5, label: "History",  icon: "history" },
         { idx: 6, label: "Favs",     icon: "star" }
     ]
+    // Position of the nav-tab whose `idx` matches the current state (-1 = no
+    // matching tab, e.g. the article pane). Drives TabBar.currentIndex and the
+    // highlight; keeps the mapping in one place.
+    function _tabIndexForState() {
+        if (root.state === 2) return -1
+        for (var i = 0; i < root.navItems.length; ++i) {
+            if (root.navItems[i].idx === root.state) return i
+        }
+        return -1
+    }
     function _navTo(idx) {
         if (idx === 0) {
             _blurActive()
             // An article left over from another pane (full-pane article opened
-            // from Favs/History/FTS) must not carry into a fresh Search — a
-            // stale article would steal the WebView and the typed query's
-            // suggestions would never show. Inline articles (opened IN Search)
-            // were already wiped above on the way out.
+            // from Favs/FTS) must not carry into a fresh Search — a stale
+            // article would steal the WebView and the typed query's suggestions
+            // would never show. Inline articles (opened IN Search) were already
+            // wiped above on the way out.
             if (root.currentHtml.length > 0 && !root.inlineArticle) {
                 root.currentWord = ""
                 root.currentHtml = ""
                 root.navStack = []
+                root.fwdStack = []
             }
             state = 0
             return
@@ -359,7 +444,6 @@ ApplicationWindow {
         if (idx === 1) { _openDicts(); return }
         if (idx === 3) { _openGroups(); return }
         if (idx === 4) { _openFts(); return }
-        if (idx === 5) { _openHistory(); return }
         if (idx === 6) { _openFavorites(); return }
     }
 
@@ -392,7 +476,6 @@ ApplicationWindow {
                     : root.state === 1 ? "Dictionaries (" + engine.dictCount + ")"
                     : root.state === 3 ? "Groups (" + engine.groups.length + ")"
                     : root.state === 4 ? "FTS (" + root.ftsResults.length + ")"
-                    : root.state === 5 ? "History (" + engine.history.length + ")"
                     : root.state === 6 ? "Favorites (" + engine.favorites.length + ")"
                     : root.currentWord
             }
@@ -435,21 +518,16 @@ ApplicationWindow {
         Accessible.name: "Main navigation"
         Accessible.role: Accessible.TabBar
         // 5.2: highlight the active tab by driving the TabBar's own selection
-        // (TabButton has no `highlighted` in Qt 6.6). State -> tab index; the
-        // article pane (state 2) has no tab, so clear the selection.
-        currentIndex: root.state === 2 ? -1
-                    : root.state === 3 ? 2
-                    : root.state === 4 ? 3
-                    : root.state === 5 ? 4
-                    : root.state === 6 ? 5
-                    : root.state
+        // (TabButton has no `highlighted` in Qt 6.6). State -> tab position via
+        // _tabIndexForState(); the article pane (state 2) has no tab.
+        currentIndex: root._tabIndexForState()
 
         Repeater {
             model: root.navItems
             delegate: TabButton {
                 id: tabBtn
                 // Equal-width tabs from the bar's own (anchored) width, so the
-                // six tabs tile the bar exactly with no leftover space that
+                // tabs tile the bar exactly with no leftover space that
                 // would make it horizontally scrollable.
                 width: navBar.width / root.navItems.length
                 height: parent.height
@@ -494,7 +572,9 @@ ApplicationWindow {
         function _doSuggest() {
             const t = input.displayText
             if (t.trim().length === 0) {
-                root._hideSuggestOverlay()
+                // Empty field: drop any open inline article and show history.
+                if (root.inlineArticle) root._clearInlineArticle()
+                root._showHistoryOverlay()
                 return
             }
             // When the user types a new query, clear any inline article.
@@ -510,10 +590,16 @@ ApplicationWindow {
             target: engine
             function onSuggestionsReady(prefix, suggestions) {
                 searchPane.pendingSuggestions = suggestions
-                root._renderSuggestOverlay(suggestions)
+                // A typed query that matches nothing falls back to history.
+                if (suggestions.length === 0) {
+                    root._showHistoryOverlay()
+                } else {
+                    root._renderSuggestOverlay(suggestions)
+                }
             }
             function onArticleNotFound(word) {
-                root._renderSuggestOverlay(["(no results for " + word + ")"])
+                // A failed lookup returns the surface to history.
+                root._showHistoryOverlay()
             }
         }
 
@@ -637,10 +723,13 @@ ColumnLayout {
 
                 Rectangle {
                     id: inlineArticleToolbar
+                    // Nav/star controls only exist while a real article is shown;
+                    // with nothing open (suggestions/history) the header collapses
+                    // and the WebView fills the pane.
+                    visible: root.inlineArticle
                     width: parent.width
-                    height: 40
-                    color: root.uiCard
-                    border.color: root.uiBorder
+                    height: root.inlineArticle ? 40 : 0
+                    // Frameless header: the icons sit directly on the pane.
 
                     RowLayout {
                         anchors.fill: parent
@@ -648,40 +737,42 @@ ColumnLayout {
                         anchors.rightMargin: 4
                         spacing: 4
 
+                        // Spacer right-justifies the controls.
+                        Item { Layout.fillWidth: true }
+
                         ToolButton {
                             text: root.icon("arrow_back")
                             font.family: root.iconFontFamily
                             font.pixelSize: 22
-                            enabled: root.inlineArticle
                             Accessible.name: "Back"
                             Accessible.role: Accessible.Button
                             onClicked: root._backFromArticle()
                         }
                         ToolButton {
-                            property bool active: root.inlineArticle
-                                && engine.favorites.indexOf(root.currentWord) >= 0
+                            text: root.icon("arrow_forward")
+                            font.family: root.iconFontFamily
+                            font.pixelSize: 22
+                            enabled: root.fwdStack.length > 0
+                            Accessible.name: "Forward"
+                            Accessible.role: Accessible.Button
+                            onClicked: root._forwardFromArticle()
+                        }
+                        ToolButton {
+                            property bool active: engine.favorites.indexOf(root.currentWord) >= 0
                             text: root.icon(active ? "star" : "star_border")
                             font.family: root.iconFontFamily
                             font.pixelSize: 22
-                            enabled: root.inlineArticle
                             Material.foreground: active ? Material.primary : root.uiSubFg
                             Accessible.name: active ? "Remove from favorites" : "Add to favorites"
                             Accessible.role: Accessible.Button
                             onClicked: engine.toggleFavorite(root.currentWord)
-                        }
-                        Label {
-                            Layout.fillWidth: true
-                            text: root.inlineArticle ? root.currentWord : "Dictionary article"
-                            elide: Text.ElideRight
-                            color: root.inlineArticle ? root.uiFg : root.uiSubFg
-                            font.pixelSize: 14
                         }
                     }
                 }
 
                 Loader {
                     id: searchArticleLoader
-                    anchors { top: parent.top; topMargin: 40; left: parent.left; right: parent.right; bottom: parent.bottom }
+                    anchors { top: parent.top; topMargin: inlineArticleToolbar.height; left: parent.left; right: parent.right; bottom: parent.bottom }
                     // Defer WebView creation until the scene is measured.
                     // On Android, a WebView created before layout runs locks its
                     // native surface to a wrong (full-window) size that then
@@ -738,6 +829,11 @@ ColumnLayout {
                                     // any suggestions that arrived meanwhile.
                                     root._blankPending = false
                                     root._flushPendingSugg()
+                                    // With nothing typed and no article open, the
+                                    // empty Search surface falls back to history.
+                                    if (root.state === 0 && !root.inlineArticle
+                                        && input.text.trim().length === 0)
+                                        root._showHistoryOverlay()
                                 }
                             }
                             onHeightChanged: {
@@ -1479,8 +1575,7 @@ ColumnLayout {
         Rectangle {
             width: parent.width
             height: 44
-            color: root.uiCard
-            border.color: root.uiBorder
+            // Frameless header: the icons sit directly on the pane.
             z: 2
 
             RowLayout {
@@ -1489,7 +1584,10 @@ ColumnLayout {
                 anchors.rightMargin: 4
                 spacing: 4
 
-                // 4.7: back button -> ToolButton with arrow_back icon.
+                // Spacer right-justifies the controls.
+                Item { Layout.fillWidth: true }
+
+                // Back: arrow_back icon -> _backFromArticle.
                 ToolButton {
                     text: root.icon("arrow_back")
                     font.family: root.iconFontFamily
@@ -1500,7 +1598,19 @@ ColumnLayout {
                     ToolTip.text: "Back"
                     onClicked: root._backFromArticle()
                 }
-                // 4.7: favorite star -> ToolButton, Material.primary when active.
+                // Forward: re-opens the article the user backed out of.
+                ToolButton {
+                    text: root.icon("arrow_forward")
+                    font.family: root.iconFontFamily
+                    font.pixelSize: 22
+                    enabled: root.fwdStack.length > 0
+                    Accessible.name: "Forward"
+                    Accessible.role: Accessible.Button
+                    ToolTip.visible: hovered
+                    ToolTip.text: "Forward"
+                    onClicked: root._forwardFromArticle()
+                }
+                // Favorite star, Material.primary when active.
                 ToolButton {
                     property bool active: engine.favorites.indexOf(root.currentWord) >= 0
                     text: root.icon(active ? "star" : "star_border")
@@ -1611,74 +1721,6 @@ ColumnLayout {
         return decodeURIComponent(rest)
     }
 
-    // --- history view ---
-    Rectangle {
-        id: historyPane
-        anchors { top: topBar.bottom; left: parent.left; right: parent.right; bottom: navBar.top }
-        color: root.uiBg
-        visible: root.state === 5
-
-        ColumnLayout {
-            anchors.fill: parent
-            anchors.margins: 12
-            spacing: 8
-
-            // 4.5: Clear all -> flat Button (Material danger color).
-            Button {
-                text: "Clear all"
-                flat: true
-                highlighted: true
-                Material.foreground: Material.color(Material.Red)
-                Accessible.name: "Clear all"
-                Accessible.role: Accessible.Button
-                onClicked: engine.clearHistory()
-            }
-
-            ListView {
-                Layout.fillWidth: true
-                Layout.fillHeight: true
-                clip: true
-                model: engine.history
-                spacing: 2
-                Accessible.name: "Lookup history"
-                Accessible.role: Accessible.List
-                delegate: SwipeDelegate {
-                    id: histRow
-                    property string word: modelData
-                    width: ListView.view.width
-                    height: 48
-                    text: histRow.word
-                    Accessible.name: histRow.word
-                    Accessible.role: Accessible.ListItem
-                    // tap -> lookup
-                    onClicked: { root._requestedWord = histRow.word; engine.lookup(histRow.word) }
-
-                    // 4.5: swipe-to-remove.
-                    swipe.right: Rectangle {
-                        clip: true
-                        color: Material.Red
-                        RowLayout {
-                            anchors.fill: parent
-                            Button {
-                                text: "Delete"
-                                Material.background: Material.Red
-                                Material.foreground: "white"
-                                Layout.fillHeight: true
-                                Layout.fillWidth: true
-                                Accessible.name: "Delete"
-                                Accessible.role: Accessible.Button
-                                onClicked: {
-                                    engine.removeHistory(histRow.word)
-                                    histRow.swipe.close()
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
     // --- favorites view ---
     Rectangle {
         id: favoritesPane
@@ -1694,37 +1736,33 @@ ColumnLayout {
             spacing: 2
             Accessible.name: "Favorites"
             Accessible.role: Accessible.List
-            delegate: SwipeDelegate {
+            delegate: ItemDelegate {
                 id: favRow
                 property string word: modelData
                 width: ListView.view.width
                 height: 48
-                text: favRow.word
                 Accessible.name: favRow.word
                 Accessible.role: Accessible.ListItem
-                onClicked: { root._requestedWord = favRow.word; engine.lookup(favRow.word) }
-
-                // 4.6: swipe-to-remove.
-                swipe.right: Rectangle {
-                    clip: true
-                    color: Material.Red
-                    RowLayout {
-                        anchors.fill: parent
-                        Button {
-                            text: "Remove"
-                            Material.background: Material.Red
-                            Material.foreground: "white"
-                            Layout.fillHeight: true
-                            Layout.fillWidth: true
-                            Accessible.name: "Remove"
-                            Accessible.role: Accessible.Button
-                            onClicked: {
-                                engine.toggleFavorite(favRow.word)
-                                favRow.swipe.close()
-                            }
-                        }
+                contentItem: RowLayout {
+                    spacing: 0
+                    Label {
+                        Layout.fillWidth: true
+                        text: favRow.word
+                        elide: Text.ElideMiddle
+                        verticalAlignment: Text.AlignVCenter
+                        leftPadding: 16
+                    }
+                    // "X to remove" matches the history overlay: a plain row
+                    // button (no swipe gesture) that drops the favorite.
+                    ToolButton {
+                        text: "✕"
+                        font.pixelSize: 18
+                        Accessible.name: "Remove"
+                        Accessible.role: Accessible.Button
+                        onClicked: engine.toggleFavorite(favRow.word)
                     }
                 }
+                onClicked: { root._requestedWord = favRow.word; engine.lookup(favRow.word) }
             }
         }
     }
@@ -1737,6 +1775,16 @@ ColumnLayout {
             if (root._requestedWord.length > 0 && word !== root._requestedWord) return
             root._requestedWord = ""
             root._showArticle(word, html)
+        }
+    }
+
+    Connections {
+        target: engine
+        // History changed (a new lookup was recorded, an item removed, or the
+        // list cleared): if the candidate surface is showing history, refresh
+        // the overlay so removals/clears reflect immediately.
+        function onHistoryChanged() {
+            if (root._suggMode === "history") root._showHistoryOverlay()
         }
     }
 
@@ -1808,16 +1856,31 @@ ColumnLayout {
             if (!wv || wv.url.toString().length < 5) return
             wv.runJavaScript(
                 "if(!window.__probeInstalled){"
-                + "window.__tapped='';window.__suggWord='';"
+                + "window.__tapped='';window.__suggWord='';window.__gdAction='';"
                 + "document.addEventListener('click',function(e){"
+                + "var n=e.target.closest?e.target.closest('[data-action],[data-w]'):null;"
+                + "if(n){"
+                + "if(n.getAttribute('data-action')){window.__gdAction=n.getAttribute('data-action')+'|'+(n.getAttribute('data-w')||'');}"
+                + "else if(n.tagName==='A'){window.__suggWord=n.getAttribute('data-w');}"
+                + "e.preventDefault();return;}"
                 + "var a=e.target.closest?e.target.closest('a'):null;"
-                + "if(a&&a.id==='gd-sugg-link'){window.__suggWord=a.getAttribute('data-w');e.preventDefault();}"
-                + "else{window.__tapped=(a?a.href:'');}},true);"
+                + "window.__tapped=(a?a.href:'');},true);"
                 + "window.__probeInstalled=true;}"
+                + "var act=window.__gdAction||'';window.__gdAction='';"
                 + "var s=window.__suggWord||'';window.__suggWord='';"
-                + "(s ? 'SUGG:'+s : (window.__tapped || ''))",
+                + "(act ? 'ACT:'+act : (s ? 'SUGG:'+s : (window.__tapped || '')))",
                 function(v){
                     if (!v) return
+                    if (v.indexOf("ACT:") === 0) {
+                        // History overlay actions: remove-history|<word> or clear-history|.
+                        const rest = v.substring(4)
+                        const bar = rest.indexOf("|")
+                        const action = bar >= 0 ? rest.substring(0, bar) : rest
+                        const arg = bar >= 0 ? rest.substring(bar + 1) : ""
+                        if (action === "remove-history" && arg.length > 0) engine.removeHistory(arg)
+                        else if (action === "clear-history") engine.clearHistory()
+                        return
+                    }
                     if (v.indexOf("SUGG:") === 0) {
                         const word = v.substring(5)
                         if (word.length > 0 && word !== articleLinkPoller._lastSugg) {
@@ -1994,7 +2057,7 @@ ColumnLayout {
             Label {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
-                text: "Add dictionaries by tapping Add dictionaries in the Dicts tab and picking a folder with dictionary files (.mdx, .dsl, .dsl.dz, .ifo) — the folder is copied into the app once (no system-wide file access needed). Use the bottom bar to switch between Search, Dictionaries, Groups, FTS, History and Favorites."
+                text: "Add dictionaries by tapping Add dictionaries in the Dicts tab and picking a folder with dictionary files (.mdx, .dsl, .dsl.dz, .ifo) — the folder is copied into the app once (no system-wide file access needed). Use the bottom bar to switch between Search, Dictionaries, Groups, FTS and Favorites."
                 font.pixelSize: 15
                 wrapMode: Text.Wrap
                 horizontalAlignment: Text.AlignHCenter

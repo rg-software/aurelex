@@ -32,6 +32,7 @@ build-host/
 vcpkg_installed/
 # qt-quick experiment build outputs
 /build-qtquick/
+/build-smoke/
 
 aqtinstall.log
 
