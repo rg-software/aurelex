@@ -711,14 +711,23 @@ ColumnLayout {
                     textRole: "name"
                     Accessible.name: "Search group scope"
                     Accessible.role: Accessible.ComboBox
-                    // Dismiss the search field's IME when the dropdown opens, else
-                    // the keyboard obscures/blocks the popup while typing.
-                    popup.onOpened: input.focus = false
-                    onActivated: (index) => {
-                        const g = engine.groups[index]
-                        if (g) engine.setActiveGroup(g.id)
-                        // Re-run suggestions for the newly selected group's scope.
-                        if (input.displayText.trim().length > 0) searchPane._doSuggest()
+                    // The article WebView sits ABOVE Qt's own popup surface, so a
+                    // normal ComboBox dropdown would be hidden behind it. Instead
+                    // tapping the control opens a modal group picker (a Dialog that
+                    // first hides the WebView). Selecting there applies the group.
+                    // Keep the widget from opening its own popup by never letting
+                    // it get pressed-under: a transparent MouseArea on top
+                    // intercepts taps and routes them to the picker.
+                    MouseArea {
+                        anchors.fill: parent
+                        enabled: searchGroupCombo.enabled
+                        z: parent.z + 1
+                        onClicked: {
+                            if (engine.groups.length > 1) {
+                                input.focus = false
+                                groupPicker.openAt(searchGroupCombo.currentIndex)
+                            }
+                        }
                     }
                     // Floating "Group" caption, mirroring the search field's
                     // floating placeholder: a tiny label sits on the combo's top
@@ -851,7 +860,7 @@ ColumnLayout {
                     // native surface to a wrong (full-window) size that then
                     // overtakes the whole screen. inlineWebReady is set by a
                     // short timer once the Search tab is actually visible.
-                    active: root.state === 0 && root.inlineWebReady
+                    active: root.state === 0 && root.inlineWebReady && !root._pickerOpen
                     onLoaded: {
                         root.inlineWv = item
                         // Give the fresh WebView a document to run JS against.
@@ -1951,8 +1960,18 @@ ColumnLayout {
                         const bar = rest.indexOf("|")
                         const action = bar >= 0 ? rest.substring(0, bar) : rest
                         const arg = bar >= 0 ? rest.substring(bar + 1) : ""
-                        if (action === "remove-history" && arg.length > 0) engine.removeHistory(arg)
-                        else if (action === "clear-history") engine.clearHistory()
+                        if (action === "remove-history" && arg.length > 0) {
+                            engine.removeHistory(arg)
+                            // The tap happened inside the WebView, so Qt focus is
+                            // not on the search field even though it looks focused
+                            // (keyboard may still show). Put focus back so the
+                            // next keystroke actually types.
+                            input.forceActiveFocus()
+                        }
+                        else if (action === "clear-history") {
+                            engine.clearHistory()
+                            input.forceActiveFocus()
+                        }
                         return
                     }
                     if (v.indexOf("SUGG:") === 0) {
@@ -2099,6 +2118,82 @@ ColumnLayout {
                             gid = engine.groups[ftsGroupCombo.currentIndex].id
                         root._requestedWord = modelData.headword
                         engine.lookupInGroup(modelData.headword, gid)
+                    }
+                }
+            }
+        }
+    }
+
+    // --- group picker dialog ---
+    // True while the modal group picker is open: the inline WebView is torn
+    // down (its native surface sits above ANY Qt item, so it would cover the
+    // dialog). When this flips back to false, the loader re-creates the WebView
+    // and the suggestion/history overlay is re-applied via onLoadingChanged.
+    property bool _pickerOpen: false
+    Dialog {
+        id: groupPicker
+        anchors.centerIn: parent
+        width: Math.min(parent.width - 96, 360)
+        modal: true
+        title: "Select group"
+        Accessible.name: "Select group"
+        Accessible.role: Accessible.Dialog
+        standardButtons: Dialog.Cancel
+        function openAt(index) {
+            // Tear down the inline WebView so its native surface can't sit above
+            // the modal dialog. Its document/history survive in currentHtml; the
+            // loader recreates it when _pickerOpen goes back to false.
+            root._pickerOpen = true
+            root.inlineWv = null
+            input.focus = false
+            groupPicker.open()
+        }
+        onClosed: {
+            root._pickerOpen = false
+            // Loader binding re-evaluates to create the WebView (state 0 &&
+            // inlineWebReady && !_pickerOpen). If inlineWebReady was toggled off
+            // while away, the inlineWebTimer re-arms on the Search state.
+            root.inlineWebReady = true
+            // Re-populate the candidate surface for whatever is in the box now
+            // (suggestions for a typed query, or history when empty). The
+            // _suggWords/_suggMode state survives, but re-querying ensures the
+            // results are fresh after the WebView destruction + group change.
+            if (input.displayText.trim().length > 0) searchPane._doSuggest()
+            else root._showHistoryOverlay()
+        }
+        onOpened: {
+            // Start selection at the currently-active group.
+            if (searchGroupCombo.currentIndex >= 0 && searchGroupCombo.currentIndex < engine.groups.length)
+                groupPickerList.positionViewAtIndex(searchGroupCombo.currentIndex, ListView.Center)
+        }
+
+        contentItem: ColumnLayout {
+            spacing: 4
+            ListView {
+                id: groupPickerList
+                Layout.fillWidth: true
+                Layout.preferredHeight: Math.min(engine.groups.length * 48, 320)
+                model: engine.groups
+                clip: true
+                Accessible.name: "Select group"
+                Accessible.role: Accessible.List
+                delegate: ItemDelegate {
+                    width: groupPickerList.width
+                    height: 48
+                    text: modelData.name
+                    highlighted: groupPickerList.currentIndex === index
+                    Accessible.name: modelData.name
+                    Accessible.role: Accessible.ListItem
+                    onClicked: {
+                        const g = engine.groups[index]
+                        if (g) {
+                            engine.setActiveGroup(g.id)
+                            searchGroupCombo.currentIndex = index
+                            groupPickerList.currentIndex = index
+                            // Re-run suggestions for the newly selected scope.
+                            if (input.displayText.trim().length > 0) searchPane._doSuggest()
+                        }
+                        groupPicker.close()
                     }
                 }
             }
