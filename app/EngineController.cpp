@@ -894,6 +894,19 @@ QString EngineController::rewriteArticleUrls(const QString &html) const {
     // Always-on controller. darkreader.js is bundled in APK assets/scripts, so
     // the loopback article server serves it; article-style-darkmode.css is a
     // bare .css in assets/stylesheets (the server prefixes "stylesheets/").
+    // A plain-background override is injected too: the "modern" style renders
+    // each dictionary entry as a bordered white card (.gdarticle), which reads
+    // as a light-gray frame on the phone. Neutralize the card so article text
+    // sits directly on the pane's plain background.
+    const QString plainCss = QStringLiteral(
+        R"(<style>
+html, body { background: transparent !important; }
+.gdarticle { border: none !important; border-radius: 0 !important;
+             background: transparent !important; box-shadow: none !important;
+             padding-top: 0 !important; padding-bottom: 0 !important;
+             margin-bottom: 0.6em !important; }
+</style>
+)");
     const QString darkInit = m_darkMode ? QStringLiteral("1") : QStringLiteral("0");
     const QString darkCtrl = QStringLiteral(
         R"(
@@ -942,9 +955,9 @@ window.__gdDarkMode=%2;
 
     const int headEnd = out.indexOf(QStringLiteral("</head>"));
     if (headEnd >= 0)
-        out.insert(headEnd, darkCtrl);
+        out.insert(headEnd, plainCss + darkCtrl);
     else
-        out.append(darkCtrl);
+        out.append(plainCss + darkCtrl);
     return out;
 }
 

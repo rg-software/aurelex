@@ -149,6 +149,20 @@ ApplicationWindow {
         root.navStack = []
         root.fwdStack = []
         root._hideSuggestOverlay()
+        root._blankInline()
+    }
+    // Conceal the inline article (back to the candidate surface) WITHOUT
+    // destroying the article nav history: currentWord/currentHtml and the
+    // back/forward stacks are retained, so a subsequent lookup still pushes the
+    // previous article and Back/Forward can re-open it. Used when the user types
+    // over a shown article. _clearInlineArticle() remains the full reset
+    // (leaving the tab / exiting to search).
+    function _hideInlineArticle() {
+        root.inlineArticle = false
+        root._hideSuggestOverlay()
+        root._blankInline()
+    }
+    function _blankInline() {
         if (root.inlineWv && engine.articleBaseUrl.length > 0) {
             // A suggestion injected before this blank load finishes gets wiped;
             // flag it so _renderSuggestOverlay defers (see _blankPending).
@@ -174,6 +188,10 @@ ApplicationWindow {
     // while typing) or "history" (recent lookups when the field is empty or a
     // query has no matches). Drives how _applySuggestOverlay builds the rows.
     property string _suggMode: "sugg"
+    // Set while programmatically assigning input.text (article open via Back/
+    // Forward/selection) so the onDisplayTextChanged -> _doSuggest path does
+    // not race the article render with a suggestion re-query.
+    property bool _suppressSuggest: false
     // True while `inlineWv` is loading a base document (fresh WebView or a
     // cleared article). An overlay injected before that load finishes is wiped
     // by the load completion, so re-apply is deferred while this is set;
@@ -287,7 +305,10 @@ ApplicationWindow {
     // and no JS context, which silently swallows the suggestion-overlay
     // injection and the link poller.
     function _ensureInlineBlank() {
-        if (root.inlineWv && root.currentHtml.length === 0 && engine.articleBaseUrl.length > 5) {
+        // When NOT showing an article and there is no article to show, load a
+        // blank base document so runJavaScript works for the candidate overlay.
+        if (root.inlineWv && !root.inlineArticle && root.currentHtml.length === 0
+            && engine.articleBaseUrl.length > 5) {
             root._blankPending = true
             root.inlineWv.loadHtml("<html><body></body></html>", engine.articleBaseUrl)
         }
@@ -307,6 +328,11 @@ ApplicationWindow {
         }
         currentWord = word
         currentHtml = html
+        // Show the looked-up term in the search box (users see the article +
+        // its word in the field, like a browser address bar).
+        root._suppressSuggest = true
+        input.text = word
+        root._suppressSuggest = false
         _blurActive()
         if (state === 0) {
             // Inline mode: show article below suggestions in the search tab.
@@ -342,6 +368,10 @@ ApplicationWindow {
         root.navStack = root.navStack.slice(0, root.navStack.length - 1)
         currentWord = prev.word
         currentHtml = prev.html
+        // Reflect the previous article's word in the search box.
+        root._suppressSuggest = true
+        input.text = prev.word
+        root._suppressSuggest = false
         if (root.inlineArticle) {
             // Stay in inline mode, re-render the previous article.
             articleLoadTimer.restart()
@@ -360,6 +390,10 @@ ApplicationWindow {
         root.fwdStack = root.fwdStack.slice(0, root.fwdStack.length - 1)
         currentWord = next.word
         currentHtml = next.html
+        // Reflect the next article's word in the search box.
+        root._suppressSuggest = true
+        input.text = next.word
+        root._suppressSuggest = false
         if (root.inlineArticle) {
             articleLoadTimer.restart()
         } else {
@@ -427,12 +461,11 @@ ApplicationWindow {
             // from Favs/FTS) must not carry into a fresh Search — a stale
             // article would steal the WebView and the typed query's suggestions
             // would never show. Inline articles (opened IN Search) were already
-            // wiped above on the way out.
+            // wiped above on the way out. The session back/forward history is
+            // retained so a later lookup can still reach the previous article.
             if (root.currentHtml.length > 0 && !root.inlineArticle) {
                 root.currentWord = ""
                 root.currentHtml = ""
-                root.navStack = []
-                root.fwdStack = []
             }
             state = 0
             return
@@ -570,16 +603,22 @@ ApplicationWindow {
         visible: root.state === 0
 
         function _doSuggest() {
+            // Programmatic box updates (article open via Back/Forward) must not
+            // re-trigger a suggestion query that would race the article render.
+            if (root._suppressSuggest) return
             const t = input.displayText
             if (t.trim().length === 0) {
-                // Empty field: drop any open inline article and show history.
-                if (root.inlineArticle) root._clearInlineArticle()
+                // Empty field: concealing any open article and showing history.
+                // History is retained (not wiped) so Back/Forward can still
+                // re-open the concealed article after a later lookup.
+                if (root.inlineArticle) root._hideInlineArticle()
                 root._showHistoryOverlay()
                 return
             }
-            // When the user types a new query, clear any inline article.
+            // When the user types a new query, conceal any open article but keep
+            // the article nav history so Back still reaches the previous article.
             if (root.inlineArticle) {
-                root._clearInlineArticle()
+                root._hideInlineArticle()
             }
             engine.suggest(t)
         }
@@ -1752,11 +1791,12 @@ ColumnLayout {
                         verticalAlignment: Text.AlignVCenter
                         leftPadding: 16
                     }
-                    // "X to remove" matches the history overlay: a plain row
-                    // button (no swipe gesture) that drops the favorite.
+                    // "X to remove" matches the history overlay (no swipe gesture).
                     ToolButton {
-                        text: "✕"
+                        text: root.icon("close")
+                        font.family: root.iconFontFamily
                         font.pixelSize: 18
+                        flat: true
                         Accessible.name: "Remove"
                         Accessible.role: Accessible.Button
                         onClicked: engine.toggleFavorite(favRow.word)
