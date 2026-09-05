@@ -53,7 +53,7 @@ ApplicationWindow {
         var map = {
             "search": 0xe8b6,
             "menu_book": 0xea19,
-            "book": 0xe865,
+            "book": 0xe0e0,
             "library_books": 0xe02f,
             "manage_search": 0xf02f,
             "content_paste_search": 0xea9b,
