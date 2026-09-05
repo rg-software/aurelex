@@ -13,6 +13,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonValue>
+#include <QRegularExpression>
 #include <QXmlStreamReader>
 #include <QGuiApplication>
 #if defined(Q_OS_ANDROID)
@@ -828,6 +829,43 @@ QString EngineController::rewriteArticleUrls(const QString &html) const {
     out.replace(QStringLiteral("bres://"), base + QStringLiteral("/bres/"));
     out.replace(QStringLiteral("gdau://"), base + QStringLiteral("/gdau/"));
     out.replace(QStringLiteral("qrc:///"), base + QStringLiteral("/"));
+    // Strip desktop-only / dead-weight script ELEMENTS the engine emits but that
+    // serve nothing on Android (they used to 404 and stall the page load):
+    //   jquery / gd-custom / gd-builtin   -> desktop link/active-article bridge
+    //   qtwebchannel + init script         -> Qt WebChannel (not used on mobile)
+    //   iframeResizer / mark               -> desktop iframe + in-page search
+    // Keep darkreader.js + the stylesheets, which now load from assets and
+    // provide dark mode + proper article CSS.
+    const QStringList stripScripts = {
+        QStringLiteral("/scripts/jquery-3.6.0.slim.min.js"),
+        QStringLiteral("/scripts/gd-custom.js"),
+        QStringLiteral("/scripts/gd-builtin.js"),
+        QStringLiteral("/scripts/iframe-defer.js"),
+        QStringLiteral("/scripts/iframeResizer.min.js"),
+        QStringLiteral("/scripts/iframeResizer.contentWindow.min.js"),
+        QStringLiteral("/scripts/mark.min.js"),
+        QStringLiteral("/scripts/mark.js"),
+        QStringLiteral("/qtwebchannel/qwebchannel.js"),
+    };
+    // Match the whole <script src="..."></script> element (src may be the
+    // original qrc:/// URL or the rewritten loopback URL). Removing the whole
+    // element avoids leaving `<script src=""></script>`, whose empty src
+    // resolves to the article page itself and triggers a reload/parse error.
+    for (const QString &p : stripScripts) {
+        QRegularExpression scriptTag(
+            QStringLiteral(R"(<script[^>]*\bsrc="[^"]*%1"[^>]*>\s*</script>)")
+                .arg(QRegularExpression::escape(p)),
+            QRegularExpression::DotMatchesEverythingOption);
+        out.remove(scriptTag);
+    }
+    // Strip the jQuery noConflict stub and the Qt WebChannel init script body
+    // (emitted as `function gd_init_QtWebChannel(){ ... new QWebChannel(...) }`,
+    // which throws `QWebChannel is not defined` on Android).
+    out.remove(QRegularExpression(
+        QStringLiteral(R"(<script>\s*jQuery\.noConflict\(\);\s*</script>)")));
+    out.remove(QRegularExpression(
+        QStringLiteral(R"(<script>\s*function\s+gd_init_QtWebChannel.*?</script>)"),
+        QRegularExpression::DotMatchesEverythingOption));
     return out;
 }
 
@@ -1142,7 +1180,16 @@ void EngineController::applyEffectiveDark()
     m_darkMode = m_userDarkOverride || m_systemDark;
     // Off-thread: gd_set_dark_mode takes the engine mutex, which a concurrent
     // FTS index build may hold for a long time. Never block the UI thread.
-    QtConcurrent::run([dark = m_darkMode]{ gd_set_dark_mode(dark ? 1 : 0); });
+    // Article HTML embeds darkreader.js only when the engine sees the dark
+    // preference at generation time, so once gd_set_dark_mode has actually
+    // landed we emit darkModeApplied (queued to the UI thread) and the UI
+    // re-generates the current article with the new preference.
+    QtConcurrent::run([this, dark = m_darkMode]{
+        gd_set_dark_mode(dark ? 1 : 0);
+        QMetaObject::invokeMethod(this, [this]{
+            emit darkModeApplied();
+        }, Qt::QueuedConnection);
+    });
     emit darkModeChanged();
 }
 

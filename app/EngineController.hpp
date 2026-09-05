@@ -230,6 +230,11 @@ signals:
     void historyChanged();
     void favoritesChanged();
     void darkModeChanged();
+    // Emitted (queued to the UI thread) AFTER the engine config's dark mode
+    // preference has actually been applied via gd_set_dark_mode. Article HTML
+    // embeds darkreader.js based on that preference at generation time, so the
+    // UI re-generates the current article on this signal.
+    void darkModeApplied();
     void onboardedChanged();
     void articleBaseUrlChanged();
     void systemDarkChanged();

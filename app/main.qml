@@ -1554,6 +1554,17 @@ ColumnLayout {
 
     Connections {
         target: engine
+        // The engine only embeds darkreader.js in article HTML at generation
+        // time, so a dark-mode change must re-generate the current article.
+        // darkModeApplied fires (queued) after the engine's preference actually
+        // landed, so the re-lookup picks up the new mode.
+        function onDarkModeApplied() {
+            if (root.currentWord.length > 0) engine.lookup(root.currentWord)
+        }
+    }
+
+    Connections {
+        target: engine
         function onArticleBaseUrlChanged() {
             if ((state === 2 || (state === 0 && inlineArticle)) && currentHtml.length > 0)
                 _loadArticleNow()
