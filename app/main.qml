@@ -52,10 +52,10 @@ ApplicationWindow {
     function icon( name ) {
         var map = {
             "search": 0xe8b6,
-            "menu_book": 0xe3c9,
+            "menu_book": 0xea19,
             "library_books": 0xe02f,
-            "manage_search": 0xe3d9,
-            "content_paste_search": 0xe94a,
+            "manage_search": 0xf02f,
+            "content_paste_search": 0xea9b,
             "folder": 0xe2c7,
             "history": 0xe889,
             "star": 0xe838,
@@ -424,6 +424,13 @@ ApplicationWindow {
         // pane (bottom: navBar.top) then collapsed against y=0.
         anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
         z: 5
+        // Force the bar to exactly fill the screen width with no gaps and no
+        // room for the tabs to be scrollable: spacing 0 + each button sized to
+        // a precise fraction of the bar's own width. (A TabBar only becomes
+        // horizontally scrollable when its tabs' total width exceeds the bar,
+        // so exact-fill prevents any off-screen drag.)
+        spacing: 0
+        clip: true
         Accessible.name: "Main navigation"
         Accessible.role: Accessible.TabBar
         // 5.2: highlight the active tab by driving the TabBar's own selection
@@ -440,9 +447,11 @@ ApplicationWindow {
             model: root.navItems
             delegate: TabButton {
                 id: tabBtn
-                // Equal-width tabs from the fixed window width (avoiding a
-                // TabButton width <-> TabBar implicitWidth binding loop).
-                width: root.width / root.navItems.length
+                // Equal-width tabs from the bar's own (anchored) width, so the
+                // six tabs tile the bar exactly with no leftover space that
+                // would make it horizontally scrollable.
+                width: navBar.width / root.navItems.length
+                height: parent.height
                 // 5.3: icon glyph in the Material Icons font + label in the theme
                 // font. The default TabButton renders `text` in a single font, so
                 // applying the icon font hid the labels (icon font has no Latin
@@ -550,6 +559,29 @@ ColumnLayout {
                         if (g) engine.setActiveGroup(g.id)
                         // Re-run suggestions for the newly selected group's scope.
                         if (input.text.trim().length > 0) searchPane._doSuggest()
+                    }
+                    // Floating "Group" caption, mirroring the search field's
+                    // floating placeholder: a tiny label sits on the combo's top
+                    // border (left) so the field reads as a labelled control even
+                    // though a ComboBox always has a selected value. It doesn't
+                    // grab pointer events, so taps fall through to the dropdown.
+                    Label {
+                        text: "Group"
+                        font.pixelSize: 9
+                        color: root.uiSubFg
+                        z: 3
+                        anchors.left: parent.left
+                        anchors.top: parent.top
+                        anchors.leftMargin: 10
+                        anchors.topMargin: -6
+                        background: Rectangle {
+                            color: root.uiBg
+                            anchors.fill: parent
+                            anchors.leftMargin: -3
+                            anchors.rightMargin: -3
+                            anchors.topMargin: 2
+                            anchors.bottomMargin: 3
+                        }
                     }
                 }
 
