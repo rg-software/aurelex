@@ -94,7 +94,7 @@ elements in automated tests:
 | Search | ComboBox | `"Search group scope"` |
 | Search | TextField | `"Search dictionaries"` |
 | Search | Clipboard button | `"Clipboard"` |
-| Search | ListView | `"Search suggestions"` |
+| Search | Suggestion dropdown | Rendered as an HTML `<a>` panel (`#gd-sugg`) *inside* the article WebView — QML controls can't stack above Android's native WebView surface. Each entry is a `gdlookup://localhost/<word>` anchor; UIAutomator sees them via the WebView's own DOM accessibility subtree (content-desc = the word). No separate Qt node. |
 | Dicts | Add dict button | `"Add dictionaries"` |
 | Dicts | By Pair toggle | `"By Pair"` |
 | Dicts | Remove button | `"Remove"` |

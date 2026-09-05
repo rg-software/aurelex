@@ -11,6 +11,7 @@
 #include <QTimer>
 #include <QMutex>
 #include <QList>
+#include <QHash>
 
 class ArticleServer;
 
@@ -352,4 +353,17 @@ private:
     // to the queue the running worker picks up.
     bool m_ftsWorkerRunning = false;
     QPointer<ArticleServer> m_articleServer;
+
+    // Small per-(word, active group, dark) article cache. Suggested words are
+    // prefetched when suggestions arrive and lookups write back on completion,
+    // so tapping a candidate (or re-opening a word) usually skips gd_lookup
+    // entirely — the QML shows the cached HTML immediately. Keyed by dark mode
+    // because the engine embeds darkreader.js into generated HTML.
+    static constexpr int kArticleCacheMax = 8;
+    QString articleCacheKey(const QString &word) const;
+    void cacheArticle(const QString &key, const QString &html);
+    void clearArticleCache();
+    void prefetchArticle(const QString &word);
+    QHash<QString, QString> m_articleCache;
+    QStringList m_articleCacheOrder;
 };

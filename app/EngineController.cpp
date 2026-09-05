@@ -82,6 +82,8 @@ void EngineController::setDictionaries(const QVariantList &list) {
 
 void EngineController::setGroups(const QVariantList &list) {
     m_groups = list;
+    // Group membership edits change which dictionaries a lookup sees.
+    clearArticleCache();
     qInfo() << "[aurelex] setGroups count=" << list.size();
     emit groupsChanged();
 }
@@ -89,6 +91,8 @@ void EngineController::setGroups(const QVariantList &list) {
 void EngineController::setActiveGroupId(int id) {
     if (m_activeGroupId == id) return;
     m_activeGroupId = id;
+    // Lookup results are scoped to the active group: drop cached articles.
+    clearArticleCache();
     emit activeGroupChanged();
 }
 
@@ -444,6 +448,8 @@ void EngineController::refreshDictionaries() {
         return;
     }
     qInfo() << "[aurelex] refreshDictionaries firing";
+    // Dictionary set/scopes changed: cached articles may be stale.
+    clearArticleCache();
     QFuture<QVariantList> f = QtConcurrent::run([]{
         QVariantList list;
         const int n = gd_dict_count();
@@ -897,7 +903,63 @@ void EngineController::stopAudio() {
 #endif
 }
 
+QString EngineController::articleCacheKey(const QString &word) const {
+    return word + QLatin1Char('\x1f')
+        + QString::number(m_activeGroupId) + QLatin1Char('\x1f')
+        + QLatin1Char(m_darkMode ? '1' : '0');
+}
+
+void EngineController::cacheArticle(const QString &key, const QString &html) {
+    if (key.isEmpty() || html.isEmpty()) return;
+    if (!m_articleCache.contains(key)) {
+        m_articleCacheOrder.append(key);
+        if (m_articleCacheOrder.size() > kArticleCacheMax) {
+            const QString oldest = m_articleCacheOrder.takeFirst();
+            m_articleCache.remove(oldest);
+        }
+    }
+    m_articleCache.insert(key, html);
+}
+
+void EngineController::clearArticleCache() {
+    m_articleCache.clear();
+    m_articleCacheOrder.clear();
+}
+
+// Background-prefetch `word`'s article into the cache so the next lookup of it
+// (suggestion tap / Enter) hits the cache and renders without a gd_lookup wait.
+void EngineController::prefetchArticle(const QString &word) {
+    if (word.trimmed().isEmpty()) return;
+    const QString key = articleCacheKey(word);
+    if (m_articleCache.contains(key)) return;
+    const QByteArray utf = word.toUtf8();
+    QFuture<QString> f = QtConcurrent::run([utf]{
+        std::vector<char> buf(1 << 20);
+        const int sz = gd_lookup(utf.constData(), buf.data(), static_cast<int>(buf.size()));
+        if (sz <= 0) return QString();
+        return QString::fromUtf8(buf.data(), sz);
+    });
+    auto *w = new QFutureWatcher<QString>(this);
+    connect(w, &QFutureWatcher<QString>::finished, this, [this, key, w]{
+        w->deleteLater();
+        if (m_articleCache.contains(key)) return;
+        const QString html = w->result();
+        if (!html.isEmpty()) cacheArticle(key, html);
+    });
+    w->setFuture(f);
+}
+
 void EngineController::lookup(const QString &word) {
+    const QString key = articleCacheKey(word);
+    const auto it = m_articleCache.constFind(key);
+    if (it != m_articleCache.constEnd()) {
+        // Cache hit: render immediately without a gd_lookup worker round-trip.
+        m_articleCacheOrder.removeAll(key);
+        m_articleCacheOrder.append(key);
+        recordHistory(word);
+        emit articleLoaded(word, it.value());
+        return;
+    }
     QFuture<QString> f = QtConcurrent::run([word]{
         std::vector<char> buf(1 << 20);
         const int sz = gd_lookup(word.toLocal8Bit().constData(),
@@ -906,11 +968,12 @@ void EngineController::lookup(const QString &word) {
         return QString::fromUtf8(buf.data(), sz);
     });
     auto *w = new QFutureWatcher<QString>(this);
-    connect(w, &QFutureWatcher<QString>::finished, this, [this, word, w]{
+    connect(w, &QFutureWatcher<QString>::finished, this, [this, word, key, w]{
         const QString html = w->result();
         if (html.isEmpty()) {
             emit articleNotFound(word);
         } else {
+            cacheArticle(key, html);
             recordHistory(word);
             emit articleLoaded(word, html);
         }
@@ -963,6 +1026,9 @@ void EngineController::suggest(const QString &prefix) {
         }
         qInfo() << "[aurelex] suggest ready:" << prefix << "count:" << w->result().size();
         emit suggestionsReady(prefix, w->result());
+        // Prefetch the typed headword so the first suggestion tap / Enter is
+        // near-instant (cache hit instead of a fresh gd_lookup).
+        if (!w->result().isEmpty()) prefetchArticle(prefix);
         w->deleteLater();
     });
     w->setFuture(f);
@@ -1178,6 +1244,8 @@ void EngineController::updateSystemDark()
 void EngineController::applyEffectiveDark()
 {
     m_darkMode = m_userDarkOverride || m_systemDark;
+    // Cached articles embed darkreader.js per the mode they were generated in.
+    clearArticleCache();
     // Off-thread: gd_set_dark_mode takes the engine mutex, which a concurrent
     // FTS index build may hold for a long time. Never block the UI thread.
     // Article HTML embeds darkreader.js only when the engine sees the dark

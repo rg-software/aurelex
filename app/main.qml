@@ -125,8 +125,86 @@ ApplicationWindow {
         root.currentWord = ""
         root.currentHtml = ""
         root.navStack = []
+        root._hideSuggestOverlay()
         if (root.inlineWv && engine.articleBaseUrl.length > 0)
             root.inlineWv.loadHtml("<html><body></body></html>", engine.articleBaseUrl)
+    }
+
+    // --- search-suggestion overlay (rendered inside the inline article
+    // WebView) --- QML items cannot stack above Android's native WebView
+    // surface, so the candidate dropdown is an HTML <a> panel in the same
+    // document (id `gd-sugg`, pinned to the top of the article pane). Each
+    // entry carries data-w; the articleLinkPoller's click listener reads it and
+    // dispatches engine.lookup() directly — no navigation, so the panel simply
+    // collapses when the article loads. Until the WebView exists (it's created
+    // 420 ms after the tab shows), the list is held in _pendingSugg and flushed
+    // by _flushPendingSugg(); _ensureInlineBlank() guarantees the WebView has a
+    // document to inject into.
+    property var _pendingSugg: []
+    property bool _suggVisible: false
+    function _escHtml(s) {
+        return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;").replace(/"/g, "&quot;")
+    }
+    function _renderSuggestOverlay(words) {
+        root._pendingSugg = words
+        articleLinkPoller._lastSugg = ""
+        const wv = root.inlineWv
+        if (!wv) return
+        const base = engine.articleBaseUrl
+        if (base.length < 5) return
+        const dark = engine.darkMode
+        const bg = dark ? "#242526" : "#ffffff"
+        const fg = dark ? "#e0e0e0" : "#202124"
+        const sep = dark ? "#3a3b3c" : "#eeeeee"
+        var html = '<div id="gd-sugg" style="position:fixed;top:0;left:0;right:0;'
+            + 'z-index:9999;background:' + bg + ';color:' + fg + ';'
+            + 'box-shadow:0 2px 10px rgba(0,0,0,0.4);overflow-y:auto;max-height:72%;'
+            + 'font-family:Roboto,sans-serif;font-size:16px;text-align:left;">'
+        for (var i = 0; i < words.length; ++i) {
+            const w = words[i]
+            if (w.indexOf("(no results") === 0) {
+                html += '<div style="padding:12px 16px;color:#999;">' + root._escHtml(w) + '</div>'
+            } else {
+                // Entries are plain anchors carrying data-w. The articleLinkPoller
+                // installs a click listener on #gd-sugg that reads data-w and calls
+                // engine.lookup() directly — no navigation, no article-server 404,
+                // no load race with the ensuing article render.
+                html += '<a id="gd-sugg-link" href="javascript:;" data-w="'
+                    + root._escHtml(w) + '" style="display:block;padding:12px 16px;'
+                    + 'border-bottom:1px solid ' + sep + ';text-decoration:none;color:inherit;">'
+                    + root._escHtml(w) + '</a>'
+            }
+        }
+        html += '</div>'
+        const script = '(function(){var e=document.getElementById("gd-sugg");if(e)e.remove();'
+            + 'var d=document.createElement("div");d.id="gd-sugg";d.innerHTML='
+            + JSON.stringify(html) + ';document.body.appendChild(d);})()'
+        wv.runJavaScript(script)
+        root._suggVisible = true
+        root._pendingSugg = []
+    }
+    function _hideSuggestOverlay() {
+        root._pendingSugg = []
+        articleLinkPoller._lastSugg = ""
+        if (root.inlineWv && root._suggVisible) {
+            root.inlineWv.runJavaScript(
+                '(function(){var e=document.getElementById("gd-sugg");if(e)e.remove();})()')
+        }
+        root._suggVisible = false
+    }
+    function _flushPendingSugg() {
+        if (root.inlineWv && root._pendingSugg.length > 0)
+            root._renderSuggestOverlay(root._pendingSugg)
+    }
+    // Give the freshly-created inline WebView a real (blank) base document so
+    // runJavaScript works — until a page is loaded the WebView has an empty URL
+    // and no JS context, which silently swallows the suggestion-overlay
+    // injection and the link poller.
+    function _ensureInlineBlank() {
+        if (root.inlineWv && root.currentHtml.length === 0 && engine.articleBaseUrl.length > 5) {
+            root.inlineWv.loadHtml("<html><body></body></html>", engine.articleBaseUrl)
+        }
     }
     function _showArticle(word, html) {
         if (currentWord !== "" && currentWord !== word) {
@@ -349,7 +427,7 @@ ApplicationWindow {
         function _doSuggest() {
             const t = input.displayText
             if (t.trim().length === 0) {
-                suggestionList.model = []
+                root._hideSuggestOverlay()
                 return
             }
             // When the user types a new query, clear any inline article.
@@ -365,12 +443,10 @@ ApplicationWindow {
             target: engine
             function onSuggestionsReady(prefix, suggestions) {
                 searchPane.pendingSuggestions = suggestions
-                suggestionList.model = suggestions
-                suggestionList.forceLayout()
-                suggestionList.positionViewAtBeginning()
+                root._renderSuggestOverlay(suggestions)
             }
             function onArticleNotFound(word) {
-                suggestionList.model = ["(no results for " + word + ")"]
+                root._renderSuggestOverlay(["(no results for " + word + ")"])
             }
         }
 
@@ -437,34 +513,20 @@ ColumnLayout {
                 wrapMode: Text.Wrap
             }
 
-            ListView {
-                id: suggestionList
-                Layout.fillWidth: true
-                Layout.fillHeight: true
-                clip: true
-                model: []
-                Accessible.name: "Search suggestions"
-                Accessible.role: Accessible.List
-                delegate: ItemDelegate {
-                    width: ListView.view.width
-                    height: 44
-                    text: modelData
-                    Accessible.name: modelData
-                    Accessible.role: Accessible.ListItem
-                    onClicked: engine.lookup(modelData)
-                }
-            }
-
-            // Inline article area: a permanent browser pane at the bottom of the Search
-            // tab. It is always present while on this tab (never hidden while a
-            // WebView is alive — a hidden-but-alive native WebView overlays the
-            // whole screen on Android), and is destroyed when leaving the tab so
-            // it never covers the other panes. The bottom band keeps the article
-            // WebView warm for near-instant re-renders.
+            // Inline article area: a permanent browser pane filling the Search
+            // tab below the search row. It is always present while on this tab
+            // (never hidden while a WebView is alive — a hidden-but-alive native
+            // WebView overlays the whole screen on Android), and is destroyed on
+            // leaving the tab so it never covers the other panes. The warm
+            // WebView gives near-instant re-renders. Search suggestions render as
+            // an <a> dropdown INSIDE this WebView (main.qml _renderSuggestOverlay):
+            // QML controls cannot draw over Android's native WebView surface, so
+            // the dropdown lives in the same HTML document as the article.
             Rectangle {
                 id: searchArticleArea
                 Layout.fillWidth: true
-                Layout.preferredHeight: 300
+                Layout.fillHeight: true
+                Layout.minimumHeight: 300
                 color: root.uiBg
 
                 Rectangle {
@@ -522,9 +584,13 @@ ColumnLayout {
                     active: root.state === 0 && root.inlineWebReady
                     onLoaded: {
                         root.inlineWv = item
+                        // Give the fresh WebView a document to run JS against.
+                        root._ensureInlineBlank()
                         // Re-render an already-loaded article when returning to
                         // the tab (the WebView was just recreated).
                         if (root.currentHtml.length > 0) articleLoadTimer.restart()
+                        // Suggestions may have arrived before the WebView existed.
+                        root._flushPendingSugg()
                     }
                     onActiveChanged: if (!active) root.inlineWv = null
                     sourceComponent: Component {
@@ -1568,12 +1634,16 @@ ColumnLayout {
         function onArticleBaseUrlChanged() {
             if ((state === 2 || (state === 0 && inlineArticle)) && currentHtml.length > 0)
                 _loadArticleNow()
+            else if (state === 0) root._ensureInlineBlank()
         }
     }
 
     Timer {
         id: articleLoadTimer
-        interval: 400
+        // Coalesce rapid navigation; short enough that the render starts almost
+        // immediately (the engine pre-parses the article, and with the cache
+        // _showArticle often already has the full HTML in hand).
+        interval: 60
         onTriggered: root._loadArticleNow()
     }
     Timer {
@@ -1596,30 +1666,44 @@ ColumnLayout {
     }
     Timer {
         id: articleLinkPoller
-        interval: 400
+        // 120 ms: fast enough that suggestion-dropdown taps feel instant, slow
+        // enough to not hammer the WebView with runJavaScript calls.
+        interval: 120
         repeat: true
-        running: root.state === 2 || (root.state === 0 && root.inlineArticle)
+        running: root.state === 2 || root.state === 0
         onTriggered: {
             // Pick the active WebView: inline in search or full article pane.
-            const wv = (root.state === 0 && root.inlineArticle && root.inlineWv)
-                ? root.inlineWv : view
+            const wv = (root.state === 0 && root.inlineWv) ? root.inlineWv : view
             if (!wv || wv.url.toString().length < 5) return
             wv.runJavaScript(
                 "if(!window.__probeInstalled){"
-                + "window.__tapped='';"
+                + "window.__tapped='';window.__suggWord='';"
                 + "document.addEventListener('click',function(e){"
                 + "var a=e.target.closest?e.target.closest('a'):null;"
-                + "window.__tapped=(a?a.href:'');},true);"
+                + "if(a&&a.id==='gd-sugg-link'){window.__suggWord=a.getAttribute('data-w');e.preventDefault();}"
+                + "else{window.__tapped=(a?a.href:'');}},true);"
                 + "window.__probeInstalled=true;}"
-                + "(window.__tapped || '')",
+                + "var s=window.__suggWord||'';window.__suggWord='';"
+                + "(s ? 'SUGG:'+s : (window.__tapped || ''))",
                 function(v){
-                    if (v && v !== articleLinkPoller._prev) {
+                    if (!v) return
+                    if (v.indexOf("SUGG:") === 0) {
+                        const word = v.substring(5)
+                        if (word.length > 0 && word !== articleLinkPoller._lastSugg) {
+                            articleLinkPoller._lastSugg = word
+                            root._hideSuggestOverlay()
+                            engine.lookup(word)
+                        }
+                        return
+                    }
+                    if (v !== articleLinkPoller._prev) {
                         articleLinkPoller._prev = v
                         _handleArticleLink(v)
                     }
                 })
         }
         property string _prev: ""
+        property string _lastSugg: ""
     }
 
     function _handleArticleLink(link) {
