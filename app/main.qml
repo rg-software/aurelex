@@ -53,6 +53,7 @@ ApplicationWindow {
         var map = {
             "search": 0xe8b6,
             "menu_book": 0xea19,
+            "book": 0xe865,
             "library_books": 0xe02f,
             "manage_search": 0xf02f,
             "content_paste_search": 0xea9b,
@@ -329,7 +330,7 @@ ApplicationWindow {
     // Navigation labels/icons for the bottom TabBar.
     property var navItems: [
         { idx: 0, label: "Search",   icon: "search" },
-        { idx: 1, label: "Dicts",    icon: "menu_book" },
+        { idx: 1, label: "Dicts",    icon: "book" },
         { idx: 3, label: "Groups",   icon: "library_books" },
         { idx: 4, label: "FTS",      icon: "manage_search" },
         { idx: 5, label: "History",  icon: "history" },
@@ -567,7 +568,9 @@ ColumnLayout {
                     // grab pointer events, so taps fall through to the dropdown.
                     Label {
                         text: "Group"
-                        font.pixelSize: 9
+                        // Match the floated placeholder of the search field
+                        // (Qt floats TextField placeholders at 0.75x its font).
+                        font.pixelSize: Math.round(input.font.pixelSize * 0.75)
                         color: root.uiSubFg
                         z: 3
                         anchors.left: parent.left
