@@ -52,7 +52,10 @@ ApplicationWindow {
     function icon( name ) {
         var map = {
             "search": 0xe8b6,
+            "menu_book": 0xe3c9,
             "library_books": 0xe02f,
+            "manage_search": 0xe3d9,
+            "content_paste_search": 0xe94a,
             "folder": 0xe2c7,
             "history": 0xe889,
             "star": 0xe838,
@@ -326,9 +329,9 @@ ApplicationWindow {
     // Navigation labels/icons for the bottom TabBar.
     property var navItems: [
         { idx: 0, label: "Search",   icon: "search" },
-        { idx: 1, label: "Dicts",    icon: "library_books" },
-        { idx: 3, label: "Groups",   icon: "folder" },
-        { idx: 4, label: "FTS",      icon: "history" },
+        { idx: 1, label: "Dicts",    icon: "menu_book" },
+        { idx: 3, label: "Groups",   icon: "library_books" },
+        { idx: 4, label: "FTS",      icon: "manage_search" },
         { idx: 5, label: "History",  icon: "history" },
         { idx: 6, label: "Favs",     icon: "star" }
     ]
@@ -455,13 +458,13 @@ ApplicationWindow {
                         font.pixelSize: 18
                         color: tabBtn.down || tabBtn.checked ? tabBtn.Material.accentColor
                                                              : tabBtn.Material.foreground
-                    }
+}
                     Text {
                         anchors.horizontalCenter: parent.horizontalCenter
                         text: modelData.label
-                        font.pixelSize: 11
+                        font.pixelSize: 10
                         color: tabBtn.down || tabBtn.checked ? tabBtn.Material.accentColor
-                                                             : tabBtn.Material.foreground
+                                                              : tabBtn.Material.foreground
                     }
                 }
                 Accessible.name: modelData.label
@@ -509,34 +512,18 @@ ColumnLayout {
             anchors.margins: 12
             spacing: 8
 
-            // Group scope for lookups. "All" (index 0) is first and selected by
-            // default; choosing a group scopes every lookup (search bar,
-            // suggestions, history/favorites taps) to that group's dictionaries.
-            ComboBox {
-                id: searchGroupCombo
-                Layout.fillWidth: true
-                model: engine.groups
-                textRole: "name"
-                Accessible.name: "Search group scope"
-                Accessible.role: Accessible.ComboBox
-                // Dismiss the search field's IME when the dropdown opens, else
-                // the keyboard obscures/blocks the popup while typing.
-                popup.onOpened: input.focus = false
-                onActivated: (index) => {
-                    const g = engine.groups[index]
-                    if (g) engine.setActiveGroup(g.id)
-                    // Re-run suggestions for the newly selected group's scope.
-                    if (input.text.trim().length > 0) searchPane._doSuggest()
-                }
-            }
-
+            // Search + group scope + clipboard on one line. Search takes ~70% of
+            // the row, the group dropdown ~30%; the clipboard is a small icon
+            // button. With a single group the scope can't change, so the dropdown
+            // is disabled (still visible, showing the current scope).
             RowLayout {
                 Layout.fillWidth: true
-                spacing: 8
+                spacing: 6
 
                 TextField {
                     id: input
                     Layout.fillWidth: true
+                    Layout.preferredWidth: 7
                     placeholderText: "Search dictionaries"
                     Accessible.name: "Search dictionaries"
                     Accessible.role: Accessible.EditableText
@@ -546,13 +533,43 @@ ColumnLayout {
                     Component.onCompleted: forceActiveFocus()
                 }
 
-                Button {
-                    text: "Clipboard"
+                ComboBox {
+                    id: searchGroupCombo
+                    Layout.fillWidth: true
+                    Layout.preferredWidth: 3
+                    enabled: engine.groups.length > 1
+                    model: engine.groups
+                    textRole: "name"
+                    Accessible.name: "Search group scope"
+                    Accessible.role: Accessible.ComboBox
+                    // Dismiss the search field's IME when the dropdown opens, else
+                    // the keyboard obscures/blocks the popup while typing.
+                    popup.onOpened: input.focus = false
+                    onActivated: (index) => {
+                        const g = engine.groups[index]
+                        if (g) engine.setActiveGroup(g.id)
+                        // Re-run suggestions for the newly selected group's scope.
+                        if (input.text.trim().length > 0) searchPane._doSuggest()
+                    }
+                }
+
+                ToolButton {
+                    id: clipboardBtn
+                    text: root.icon("content_paste_search")
+                    font.family: root.iconFontFamily
+                    font.pixelSize: 20
                     Accessible.name: "Clipboard"
                     Accessible.role: Accessible.Button
+                    // Paste clipboard text into the search field (so the looked-up
+                    // word is visible in the box) and run the lookup.
                     onClicked: {
                         const t = engine.clipboardText()
-                        if (t.length > 0) { root._requestedWord = t; engine.lookup(t) }
+                        if (t.length > 0) {
+                            input.text = t
+                            input.forceActiveFocus()
+                            root._requestedWord = t
+                            engine.lookup(t)
+                        }
                     }
                 }
             }
