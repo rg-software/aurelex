@@ -9,6 +9,25 @@
 #include <string>
 #include <vector>
 
+// Resolve a dictionary index by its primary source file suffix. The scan loads
+// one primary file at a time in filesystem order (see gd_scan_dicts), so
+// indexes are not guaranteed to be stable across platforms/ordering; match on
+// the file the way the app does. Returns -1 when no loaded dictionary matches.
+static int findDictBySuffix( const char * suffix )
+{
+  const int n = gd_dict_count();
+  const size_t slen = std::strlen( suffix );
+  for ( int i = 0; i < n; ++i ) {
+    char name[ 512 ] = { 0 }, file[ 1024 ] = { 0 };
+    if ( gd_dict_info( i, name, sizeof name, file, sizeof file ) != 0 )
+      continue;
+    const size_t len = std::strlen( file );
+    if ( len >= slen && std::strcmp( file + len - slen, suffix ) == 0 )
+      return i;
+  }
+  return -1;
+}
+
 int main( int argc, char ** argv )
 {
   setvbuf( stdout, nullptr, _IONBF, 0 );
@@ -93,16 +112,19 @@ int main( int argc, char ** argv )
   }
 
   // ---- groups smoke (multi-group-management) ----
-  // CI folder has: dict 0 = StarDict ("smoke"), dict 1 = .dsl.dz (no "smoke").
+  // CI folder has the StarDict ("smoke") plus a .dsl.dz (no "smoke") and a
+  // nested .dsl; locate the primary files by suffix since scan order is not
+  // guaranteed.
   {
+    const int dslDzIdx = findDictBySuffix( ".dsl.dz" );
     const int gc = gd_group_count();
-    std::printf( "gd_group_count -> %d\n", gc );
+    std::printf( "gd_group_count -> %d\ngd_suffix(dsl.dz) -> %d\n", gc, dslDzIdx );
     int gid = -1;
     if ( gd_group_create( "OnlyDSL", &gid ) == 0 ) {
       std::printf( "gd_group_create -> %d\n", gid );
     }
-    if ( gid > 0 && gd_group_add_dict( gid, 1 ) == 0 ) {
-      std::printf( "gd_group_add_dict(1) -> 0\n" );
+    if ( gid > 0 && dslDzIdx >= 0 && gd_group_add_dict( gid, dslDzIdx ) == 0 ) {
+      std::printf( "gd_group_add_dict(%d) -> 0\n", dslDzIdx );
     }
     if ( gid > 0 && gd_group_set_active( gid ) == 0 ) {
       std::printf( "gd_group_set_active -> 0\n" );
@@ -123,18 +145,27 @@ int main( int argc, char ** argv )
   }
 
   // ---- full-text search smoke (xapian) ----
-  // Index the StarDict fixture (dict 0), then search for a term that appears
-  // in an article BODY but is not a headword ("mdx" only occurs inside the
-  // "smoke" article); expect the article's headword back.
+  // Index the StarDict fixture (found by its .ifo primary file), then search
+  // for a term that appears in an article BODY but is not a headword ("mdx"
+  // only occurs inside the "smoke" article); expect the article's headword
+  // back. The dictionary index is located by suffix because scan order is not
+  // guaranteed (Stardict is not necessarily first).
   bool ftsOk = false;
+  const int sdIdx = findDictBySuffix( ".ifo" );
+  std::printf( "gd_suffix(.ifo) -> %d\n", sdIdx );
+  if ( sdIdx < 0 ) {
+    std::fprintf( stderr, "StarDict fixture not found (no .ifo primary)\n" );
+    gd_cleanup();
+    return 1;
+  }
   {
     int st = -1;
-    if ( gd_fts_index_state( 0, &st ) == 0 )
-      std::printf( "gd_fts_index_state(0) -> %d\n", st );
-    const int idxRc = st == 0 ? 0 : gd_fts_index( 0 );
-    std::printf( "gd_fts_index(0) -> %d\n", idxRc );
-    if ( gd_fts_index_state( 0, &st ) == 0 )
-      std::printf( "gd_fts_index_state(0) after -> %d\n", st );
+    if ( gd_fts_index_state( sdIdx, &st ) == 0 )
+      std::printf( "gd_fts_index_state(%d) -> %d\n", sdIdx, st );
+    const int idxRc = st == 0 ? 0 : gd_fts_index( sdIdx );
+    std::printf( "gd_fts_index(%d) -> %d\n", sdIdx, idxRc );
+    if ( gd_fts_index_state( sdIdx, &st ) == 0 )
+      std::printf( "gd_fts_index_state(%d) after -> %d\n", sdIdx, st );
 
     std::vector< char > fts( 1 << 12 );
     const int ftsN = gd_fts_search( "mdx", 1, 0, fts.data(), static_cast< int >( fts.size() ) );
@@ -161,19 +192,20 @@ int main( int argc, char ** argv )
   }
 
   // ---- dictionary removal smoke (remove-dictionary) ----
-  // The DSL (.dsl.dz) is dict 1 and its headword "book" comes from it; remove
-  // it, confirm the count drops and "book" stops resolving, then re-scan
-  // re-adds it (removal is in-memory; dedup does not block a removed id).
+  // The DSL (.dsl.dz, found by suffix) has the headword "book"; remove it,
+  // confirm the count drops and "book" stops resolving, then re-scan re-adds
+  // it (removal is in-memory; dedup does not block a removed id).
   {
+    const int dslDzIdx = findDictBySuffix( ".dsl.dz" );
     std::vector< char > b( 1 << 20 );
     const int before = gd_dict_count();
     const int bookBefore = gd_lookup( "book", b.data(), static_cast< int >( b.size() ) );
     const bool bookFoundBefore = bookBefore > 0
       && std::string( b.data(), bookBefore ).find( "gdarticlebody" ) != std::string::npos;
 
-    const int rmRc = gd_remove_dict( 1 );
+    const int rmRc = dslDzIdx >= 0 ? gd_remove_dict( dslDzIdx ) : -1;
     const int after = gd_dict_count();
-    std::printf( "gd_remove_dict(1) -> %d (count %d -> %d)\n", rmRc, before, after );
+    std::printf( "gd_remove_dict(%d) -> %d (count %d -> %d)\n", dslDzIdx, rmRc, before, after );
 
     const int bookAfter = gd_lookup( "book", b.data(), static_cast< int >( b.size() ) );
     const bool bookFoundAfter = bookAfter > 0
