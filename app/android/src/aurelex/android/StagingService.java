@@ -186,7 +186,7 @@ public class StagingService extends Service {
         return builder
                 .setContentTitle("Aurelex")
                 .setContentText("Preparing dictionaries\u2026")
-                .setSmallIcon(android.R.drawable.ic_menu_search)
+                .setSmallIcon(R.drawable.ic_notification)
                 .setContentIntent(pi)
                 .setOngoing(true)
                 .build();

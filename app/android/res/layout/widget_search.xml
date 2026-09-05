@@ -21,10 +21,10 @@
         android:textColor="#ffffff"
         android:textSize="16sp" />
 
-    <TextView
+    <ImageView
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_marginEnd="12dp"
-        android:text="🔍"
-        android:textSize="18sp" />
+        android:src="@drawable/ic_widget_search"
+        android:contentDescription="@null" />
 </LinearLayout>

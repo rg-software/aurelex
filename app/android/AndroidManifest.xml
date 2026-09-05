@@ -18,6 +18,8 @@
         android:name="org.qtproject.qt.android.bindings.QtApplication"
         android:hardwareAccelerated="true"
         android:label="Aurelex"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher"
         android:allowBackup="true"
         android:networkSecurityConfig="@xml/network_security_config">
         <activity
@@ -57,7 +59,7 @@
         <service
             android:name=".AurelexTileService"
             android:label="Aurelex Lookup"
-            android:icon="@android:drawable/ic_menu_search"
+            android:icon="@drawable/ic_tile_lookup"
             android:permission="android.permission.BIND_QUICK_SETTINGS_TILE"
             android:exported="true">
             <intent-filter>

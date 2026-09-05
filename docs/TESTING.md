@@ -116,13 +116,13 @@ This adb-installs the result (`-Install`); without it the APK lands in
 | --- | --- | --- | --- |
 | 47 | Fresh install | Adaptive launcher icon in the launcher; onboarding screen shows on first launch | ⬜ (icon visual not re-checked; onboarding verified) |
 | 48 | After onboarding, no dicts loaded | Empty search state: guidance to add dictionaries | ✅ |
-| 49 | Tagged release build | Signed APK produced on a `vX.Y.Z` tag push | ⬜ (Release Java build was being fixed; keystore secrets configured) |
+| 49 | Tagged release build | Signed APK produced on a `vX.Y.Z` tag push | ⬜ (Release Java build fixed + verified locally; first signed CI run pending a tag push — keystore secrets configured) |
 
 ## Known gaps
 
 - `.mdd` images not exercised on-device (#18) — needs a real MDict fixture.
 - QS tile / widget active-group (#37) — inherited from `quick-lookup-shortcuts`.
-- Dark-mode live system-switch (#25), icon visual (#47), signed-release artifact (#49).
+- Dark-mode live system-switch (#25), icon visual (#47), signed-release artifact (#49 — Release Java build fixed; CI run pending).
 
 ## Provenance
 

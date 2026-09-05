@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Notification small icon: open-book silhouette (white / alpha-only; the
+     system tints small icons). Same book motif as the launcher glyph. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M12,4 L19,6.5 L19,15.5 C19,17.5 15.87,19.5 12,20 C8.13,19.5 5,17.5 5,15.5 L5,6.5 Z M6.5,7.5 L6.5,15.5 C6.5,16.9 8.9,18.4 12,18.9 L12,6.9 L6.5,7.5 Z" />
+</vector>

@@ -8,7 +8,11 @@
 #   pthread_cond_clockwait >= 30)
 # - NDK bionic sysroot include needed for iconv.h
 # - Gradle must run under JDK 17 (AGP 7.4.1 + JDK 21 -> D8 NPE); Unity ships 17.0.9
-# - aapt2 needs compileSdk android-34 + buildTools 35.0.0 (AGP 7.4.1 ceiling)
+# - compileSdk is bumped to android-35 for Play's targetSdk 35 requirement.
+#   AGP 7.4.1 predates SDK 35, so android.suppressUnsupportedCompileSdk silences
+#   its "not supported" warning. AGP's default aapt2 (7.4.1-8841542) cannot link
+#   against SDK 35's android.jar, so gradle.properties pins
+#   android.aapt2FromMavenOverride to the aapt2 from build-tools 36.0.0.
 # - androiddeployqt regenerates local.properties/gradle.properties -> re-apply overrides
 # - Qt has no qt_add_apk_target in the aqt carve subset -> package via androiddeployqt
 
@@ -17,7 +21,11 @@ param(
     [ValidateSet("Debug", "Release")]
     [string]$Configuration = "Debug",
     [switch]$SkipConfigure,
-    [switch]$Install
+    [switch]$Install,
+    # Release only: also run bundleRelease so a signed AAB is produced for the
+    # Google Play upload (distribution-and-polish design D3). The release APK
+    # is still output for GitHub/F-Droid/sideload.
+    [switch]$Bundle
 )
 
 $ErrorActionPreference = "Stop"
@@ -273,6 +281,10 @@ $sdkDir = if ($env:AURELEX_ANDROID_SDK) { $env:AURELEX_ANDROID_SDK } else { "C:\
 $sdkProp = ($sdkDir -replace '\\', '/') -replace ':', '\:'
 Set-Content (Join-Path $ApkDir "local.properties") "sdk.dir=$sdkProp" -NoNewline
 $gpPath = Join-Path $ApkDir "gradle.properties"
+# aapt2 from AGP 7.4.1's default Maven artifact (7.4.1-8841542) cannot link
+# against SDK 35's android.jar, so override aapt2 with the newer binary shipped
+# in build-tools 36.0.0. The property key is android.aapt2FromMavenOverride.
+$Aapt2Exe = (Join-Path $sdkDir "build-tools\36.0.0\aapt2.exe") -replace '\\', '/'
 # androiddeployqt in the carve-subset kit may not generate gradle.properties on
 # a fresh tree (it exists locally only because a prior run left it behind). If
 # absent, write one with our pinned values; otherwise patch the existing file.
@@ -283,20 +295,29 @@ if (-not (Test-Path $gpPath)) {
     @"
 org.gradle.jvmargs=-Xmx2500m -XX:MaxMetaspaceSize=768m -Dfile.encoding=UTF-8
 android.useAndroidX=true
+android.aapt2FromMavenOverride=$Aapt2Exe
 androidBuildToolsVersion=35.0.0
-androidCompileSdkVersion=android-34
+androidCompileSdkVersion=android-35
 androidNdkVersion=23.2.8568313
 buildDir=build
 qt5AndroidDir=$qtAndroidDir
 qtAndroidDir=$qtAndroidDir
 qtMinSdkVersion=23
+android.suppressUnsupportedCompileSdk=35
 qtTargetAbiList=arm64-v8a
-qtTargetSdkVersion=33
+qtTargetSdkVersion=35
 "@ | Set-Content $gpPath -NoNewline
 } else {
     $gp = Get-Content $gpPath -Raw
-    $gp = $gp -replace 'androidCompileSdkVersion=android-\d+', 'androidCompileSdkVersion=android-34'
+    $gp = $gp -replace 'androidCompileSdkVersion=android-\d+', 'androidCompileSdkVersion=android-35'
     $gp = $gp -replace 'androidBuildToolsVersion=[\d.]+', 'androidBuildToolsVersion=35.0.0'
+    $gp = $gp -replace 'qtTargetSdkVersion=\d+', 'qtTargetSdkVersion=35'
+    if ($gp -notmatch 'suppressUnsupportedCompileSdk') {
+        $gp = $gp -replace '(qtTargetSdkVersion=\d+)', "`$1`nandroid.suppressUnsupportedCompileSdk=35"
+    }
+    if ($gp -notmatch 'aapt2FromMavenOverride') {
+        $gp = $gp.TrimEnd() + "`nandroid.aapt2FromMavenOverride=$Aapt2Exe`n"
+    }
     Set-Content $gpPath $gp -NoNewline
 }
 # settings.gradle must scope this build away from the repo's settings.gradle.kts
@@ -436,21 +457,32 @@ try {
     # jar on a full kit); on the carve-subset fresh tree neither exists, so use
     # the gradle distribution from AURELEX_GRADLE_HOME (CI installs it) or the
     # system gradle.
-    if (Test-Path ".\gradlew.bat") {
-        & ".\gradlew.bat" --no-daemon $gradleTask
-    } elseif ($env:AURELEX_GRADLE_HOME -and (Test-Path (Join-Path $env:AURELEX_GRADLE_HOME "bin\gradle.bat"))) {
-        & (Join-Path $env:AURELEX_GRADLE_HOME "bin\gradle.bat") --no-daemon $gradleTask
-    } elseif ($env:GRADLE_HOME -and (Test-Path (Join-Path $env:GRADLE_HOME "bin\gradle.bat"))) {
-        & (Join-Path $env:GRADLE_HOME "bin\gradle.bat") --no-daemon $gradleTask
-    } else {
-        $wt = Get-Command "gradle.bat" -ErrorAction SilentlyContinue
-        if ($wt) {
-            & $wt.Source --no-daemon $gradleTask
-        } else {
-            throw "no gradlew.bat, no gradle-wrapper.jar, no gradle on PATH in $ApkDir — cannot run gradle"
+    function Invoke-Gradle([string[]]$Tasks) {
+        foreach ($t in $Tasks) {
+            if (Test-Path ".\gradlew.bat") {
+                & ".\gradlew.bat" --no-daemon $t
+            } elseif ($env:AURELEX_GRADLE_HOME -and (Test-Path (Join-Path $env:AURELEX_GRADLE_HOME "bin\gradle.bat"))) {
+                & (Join-Path $env:AURELEX_GRADLE_HOME "bin\gradle.bat") --no-daemon $t
+            } elseif ($env:GRADLE_HOME -and (Test-Path (Join-Path $env:GRADLE_HOME "bin\gradle.bat"))) {
+                & (Join-Path $env:GRADLE_HOME "bin\gradle.bat") --no-daemon $t
+            } else {
+                $wt = Get-Command "gradle.bat" -ErrorAction SilentlyContinue
+                if ($wt) {
+                    & $wt.Source --no-daemon $t
+                } else {
+                    throw "no gradlew.bat, no gradle-wrapper.jar, no gradle on PATH in $ApkDir — cannot run gradle"
+                }
+            }
+            if ($LASTEXITCODE -ne 0) { throw "gradle $t failed" }
         }
     }
-    if ($LASTEXITCODE -ne 0) { throw "gradle $gradleTask failed" }
+
+    $tasks = @($gradleTask)
+    if ($Bundle -and $Configuration -eq "Release") {
+        # Play upload needs the signed AAB; build it alongside the release APK.
+        $tasks += @("bundleRelease")
+    }
+    Invoke-Gradle $tasks
 } finally {
     Pop-Location
 }
@@ -460,6 +492,13 @@ $apkDir2 = "$ApkDir\build\outputs\apk\$configLower"
 $apk = Get-ChildItem $apkDir2 -Filter "*.apk" | Select-Object -First 1
 if (-not $apk) { throw "APK not produced in $apkDir2" }
 Write-Host "== DONE: $($apk.FullName) ($([math]::Round($apk.Length/1MB,1)) MB) ==" -ForegroundColor Green
+
+if ($Bundle -and $Configuration -eq "Release") {
+    $aabDir = "$ApkDir\build\outputs\bundle\release"
+    $aab = Get-ChildItem $aabDir -Filter "*.aab" | Select-Object -First 1
+    if (-not $aab) { throw "AAB not produced in $aabDir (did -Bundle run bundleRelease?)" }
+    Write-Host "== AAB: $($aab.FullName) ($([math]::Round($aab.Length/1MB,1)) MB) ==" -ForegroundColor Green
+}
 
 if ($Install) {
     $adb = "$RealSdk\platform-tools\adb.exe"

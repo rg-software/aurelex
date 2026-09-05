@@ -1,9 +1,10 @@
 name: release build (Qt)
 
-# On tag push (vX.Y.Z) builds a SIGNED release APK from the Qt app
-# (app/) and attaches it to a GitHub release. The Kotlin app
-# (app/ — historically the Compose UI) was removed; this is the only release
-# workflow.
+# On tag push (vX.Y.Z) builds a SIGNED release APK + AAB from the Qt app
+# (app/) and attaches them to a GitHub release. The AAB is the Google Play
+# upload artifact (uploaded manually to Play Console); the APK covers
+# GitHub/F-Droid/sideload. The Kotlin app (app/ — historically the Compose UI)
+# was removed; this is the only release workflow.
 #
 # Why Windows: app/build.ps1 targets a Windows aqt 6.6.3
 # layout. The carve (engine/) compiles under the same script. Build time is
@@ -113,7 +114,7 @@ jobs:
           $previewLicense = "8933bad161af4178b1185d1a37fbf41ea5269c55"
           Add-Content -Path "$licensesDir\android-sdk-preview-license" -Value $previewLicense -Encoding ASCII
           & "$env:ANDROID_SDK_ROOT\cmdline-tools\latest\bin\sdkmanager.bat" --sdk_root="$env:ANDROID_SDK_ROOT" `
-            "platforms;android-34" "build-tools;35.0.0" "build-tools;36.0.0" "platform-tools"
+            "platforms;android-34" "platforms;android-35" "build-tools;35.0.0" "build-tools;36.0.0" "platform-tools"
           if ($LASTEXITCODE -ne 0) { throw "sdkmanager failed (exit $LASTEXITCODE)" }
           if (-not (Test-Path "$env:ANDROID_SDK_ROOT\build-tools\36.0.0")) {
             throw "build-tools/36.0.0 not installed under $env:ANDROID_SDK_ROOT"
@@ -204,7 +205,7 @@ jobs:
             echo "AURELEX_VERSION_CODE=" >> "$GITHUB_ENV"
           fi
 
-      - name: Build signed release APK
+      - name: Build signed release APK + AAB
         shell: pwsh
         env:
           AURELEX_KEYSTORE_PATH: ${{ runner.temp }}\release.jks
@@ -214,33 +215,42 @@ jobs:
         run: |
           if (Test-Path "$env:AURELEX_KEYSTORE_PATH") {
             Write-Host "=== signed build ==="
-            & "$env:GITHUB_WORKSPACE\app\build.ps1" -Configuration Release
+            & "$env:GITHUB_WORKSPACE\app\build.ps1" -Configuration Release -Bundle
             if ($LASTEXITCODE -ne 0) { throw "build.ps1 failed" }
           } else {
-            Write-Host "=== AURELEX_KEYSTORE_PATH not present; building unsigned release APK for dry-run ===" -ForegroundColor Yellow
-            & "$env:GITHUB_WORKSPACE\app\build.ps1" -Configuration Release
+            Write-Host "=== AURELEX_KEYSTORE_PATH not present; building unsigned release APK + AAB for dry-run ===" -ForegroundColor Yellow
+            & "$env:GITHUB_WORKSPACE\app\build.ps1" -Configuration Release -Bundle
             if ($LASTEXITCODE -ne 0) { throw "build.ps1 failed" }
           }
 
-      - name: Locate release APK
-        id: apk
+      - name: Locate release APK + AAB
+        id: artifacts
         shell: pwsh
         run: |
-          $apk = Get-ChildItem "$env:GITHUB_WORKSPACE\build-qtquick\apk\build\outputs\apk\release" -Filter "*.apk" -ErrorAction SilentlyContinue | Select-Object -First 1
+          $root = "$env:GITHUB_WORKSPACE\build-qtquick\apk\build\outputs"
+          $apk = Get-ChildItem "$root\apk\release" -Filter "*.apk" -ErrorAction SilentlyContinue | Select-Object -First 1
           if (-not $apk) { throw "no release APK produced" }
+          $aab = Get-ChildItem "$root\bundle\release" -Filter "*.aab" -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $aab) { throw "no release AAB produced (bundleRelease)" }
           Write-Host "release APK: $($apk.FullName) ($([math]::Round($apk.Length/1MB,1)) MB)"
+          Write-Host "release AAB: $($aab.FullName) ($([math]::Round($aab.Length/1MB,1)) MB)"
           "APK_PATH=$($apk.FullName)" >> $env:GITHUB_OUTPUT
+          "AAB_PATH=$($aab.FullName)" >> $env:GITHUB_OUTPUT
 
-      - name: Upload release artifact
+      - name: Upload release artifacts
         uses: actions/upload-artifact@v4
         with:
           name: aurelex-qt-release
-          path: ${{ steps.apk.outputs.APK_PATH }}
+          path: |
+            ${{ steps.artifacts.outputs.APK_PATH }}
+            ${{ steps.artifacts.outputs.AAB_PATH }}
           if-no-files-found: error
 
       - name: Create GitHub release (tag pushes)
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: ${{ steps.apk.outputs.APK_PATH }}
+          files: |
+            ${{ steps.artifacts.outputs.APK_PATH }}
+            ${{ steps.artifacts.outputs.AAB_PATH }}
           generate_release_notes: true

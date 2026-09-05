@@ -33,6 +33,11 @@
 - [x] 5.2 On-device: icon shows in launcher + notification + widget; first-run
       onboarding shows on a fresh install; empty search state with no dicts. **Verified** (Qt app): onboarding + empty-state shown on fresh install (verified in qt-material-ui 8.x); adaptive icon + widget/notification wiring present. Launcher-icon visual check not separately repeated on-device.
 - [ ] 5.3 Verify the CI release job artifacts (AAB + APK) by pushing a tag (or
-      a dry-run `workflow_dispatch`). **Blocked** on the Release Java build
-      (`compileReleaseJavaWithJavac` — Qt android jar not on the Release
-      classpath); tracked separately. Keystore secrets are configured.
+      a dry-run `workflow_dispatch`). **Blocked** previously on the Release Java
+      build (`compileReleaseJavaWithJavac` — Qt android jar not on the Release
+      classpath); that is **fixed** (Qt Android jars staged from the kit into
+      `libs/` since the Qt-app promotion) and locally verified
+      (`compileReleaseJavaWithJavac` + `assembleRelease` + `bundleRelease` pass
+      under JDK 17). Keystore secrets are configured. Still open: run a tag
+      push / `workflow_dispatch` on CI and confirm the signed APK + AAB attach
+      to a GitHub release.

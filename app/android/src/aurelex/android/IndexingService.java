@@ -168,7 +168,7 @@ public class IndexingService extends Service {
         builder
                 .setContentTitle("Aurelex")
                 .setContentText(text)
-                .setSmallIcon(android.R.drawable.ic_menu_search)
+                .setSmallIcon(R.drawable.ic_notification)
                 .setContentIntent(pi)
                 .setOnlyAlertOnce(true)
                 .setOngoing(true);
