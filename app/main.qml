@@ -52,7 +52,7 @@ ApplicationWindow {
     function icon( name ) {
         var map = {
             "search": 0xe8b6,
-            "library_books": 0xe254,
+            "library_books": 0xe02f,
             "folder": 0xe2c7,
             "history": 0xe889,
             "star": 0xe838,
