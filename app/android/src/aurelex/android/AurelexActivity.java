@@ -108,9 +108,37 @@ public class AurelexActivity extends QtActivity {
 
         captureLookupText(getIntent());
         maybeRequestNotificationPermission();
+        // Main-looper watchdog for the system-bar icon appearance: Qt's QPA (and
+        // the WM) can reset it right after we set it. Re-check every 700ms and
+        // rewrite only when it has drifted, so the icons stay matched to our
+        // self-painted strips and never flicker.
+        new android.os.Handler(android.os.Looper.getMainLooper()).post(new Runnable() {
+            @Override
+            public void run() {
+                syncSystemBarAppearance();
+                new android.os.Handler(android.os.Looper.getMainLooper())
+                        .postDelayed(this, 700);
+            }
+        });
     }
 
     private static final int REQUEST_POST_NOTIFICATIONS = 2002;
+
+    // Desired system-bar icon appearance, remembered from the native side so the
+    // Activity can (re)apply it whenever the window regains focus — Qt's QPA
+    // sometimes resets the bars to its own (device-theme) appearance after we
+    // set it, which is why icons ended up matching the DEVICE theme instead of
+    // ours (invisible white-on-white / dark-on-dark).
+    private static volatile boolean sDarkBars = false;
+
+    @Override
+    public void onWindowFocusChanged(boolean hasFocus) {
+        super.onWindowFocusChanged(hasFocus);
+        // Qt can clobber the bar appearance when it re-syncs; reapply the last
+        // known value on every focus gain so our chrome and the icons always
+        // match.
+        if (hasFocus) setSystemBarAppearanceInternal(sDarkBars);
+    }
 
     /**
      * On Android 13+ (API 33) POST_NOTIFICATIONS is a RUNTIME permission. The
@@ -207,27 +235,77 @@ public class AurelexActivity extends QtActivity {
      * white on a white background (invisible). `dark` = our theme is dark.
      */
     public static void setSystemBarAppearance(boolean dark) {
+        sDarkBars = dark;
+        setSystemBarAppearanceInternal(dark);
+    }
+
+    /**
+     * Self-healing sync: Qt's QPA (or the WM) can reset the bar icons to the
+     * device-theme default after we set them. This reads the CURRENT appearance
+     * and only rewrites when it does not match {@link #sDarkBars}. Called
+     * periodically from the native poller and on window focus, so the bars heal
+     * within ~500ms of any clobber.
+     */
+    public static void syncSystemBarAppearance() {
         try {
             android.app.Activity activity = QtNative.activity();
             if (activity == null) return;
             android.view.Window window = activity.getWindow();
             if (window == null) return;
+            final int want = sDarkBars ? 0 : android.view.View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR;
+            int have;
             if (android.os.Build.VERSION.SDK_INT >= 30) {
                 android.view.WindowInsetsController c = window.getInsetsController();
                 if (c == null) return;
-                final int light =
-                        android.view.WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS;
-                final int lightNav =
-                        android.view.WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS;
-                // Our strips are LIGHT in light mode -> dark system icons.
-                c.setSystemBarsAppearance(dark ? 0 : (light | lightNav), light | lightNav);
+                int app = c.getSystemBarsAppearance();
+                have = (app & android.view.WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS);
             } else {
-                final int LIGHT_STATUS = android.view.View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR;
-                final int LIGHT_NAV = android.view.View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR;
+                have = window.getDecorView().getSystemUiVisibility()
+                        & android.view.View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR;
+            }
+            if (have != want) setSystemBarAppearanceInternal(sDarkBars);
+        } catch (Exception ignored) {
+        }
+    }
+
+    private static void setSystemBarAppearanceInternal(boolean dark) {
+        try {
+            android.app.Activity activity = QtNative.activity();
+            if (activity == null) return;
+            android.view.Window window = activity.getWindow();
+            if (window == null) return;
+            final int LIGHT_STATUS = android.view.View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR;
+            final int LIGHT_NAV = android.view.View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR;
+            if (android.os.Build.VERSION.SDK_INT >= 30) {
+                android.view.WindowInsetsController c = window.getInsetsController();
+                if (c != null) {
+                    final int light =
+                            android.view.WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS;
+                    final int lightNav =
+                            android.view.WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS;
+                    // dark theme -> keep default (light/white) icons; light theme ->
+                    // dark icons via the LIGHT appearance flags.
+                    c.setSystemBarsAppearance(dark ? 0 : (light | lightNav), light | lightNav);
+                }
+            }
+            // Set the window's own deprecated systemUiVisibility attrs too — some
+            // ROMs/WMs only honor those for the status-icon color.
+            try {
+                android.view.WindowManager.LayoutParams lp = window.getAttributes();
+                int w = lp.systemUiVisibility & ~(LIGHT_STATUS | LIGHT_NAV);
+                if (!dark) w |= (LIGHT_STATUS | LIGHT_NAV);
+                lp.systemUiVisibility = w;
+                window.setAttributes(lp);
+            } catch (Exception ignored) {
+            }
+            // Belt-and-braces on the decor view too (pre-30 API and any window
+            // that doesn't honor the insets controller).
+            try {
                 int flags = window.getDecorView().getSystemUiVisibility();
                 flags = dark ? (flags & ~(LIGHT_STATUS | LIGHT_NAV))
                              : (flags | LIGHT_STATUS | LIGHT_NAV);
                 window.getDecorView().setSystemUiVisibility(flags);
+            } catch (Exception ignored) {
             }
         } catch (Exception e) {
             android.util.Log.w(TAG, "setSystemBarAppearance failed: " + e);
@@ -439,7 +517,12 @@ public class AurelexActivity extends QtActivity {
             // forever (the "no supported files staged" / stack-overflow bug).
             final android.net.Uri childrenUri =
                     android.provider.DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, currentDocId);
+            int sawFiles = 0, supported = 0, deduped = 0, alreadyLocal = 0;
             try (android.database.Cursor c = cr.query(childrenUri, cols, null, null, null)) {
+                if (c == null) {
+                    android.util.Log.w(TAG, "stageTreeInto: null cursor for docId=" + currentDocId);
+                    return copied;
+                }
                 while (c != null && c.moveToNext()) {
                     final String docId = c.getString(0);
                     final String name = c.getString(1);
@@ -461,7 +544,9 @@ public class AurelexActivity extends QtActivity {
                                 depth + 1, state);
                         continue;
                     }
+                    sawFiles++;
                     if (!isSupportedDictionaryName(name)) continue;
+                    supported++;
                     final long srcSize = c.isNull(3) ? -1 : c.getLong(3);
                     final long srcModified = c.isNull(4) ? 0 : c.getLong(4);
                     final java.io.File out = new java.io.File(destDir, name);
@@ -469,6 +554,7 @@ public class AurelexActivity extends QtActivity {
                             && srcSize >= 0 && out.length() == srcSize
                             && (srcModified <= 0
                                 || Math.abs(out.lastModified() - srcModified) < 5000)) {
+                        alreadyLocal++;
                         continue; // unchanged since we staged it
                     }
                     // Intersecting pick (same dictionary under another source):
@@ -476,6 +562,7 @@ public class AurelexActivity extends QtActivity {
                     // elsewhere in the stage root, skip it so the engine doesn't
                     // load a path-hashed duplicate id twice.
                     if (hasStagedCopy(stageRoot, name, srcSize, srcModified, destDir)) {
+                        deduped++;
                         continue;
                     }
                     final android.net.Uri child = android.provider.DocumentsContract
@@ -490,9 +577,14 @@ public class AurelexActivity extends QtActivity {
                     }
                 }
             }
+            if (supported > 0) {
+                android.util.Log.i(TAG, "stageTreeInto[" + currentDocId + "]: saw=" + sawFiles
+                        + " supported=" + supported + " alreadyLocal=" + alreadyLocal
+                        + " deduped=" + deduped + " copied=" + copied);
+            }
             return copied;
         } catch (Exception e) {
-            android.util.Log.w(TAG, "stageTreeInto failed: " + e);
+            android.util.Log.w(TAG, "stageTreeInto failed for " + currentDocId + ": " + e);
             return copied;
         }
     }

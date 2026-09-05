@@ -128,7 +128,16 @@ public class StagingService extends Service {
             final int copied =
                     AurelexActivity.stageTree(treeUri, tmpDir.getAbsolutePath(), stagedRoot, this);
             if (copied <= 0) {
-                android.util.Log.w(TAG, "no supported files staged from " + treeUri);
+                // 0 may mean "nothing new" (already-local/unchanged/deduped) or
+                // "no supported files at all". StageService.log still has the
+                // detailed counts from stageTreeInto when supported files were
+                // found; surface a hint either way so the pick isn't a silent
+                // no-op.
+                android.util.Log.w(TAG, "no new dictionary files staged from " + treeUri
+                        + " (displaying " + display + "); the dictionary is likely "
+                        + "already added, or the folder has no supported files.");
+                // Clean up the temp dir we would have filled.
+                if (tmpDir.exists()) AurelexActivity.deleteRecursively(tmpDir);
                 return;
             }
             // Swap temp -> final; a stale final dir is only our snapshot.

@@ -62,10 +62,20 @@ ApplicationWindow {
     property int _insetTop: 0
     property int _insetBottom: 0
     property real _insetDpr: Screen.devicePixelRatio > 0 ? Screen.devicePixelRatio : 1
+    // Briefly true after an orientation change: tears down both native WebViews
+    // so they recreate at the new window geometry (a stale-size native surface
+    // would otherwise cover sibling chrome — e.g. the bottom dock in landscape).
+    property bool _geometryInvalid: false
     function _refreshInsets() {
         root._insetDpr = Screen.devicePixelRatio > 0 ? Screen.devicePixelRatio : 1
         root._insetTop = Math.round(engine.systemInsetTop() / root._insetDpr)
         root._insetBottom = Math.round(engine.systemInsetBottom() / root._insetDpr)
+        // Orientation change: both loaders' `active` bindings re-evaluate to
+        // false (destroying the native surfaces), then true again next tick
+        // (recreating them sized to the new window). The inline/currentHtml
+        // survive and re-render via onLoaded; the article pane re-renders too.
+        root._geometryInvalid = true
+        Qt.callLater(function(){ root._geometryInvalid = false })
     }
     onWidthChanged: root._refreshInsets()
     onHeightChanged: root._refreshInsets()
@@ -877,7 +887,7 @@ ColumnLayout {
                     // native surface to a wrong (full-window) size that then
                     // overtakes the whole screen. inlineWebReady is set by a
                     // short timer once the Search tab is actually visible.
-                    active: root.state === 0 && root.inlineWebReady && !root._pickerOpen
+                    active: root.state === 0 && root.inlineWebReady && !root._pickerOpen && !root._geometryInvalid
                     onLoaded: {
                         root.inlineWv = item
                         // Give the fresh WebView a document to run JS against.
@@ -1732,7 +1742,7 @@ ColumnLayout {
             // A native Android WebView kept alive while hidden still participates
             // in the native view hierarchy and swallows touches across the whole
             // UI (it coexisted with the inline search WebView -> unusable screen).
-            active: root.state === 2
+            active: root.state === 2 && !root._geometryInvalid
             sourceComponent: articleViewComponent
             Accessible.name: "Article content"
             Accessible.role: Accessible.Group

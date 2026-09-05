@@ -1397,9 +1397,19 @@ void EngineController::applySystemBarAppearance()
         "aurelex/android/AurelexActivity",
         "setSystemBarAppearance",
         "(Z)V",
-        m_darkMode ? JNI_FALSE : JNI_TRUE);
+        m_darkMode ? JNI_TRUE : JNI_FALSE);
 #else
     Q_UNUSED(m_darkMode);
+#endif
+}
+
+void EngineController::syncSystemBarAppearance()
+{
+#if defined(Q_OS_ANDROID)
+    QJniObject::callStaticMethod<void>(
+        "aurelex/android/AurelexActivity",
+        "syncSystemBarAppearance",
+        "()V");
 #endif
 }
 
@@ -1602,6 +1612,10 @@ void EngineController::pollPendingLookup()
 {
     if (m_appDir.isEmpty()) return;
     const QString path = m_appDir + QStringLiteral("/../shared_prefs/intent.xml");
+
+    // Heal the system bar icon contrast if the WM/Qt reset it (cheap: only
+    // rewrites when the read-back appearance drifted from our desired state).
+    syncSystemBarAppearance();
 
     // Sample the Android system dark/light state (Qt 6.6 QPA can't detect it
     // natively); the activity's onConfigurationChanged fires on a live switch,

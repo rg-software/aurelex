@@ -315,6 +315,9 @@ private:
     // Flips the Android system status/nav bar icons to the correct contrast for
     // our self-painted light/dark chrome strips (JNI).
     void applySystemBarAppearance();
+    // Periodic self-heal: the WM/Qt can reset the bar icons to the device-theme
+    // default; this reapplies our desired appearance when it drifted (cheap, ~2Hz).
+    void syncSystemBarAppearance();
 
     QTimer m_pollTimer;
     // Failsafe for the "Scanning/Reading dictionary files..." banner: gd_scan
