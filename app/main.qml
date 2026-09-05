@@ -1620,13 +1620,11 @@ ColumnLayout {
 
     Connections {
         target: engine
-        // The engine only embeds darkreader.js in article HTML at generation
-        // time, so a dark-mode change must re-generate the current article.
-        // darkModeApplied fires (queued) after the engine's preference actually
-        // landed, so the re-lookup picks up the new mode.
-        function onDarkModeApplied() {
-            if (root.currentWord.length > 0) engine.lookup(root.currentWord)
-        }
+        // Dark mode flips the OPEN article in place: rewriteArticleUrls always
+        // injects darkreader + a gdSetDarkMode controller, so on the toggle we
+        // just call it on the live document — no re-lookup/reload, no scroll
+        // reset. Runs synchronously on darkModeChanged.
+        function onDarkModeChanged() { root._applyArticleDarkMode() }
     }
 
     Connections {
@@ -1663,6 +1661,17 @@ ColumnLayout {
         if (state !== 2) return
         loadedAtHeight = view.height
         view.loadHtml(html, base)
+    }
+    // Flip the OPEN article's dark mode in place via the injected gdSetDarkMode
+    // controller — instant, no reload, scroll position preserved. No article
+    // open? The next rendered document gets the baked-in mode from
+    // rewriteArticleUrls, so nothing to do here.
+    function _applyArticleDarkMode() {
+        const wv = (state === 0 && root.inlineWv) ? root.inlineWv : (state === 2 ? view : null)
+        if (wv && wv.url.toString().length > 5) {
+            wv.runJavaScript("try{if(window.gdSetDarkMode)gdSetDarkMode("
+                + (engine.darkMode ? 1 : 0) + ");}catch(e){}")
+        }
     }
     Timer {
         id: articleLinkPoller

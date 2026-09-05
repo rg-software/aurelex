@@ -872,6 +872,79 @@ QString EngineController::rewriteArticleUrls(const QString &html) const {
     out.remove(QRegularExpression(
         QStringLiteral(R"(<script>\s*function\s+gd_init_QtWebChannel.*?</script>)"),
         QRegularExpression::DotMatchesEverythingOption));
+
+    // --- unified dark-mode injection ---
+    // The engine bakes darkreader.js + a one-shot enable() into the article HTML
+    // ONLY when dark mode is on at generation time (and only for the "modern"
+    // style). That couples the page's appearance to generation state, so a dark
+    // toggle would otherwise need a full re-lookup + reload (slow, resets scroll).
+    // Strip the engine's dark block entirely and inject a fixed controller
+    // (darkreader.js + fetchShim + gdSetDarkMode) with the mode baked in. QML
+    // then flips the OPEN article in place via gdSetDarkMode() — instant.
+    out.remove(QRegularExpression(
+        QStringLiteral(R"(<script[^>]*\bsrc="[^"]*(?:scripts/)?darkreader\.js"[^>]*>\s*</script>)"),
+        QRegularExpression::DotMatchesEverythingOption));
+    out.remove(QRegularExpression(
+        QStringLiteral(R"(<script[^>]*>[\s\S]*?DarkReader\.[\s\S]*?</script>)"),
+        QRegularExpression::DotMatchesEverythingOption));
+    out.remove(QRegularExpression(
+        QStringLiteral(R"(<style[^>]*>[\s\S]*?\.gdarticlebody\s+img[\s\S]*?</style>)"),
+        QRegularExpression::DotMatchesEverythingOption));
+
+    // Always-on controller. darkreader.js is bundled in APK assets/scripts, so
+    // the loopback article server serves it; article-style-darkmode.css is a
+    // bare .css in assets/stylesheets (the server prefixes "stylesheets/").
+    const QString darkInit = m_darkMode ? QStringLiteral("1") : QStringLiteral("0");
+    const QString darkCtrl = QStringLiteral(
+        R"(
+<script src="%1/scripts/darkreader.js"></script>
+<script>
+window.__gdDarkMode=%2;
+(function(){
+  function fetchShim(src){
+    if(src.indexOf('gdlookup://')===0){console.error('Dark Reader discovered unexpected URL',src);return Promise.resolve({blob:function(){return new Blob();}});}
+    if(src.indexOf('qrcx://')===0||src.indexOf('qrc://')===0||src.indexOf('bres://')===0||src.indexOf('gico://')===0){
+      return new Promise(function(resolve){
+        var img=document.createElement('img');
+        img.addEventListener('load',function(){
+          var canvas=document.createElement('canvas');canvas.width=img.naturalWidth;canvas.height=img.naturalHeight;
+          var ctx=canvas.getContext('2d');ctx.drawImage(img,0,0);
+          canvas.toBlob(function(blob){resolve({blob:function(){return blob;}});});
+        },false);
+        img.src=src;
+      });
+    }
+    return fetch(src);
+  }
+  DarkReader.setFetchMethod(fetchShim);
+  var cssId='gd-darkmode-css', imgStyleId='gd-dark-img-style';
+  window.gdSetDarkMode=function(v){
+    v=!!v;
+    if(v===window.__gdDarkMode)return;
+    window.__gdDarkMode=v;
+    var head=document.head||document.documentElement;
+    if(v){
+      var l=document.getElementById(cssId);
+      if(!l){l=document.createElement('link');l.id=cssId;l.rel='stylesheet';l.href='%1/article-style-darkmode.css';head.appendChild(l);}
+      var st=document.getElementById(imgStyleId);
+      if(!st){st=document.createElement('style');st.id=imgStyleId;st.textContent='.gdarticlebody img{background:white !important;}';head.appendChild(st);}
+      DarkReader.enable({brightness:100,contrast:90,sepia:10});
+    }else{
+      var l=document.getElementById(cssId);if(l&&l.parentNode)l.parentNode.removeChild(l);
+      var st=document.getElementById(imgStyleId);if(st&&st.parentNode)st.parentNode.removeChild(st);
+      DarkReader.disable();
+    }
+  };
+  if(window.__gdDarkMode)window.gdSetDarkMode(1);
+})();
+</script>
+)").arg(base).arg(darkInit);
+
+    const int headEnd = out.indexOf(QStringLiteral("</head>"));
+    if (headEnd >= 0)
+        out.insert(headEnd, darkCtrl);
+    else
+        out.append(darkCtrl);
     return out;
 }
 
@@ -904,9 +977,9 @@ void EngineController::stopAudio() {
 }
 
 QString EngineController::articleCacheKey(const QString &word) const {
-    return word + QLatin1Char('\x1f')
-        + QString::number(m_activeGroupId) + QLatin1Char('\x1f')
-        + QLatin1Char(m_darkMode ? '1' : '0');
+    // Article HTML is dark-mode agnostic (rewriteArticleUrls always injects the
+    // dark controller), so the key needs word + active group only.
+    return word + QLatin1Char('\x1f') + QString::number(m_activeGroupId);
 }
 
 void EngineController::cacheArticle(const QString &key, const QString &html) {
@@ -1240,24 +1313,14 @@ void EngineController::updateSystemDark()
 }
 
 // Effective dark = manual override OR system dark. Drives the Material.theme
-// palette (QML) and the article CSS (gd_set_dark_mode).
+// palette (QML) and the engine preference. The OPEN article flips in place via
+// gdSetDarkMode() (rewriteArticleUrls always injects the dark controller), so
+// no re-lookup/reload is needed here — only the engine preference is kept in
+// sync off-thread for any future HTML generation.
 void EngineController::applyEffectiveDark()
 {
     m_darkMode = m_userDarkOverride || m_systemDark;
-    // Cached articles embed darkreader.js per the mode they were generated in.
-    clearArticleCache();
-    // Off-thread: gd_set_dark_mode takes the engine mutex, which a concurrent
-    // FTS index build may hold for a long time. Never block the UI thread.
-    // Article HTML embeds darkreader.js only when the engine sees the dark
-    // preference at generation time, so once gd_set_dark_mode has actually
-    // landed we emit darkModeApplied (queued to the UI thread) and the UI
-    // re-generates the current article with the new preference.
-    QtConcurrent::run([this, dark = m_darkMode]{
-        gd_set_dark_mode(dark ? 1 : 0);
-        QMetaObject::invokeMethod(this, [this]{
-            emit darkModeApplied();
-        }, Qt::QueuedConnection);
-    });
+    QtConcurrent::run([dark = m_darkMode]{ gd_set_dark_mode(dark ? 1 : 0); });
     emit darkModeChanged();
 }
 
