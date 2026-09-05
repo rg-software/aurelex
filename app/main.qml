@@ -141,8 +141,12 @@ ApplicationWindow {
         root.currentHtml = ""
         root.navStack = []
         root._hideSuggestOverlay()
-        if (root.inlineWv && engine.articleBaseUrl.length > 0)
+        if (root.inlineWv && engine.articleBaseUrl.length > 0) {
+            // A suggestion injected before this blank load finishes gets wiped;
+            // flag it so _renderSuggestOverlay defers (see _blankPending).
+            root._blankPending = true
             root.inlineWv.loadHtml("<html><body></body></html>", engine.articleBaseUrl)
+        }
     }
 
     // --- search-suggestion overlay (rendered inside the inline article
@@ -157,6 +161,11 @@ ApplicationWindow {
     // document to inject into.
     property var _pendingSugg: []
     property bool _suggVisible: false
+    // True while `inlineWv` is loading a blank base document (fresh WebView or a
+    // cleared article). A suggestion overlay injected before that load finishes
+    // is wiped by the load completion, so _renderSuggestOverlay defers to the
+    // pending-stash while this is set; onLoadingChanged clears it and flushes.
+    property bool _blankPending: false
     function _escHtml(s) {
         return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;")
             .replace(/>/g, "&gt;").replace(/"/g, "&quot;")
@@ -165,7 +174,7 @@ ApplicationWindow {
         root._pendingSugg = words
         articleLinkPoller._lastSugg = ""
         const wv = root.inlineWv
-        if (!wv) return
+        if (!wv || root._blankPending) return
         const base = engine.articleBaseUrl
         if (base.length < 5) return
         const dark = engine.darkMode
@@ -218,6 +227,7 @@ ApplicationWindow {
     // injection and the link poller.
     function _ensureInlineBlank() {
         if (root.inlineWv && root.currentHtml.length === 0 && engine.articleBaseUrl.length > 5) {
+            root._blankPending = true
             root.inlineWv.loadHtml("<html><body></body></html>", engine.articleBaseUrl)
         }
     }
@@ -241,8 +251,11 @@ ApplicationWindow {
         if (navStack.length === 0) {
             // No more articles in the stack.
             if (root.inlineArticle) {
-                // Clear inline article and return to pure suggestions view.
+                // Clear inline article and return to pure suggestions view. The
+                // query is still in the field, so re-show its candidates (the
+                // regular typing path doesn't fire — the text didn't change).
                 root._clearInlineArticle()
+                searchPane._doSuggest()
                 return
             }
             state = 0
@@ -605,7 +618,7 @@ ColumnLayout {
                         // the tab (the WebView was just recreated).
                         if (root.currentHtml.length > 0) articleLoadTimer.restart()
                     }
-                    onActiveChanged: if (!active) root.inlineWv = null
+                    onActiveChanged: { root._blankPending = false; if (!active) root.inlineWv = null }
                     sourceComponent: Component {
                         WebView {
                             id: searchArticleView
@@ -640,7 +653,12 @@ ColumnLayout {
                                 }
                             }
                             onLoadingChanged: {
-                                if (!loading) root._flushPendingSugg()
+                                if (!loading) {
+                                    // Blank base document settled: safe to inject
+                                    // any suggestions that arrived meanwhile.
+                                    root._blankPending = false
+                                    root._flushPendingSugg()
+                                }
                             }
                             onHeightChanged: {
                                 if (root.state === 0 && root.inlineArticle
