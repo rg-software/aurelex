@@ -55,9 +55,21 @@ ApplicationWindow {
     property string iconFontFamily: "Material Icons"
     // Android system-window insets (logical px): the Qt window is edge-to-edge,
     // so our own chrome must sit below the status bar / above the navigation
-    // bar. Converted from physical px returned by the activity via JNI.
-    property int _insetTop: Math.round(engine.systemInsetTop() / (Screen.devicePixelRatio > 0 ? Screen.devicePixelRatio : 1))
-    property int _insetBottom: Math.round(engine.systemInsetBottom() / (Screen.devicePixelRatio > 0 ? Screen.devicePixelRatio : 1))
+    // bar. Converted from physical px returned by the activity via JNI. They are
+    // recomputed on every window resize (e.g. portrait->landscape, where the
+    // bottom inscription on gesture-nav devices moves to a side and the bottom
+    // inset becomes 0) rather than captured once.
+    property int _insetTop: 0
+    property int _insetBottom: 0
+    property real _insetDpr: Screen.devicePixelRatio > 0 ? Screen.devicePixelRatio : 1
+    function _refreshInsets() {
+        root._insetDpr = Screen.devicePixelRatio > 0 ? Screen.devicePixelRatio : 1
+        root._insetTop = Math.round(engine.systemInsetTop() / root._insetDpr)
+        root._insetBottom = Math.round(engine.systemInsetBottom() / root._insetDpr)
+    }
+    onWidthChanged: root._refreshInsets()
+    onHeightChanged: root._refreshInsets()
+    Component.onCompleted: root._refreshInsets()
     function icon( name ) {
         var map = {
             "search": 0xe8b6,
@@ -295,7 +307,12 @@ ApplicationWindow {
             }
         }
         html += '</div>'
-        const script = '(function(){var e=document.getElementById("gd-sugg");if(e)e.remove();'
+        const script = '(function(){'
+            + 'var e=document.getElementById("gd-sugg");if(e)e.remove();'
+            + 'var st="' + bg + '";'
+            + 'if(document.body){document.body.style.background=st;'
+            + 'document.body.style.margin="0";}'
+            + 'if(document.documentElement)document.documentElement.style.background=st;'
             + 'var d=document.createElement("div");d.id="gd-sugg";d.innerHTML='
             + JSON.stringify(html) + ';document.body.appendChild(d);})()'
         wv.runJavaScript(script)
@@ -1876,8 +1893,12 @@ ColumnLayout {
         // Dark mode flips the OPEN article in place: rewriteArticleUrls always
         // injects darkreader + a gdSetDarkMode controller, so on the toggle we
         // just call it on the live document — no re-lookup/reload, no scroll
-        // reset. Runs synchronously on darkModeChanged.
-        function onDarkModeChanged() { root._applyArticleDarkMode() }
+        // reset. The candidate overlay (suggestions/history) re-renders with the
+        // new palette too. Runs synchronously on darkModeChanged.
+        function onDarkModeChanged() {
+            root._applyArticleDarkMode()
+            root._applySuggestOverlay()
+        }
     }
 
     Connections {

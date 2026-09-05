@@ -29,6 +29,22 @@ EngineController::EngineController(QObject *parent)
     connect(&m_pollTimer, &QTimer::timeout, this, &EngineController::pollPendingLookup);
     m_pollTimer.start(500);
 
+    // Scan failsafe (see runScan): if a scan is still 'active' long past any
+    // plausible duration, the engine mutex is parked by a wedged worker. Clear
+    // the banner and tell the user to relaunch (which frees the mutex and
+    // re-scans the staged root). This keeps the UI from showing "Reading
+    // dictionary files…" forever.
+    connect(&m_scanWatchdog, &QTimer::timeout, this, [this]{
+        m_scanWatchdog.stop();
+        if (m_scanningActive) {
+            qWarning("[aurelex] scan watchdog fired: dictionary scan did not "
+                     "complete in %d ms (engine mutex likely parked). "
+                     "Closing the banner; restart the app to rescan.",
+                     kScanWatchdogMs);
+            setScanningActive(false);
+        }
+    });
+
     // FTS batch completion arrives from the index-build worker thread; deliver
     // it into the UI-thread properties via a queued connection (same-object
     // connect resolves to queued when the emitter thread differs from this
@@ -227,6 +243,11 @@ void EngineController::runScan() {
     // processing banner stays visible continuously from folder pick -> staging
     // -> scan -> indexing.
     setScanningActive(true);
+    // Failsafe: gd_scan must always eventually return; if the engine mutex is
+    // parked (a wedged worker holds it) the QtConcurrent call below never
+    // returns and the banner would show forever. Kick a watchdog so the UI
+    // recovers with a clear message instead of an endless spinner.
+    m_scanWatchdog.start(kScanWatchdogMs);
     QFuture<QPair<int, int>> f = QtConcurrent::run([stagedBase]{
         int total = 0;
         if (QDir(stagedBase).exists())
@@ -236,6 +257,7 @@ void EngineController::runScan() {
     });
     auto *w = new QFutureWatcher<QPair<int, int>>(this);
     connect(w, &QFutureWatcher<QPair<int, int>>::finished, this, [this, w]{
+        m_scanWatchdog.stop();
         const QPair<int, int> result = w->result();
         qInfo() << "[aurelex] scan ->" << result.first;
         setDictCount(result.second);
@@ -897,10 +919,13 @@ QString EngineController::rewriteArticleUrls(const QString &html) const {
     // A plain-background override is injected too: the "modern" style renders
     // each dictionary entry as a bordered white card (.gdarticle), which reads
     // as a light-gray frame on the phone. Neutralize the card so article text
-    // sits directly on the pane's plain background.
+    // sits directly on the pane's plain background. The base canvas uses a CSS
+    // variable that gdSetDarkMode() flips, so the whole WebView backgrounds
+    // match the app theme on a live dark/light switch (a fully-transparent html
+    // would show the native WebView's own white underneath).
     const QString plainCss = QStringLiteral(
         R"(<style>
-html, body { background: transparent !important; }
+html, body { background: var(--gd-bg, #ffffff) !important; }
 .gdarticle { border: none !important; border-radius: 0 !important;
              background: transparent !important; box-shadow: none !important;
              padding: 0 !important;
@@ -936,6 +961,7 @@ window.__gdDarkMode=%2;
     if(v===window.__gdDarkMode)return;
     window.__gdDarkMode=v;
     var head=document.head||document.documentElement;
+    if(document.documentElement)document.documentElement.style.setProperty('--gd-bg', v?'#242526':'#ffffff');
     if(v){
       var l=document.getElementById(cssId);
       if(!l){l=document.createElement('link');l.id=cssId;l.rel='stylesheet';l.href='%1/article-style-darkmode.css';head.appendChild(l);}
@@ -1357,8 +1383,24 @@ void EngineController::updateSystemDark()
 void EngineController::applyEffectiveDark()
 {
     m_darkMode = m_userDarkOverride || m_systemDark;
+    // Our self-painted status/nav strips must invert the system bar icons to
+    // the opposite contrast (dark icons on a light strip, light icons on dark).
+    applySystemBarAppearance();
     QtConcurrent::run([dark = m_darkMode]{ gd_set_dark_mode(dark ? 1 : 0); });
     emit darkModeChanged();
+}
+
+void EngineController::applySystemBarAppearance()
+{
+#if defined(Q_OS_ANDROID)
+    QJniObject::callStaticMethod<void>(
+        "aurelex/android/AurelexActivity",
+        "setSystemBarAppearance",
+        "(Z)V",
+        m_darkMode ? JNI_FALSE : JNI_TRUE);
+#else
+    Q_UNUSED(m_darkMode);
+#endif
 }
 
 bool EngineController::peekPendingIndexingDone() const

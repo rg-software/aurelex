@@ -312,8 +312,18 @@ private:
     bool readSystemDark() const;
     void updateSystemDark();
     void applyEffectiveDark();
+    // Flips the Android system status/nav bar icons to the correct contrast for
+    // our self-painted light/dark chrome strips (JNI).
+    void applySystemBarAppearance();
 
     QTimer m_pollTimer;
+    // Failsafe for the "Scanning/Reading dictionary files..." banner: gd_scan
+    // can wedge behind a parked engine-mutex holder, and the QtConcurrent scan
+    // never returns (the UI then shows the banner forever). If a scan hasn't
+    // completed within kScanWatchdogMs, clear the flag so the UI recovers and
+    // logs what to do. A relaunch re-scans the staged root and frees the mutex.
+    QTimer m_scanWatchdog;
+    static constexpr int kScanWatchdogMs = 90000;
     int m_clipboardRetries = 0;
     int m_suggestGeneration = 0;
 

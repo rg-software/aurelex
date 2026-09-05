@@ -199,6 +199,41 @@ public class AurelexActivity extends QtActivity {
         }
     }
 
+    /**
+     * Tells the system whether our chrome (status strip at top, nav strip at
+     * bottom) is LIGHT or DARK, so the system icons (clock, signals, gesture
+     * bar) are drawn with the right contrast. The Qt window is edge-to-edge and
+     * we paint those two strips ourselves; without this the status icons stay
+     * white on a white background (invisible). `dark` = our theme is dark.
+     */
+    public static void setSystemBarAppearance(boolean dark) {
+        try {
+            android.app.Activity activity = QtNative.activity();
+            if (activity == null) return;
+            android.view.Window window = activity.getWindow();
+            if (window == null) return;
+            if (android.os.Build.VERSION.SDK_INT >= 30) {
+                android.view.WindowInsetsController c = window.getInsetsController();
+                if (c == null) return;
+                final int light =
+                        android.view.WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS;
+                final int lightNav =
+                        android.view.WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS;
+                // Our strips are LIGHT in light mode -> dark system icons.
+                c.setSystemBarsAppearance(dark ? 0 : (light | lightNav), light | lightNav);
+            } else {
+                final int LIGHT_STATUS = android.view.View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR;
+                final int LIGHT_NAV = android.view.View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR;
+                int flags = window.getDecorView().getSystemUiVisibility();
+                flags = dark ? (flags & ~(LIGHT_STATUS | LIGHT_NAV))
+                             : (flags | LIGHT_STATUS | LIGHT_NAV);
+                window.getDecorView().setSystemUiVisibility(flags);
+            }
+        } catch (Exception e) {
+            android.util.Log.w(TAG, "setSystemBarAppearance failed: " + e);
+        }
+    }
+
     @Override
     public void onConfigurationChanged(Configuration newConfig) {
         super.onConfigurationChanged(newConfig);
