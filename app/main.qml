@@ -136,7 +136,7 @@ ApplicationWindow {
             // after; the pending suggestions are flushed once it's ready.
             root._returningToSearch = false
             input.forceActiveFocus()
-            if (input.text.trim().length > 0) searchPane._doSuggest()
+            if (input.displayText.trim().length > 0) searchPane._doSuggest()
         }
     }
     // Guards the onStateChanged re-focus/re-suggest so it only runs on an
@@ -224,10 +224,22 @@ ApplicationWindow {
         if (url.length < 6) return
         const base = engine.articleBaseUrl
         if (base.length < 5) return
-        // The suggestions list can be empty legitimately (a query typed while
-        // results are still pending); a history overlay with no entries is still
-        // worth drawing (empty-state message).
-        if (words.length === 0 && root._suggMode !== "history") return
+        // History must NEVER sit under a typed query: if the box has text but the
+        // surface is in history mode (stale from an earlier empty/fallback state),
+        // drop the overlay entirely and let the pending suggestion render.
+        if (root._suggMode === "history" && input.displayText.trim().length > 0) {
+            root._clearOverlayDom()
+            root._suggVisible = false
+            return
+        }
+        // In suggestions mode, zero words means a query is still in flight (or
+        // just started): render nothing (clear any stale overlay) until results
+        // arrive. A history overlay with no entries still gets drawn (empty state).
+        if (words.length === 0 && root._suggMode !== "history") {
+            root._clearOverlayDom()
+            root._suggVisible = false
+            return
+        }
         const dark = engine.darkMode
         const bg = dark ? "#242526" : "#ffffff"
         const fg = dark ? "#e0e0e0" : "#202124"
@@ -284,14 +296,18 @@ ApplicationWindow {
         wv.runJavaScript(script)
         root._suggVisible = true
     }
+    // Remove the overlay element from the live document if it exists.
+    function _clearOverlayDom() {
+        if (root.inlineWv) {
+            root.inlineWv.runJavaScript(
+                '(function(){var e=document.getElementById("gd-sugg");if(e)e.remove();})()')
+        }
+    }
     function _hideSuggestOverlay() {
         root._suggMode = "sugg"
         root._suggWords = []
         articleLinkPoller._lastSugg = ""
-        if (root.inlineWv && root._suggVisible) {
-            root.inlineWv.runJavaScript(
-                '(function(){var e=document.getElementById("gd-sugg");if(e)e.remove();})()')
-        }
+        if (root.inlineWv && root._suggVisible) root._clearOverlayDom()
         root._suggVisible = false
     }
     // Called on every load-settle (and after WebView recreation): re-render the
@@ -620,6 +636,13 @@ ApplicationWindow {
             if (root.inlineArticle) {
                 root._hideInlineArticle()
             }
+            // Immediately switch the surface to suggestions-pending: clear any
+            // stale history/suggestion overlay so nothing lingers under a typed
+            // query while the engine is still working.
+            root._suggMode = "sugg"
+            root._suggWords = []
+            articleLinkPoller._lastSugg = ""
+            root._applySuggestOverlay()
             engine.suggest(t)
         }
 
@@ -628,6 +651,13 @@ ApplicationWindow {
         Connections {
             target: engine
             function onSuggestionsReady(prefix, suggestions) {
+                // Only apply results for the query still in the box. A result
+                // for an earlier query (e.g. the user cleared the field and no
+                // new suggest fired, so the engine's stale-guard didn't drop it)
+                // must not overwrite what the empty field now shows (history).
+                // NB: compare against displayText, not text — during IME
+                // composition text lags behind what the user sees/typed.
+                if (prefix.trim() !== input.displayText.trim()) return
                 searchPane.pendingSuggestions = suggestions
                 // A typed query that matches nothing falls back to history.
                 if (suggestions.length === 0) {
@@ -637,8 +667,12 @@ ApplicationWindow {
                 }
             }
             function onArticleNotFound(word) {
-                // A failed lookup returns the surface to history.
-                root._showHistoryOverlay()
+                // A failed lookup returns the surface to history (only while the
+                // field is empty or matches the failed word; a new typed query
+                // must keep showing its own suggestions instead).
+                const cur = input.displayText.trim()
+                if (cur.length === 0 || word.trim() === cur)
+                    root._showHistoryOverlay()
             }
         }
 
@@ -684,7 +718,7 @@ ColumnLayout {
                         const g = engine.groups[index]
                         if (g) engine.setActiveGroup(g.id)
                         // Re-run suggestions for the newly selected group's scope.
-                        if (input.text.trim().length > 0) searchPane._doSuggest()
+                        if (input.displayText.trim().length > 0) searchPane._doSuggest()
                     }
                     // Floating "Group" caption, mirroring the search field's
                     // floating placeholder: a tiny label sits on the combo's top
@@ -871,7 +905,7 @@ ColumnLayout {
                                     // With nothing typed and no article open, the
                                     // empty Search surface falls back to history.
                                     if (root.state === 0 && !root.inlineArticle
-                                        && input.text.trim().length === 0)
+                                        && input.displayText.trim().length === 0)
                                         root._showHistoryOverlay()
                                 }
                             }

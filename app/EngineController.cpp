@@ -903,7 +903,7 @@ QString EngineController::rewriteArticleUrls(const QString &html) const {
 html, body { background: transparent !important; }
 .gdarticle { border: none !important; border-radius: 0 !important;
              background: transparent !important; box-shadow: none !important;
-             padding-top: 0 !important; padding-bottom: 0 !important;
+             padding: 0 !important;
              margin-bottom: 0.6em !important; }
 </style>
 )");
