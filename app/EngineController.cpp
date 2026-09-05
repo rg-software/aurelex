@@ -91,8 +91,11 @@ void EngineController::setLastError(const QString &e) {
 
 void EngineController::setDictionaries(const QVariantList &list) {
     m_dictionaries = list;
+    QStringList names;
+    for (const QVariant &v : list)
+        names << v.toMap().value("name").toString();
     qInfo() << "[aurelex] setDictionaries count=" << list.size()
-            << " names=" << (list.isEmpty() ? QString() : list.first().toMap().value("name").toString());
+            << " names=" << names.join(" | ");
     emit dictionariesChanged();
 }
 

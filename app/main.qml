@@ -641,7 +641,7 @@ ApplicationWindow {
     // --- search view ---
     Rectangle {
         id: searchPane
-        anchors { top: topBar.bottom; left: parent.left; right: parent.right; bottom: navBar.top }
+        anchors { top: topBar.bottom; left: parent.left; right: parent.right; bottom: navDock.top }
         color: root.uiBg
         visible: root.state === 0
 
@@ -961,7 +961,7 @@ ColumnLayout {
     // --- dictionaries view ---
     Rectangle {
         id: dictsPane
-        anchors { top: topBar.bottom; left: parent.left; right: parent.right; bottom: navBar.top }
+        anchors { top: topBar.bottom; left: parent.left; right: parent.right; bottom: navDock.top }
         color: root.uiBg
         visible: root.state === 1
 
@@ -1246,7 +1246,6 @@ ColumnLayout {
 
             // Grouped list (By Pair on): header rows + dict rows from a flattened model.
             ListView {
-                id: dictsListByPair
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 clip: true
@@ -1376,7 +1375,7 @@ ColumnLayout {
 
     Rectangle {
         id: groupsPane
-        anchors { top: topBar.bottom; left: parent.left; right: parent.right; bottom: navBar.top }
+        anchors { top: topBar.bottom; left: parent.left; right: parent.right; bottom: navDock.top }
         color: root.uiBg
         visible: root.state === 3
 
@@ -1677,7 +1676,7 @@ ColumnLayout {
     // --- article view ---
     Rectangle {
         id: articlePane
-        anchors { top: topBar.bottom; left: parent.left; right: parent.right; bottom: navBar.top }
+        anchors { top: topBar.bottom; left: parent.left; right: parent.right; bottom: navDock.top }
         color: root.uiBg
         visible: root.state === 2
 
@@ -1833,7 +1832,7 @@ ColumnLayout {
     // --- favorites view ---
     Rectangle {
         id: favoritesPane
-        anchors { top: topBar.bottom; left: parent.left; right: parent.right; bottom: navBar.top }
+        anchors { top: topBar.bottom; left: parent.left; right: parent.right; bottom: navDock.top }
         color: root.uiBg
         visible: root.state === 6
 
@@ -2042,7 +2041,7 @@ ColumnLayout {
     // --- FTS view ---
     Rectangle {
         id: ftsPane
-        anchors { top: topBar.bottom; left: parent.left; right: parent.right; bottom: navBar.top }
+        anchors { top: topBar.bottom; left: parent.left; right: parent.right; bottom: navDock.top }
         color: root.uiBg
         visible: root.state === 4
 
