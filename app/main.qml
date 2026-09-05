@@ -53,6 +53,11 @@ ApplicationWindow {
     // Material icon font family (registered from fonts.qrc in main.cpp) + the
     // icon-name -> codepoint helper (qt-material-ui task 7.2).
     property string iconFontFamily: "Material Icons"
+    // Android system-window insets (logical px): the Qt window is edge-to-edge,
+    // so our own chrome must sit below the status bar / above the navigation
+    // bar. Converted from physical px returned by the activity via JNI.
+    property int _insetTop: Math.round(engine.systemInsetTop() / (Screen.devicePixelRatio > 0 ? Screen.devicePixelRatio : 1))
+    property int _insetBottom: Math.round(engine.systemInsetBottom() / (Screen.devicePixelRatio > 0 ? Screen.devicePixelRatio : 1))
     function icon( name ) {
         var map = {
             "search": 0xe8b6,
@@ -504,110 +509,105 @@ ApplicationWindow {
         }
     }
 
-    // --- shared top bar (Material ToolBar) ---
-    ToolBar {
+    // --- shared top chrome (system-status-bar strip) ---
+    // The window is edge-to-edge, so this strip sits behind the status icons
+    // and paints them onto our background. It holds no interactive content
+    // (per design: nothing goes in the unsafe top area).
+    Rectangle {
         id: topBar
-        width: parent.width
+        anchors { left: parent.left; right: parent.right; top: parent.top }
+        height: root._insetTop
+        color: root.uiBg
         z: 5
-        Accessible.name: "Top toolbar"
-        Accessible.role: Accessible.ToolBar
+    }
+
+// --- bottom chrome (navigation dock + dark toggle + system-nav strip) ---
+    // The Qt window is edge-to-edge; the dock sits above the system navigation
+    // bar (insetBottom) and its tab cells stay within the safe area, while a
+    // strip below repaints the nav-bar region in our background color.
+    Rectangle {
+        id: navDock
+        anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
+        height: navRow.height + root._insetBottom
+        z: 5
+        color: root.uiBg
 
         RowLayout {
-            anchors.fill: parent
-            anchors.leftMargin: 12
-            anchors.rightMargin: 8
-            spacing: 8
+            id: navRow
+            anchors { left: parent.left; right: parent.right; top: parent.top }
+            spacing: 0
 
-            Label {
+            TabBar {
+                id: navBar
                 Layout.fillWidth: true
-                elide: Text.ElideRight
-                text: root.state === 0 ? "Search"
-                    : root.state === 1 ? "Dictionaries (" + engine.dictCount + ")"
-                    : root.state === 3 ? "Groups (" + engine.groups.length + ")"
-                    : root.state === 4 ? "FTS (" + root.ftsResults.length + ")"
-                    : root.state === 6 ? "Favorites (" + engine.favorites.length + ")"
-                    : root.currentWord
+                // TabBar tabs tile the bar exactly (spacing 0 + exact-fill
+                // widths) so the row is never horizontally scrollable.
+                spacing: 0
+                clip: true
+                Accessible.name: "Main navigation"
+                Accessible.role: Accessible.TabBar
+                // 5.2: highlight the active tab by driving the TabBar's own
+                // selection (TabButton has no `highlighted` in Qt 6.6). State ->
+                // tab position via _tabIndexForState(); article pane has no tab.
+                currentIndex: root._tabIndexForState()
+
+                Repeater {
+                    model: root.navItems
+                    delegate: TabButton {
+                        id: tabBtn
+                        // Equal-width tabs: five tabs share the dock minus the
+                        // dark-mode slot, so every cell is the same width.
+                        width: navBar.width / root.navItems.length
+                        height: parent.height
+                        // icon glyph + label in the theme font (a single-font
+                        // `text` would render the icon glyphs as broken Latin).
+                        contentItem: Column {
+                            anchors.centerIn: parent
+                            spacing: 0
+                            Text {
+                                anchors.horizontalCenter: parent.horizontalCenter
+                                text: root.icon(modelData.icon)
+                                font.family: root.iconFontFamily
+                                font.pixelSize: 18
+                                color: tabBtn.down || tabBtn.checked ? tabBtn.Material.accentColor
+                                                                     : tabBtn.Material.foreground
+                            }
+                            Text {
+                                anchors.horizontalCenter: parent.horizontalCenter
+                                text: modelData.label
+                                font.pixelSize: 10
+                                color: tabBtn.down || tabBtn.checked ? tabBtn.Material.accentColor
+                                                                      : tabBtn.Material.foreground
+                            }
+                        }
+                        Accessible.name: modelData.label
+                        Accessible.role: Accessible.TabButton
+                        onClicked: root._navTo(modelData.idx)
+                    }
+                }
             }
 
+            // Dark-mode toggle lives in the bottom dock (one slot wide).
             ToolButton {
-                // Manual dark override D toggle. When following system it forces
-                // dark; when forcing dark it returns to following the system theme.
-                property string _name: "dark_mode"
-                Accessible.name: engine.userDarkOverride || engine.systemDark ? "Light mode" : "Dark mode"
-                Accessible.role: Accessible.Button
+                Layout.preferredWidth: root.width / 6
+                Layout.fillHeight: true
                 text: root.icon("dark_mode")
                 font.family: root.iconFontFamily
                 font.pixelSize: 20
-                ToolTip.visible: hovered
-                ToolTip.text: engine.userDarkOverride ? "Dark (forced) — tap to follow system"
-                                                       : "Follow system — tap to force dark"
+                Accessible.name: engine.userDarkOverride || engine.systemDark ? "Light mode" : "Dark mode"
+                Accessible.role: Accessible.Button
                 onClicked: {
                     engine.toggleDarkOverride()
                     root._blurActive()
                 }
             }
         }
-    }
 
-    // --- bottom navigation (Material TabBar, replaces the old cycle button) ---
-    TabBar {
-        id: navBar
-        // 5.2: anchor to the BOTTOM. Without anchors the TabBar defaulted to
-        // (0,0) and rendered as a second top bar overlapping the ToolBar; every
-        // pane (bottom: navBar.top) then collapsed against y=0.
-        anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
-        z: 5
-        // Force the bar to exactly fill the screen width with no gaps and no
-        // room for the tabs to be scrollable: spacing 0 + each button sized to
-        // a precise fraction of the bar's own width. (A TabBar only becomes
-        // horizontally scrollable when its tabs' total width exceeds the bar,
-        // so exact-fill prevents any off-screen drag.)
-        spacing: 0
-        clip: true
-        Accessible.name: "Main navigation"
-        Accessible.role: Accessible.TabBar
-        // 5.2: highlight the active tab by driving the TabBar's own selection
-        // (TabButton has no `highlighted` in Qt 6.6). State -> tab position via
-        // _tabIndexForState(); the article pane (state 2) has no tab.
-        currentIndex: root._tabIndexForState()
-
-        Repeater {
-            model: root.navItems
-            delegate: TabButton {
-                id: tabBtn
-                // Equal-width tabs from the bar's own (anchored) width, so the
-                // tabs tile the bar exactly with no leftover space that
-                // would make it horizontally scrollable.
-                width: navBar.width / root.navItems.length
-                height: parent.height
-                // 5.3: icon glyph in the Material Icons font + label in the theme
-                // font. The default TabButton renders `text` in a single font, so
-                // applying the icon font hid the labels (icon font has no Latin
-                // glyphs). Custom two-line contentItem mirrors the Material
-                // TabButton color rule (checked/down -> accent).
-                contentItem: Column {
-                    anchors.centerIn: parent
-                    spacing: 0
-                    Text {
-                        anchors.horizontalCenter: parent.horizontalCenter
-                        text: root.icon(modelData.icon)
-                        font.family: root.iconFontFamily
-                        font.pixelSize: 18
-                        color: tabBtn.down || tabBtn.checked ? tabBtn.Material.accentColor
-                                                             : tabBtn.Material.foreground
-}
-                    Text {
-                        anchors.horizontalCenter: parent.horizontalCenter
-                        text: modelData.label
-                        font.pixelSize: 10
-                        color: tabBtn.down || tabBtn.checked ? tabBtn.Material.accentColor
-                                                              : tabBtn.Material.foreground
-                    }
-                }
-                Accessible.name: modelData.label
-                Accessible.role: Accessible.TabButton
-                onClicked: root._navTo(modelData.idx)
-            }
+        // Repaint the system-navigation-bar strip in our background color.
+        Rectangle {
+            anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
+            height: root._insetBottom
+            color: root.uiBg
         }
     }
 
@@ -2133,12 +2133,16 @@ ColumnLayout {
     Dialog {
         id: groupPicker
         anchors.centerIn: parent
-        width: Math.min(parent.width - 96, 360)
+        // A tall modal, like the dictionary/groups list: most of the screen
+        // height, with the group rows filling it and scrolling naturally.
+        width: parent.width - 48
+        height: parent.height * 0.8
         modal: true
         title: "Select group"
         Accessible.name: "Select group"
         Accessible.role: Accessible.Dialog
-        standardButtons: Dialog.Cancel
+        // No Cancel button — tapping outside (or Back) dismisses.
+        closePolicy: Popup.CloseOnPressOutside | Popup.CloseOnEscape
         function openAt(index) {
             // Tear down the inline WebView so its native surface can't sit above
             // the modal dialog. Its document/history survive in currentHtml; the
@@ -2162,26 +2166,40 @@ ColumnLayout {
             else root._showHistoryOverlay()
         }
         onOpened: {
-            // Start selection at the currently-active group.
+            // Scroll to the currently-active group.
             if (searchGroupCombo.currentIndex >= 0 && searchGroupCombo.currentIndex < engine.groups.length)
                 groupPickerList.positionViewAtIndex(searchGroupCombo.currentIndex, ListView.Center)
         }
 
         contentItem: ColumnLayout {
-            spacing: 4
+            spacing: 8
+
+            Label {
+                Layout.fillWidth: true
+                Layout.leftMargin: 16
+                Layout.rightMargin: 16
+                text: "Groups"
+                font.pixelSize: 15
+                font.bold: true
+                color: root.uiSubFg
+            }
+
             ListView {
                 id: groupPickerList
                 Layout.fillWidth: true
-                Layout.preferredHeight: Math.min(engine.groups.length * 48, 320)
+                Layout.fillHeight: true
                 model: engine.groups
                 clip: true
+                currentIndex: searchGroupCombo.currentIndex
+                boundsBehavior: Flickable.StopAtBounds
                 Accessible.name: "Select group"
                 Accessible.role: Accessible.List
                 delegate: ItemDelegate {
                     width: groupPickerList.width
-                    height: 48
+                    height: 56
                     text: modelData.name
                     highlighted: groupPickerList.currentIndex === index
+                    font.pixelSize: 16
                     Accessible.name: modelData.name
                     Accessible.role: Accessible.ListItem
                     onClicked: {

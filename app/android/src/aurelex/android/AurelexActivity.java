@@ -158,6 +158,47 @@ public class AurelexActivity extends QtActivity {
         }
     }
 
+    /**
+     * Height (px) of the system status-bar inset at the top of the screen.
+     * The Qt window runs edge-to-edge (no Android insets applied), so the QML
+     * layer must offset its own top chrome below the status icons. Favors the
+     * window's reported inset; falls back to the resource dimension.
+     */
+    public static int getSystemInsetTop() {
+        try {
+            android.app.Activity activity = QtNative.activity();
+            if (activity != null) {
+                android.view.WindowInsets wi = activity.getWindow().getDecorView().getRootWindowInsets();
+                if (wi != null && wi.getSystemWindowInsetTop() > 0) return wi.getSystemWindowInsetTop();
+            }
+            int id = activity.getResources().getIdentifier("status_bar_height", "dimen", "android");
+            return id > 0 ? activity.getResources().getDimensionPixelSize(id) : 0;
+        } catch (Exception e) {
+            android.util.Log.w(TAG, "getSystemInsetTop failed: " + e);
+            return 0;
+        }
+    }
+
+    /**
+     * Height (px) of the system navigation-bar inset at the bottom.
+     * Same edge-to-edge rationale as {@link #getSystemInsetTop}: the bottom
+     * chrome must sit above the gesture/3-button nav area.
+     */
+    public static int getSystemInsetBottom() {
+        try {
+            android.app.Activity activity = QtNative.activity();
+            if (activity != null) {
+                android.view.WindowInsets wi = activity.getWindow().getDecorView().getRootWindowInsets();
+                if (wi != null && wi.getSystemWindowInsetBottom() > 0) return wi.getSystemWindowInsetBottom();
+            }
+            int id = activity.getResources().getIdentifier("navigation_bar_height", "dimen", "android");
+            return id > 0 ? activity.getResources().getDimensionPixelSize(id) : 0;
+        } catch (Exception e) {
+            android.util.Log.w(TAG, "getSystemInsetBottom failed: " + e);
+            return 0;
+        }
+    }
+
     @Override
     public void onConfigurationChanged(Configuration newConfig) {
         super.onConfigurationChanged(newConfig);

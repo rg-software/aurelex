@@ -213,6 +213,12 @@ public:
     // app-private storage and then scanned + indexed (a one-off import).
     Q_INVOKABLE void addDictionaryFolder();
 
+    // System-window inset heights (physical px) read from the Android activity:
+    // the Qt window runs edge-to-edge, so QML offsets its top/bottom chrome
+    // above the status bar / navigation bar itself. 0 off-Android.
+    Q_INVOKABLE int systemInsetTop() const;
+    Q_INVOKABLE int systemInsetBottom() const;
+
 signals:
     void dictCountChanged();
     void readyChanged();

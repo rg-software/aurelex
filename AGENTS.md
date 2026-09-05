@@ -88,8 +88,8 @@ elements in automated tests:
 | Nav | Groups tab | `"Groups"` |
 | Nav | Full-text search tab | `"Full-text search"` |
 | Nav | Favorites tab | `"Favorites"` |
-| Top | ToolBar | `"Top toolbar"` |
-| Top | Dark-mode toggle | `"Light mode"` / `"Dark mode"` (dynamic) |
+| Nav | Dark-mode toggle | `"Light mode"` / `"Dark mode"` (dynamic); the last (6th) slot in the bottom dock |
+| Top | Status strip | No interactive content — paints the edge-to-edge window's top chrome in the app background |
 | Search | ComboBox | `"Search group scope"` |
 | Search | TextField | `"Search dictionaries"` |
 | Search | Clipboard button | `"Clipboard"` |

@@ -965,6 +965,30 @@ QString EngineController::articleBaseUrl() const {
     return (m_articleServer && m_articleServer->isRunning()) ? m_articleServer->baseUrl() : QString();
 }
 
+int EngineController::systemInsetTop() const
+{
+#if defined(Q_OS_ANDROID)
+    return QJniObject::callStaticMethod<jint>(
+        "aurelex/android/AurelexActivity",
+        "getSystemInsetTop",
+        "()I");
+#else
+    return 0;
+#endif
+}
+
+int EngineController::systemInsetBottom() const
+{
+#if defined(Q_OS_ANDROID)
+    return QJniObject::callStaticMethod<jint>(
+        "aurelex/android/AurelexActivity",
+        "getSystemInsetBottom",
+        "()I");
+#else
+    return 0;
+#endif
+}
+
 void EngineController::playAudio(const QString &url) {
 #if defined(Q_OS_ANDROID)
     // JNI passthrough to AurelexActivity.playAudio(String) — Android's
