@@ -116,10 +116,25 @@ ApplicationWindow {
     }
     onStateChanged: {
         if (root.state !== 0) {
+            // Leaving the Search tab: mark that a return should restore the
+            // field's focus and re-trigger suggestions (the inline WebView and
+            // its suggestion overlay are destroyed on leaving).
+            root._returningToSearch = true
             root.inlineWebReady = false
             root.inlineWebTimer.stop()
+        } else if (root._returningToSearch) {
+            // Back on the Search tab: refocus the field (so Enter works again)
+            // and re-populate candidates for the text that's still typed. The
+            // fresh inline WebView is (re)created by inlineWebTimer shortly
+            // after; the pending suggestions are flushed once it's ready.
+            root._returningToSearch = false
+            input.forceActiveFocus()
+            if (input.text.trim().length > 0) searchPane._doSuggest()
         }
     }
+    // Guards the onStateChanged re-focus/re-suggest so it only runs on an
+    // actual return to Search, not on first show.
+    property bool _returningToSearch: false
     function _clearInlineArticle() {
         root.inlineArticle = false
         root.currentWord = ""
@@ -589,8 +604,6 @@ ColumnLayout {
                         // Re-render an already-loaded article when returning to
                         // the tab (the WebView was just recreated).
                         if (root.currentHtml.length > 0) articleLoadTimer.restart()
-                        // Suggestions may have arrived before the WebView existed.
-                        root._flushPendingSugg()
                     }
                     onActiveChanged: if (!active) root.inlineWv = null
                     sourceComponent: Component {
@@ -626,7 +639,9 @@ ColumnLayout {
                                     return
                                 }
                             }
-                            onLoadingChanged: console.log("Search WebView loading:", loading, "url:", url)
+                            onLoadingChanged: {
+                                if (!loading) root._flushPendingSugg()
+                            }
                             onHeightChanged: {
                                 if (root.state === 0 && root.inlineArticle
                                     && searchArticleView.height !== root.loadedAtHeight
