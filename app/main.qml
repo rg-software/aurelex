@@ -34,13 +34,13 @@ ApplicationWindow {
     property string currentWord: ""
     property string currentHtml: ""
     property var ftsResults: []
-    // The article WebView is created on demand (articleLoader) to avoid
-    // standing up a full-bleed native Android WebView over the UI at startup;
-    // root.view aliases the loaded item (null until article mode).
-    property var view: articleLoader.item
-    // Back-stack for in-article navigation. Each entry is a {word, html} pair
-    // so the Back button can pop to the previous article without losing scroll
-    // position (we re-render the prior article's HTML).
+    // The article WebView is the Search tab's inline pane (articleLoader aliases
+    // it); there is no separate full-pane article view — every article opens in
+    // the inline Search surface.
+    // Back-stack for in-article navigation. Each entry is a {word, html, group}
+    // triple so the Back button can pop to the previous article without losing
+    // scroll position (we re-render the prior article's HTML) and restore the
+    // dictionary group it was produced in.
     property var navStack: []
     // Browser-like redo stack: words the user backed out of, re-opened by the
     // Forward control. Cleared whenever a fresh lookup happens (any new lookup
@@ -298,16 +298,20 @@ ApplicationWindow {
                 html += '<div style="padding:20px 16px;color:#999;text-align:center;">No lookups yet</div>'
             } else {
                 // Recent lookups, most recent first, each tap-to-lookup with a
-                // per-row remove; plus a Clear all row. Rows are anchors with
-                // data-w (lookup) and buttons with data-action (remove/clear);
-                // the articleLinkPoller dispatches both.
+                // per-row remove; plus a Clear all row. The word is the entry's
+                // `.word`; removal targets the exact (word, group) pair via
+                // data-w + data-group. The articleLinkPoller dispatches both.
                 for (var h = 0; h < words.length; ++h) {
-                    const hw = words[h]
+                    const hwObj = words[h]
+                    const hw = typeof hwObj === "string" ? hwObj : hwObj.word
+                    const hg = (typeof hwObj === "string") ? 0 : (hwObj.group || 0)
                     html += '<div style="display:flex;align-items:center;border-bottom:1px solid ' + sep + ';">'
-                        + '<a id="gd-sugg-link" href="javascript:;" data-w="' + root._escHtml(hw)
+                        + '<a id="gd-sugg-link" href="javascript:;" data-action="open-history" data-w="' + root._escHtml(hw)
+                        + '" data-group="' + hg
                         + '" style="flex:1;padding:12px 16px;text-decoration:none;color:inherit;overflow:hidden;'
                         + 'text-overflow:ellipsis;white-space:nowrap;">' + root._escHtml(hw) + '</a>'
                         + '<button data-action="remove-history" data-w="' + root._escHtml(hw)
+                        + '" data-group="' + hg
                         + '" style="border:0;background:none;color:#999;font-size:18px;padding:4px 16px;">✕</button>'
                         + '</div>'
                 }
@@ -384,13 +388,17 @@ ApplicationWindow {
         if (currentWord !== "" && currentWord !== word) {
             // Reassign a NEW array: push()/pop() on a `property var` don't
             // notify QML, so a binding on navStack.length would go stale.
-            // (Nothing binds navStack.length today, but keep mutations
-            // non-destructive for consistency.)
-            root.navStack = root.navStack.concat([{ word: currentWord, html: currentHtml }])
+            // Capture the producing group (engine.activeGroupId) so Back/Forward
+            // can restore the scope the article was rendered in.
+            root.navStack = root.navStack.concat([{ word: currentWord,
+                                                    html: currentHtml,
+                                                    group: engine.activeGroupId }])
             // A fresh lookup invalidates any forward (redo) path. Reassign too
             // so the Forward buttons' `enabled` binding re-evaluates to false.
             root.fwdStack = []
         }
+        // Route any lookup to the Search tab's inline surface.
+        if (root.state !== 0) state = 0
         currentWord = word
         currentHtml = html
         // Show the looked-up term in the search box (users see the article +
@@ -399,14 +407,8 @@ ApplicationWindow {
         input.text = word
         root._suppressSuggest = false
         _blurActive()
-        if (state === 0) {
-            // Inline mode: show article below suggestions in the search tab.
-            inlineArticle = true
-            articleLoadTimer.restart()
-        } else {
-            state = 2
-            articleLoadTimer.restart()
-        }
+        inlineArticle = true
+        articleLoadTimer.restart()
     }
     function _backFromArticle() {
         if (navStack.length === 0) {
@@ -424,47 +426,75 @@ ApplicationWindow {
             state = 0
             return
         }
+        const prev = root.navStack[root.navStack.length - 1]
+        root.navStack = root.navStack.slice(0, root.navStack.length - 1)
         // Push the article we're leaving onto the forward stack (new array so
         // the Forward buttons' enabled binding sees the change).
         if (root.currentWord.length > 0) {
-            root.fwdStack = root.fwdStack.concat([{ word: currentWord, html: currentHtml }])
+            root.fwdStack = root.fwdStack.concat([{ word: currentWord,
+                                                    html: currentHtml,
+                                                    group: engine.activeGroupId }])
         }
-        const prev = root.navStack[root.navStack.length - 1]
-        root.navStack = root.navStack.slice(0, root.navStack.length - 1)
+        // Restore the group the previous article was produced in (fallback All)
+        // before rendering it, and render inline.
+        root._applyGroupForNav(prev.group)
         currentWord = prev.word
         currentHtml = prev.html
         // Reflect the previous article's word in the search box.
         root._suppressSuggest = true
         input.text = prev.word
         root._suppressSuggest = false
-        if (root.inlineArticle) {
-            // Stay in inline mode, re-render the previous article.
-            articleLoadTimer.restart()
-        } else {
-            state = 2
-            articleLoadTimer.restart()
-        }
+        inlineArticle = true
+        articleLoadTimer.restart()
     }
     function _forwardFromArticle() {
         if (root.fwdStack.length === 0) return
-        // Moving forward returns us to where we'd be on the back path.
-        if (root.currentWord.length > 0) {
-            root.navStack = root.navStack.concat([{ word: currentWord, html: currentHtml }])
-        }
         const next = root.fwdStack[root.fwdStack.length - 1]
         root.fwdStack = root.fwdStack.slice(0, root.fwdStack.length - 1)
+        // Moving forward returns us to where we'd be on the back path.
+        if (root.currentWord.length > 0) {
+            root.navStack = root.navStack.concat([{ word: currentWord,
+                                                    html: currentHtml,
+                                                    group: engine.activeGroupId }])
+        }
+        // Restore the group then render inline.
+        root._applyGroupForNav(next.group)
         currentWord = next.word
         currentHtml = next.html
         // Reflect the next article's word in the search box.
         root._suppressSuggest = true
         input.text = next.word
         root._suppressSuggest = false
-        if (root.inlineArticle) {
-            articleLoadTimer.restart()
+        inlineArticle = true
+        articleLoadTimer.restart()
+    }
+    // Restore a stored group (fallback to "All"=0 if the group no longer exists)
+    // and keep the Search group picker's selection in sync.
+    function _applyGroupForNav(groupId) {
+        if (engine.groupExists(groupId)) {
+            engine.setActiveGroup(groupId)
+            searchGroupCombo.currentIndex = root._groupIndexForId(groupId)
         } else {
-            state = 2
-            articleLoadTimer.restart()
+            engine.setActiveGroup(0)
+            searchGroupCombo.currentIndex = root._groupIndexForId(0)
         }
+    }
+    function _groupIndexForId(groupId) {
+        for (var i = 0; i < engine.groups.length; ++i) {
+            if (engine.groups[i].id === groupId) return i
+        }
+        return 0
+    }
+    // Is `word` a favorite in the given group (favorites are {word, group})?
+    function _isFavorite(word, group) {
+        const favs = engine.favorites
+        for (var i = 0; i < favs.length; ++i) {
+            const e = favs[i]
+            const w = (typeof e === "string") ? e : e.word
+            const g = (typeof e === "string") ? 0 : (e.group || 0)
+            if (w === word && g === group) return true
+        }
+        return false
     }
     function _blurActive() {
         if (root.activeFocusItem && root.activeFocusItem.forceActiveFocus === undefined) return
@@ -509,11 +539,11 @@ ApplicationWindow {
         { idx: 4, label: "FTS",      icon: "manage_search" },
         { idx: 6, label: "Favs",     icon: "star" }
     ]
-    // Position of the nav-tab whose `idx` matches the current state (-1 = no
-    // matching tab, e.g. the article pane). Drives TabBar.currentIndex and the
-    // highlight; keeps the mapping in one place.
+    // Position of the nav-tab whose `idx` matches the current state (articles
+    // always live in the Search tab, so state 0 is always a match). Drives
+    // TabBar.currentIndex and the highlight; keeps the mapping in one place.
     function _tabIndexForState() {
-        if (root.state === 2) return -1
+        if (root.state === 2) return -1 // safety: no such state anymore
         for (var i = 0; i < root.navItems.length; ++i) {
             if (root.navItems[i].idx === root.state) return i
         }
@@ -884,7 +914,7 @@ ColumnLayout {
                             onClicked: root._forwardFromArticle()
                         }
                         ToolButton {
-                            property bool active: engine.favorites.indexOf(root.currentWord) >= 0
+                            property bool active: root._isFavorite(root.currentWord, engine.activeGroupId)
                             text: root.icon(active ? "star" : "star_border")
                             font.family: root.iconFontFamily
                             font.pixelSize: 22
@@ -1698,123 +1728,6 @@ ColumnLayout {
         }
     }
 
-    // --- article view ---
-    Rectangle {
-        id: articlePane
-        anchors { top: topBar.bottom; left: parent.left; right: parent.right; bottom: navDock.top }
-        color: root.uiBg
-        visible: root.state === 2
-
-        Rectangle {
-            width: parent.width
-            height: 44
-            // Frameless header: the icons sit directly on the pane.
-            z: 2
-
-            RowLayout {
-                anchors.fill: parent
-                anchors.leftMargin: 4
-                anchors.rightMargin: 4
-                spacing: 4
-
-                // Spacer right-justifies the controls.
-                Item { Layout.fillWidth: true }
-
-                // Back: arrow_back icon -> _backFromArticle.
-                ToolButton {
-                    text: root.icon("arrow_back")
-                    font.family: root.iconFontFamily
-                    font.pixelSize: 22
-                    Accessible.name: "Back"
-                    Accessible.role: Accessible.Button
-                    ToolTip.visible: hovered
-                    ToolTip.text: "Back"
-                    onClicked: root._backFromArticle()
-                }
-                // Forward: re-opens the article the user backed out of.
-                ToolButton {
-                    text: root.icon("arrow_forward")
-                    font.family: root.iconFontFamily
-                    font.pixelSize: 22
-                    enabled: root.fwdStack.length > 0
-                    Accessible.name: "Forward"
-                    Accessible.role: Accessible.Button
-                    ToolTip.visible: hovered
-                    ToolTip.text: "Forward"
-                    onClicked: root._forwardFromArticle()
-                }
-                // Favorite star, Material.primary when active.
-                ToolButton {
-                    property bool active: engine.favorites.indexOf(root.currentWord) >= 0
-                    text: root.icon(active ? "star" : "star_border")
-                    font.family: root.iconFontFamily
-                    font.pixelSize: 22
-                    Material.foreground: active ? Material.primary : root.uiSubFg
-                    Accessible.name: active ? "Remove from favorites" : "Add to favorites"
-                    Accessible.role: Accessible.Button
-                    ToolTip.visible: hovered
-                    ToolTip.text: active ? "Remove from favorites" : "Add to favorites"
-                    onClicked: engine.toggleFavorite(root.currentWord)
-                }
-            }
-        }
-
-        Loader {
-            id: articleLoader
-            anchors { top: parent.top; topMargin: 44; left: parent.left; right: parent.right; bottom: parent.bottom }
-            // Only create the full-pane WebView while the article pane is active.
-            // A native Android WebView kept alive while hidden still participates
-            // in the native view hierarchy and swallows touches across the whole
-            // UI (it coexisted with the inline search WebView -> unusable screen).
-            active: root.state === 2 && !root._geometryInvalid
-            sourceComponent: articleViewComponent
-            Accessible.name: "Article content"
-            Accessible.role: Accessible.Group
-        }
-    }
-
-    Component {
-        id: articleViewComponent
-        WebView {
-            id: view
-            Accessible.name: "Dictionary article"
-            Accessible.role: Accessible.WebView
-            onUrlChanged: {
-                const u = url.toString()
-                const base = engine.articleBaseUrl
-                if (base.length > 0 && u.indexOf(base + "/gdlookup/") === 0) {
-                    const word = _parseGdlookupHttpUrl(u, base)
-                    if (word.length > 0) {
-                        _gdlookupInFlight = word
-                        root._requestedWord = word
-                        engine.lookup(word)
-                    }
-                    view.loadHtml("<html><body></body></html>", engine.articleBaseUrl)
-                    return
-                }
-                if (u.indexOf("gdlookup://") === 0) {
-                    const word = _parseGdlookupUrl(u)
-                    if (word.length > 0) {
-                        _gdlookupInFlight = word
-                        root._requestedWord = word
-                        engine.lookup(word)
-                    }
-                    view.loadHtml("<html><body></body></html>", engine.articleBaseUrl)
-                    return
-                }
-                if (base.length > 0 && u.indexOf(base + "/gdau/") === 0) {
-                    engine.playAudio(u)
-                    view.loadHtml("<html><body></body></html>", engine.articleBaseUrl)
-                    return
-                }
-            }
-            onHeightChanged: {
-                if (root.state === 2 && view.height !== root.loadedAtHeight && root.currentHtml.length > 0)
-                    articleReloader.restart()
-            }
-        }
-    }
-
     function _parseGdlookupUrl(u) {
         const q = u.indexOf("?")
         if (q >= 0) {
@@ -1871,7 +1784,8 @@ ColumnLayout {
             Accessible.role: Accessible.List
             delegate: ItemDelegate {
                 id: favRow
-                property string word: modelData
+                property string word: typeof modelData === "string" ? modelData : modelData.word
+                property int group: (typeof modelData === "string") ? 0 : (modelData.group || 0)
                 width: ListView.view.width
                 height: 48
                 Accessible.name: favRow.word
@@ -1893,10 +1807,13 @@ ColumnLayout {
                         flat: true
                         Accessible.name: "Remove"
                         Accessible.role: Accessible.Button
-                        onClicked: engine.toggleFavorite(favRow.word)
+                        onClicked: engine.toggleFavoriteEntry(favRow.word, favRow.group)
                     }
                 }
-                onClicked: { root._requestedWord = favRow.word; engine.lookup(favRow.word) }
+                onClicked: {
+                    root._requestedWord = favRow.word
+                    engine.lookupInGroupWithSwitch(favRow.word, favRow.group)
+                }
             }
         }
     }
@@ -1938,7 +1855,7 @@ ColumnLayout {
     Connections {
         target: engine
         function onArticleBaseUrlChanged() {
-            if ((state === 2 || (state === 0 && inlineArticle)) && currentHtml.length > 0)
+            if (root.inlineArticle && currentHtml.length > 0)
                 _loadArticleNow()
             else if (state === 0) root._ensureInlineBlank()
         }
@@ -1961,23 +1878,18 @@ ColumnLayout {
     function _loadArticleNow() {
         const html = engine.rewriteArticleUrls(currentHtml)
         const base = engine.articleBaseUrl.length > 0 ? engine.articleBaseUrl + "/" : ""
-        if (state === 0 && inlineArticle && root.inlineWv) {
+        if (root.inlineWv) {
             loadedAtHeight = root.inlineWv.height
             root.inlineWv.loadHtml(html, base)
-            return
         }
-        if (state !== 2) return
-        loadedAtHeight = view.height
-        view.loadHtml(html, base)
     }
     // Flip the OPEN article's dark mode in place via the injected gdSetDarkMode
     // controller — instant, no reload, scroll position preserved. No article
     // open? The next rendered document gets the baked-in mode from
     // rewriteArticleUrls, so nothing to do here.
     function _applyArticleDarkMode() {
-        const wv = (state === 0 && root.inlineWv) ? root.inlineWv : (state === 2 ? view : null)
-        if (wv && wv.url.toString().length > 5) {
-            wv.runJavaScript("try{if(window.gdSetDarkMode)gdSetDarkMode("
+        if (root.inlineWv && root.inlineWv.url.toString().length > 5) {
+            root.inlineWv.runJavaScript("try{if(window.gdSetDarkMode)gdSetDarkMode("
                 + (engine.darkMode ? 1 : 0) + ");}catch(e){}")
         }
     }
@@ -1987,10 +1899,10 @@ ColumnLayout {
         // enough to not hammer the WebView with runJavaScript calls.
         interval: 120
         repeat: true
-        running: root.state === 2 || root.state === 0
+        running: root.state === 0
         onTriggered: {
-            // Pick the active WebView: inline in search or full article pane.
-            const wv = (root.state === 0 && root.inlineWv) ? root.inlineWv : view
+            // Only the inline Search article exists now.
+            const wv = root.inlineWv
             if (!wv || wv.url.toString().length < 5) return
             wv.runJavaScript(
                 "if(!window.__probeInstalled){"
@@ -1998,7 +1910,7 @@ ColumnLayout {
                 + "document.addEventListener('click',function(e){"
                 + "var n=e.target.closest?e.target.closest('[data-action],[data-w]'):null;"
                 + "if(n){"
-                + "if(n.getAttribute('data-action')){window.__gdAction=n.getAttribute('data-action')+'|'+(n.getAttribute('data-w')||'');}"
+                + "if(n.getAttribute('data-action')){window.__gdAction=n.getAttribute('data-action')+'|'+(n.getAttribute('data-w')||'')+'|'+(n.getAttribute('data-group')||'');}"
                 + "else if(n.tagName==='A'){window.__suggWord=n.getAttribute('data-w');}"
                 + "e.preventDefault();return;}"
                 + "var a=e.target.closest?e.target.closest('a'):null;"
@@ -2010,18 +1922,24 @@ ColumnLayout {
                 function(v){
                     if (!v) return
                     if (v.indexOf("ACT:") === 0) {
-                        // History overlay actions: remove-history|<word> or clear-history|.
+                        // History overlay actions: remove-history|word|group or
+                        // clear-history|. Per-entry removal uses (word, group).
                         const rest = v.substring(4)
-                        const bar = rest.indexOf("|")
-                        const action = bar >= 0 ? rest.substring(0, bar) : rest
-                        const arg = bar >= 0 ? rest.substring(bar + 1) : ""
+                        const parts = rest.split("|")
+                        const action = parts[0] || ""
+                        const arg = parts[1] || ""
+                        const grp = parseInt(parts[2] || "0", 10)
                         if (action === "remove-history" && arg.length > 0) {
-                            engine.removeHistory(arg)
+                            engine.removeHistoryEntry(arg, isNaN(grp) ? 0 : grp)
                             // The tap happened inside the WebView, so Qt focus is
                             // not on the search field even though it looks focused
                             // (keyboard may still show). Put focus back so the
                             // next keystroke actually types.
                             input.forceActiveFocus()
+                        }
+                        else if (action === "open-history" && arg.length > 0) {
+                            root._requestedWord = arg
+                            engine.lookupInGroupWithSwitch(arg, isNaN(grp) ? 0 : grp)
                         }
                         else if (action === "clear-history") {
                             engine.clearHistory()
@@ -2172,7 +2090,7 @@ ColumnLayout {
                         if (ftsGroupCombo.currentIndex >= 0 && engine.groups.length > 0)
                             gid = engine.groups[ftsGroupCombo.currentIndex].id
                         root._requestedWord = modelData.headword
-                        engine.lookupInGroup(modelData.headword, gid)
+                        engine.lookupInGroupWithSwitch(modelData.headword, gid)
                     }
                 }
             }
@@ -2263,8 +2181,12 @@ ColumnLayout {
                             engine.setActiveGroup(g.id)
                             searchGroupCombo.currentIndex = index
                             groupPickerList.currentIndex = index
-                            // Re-run suggestions for the newly selected scope.
-                            if (input.displayText.trim().length > 0) searchPane._doSuggest()
+                            // Group change re-runs the candidate surface only —
+                            // no navigation or article re-render.
+                            if (input.displayText.trim().length > 0)
+                                searchPane._doSuggest()
+                            else
+                                root._showHistoryOverlay()
                         }
                         groupPicker.close()
                     }

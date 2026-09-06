@@ -1139,6 +1139,39 @@ void EngineController::lookupInGroup(const QString &word, int groupId) {
     w->setFuture(f);
 }
 
+// Group-restoring lookup used by history/favorites taps and Back/Forward. If
+// `groupId` still exists, make it the active group and look up in it (so the
+// Search scope + history recording agree); otherwise fall back to "All" (0).
+void EngineController::lookupInGroupWithSwitch(const QString &word, int groupId)
+{
+    const int target = groupExists(groupId) ? groupId : 0;
+    QFuture<QPair<int, QString>> f = QtConcurrent::run([word, target]{
+        int rc = gd_group_set_active(target);
+        int active = 0;
+        if (rc == 0) gd_group_active(&active);
+        std::vector<char> buf(1 << 20);
+        const int sz = gd_lookup_in_group(word.toLocal8Bit().constData(), target,
+                                          buf.data(), static_cast<int>(buf.size()));
+        QString html;
+        if (sz > 0) html = QString::fromUtf8(buf.data(), sz);
+        return QPair<int, QString>(active, html);
+    });
+    auto *w = new QFutureWatcher<QPair<int, QString>>(this);
+    connect(w, &QFutureWatcher<QPair<int, QString>>::finished, this, [this, word, w]{
+        const QPair<int, QString> result = w->result();
+        setActiveGroupId(result.first);
+        const QString html = result.second;
+        if (html.isEmpty()) {
+            emit articleNotFound(word);
+        } else {
+            recordHistory(word);
+            emit articleLoaded(word, html);
+        }
+        w->deleteLater();
+    });
+    w->setFuture(f);
+}
+
 void EngineController::suggest(const QString &prefix) {
     qInfo() << "[aurelex] suggest firing:" << prefix;
     // Only the latest request may emit: while the user keeps typing (or the
@@ -1282,11 +1315,24 @@ QVariantList EngineController::ftsSearch(const QString &query, int mode, int gro
 void EngineController::loadHistory()
 {
     const QString path = m_appDir + "/history.json";
+    QVariantList list;
     QFile f(path);
-    if (!f.open(QIODevice::ReadOnly)) { setHistory(QStringList()); return; }
-    const QJsonDocument doc = QJsonDocument::fromJson(f.readAll());
-    QStringList list;
-    for (const QJsonValue &v : doc.array()) list.append(v.toString());
+    if (f.open(QIODevice::ReadOnly)) {
+        const QJsonDocument doc = QJsonDocument::fromJson(f.readAll());
+        for (const QJsonValue &v : doc.array()) {
+            QVariantMap m;
+            if (v.isString()) {
+                // Legacy plain-string entry → group 0 ("All").
+                m.insert("word", v.toString());
+                m.insert("group", 0);
+            } else {
+                m = v.toObject().toVariantMap();
+                if (!m.contains("group")) m.insert("group", 0);
+            }
+            if (m.value("word").toString().isEmpty()) continue;
+            list.append(m);
+        }
+    }
     setHistory(list);
 }
 
@@ -1296,18 +1342,37 @@ void EngineController::saveHistory()
     QFile f(path);
     if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate)) return;
     QJsonArray arr;
-    for (const QString &w : m_history) arr.append(w);
+    for (const QVariant &entry : m_history) {
+        const QVariantMap m = entry.toMap();
+        QJsonObject o;
+        o.insert("word", m.value("word").toString());
+        o.insert("group", m.value("group").toInt());
+        arr.append(o);
+    }
     f.write(QJsonDocument(arr).toJson(QJsonDocument::Compact));
 }
 
 void EngineController::loadFavorites()
 {
     const QString path = m_appDir + "/favorites.json";
+    QVariantList list;
     QFile f(path);
-    if (!f.open(QIODevice::ReadOnly)) { setFavorites(QStringList()); return; }
-    const QJsonDocument doc = QJsonDocument::fromJson(f.readAll());
-    QStringList list;
-    for (const QJsonValue &v : doc.array()) list.append(v.toString());
+    if (f.open(QIODevice::ReadOnly)) {
+        const QJsonDocument doc = QJsonDocument::fromJson(f.readAll());
+        for (const QJsonValue &v : doc.array()) {
+            QVariantMap m;
+            if (v.isString()) {
+                // Legacy plain-string entry → group 0 ("All").
+                m.insert("word", v.toString());
+                m.insert("group", 0);
+            } else {
+                m = v.toObject().toVariantMap();
+                if (!m.contains("group")) m.insert("group", 0);
+            }
+            if (m.value("word").toString().isEmpty()) continue;
+            list.append(m);
+        }
+    }
     setFavorites(list);
 }
 
@@ -1317,22 +1382,52 @@ void EngineController::saveFavorites()
     QFile f(path);
     if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate)) return;
     QJsonArray arr;
-    for (const QString &w : m_favorites) arr.append(w);
+    for (const QVariant &entry : m_favorites) {
+        const QVariantMap m = entry.toMap();
+        QJsonObject o;
+        o.insert("word", m.value("word").toString());
+        o.insert("group", m.value("group").toInt());
+        arr.append(o);
+    }
     f.write(QJsonDocument(arr).toJson(QJsonDocument::Compact));
 }
 
-void EngineController::setHistory(const QStringList &list)
+void EngineController::setHistory(const QVariantList &list)
 {
     if (m_history == list) return;
     m_history = list;
     emit historyChanged();
 }
 
-void EngineController::setFavorites(const QStringList &list)
+void EngineController::setFavorites(const QVariantList &list)
 {
     if (m_favorites == list) return;
     m_favorites = list;
     emit favoritesChanged();
+}
+
+QStringList EngineController::historyWords() const
+{
+    QStringList out;
+    for (const QVariant &e : m_history)
+        out << e.toMap().value("word").toString();
+    return out;
+}
+
+QStringList EngineController::favoritesWords() const
+{
+    QStringList out;
+    for (const QVariant &e : m_favorites)
+        out << e.toMap().value("word").toString();
+    return out;
+}
+
+bool EngineController::groupExists(int groupId) const
+{
+    for (const QVariant &g : m_groups) {
+        if (g.toMap().value("id").toInt() == groupId) return true;
+    }
+    return false;
 }
 
 void EngineController::setUserDarkOverride(bool on)
@@ -1509,12 +1604,18 @@ void EngineController::saveSettings()
 void EngineController::recordHistory(const QString &word)
 {
     if (word.isEmpty()) return;
-    // Dedupe + move-to-front, cap at 100.
-    QStringList updated;
-    updated.append(word);
-    for (const QString &w : m_history) {
-        if (w == word) continue;
-        updated.append(w);
+    // Dedupe + move-to-front (same word+group considered one entry), cap at 100.
+    const int group = m_activeGroupId;
+    QVariantList updated;
+    QVariantMap head;
+    head.insert("word", word);
+    head.insert("group", group);
+    updated.append(head);
+    for (const QVariant &entry : m_history) {
+        const QVariantMap m = entry.toMap();
+        if (m.value("word").toString() == word && m.value("group").toInt() == group)
+            continue;
+        updated.append(entry);
     }
     while (updated.size() > 100) updated.removeLast();
     setHistory(updated);
@@ -1523,24 +1624,78 @@ void EngineController::recordHistory(const QString &word)
 
 void EngineController::toggleFavorite(const QString &word)
 {
-    QStringList updated = m_favorites;
-    if (updated.contains(word)) updated.removeAll(word);
-    else updated.append(word);
+    if (word.isEmpty()) return;
+    const int group = m_activeGroupId;
+    // Remove an existing favorite with the same word+group, else add it.
+    QVariantList updated;
+    bool present = false;
+    for (const QVariant &entry : m_favorites) {
+        const QVariantMap m = entry.toMap();
+        if (m.value("word").toString() == word && m.value("group").toInt() == group) {
+            present = true;
+            continue;
+        }
+        updated.append(entry);
+    }
+    if (!present) {
+        QVariantMap m;
+        m.insert("word", word);
+        m.insert("group", group);
+        updated.append(m);
+    }
     setFavorites(updated);
     saveFavorites();
 }
 
 void EngineController::removeHistory(const QString &word)
 {
-    QStringList updated = m_history;
-    updated.removeAll(word);
+    QVariantList updated;
+    for (const QVariant &entry : m_history) {
+        if (entry.toMap().value("word").toString() == word) continue;
+        updated.append(entry);
+    }
     setHistory(updated);
     saveHistory();
 }
 
+void EngineController::removeHistoryEntry(const QString &word, int group)
+{
+    QVariantList updated;
+    for (const QVariant &entry : m_history) {
+        const QVariantMap m = entry.toMap();
+        if (m.value("word").toString() == word && m.value("group").toInt() == group)
+            continue;
+        updated.append(entry);
+    }
+    setHistory(updated);
+    saveHistory();
+}
+
+void EngineController::toggleFavoriteEntry(const QString &word, int group)
+{
+    QVariantList updated;
+    bool present = false;
+    for (const QVariant &entry : m_favorites) {
+        const QVariantMap m = entry.toMap();
+        if (m.value("word").toString() == word && m.value("group").toInt() == group) {
+            present = true;
+            continue;
+        }
+        updated.append(entry);
+    }
+    if (!present) {
+        QVariantMap m;
+        m.insert("word", word);
+        m.insert("group", group);
+        updated.append(m);
+    }
+    setFavorites(updated);
+    saveFavorites();
+}
+
 void EngineController::clearHistory()
 {
-    setHistory(QStringList());
+    setHistory(QVariantList());
     saveHistory();
 }
 

@@ -31,8 +31,8 @@ class EngineController : public QObject
     Q_PROPERTY(QVariantList dictionaries READ dictionaries NOTIFY dictionariesChanged)
     Q_PROPERTY(QVariantList groups READ groups NOTIFY groupsChanged)
     Q_PROPERTY(int activeGroupId READ activeGroupId NOTIFY activeGroupChanged)
-    Q_PROPERTY(QStringList history READ history NOTIFY historyChanged)
-    Q_PROPERTY(QStringList favorites READ favorites NOTIFY favoritesChanged)
+    Q_PROPERTY(QVariantList history READ history NOTIFY historyChanged)
+    Q_PROPERTY(QVariantList favorites READ favorites NOTIFY favoritesChanged)
     Q_PROPERTY(bool darkMode READ darkMode NOTIFY darkModeChanged)
     Q_PROPERTY(bool systemDark READ systemDark NOTIFY systemDarkChanged)
     Q_PROPERTY(bool userDarkOverride READ userDarkOverride WRITE setUserDarkOverride NOTIFY userDarkOverrideChanged)
@@ -75,8 +75,15 @@ public:
     QVariantList dictionaries() const { return m_dictionaries; }
     QVariantList groups() const { return m_groups; }
     int activeGroupId() const { return m_activeGroupId; }
-    QStringList history() const { return m_history; }
-    QStringList favorites() const { return m_favorites; }
+    // History / favorites as a list of {word, group} maps. The group is the
+    // dictionary group the article was produced in (0 = "All"). QML renders the
+    // row label from `.word` and uses `.group` for per-entry restore/removal.
+    QVariantList history() const { return m_history; }
+    QVariantList favorites() const { return m_favorites; }
+    Q_INVOKABLE QStringList historyWords() const;
+    Q_INVOKABLE QStringList favoritesWords() const;
+    // Does a group with this id exist (used for group-restore fallback to All)?
+    Q_INVOKABLE bool groupExists(int groupId) const;
     bool darkMode() const { return m_darkMode; }
     bool systemDark() const { return m_systemDark; }
     bool userDarkOverride() const { return m_userDarkOverride; }
@@ -154,6 +161,8 @@ public:
     Q_INVOKABLE void recordHistory(const QString &word);
     Q_INVOKABLE void toggleFavorite(const QString &word);
     Q_INVOKABLE void removeHistory(const QString &word);
+    Q_INVOKABLE void removeHistoryEntry(const QString &word, int group);
+    Q_INVOKABLE void toggleFavoriteEntry(const QString &word, int group);
     Q_INVOKABLE void clearHistory();
 
     // Milestone 6: incoming lookup intents. The Java shell (AurelexActivity)
@@ -184,6 +193,9 @@ public:
     // result from a scoped context (e.g. FTS tab) must open in that group,
     // independent of the Search tab's active-group selection.
     Q_INVOKABLE void lookupInGroup(const QString &word, int groupId);
+    // Group-restoring lookup: switch active group to `groupId` (fallback All) and
+    // look up `word` in it. Used for history/favorites taps and Back/Forward.
+    Q_INVOKABLE void lookupInGroupWithSwitch(const QString &word, int groupId);
     Q_INVOKABLE void suggest(const QString &prefix);
 
     // Rewrite upstream article asset URLs (qrc:///, bres://, gdau://) to the
@@ -285,8 +297,8 @@ private:
     void pollFtsProgress();
     void setScanFailures(const QVariantList &list);
     void collectScanFailures();
-    void setHistory(const QStringList &list);
-    void setFavorites(const QStringList &list);
+    void setHistory(const QVariantList &list);
+    void setFavorites(const QVariantList &list);
     void loadHistory();
     void saveHistory();
     void loadFavorites();
@@ -337,8 +349,8 @@ private:
     QVariantList m_groups;
     int m_activeGroupId = 0;
     bool m_buildingFts = false;
-    QStringList m_history;
-    QStringList m_favorites;
+    QVariantList m_history;
+    QVariantList m_favorites;
     bool m_darkMode = false;
     bool m_systemDark = false;
     bool m_userDarkOverride = false;
