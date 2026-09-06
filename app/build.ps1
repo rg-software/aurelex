@@ -424,8 +424,10 @@ if ($Configuration -eq "Release") {
             $marker = "android {"
             $idx = $bg.IndexOf($marker)
             if ($idx -ge 0) {
-                # Insert the signing configs right before android {
-                $bg = $bg.Substring(0, $idx).TrimEnd() + "`n`n" + $signBlock.TrimStart() + "`n" + $bg.Substring($idx)
+                # signingConfigs is AGP extension DSL: declare it inside android { }
+                # (project scope fails with "Could not find method signingConfigs()").
+                $insertAt = $idx + $marker.Length
+                $bg = $bg.Substring(0, $insertAt) + "`n" + $signBlock.TrimStart() + "`n" + $bg.Substring($insertAt)
             }
             # Add signingConfig to the release build type
             $bg = $bg -replace '(buildTypes\s*\{[^}]*release\s*\{)', "`$1`n            signingConfig signingConfigs.release"
