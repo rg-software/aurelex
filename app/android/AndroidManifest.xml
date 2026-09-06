@@ -1,6 +1,6 @@
 <?xml version="1.0"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    package="aurelex.android"
+    package="org.aurelex.pocket.dictionary"
     android:installLocation="auto"
     android:versionCode="1"
     android:versionName="0.0.1">

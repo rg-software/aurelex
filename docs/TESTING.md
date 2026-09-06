@@ -23,7 +23,8 @@ patches and build the Qt app (JDK 17, see `app/build.ps1`):
 ```
 
 This adb-installs the result (`-Install`); without it the APK lands in
-`build-qtquick/apk/build/outputs/apk/debug/`. The package is `aurelex.android`.
+`build-qtquick/apk/build/outputs/apk/debug/`. The package is
+`org.aurelex.pocket.dictionary`.
 
 ## Dictionary management (one-off import, folder-scoped SAF)
 

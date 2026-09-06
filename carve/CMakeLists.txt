@@ -22,7 +22,7 @@ set(CMAKE_AUTORCC ON)
 set(ENGINE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../engine")
 
 # App-private file root for PROGRAM_DATA_DIR.
-set(PROGRAM_FILES_ROOT "/data/data/aurelex.android/files")
+set(PROGRAM_FILES_ROOT "/data/data/org.aurelex.pocket.dictionary/files")
 
 # Qt kit + vcpkg base, passed from the consuming build (build.ps1 / CI) via
 # QT_BASE / QT_HOST_PATH / VCPKG_BASE.

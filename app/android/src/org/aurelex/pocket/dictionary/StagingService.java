@@ -1,4 +1,4 @@
-package aurelex.android;
+package org.aurelex.pocket.dictionary;
 
 import android.app.Notification;
 import android.app.NotificationChannel;

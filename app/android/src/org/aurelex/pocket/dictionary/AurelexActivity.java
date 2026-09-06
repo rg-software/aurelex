@@ -1,4 +1,4 @@
-package aurelex.android;
+package org.aurelex.pocket.dictionary;
 
 import android.content.Context;
 import android.content.Intent;

@@ -246,6 +246,7 @@ if (Test-Path (Join-Path $AppDir "android\src")) {
     # compiles.
     if (Test-Path (Join-Path $stageSrc "com")) { Remove-Item (Join-Path $stageSrc "com") -Recurse -Force }
     if (Test-Path (Join-Path $stageSrc "aurelex")) { Remove-Item (Join-Path $stageSrc "aurelex") -Recurse -Force }
+    if (Test-Path (Join-Path $stageSrc "org")) { Remove-Item (Join-Path $stageSrc "org") -Recurse -Force }
     Copy-Item (Join-Path $AppDir "android\src\*") $stageSrc -Recurse -Force
 }
 if (Test-Path (Join-Path $AppDir "android\res")) {
@@ -503,6 +504,6 @@ if ($Bundle -and $Configuration -eq "Release") {
 if ($Install) {
     $adb = "$RealSdk\platform-tools\adb.exe"
     & $adb install -r $apk.FullName
-    & $adb shell "am start -n aurelex.android/.AurelexActivity"
+    & $adb shell "am start -n org.aurelex.pocket.dictionary/.AurelexActivity"
     Write-Host "Installed + launched." -ForegroundColor Green
 }

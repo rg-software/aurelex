@@ -166,7 +166,7 @@ void EngineController::pollFtsProgress() {
     if (m_ftsIndexTotal > 0) {
         const int overallPercent = qRound(overall * 100.0);
         QJniObject::callStaticMethod<void>(
-            "aurelex/android/AurelexActivity",
+            "org/aurelex/pocket/dictionary/AurelexActivity",
             "updateIndexingProgress",
             "(IILjava/lang/String;I)V",
             m_ftsIndexDone + 1, m_ftsIndexTotal,
@@ -332,7 +332,7 @@ void EngineController::ensureFtsWorker()
     // they survive the app being backgrounded; the service shows a notification
     // and keeps the in-process worker alive. Stopped when the batch completes.
     QJniObject::callStaticMethod<void>(
-        "aurelex/android/AurelexActivity",
+        "org/aurelex/pocket/dictionary/AurelexActivity",
         "startIndexing",
         "()V");
 #endif
@@ -404,7 +404,7 @@ void EngineController::ensureFtsWorker()
         qInfo() << "[aurelex] FTS worker finished a drain";
 #if defined(Q_OS_ANDROID)
         QJniObject::callStaticMethod<void>(
-            "aurelex/android/AurelexActivity",
+            "org/aurelex/pocket/dictionary/AurelexActivity",
             "stopIndexing",
             "()V");
 #endif
@@ -994,7 +994,7 @@ int EngineController::systemInsetTop() const
 {
 #if defined(Q_OS_ANDROID)
     return QJniObject::callStaticMethod<jint>(
-        "aurelex/android/AurelexActivity",
+        "org/aurelex/pocket/dictionary/AurelexActivity",
         "getSystemInsetTop",
         "()I");
 #else
@@ -1006,7 +1006,7 @@ int EngineController::systemInsetBottom() const
 {
 #if defined(Q_OS_ANDROID)
     return QJniObject::callStaticMethod<jint>(
-        "aurelex/android/AurelexActivity",
+        "org/aurelex/pocket/dictionary/AurelexActivity",
         "getSystemInsetBottom",
         "()I");
 #else
@@ -1020,7 +1020,7 @@ void EngineController::playAudio(const QString &url) {
     // MediaPlayer plays the loopback URL so the WebView keeps the article.
     const QJniObject javaUrl = QJniObject::fromString(url);
     QJniObject::callStaticMethod<void>(
-        "aurelex/android/AurelexActivity",
+        "org/aurelex/pocket/dictionary/AurelexActivity",
         "playAudio",
         "(Ljava/lang/String;)V",
         javaUrl.object<jstring>());
@@ -1032,7 +1032,7 @@ void EngineController::playAudio(const QString &url) {
 void EngineController::stopAudio() {
 #if defined(Q_OS_ANDROID)
     QJniObject::callStaticMethod<void>(
-        "aurelex/android/AurelexActivity",
+        "org/aurelex/pocket/dictionary/AurelexActivity",
         "stopAudio",
         "()V");
 #endif
@@ -1462,7 +1462,7 @@ bool EngineController::readSystemDark() const
 {
 #if defined(Q_OS_ANDROID)
     return QJniObject::callStaticMethod<jboolean>(
-        "aurelex/android/AurelexActivity",
+        "org/aurelex/pocket/dictionary/AurelexActivity",
         "isNightModeActive",
         "()Z");
 #else
@@ -1499,7 +1499,7 @@ void EngineController::applySystemBarAppearance()
 {
 #if defined(Q_OS_ANDROID)
     QJniObject::callStaticMethod<void>(
-        "aurelex/android/AurelexActivity",
+        "org/aurelex/pocket/dictionary/AurelexActivity",
         "setSystemBarAppearance",
         "(Z)V",
         m_darkMode ? JNI_TRUE : JNI_FALSE);
@@ -1512,7 +1512,7 @@ void EngineController::syncSystemBarAppearance()
 {
 #if defined(Q_OS_ANDROID)
     QJniObject::callStaticMethod<void>(
-        "aurelex/android/AurelexActivity",
+        "org/aurelex/pocket/dictionary/AurelexActivity",
         "syncSystemBarAppearance",
         "()V");
 #endif
@@ -1857,7 +1857,7 @@ void EngineController::addDictionaryFolder()
 {
 #if defined(Q_OS_ANDROID)
     QJniObject::callStaticMethod<void>(
-        "aurelex/android/AurelexActivity",
+        "org/aurelex/pocket/dictionary/AurelexActivity",
         "pickDictionaryFolder",
         "()V");
 #else
