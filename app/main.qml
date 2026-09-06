@@ -633,15 +633,16 @@ ApplicationWindow {
                 // 5.2: highlight the active tab by driving the TabBar's own
                 // selection (TabButton has no `highlighted` in Qt 6.6). State ->
                 // tab position via _tabIndexForState(); article pane has no tab.
+                // The Theme tab is last and never matches a state.
                 currentIndex: root._tabIndexForState()
 
                 Repeater {
                     model: root.navItems
                     delegate: TabButton {
                         id: tabBtn
-                        // Equal-width tabs: five tabs share the dock minus the
-                        // dark-mode slot, so every cell is the same width.
-                        width: navBar.width / root.navItems.length
+                        // Equal-width tabs: five tabs + the Theme slot tile the
+                        // bar in six equal cells.
+                        width: navBar.width / 6
                         height: parent.height
                         // icon glyph + label in the theme font (a single-font
                         // `text` would render the icon glyphs as broken Latin).
@@ -669,39 +670,38 @@ ApplicationWindow {
                         onClicked: root._navTo(modelData.idx)
                     }
                 }
-            }
 
-            // Dark-mode toggle lives in the bottom dock (one slot wide). It forces dark
-            // (or returns to following the system theme); kept even though we
-            // match the system by default, so users can override without
-            // changing the device setting.
-            ToolButton {
-                id: themeBtn
-                Layout.preferredWidth: root.width / 6
-                Layout.fillHeight: true
-                Accessible.name: engine.userDarkOverride || engine.systemDark ? "Light mode" : "Dark mode"
-                Accessible.role: Accessible.Button
-                onClicked: {
-                    engine.toggleDarkOverride()
-                    root._blurActive()
-                }
-                contentItem: Column {
-                    anchors.centerIn: parent
-                    spacing: 0
-                    Text {
-                        anchors.horizontalCenter: parent.horizontalCenter
-                        text: root.icon("dark_mode")
-                        font.family: root.iconFontFamily
-                        font.pixelSize: 20
-                        color: themeBtn.down || themeBtn.checked
-                            ? themeBtn.Material.accentColor : themeBtn.Material.foreground
+                // Theme toggle: a 6th tab in the bar so its icon+label align
+                // exactly with the other cells. It forces dark (or returns to
+                // following the system theme); it does not navigate.
+                TabButton {
+                    id: themeBtn
+                    width: navBar.width / 6
+                    height: parent.height
+                    contentItem: Column {
+                        anchors.centerIn: parent
+                        spacing: 0
+                        Text {
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            text: root.icon("dark_mode")
+                            font.family: root.iconFontFamily
+                            font.pixelSize: 18
+                            color: themeBtn.down || themeBtn.checked ? themeBtn.Material.accentColor
+                                                                     : themeBtn.Material.foreground
+                        }
+                        Text {
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            text: "Theme"
+                            font.pixelSize: 10
+                            color: themeBtn.down || themeBtn.checked ? themeBtn.Material.accentColor
+                                                                      : themeBtn.Material.foreground
+                        }
                     }
-                    Text {
-                        anchors.horizontalCenter: parent.horizontalCenter
-                        text: "Theme"
-                        font.pixelSize: 10
-                        color: themeBtn.down || themeBtn.checked
-                            ? themeBtn.Material.accentColor : themeBtn.Material.foreground
+                    Accessible.name: engine.userDarkOverride || engine.systemDark ? "Light mode" : "Dark mode"
+                    Accessible.role: Accessible.TabButton
+                    onClicked: {
+                        engine.toggleDarkOverride()
+                        root._blurActive()
                     }
                 }
             }
