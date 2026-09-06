@@ -451,6 +451,16 @@ int gd_suggest( const char * word, char * out, int out_size )
     }
   }
 
+  // Empty group (e.g. a freshly-created group with no dictionaries): nothing to
+  // suggest. Without this, WordFinder::prefixMatch on an empty dictionary list
+  // never emits finished and gd_suggest blocks the engine for the full 10s
+  // loop timeout — serialized behind g_engineMutex, that starves every queued
+  // phrase (typed autocomplete appears frozen).
+  if ( dicts->empty() ) {
+    qInfo( "gd_suggest: empty active group -> no suggestions" );
+    return 0;
+  }
+
   WordFinder wf( nullptr );
   bool done = false;
   QObject::connect( &wf, &WordFinder::finished, &wf, [ &done ]() {
@@ -518,6 +528,16 @@ int gd_lookup_in_group( const char * word, int group_id, char * out, int out_siz
     return -1;
 
   const QString w = QString::fromUtf8( word );
+  // Empty group (no dictionaries): nothing can match — return empty immediately
+  // instead of blocking the engine's 15s lookup loop (the app shows a not-found
+  // / history fallback). Skip for "All" (group 0), which always has dicts.
+  if ( group_id != 0 ) {
+    GroupDef * def = findGroupDef( static_cast< unsigned >( group_id ) );
+    if ( !def || def->dictIndices.empty() ) {
+      if ( out_size > 0 ) out[ 0 ] = '\0';
+      return 0;
+    }
+  }
   // Scope to an explicit group (0 = "All"), independent of the active group —
   // used so a result from a scoped context (e.g. FTS tab) opens in the same
   // group it was found in.
