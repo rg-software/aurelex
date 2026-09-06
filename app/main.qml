@@ -136,10 +136,10 @@ ApplicationWindow {
         const gb = 1024 * 1024 * 1024
         const mb = 1024 * 1024
         const kb = 1024
-        if (bytes >= gb) return (Math.round(bytes * 10 / gb) / 10) + " GB"
-        if (bytes >= mb) return Math.round(bytes / mb) + " MB"
-        if (bytes >= kb) return Math.round(bytes / kb) + " KB"
-        return bytes + " B"
+        if (bytes >= gb) return (Math.round(bytes * 10 / gb) / 10) + " " + qsTr("GB")
+        if (bytes >= mb) return Math.round(bytes / mb) + " " + qsTr("MB")
+        if (bytes >= kb) return Math.round(bytes / kb) + " " + qsTr("KB")
+        return bytes + " " + qsTr("B")
     }
     // "English/Russian" with unknown side shown as '?'.
     function fmtPair(d) {
@@ -301,7 +301,7 @@ ApplicationWindow {
             + 'font-family:Roboto,sans-serif;font-size:16px;text-align:left;">'
         if (root._suggMode === "history") {
             if (words.length === 0) {
-                html += '<div style="padding:20px 16px;color:#999;text-align:center;">No lookups yet</div>'
+                html += '<div style="padding:20px 16px;color:#999;text-align:center;">' + root._escHtml(qsTr("No lookups yet")) + '</div>'
             } else {
                 // Recent lookups, most recent first, each tap-to-lookup with a
                 // per-row remove; plus a Clear all row. The word is the entry's
@@ -327,7 +327,7 @@ ApplicationWindow {
                 }
                 html += '<div style="padding:6px;text-align:center;border-top:1px solid ' + sep + ';">'
                     + '<a href="javascript:;" data-action="clear-history" style="display:inline-block;'
-                    + 'padding:8px 16px;color:' + accent + ';text-decoration:none;font-size:14px;">Clear all</a>'
+                    + 'padding:8px 16px;color:' + accent + ';text-decoration:none;font-size:14px;">' + root._escHtml(qsTr("Clear all")) + '</a>'
                     + '</div>'
             }
         } else {
@@ -541,13 +541,15 @@ ApplicationWindow {
             gid = engine.groups[ftsGroupCombo.currentIndex].id
         engine.ftsSearch(ftsInput.text, 2, gid, ftsWholeWords.checked)
     }
-    // Navigation labels/icons for the bottom TabBar.
+    // Navigation labels/icons for the bottom TabBar. The visible `label` is
+    // translated; `a11y` stays the literal English accessibility name so the
+    // UIAutomator/Appium content-desc contract (AGENTS.md) is unaffected.
     property var navItems: [
-        { idx: 0, label: "Search",   icon: "search" },
-        { idx: 1, label: "Dicts",    icon: "book" },
-        { idx: 3, label: "Groups",   icon: "library_books" },
-        { idx: 4, label: "FTS",      icon: "manage_search" },
-        { idx: 6, label: "Favs",     icon: "star" }
+        { idx: 0, label: qsTr("Search"), a11y: "Search", icon: "search" },
+        { idx: 1, label: qsTr("Dicts"),  a11y: "Dicts",  icon: "book" },
+        { idx: 3, label: qsTr("Groups"), a11y: "Groups", icon: "library_books" },
+        { idx: 4, label: qsTr("FTS"),    a11y: "FTS",    icon: "manage_search" },
+        { idx: 6, label: qsTr("Favs"),   a11y: "Favs",   icon: "star" }
     ]
     // Position of the nav-tab whose `idx` matches the current state (articles
     // always live in the Search tab, so state 0 is always a match). Drives
@@ -665,7 +667,7 @@ ApplicationWindow {
                                                                       : tabBtn.Material.foreground
                             }
                         }
-                        Accessible.name: modelData.label
+                        Accessible.name: modelData.a11y
                         Accessible.role: Accessible.TabButton
                         onClicked: root._navTo(modelData.idx)
                     }
@@ -691,7 +693,7 @@ ApplicationWindow {
                         }
                         Text {
                             anchors.horizontalCenter: parent.horizontalCenter
-                            text: "Theme"
+                            text: qsTr("Theme")
                             font.pixelSize: 10
                             color: themeBtn.down || themeBtn.checked ? themeBtn.Material.accentColor
                                                                       : themeBtn.Material.foreground
@@ -797,7 +799,7 @@ ColumnLayout {
                     id: input
                     Layout.fillWidth: true
                     Layout.preferredWidth: 7
-                    placeholderText: "Search dictionaries"
+                    placeholderText: qsTr("Search dictionaries")
                     Accessible.name: "Search dictionaries"
                     Accessible.role: Accessible.EditableText
                     font.pixelSize: 18
@@ -844,7 +846,7 @@ ColumnLayout {
                     // though a ComboBox always has a selected value. It doesn't
                     // grab pointer events, so taps fall through to the dropdown.
                     Label {
-                        text: "Group"
+                        text: qsTr("Group")
                         // Match the floated placeholder of the search field
                         // (Qt floats TextField placeholders at 0.75x its font).
                         font.pixelSize: Math.round(input.font.pixelSize * 0.75)
@@ -891,7 +893,7 @@ ColumnLayout {
             Label {
                 Layout.fillWidth: true
                 visible: engine.lastError.length > 0
-                text: "engine error: " + engine.lastError
+                text: qsTr("engine error: %1").arg(engine.lastError)
                 color: Material.color(Material.Red)
                 wrapMode: Text.Wrap
             }
@@ -1143,10 +1145,12 @@ ColumnLayout {
                     // Header carries the currently-indexing dictionary (1-based).
                     Label {
                         Layout.fillWidth: true
-                        text: root._stagingActive ? "Preparing dictionaries…"
-                            : engine.scanningActive ? "Scanning dictionaries…"
-                            : "Indexing (" + (engine.ftsIndexDone + 1) + " of "
-                              + engine.ftsIndexTotal + "): " + engine.ftsCurrentDictName
+                        text: root._stagingActive ? qsTr("Preparing dictionaries…")
+                            : engine.scanningActive ? qsTr("Scanning dictionaries…")
+                            : qsTr("Indexing (%1 of %2): %3")
+                              .arg(engine.ftsIndexDone + 1)
+                              .arg(engine.ftsIndexTotal)
+                              .arg(engine.ftsCurrentDictName)
                         font.pixelSize: 13
                         font.bold: true
                         color: Material.color(Material.Purple)
@@ -1180,9 +1184,9 @@ ColumnLayout {
                     Label {
                         Layout.fillWidth: true
                         visible: !engine.buildingFts
-                        text: root._stagingActive
-                              ? "Copying dictionary files into app storage. Your dictionaries will appear here when it's done."
-                              : "Reading dictionary files…"
+text: root._stagingActive
+                          ? qsTr("Copying dictionary files into app storage. Your dictionaries will appear here when it's done.")
+                          : qsTr("Reading dictionary files…")
                         color: root.uiSubFg
                         font.pixelSize: 11
                         wrapMode: Text.Wrap
@@ -1197,7 +1201,7 @@ ColumnLayout {
                 // 8.2: "Add dictionaries" (folder-scoped SAF picker). Qt 6.6
                 // RoundButton stands in for the Material 3 FloatingActionButton.
                 RoundButton {
-                    text: "Add dictionaries"
+                    text: qsTr("Add dictionaries")
                     highlighted: true
                     Accessible.name: "Add dictionaries"
                     Accessible.role: Accessible.Button
@@ -1205,7 +1209,7 @@ ColumnLayout {
                 }
                 // By Pair toggle: group the dictionary list by Source/Target.
                 Button {
-                    text: "By Pair"
+                    text: qsTr("By Pair")
                     highlighted: dictsPane.byPair
                     Accessible.name: "By Pair"
                     Accessible.role: Accessible.Button
@@ -1213,7 +1217,7 @@ ColumnLayout {
                 }
                 // Multi-select removal (enabled when >=1 row is selected).
                 Button {
-                    text: "Remove"
+                    text: qsTr("Remove")
                     enabled: dictsPane.selectedDicts.length > 0
                     Accessible.name: "Remove"
                     Accessible.role: Accessible.Button
@@ -1226,7 +1230,7 @@ ColumnLayout {
                 color: root.uiSubFg
                 font.pixelSize: 12
                 wrapMode: Text.Wrap
-                text: "Tap Add dictionaries to import a folder containing dictionary files (.mdx, .dsl, .dsl.dz, .ifo). The folder is copied into the app once; no system-wide storage access is needed."
+                text: qsTr("Tap Add dictionaries to import a folder containing dictionary files (.mdx, .dsl, .dsl.dz, .ifo). The folder is copied into the app once; no system-wide storage access is needed.")
             }
 
             // Dictionaries that failed to load in the last scan (corrupt or
@@ -1248,7 +1252,7 @@ ColumnLayout {
 
                     Label {
                         Layout.fillWidth: true
-                        text: engine.scanFailures.length + " dictionary file(s) failed to load"
+                        text: qsTr("%1 dictionary file(s) failed to load").arg(engine.scanFailures.length)
                         font.pixelSize: 13
                         font.bold: true
                         color: Material.color(Material.Red)
@@ -1267,7 +1271,7 @@ ColumnLayout {
                     }
                     Label {
                         Layout.fillWidth: true
-                        text: "The file may be incomplete or corrupt. Tap Add dictionaries and pick the same folder again to re-copy it."
+                        text: qsTr("The file may be incomplete or corrupt. Tap Add dictionaries and pick the same folder again to re-copy it.")
                         font.pixelSize: 11
                         color: root.uiSubFg
                         wrapMode: Text.Wrap
@@ -1325,7 +1329,7 @@ ColumnLayout {
                             }
                         }
                         ToolButton {
-                            text: "Remove"
+                            text: qsTr("Remove")
                             Accessible.name: "Remove"
                             Accessible.role: Accessible.Button
                             onClicked: dictsPane._requestRemove(dictRow.dictIndex, dictRow.dictData.name)
@@ -1379,7 +1383,7 @@ ColumnLayout {
                                 verticalAlignment: Text.AlignVCenter
                             }
                             ToolButton {
-                                text: "Remove"
+                                text: qsTr("Remove pair")
                                 Accessible.name: "Remove pair"
                                 Accessible.role: Accessible.Button
                                 onClicked: dictsPane._removePair(modelData.pair)
@@ -1413,7 +1417,7 @@ ColumnLayout {
                                 }
                             }
                             ToolButton {
-                                text: "Remove"
+                                text: qsTr("Remove")
                                 Accessible.name: "Remove"
                                 Accessible.role: Accessible.Button
                                 onClicked: dictsPane._requestRemove(modelData.dictIndex, modelData.item.name)
@@ -1435,7 +1439,7 @@ ColumnLayout {
             anchors.centerIn: parent
             width: Math.min(parent.width - 80, 360)
             modal: true
-            title: "Remove dictionary"
+            title: qsTr("Remove dictionary")
             visible: dictsPane.removeIndex >= 0
             Accessible.name: "Remove dictionary confirmation"
             Accessible.role: Accessible.Dialog
@@ -1445,13 +1449,13 @@ ColumnLayout {
                 spacing: 8
                 Label {
                     Layout.fillWidth: true
-                    text: "Remove dictionary \"" + (dictsPane.removeName !== "" ? dictsPane.removeName : "(unknown)") + "\"?"
+                    text: qsTr('Remove dictionary "%1"?').arg(dictsPane.removeName !== "" ? dictsPane.removeName : qsTr("(unknown)"))
                     wrapMode: Text.Wrap
                 }
                 Label {
                     Layout.fillWidth: true
                     color: root.uiSubFg
-                    text: "It will be permanently removed: the app's copy of the dictionary files and its search index will be deleted. The original folder is never touched."
+                    text: qsTr("It will be permanently removed: the app's copy of the dictionary files and its search index will be deleted. The original folder is never touched.")
                     wrapMode: Text.Wrap
                 }
             }
@@ -1490,7 +1494,7 @@ ColumnLayout {
 
                     Label {
                         Layout.fillWidth: true
-                        text: "Welcome to Aurelex"
+                        text: qsTr("Welcome to Aurelex")
                         font.pixelSize: 22
                         font.bold: true
                         horizontalAlignment: Text.AlignHCenter
@@ -1498,7 +1502,7 @@ ColumnLayout {
                     Label {
                         Layout.fillWidth: true
                         Layout.fillHeight: true
-                        text: "Add dictionaries by tapping Add dictionaries below and picking a folder with dictionary files (.mdx, .dsl, .dsl.dz, .ifo) — the folder is copied into the app once (no system-wide storage access needed). Use the bottom bar to switch between Search, Dictionaries, Groups, FTS and Favorites."
+                        text: qsTr("Add dictionaries by tapping Add dictionaries below and picking a folder with dictionary files (.mdx, .dsl, .dsl.dz, .ifo) — the folder is copied into the app once (no system-wide storage access needed). Use the bottom bar to switch between Search, Dictionaries, Groups, FTS and Favorites.")
                         font.pixelSize: 15
                         wrapMode: Text.Wrap
                         horizontalAlignment: Text.AlignHCenter
@@ -1508,7 +1512,7 @@ ColumnLayout {
                     Button {
                         id: onboardingGetStarted
                         Layout.alignment: Qt.AlignHCenter
-                        text: "Get started"
+                        text: qsTr("Get started")
                         highlighted: true
                         Accessible.name: "Get started"
                         Accessible.role: Accessible.Button
@@ -1583,14 +1587,14 @@ ColumnLayout {
                 TextField {
                     id: newGroupInput
                     Layout.fillWidth: true
-                    placeholderText: "New group name"
+                    placeholderText: qsTr("New group name")
                     font.pixelSize: 18
                     Accessible.name: "New group name"
                     Accessible.role: Accessible.EditableText
                     onAccepted: groupsPane._createGroup()
                 }
                 Button {
-                    text: "Create"
+                    text: qsTr("Create")
                     highlighted: true
                     Accessible.name: "Create"
                     Accessible.role: Accessible.Button
@@ -1619,13 +1623,13 @@ ColumnLayout {
                     contentItem: ColumnLayout {
                         spacing: 0
                         Label {
-                            text: groupRow.groupData.name + " (" + groupRow.groupData.dictCount + ")"
+                            text: qsTr("%1 (%2)").arg(groupRow.groupData.name).arg(groupRow.groupData.dictCount)
                             font.pixelSize: 16
                             font.bold: true
                             Layout.fillWidth: true
                         }
                         Label {
-                            text: groupRow.groupData.id === 0 ? "All dictionaries" : "id=" + groupRow.groupData.id
+                            text: groupRow.groupData.id === 0 ? qsTr("All dictionaries") : qsTr("id=%1").arg(groupRow.groupData.id)
                             color: root.uiSubFg
                             font.pixelSize: 11
                         }
@@ -1640,7 +1644,7 @@ ColumnLayout {
                         spacing: 2
 
                         ToolButton {
-                            text: "Dicts"
+                            text: qsTr("Dicts")
                             visible: groupRow.groupData.id !== 0
                             Accessible.name: "Edit group dictionaries"
                             Accessible.role: Accessible.Button
@@ -1651,7 +1655,7 @@ ColumnLayout {
                             Accessible.name: "Group options menu"
                             Accessible.role: Accessible.Menu
                             MenuItem {
-                                text: "Rename"
+                                text: qsTr("Rename")
                                 Accessible.name: "Rename"
                                 Accessible.role: Accessible.MenuItem
                                 onTriggered: {
@@ -1660,7 +1664,7 @@ ColumnLayout {
                                 }
                             }
                             MenuItem {
-                                text: "Delete"
+                                text: qsTr("Delete")
                                 Accessible.name: "Delete"
                                 Accessible.role: Accessible.MenuItem
                                 onTriggered: {
@@ -1693,21 +1697,21 @@ ColumnLayout {
                 spacing: 10
 
                 Button {
-                    text: "<- Back"
+                    text: qsTr("<- Back")
                     Accessible.name: "Back"
                     Accessible.role: Accessible.Button
                     onClicked: groupsPane.editingGroup = -1
                 }
                 Label {
                     Layout.fillWidth: true
-                    text: "Group: " + groupsPane.editingGroupName
+                    text: qsTr("Group: %1").arg(groupsPane.editingGroupName)
                     font.pixelSize: 16
                     font.bold: true
                     elide: Text.ElideMiddle
                 }
             }
 
-            Label { text: "In this group (" + groupsPane.groupMembers.length + ")"; color: root.uiSubFg; font.pixelSize: 13 }
+            Label { text: qsTr("In this group (%1)").arg(groupsPane.groupMembers.length); color: root.uiSubFg; font.pixelSize: 13 }
 
             ListView {
                 id: memberList
@@ -1741,7 +1745,7 @@ ColumnLayout {
                         }
                         spacing: 2
                         ToolButton {
-                            text: "Up"
+                            text: qsTr("Up")
                             enabled: memberRow.rowData.memberIndex > 0
                             Accessible.name: "Move up"
                             Accessible.role: Accessible.Button
@@ -1752,7 +1756,7 @@ ColumnLayout {
                             }
                         }
                         ToolButton {
-                            text: "Down"
+                            text: qsTr("Down")
                             enabled: memberRow.rowData.memberIndex < groupsPane.groupMembers.length - 1
                             Accessible.name: "Move down"
                             Accessible.role: Accessible.Button
@@ -1763,7 +1767,7 @@ ColumnLayout {
                             }
                         }
                         ToolButton {
-                            text: "Remove"
+                            text: qsTr("Remove")
                             Accessible.name: "Remove from group"
                             Accessible.role: Accessible.Button
                             onClicked: {
@@ -1775,7 +1779,7 @@ ColumnLayout {
                 }
             }
 
-            Label { text: "Add dictionaries"; color: root.uiSubFg; font.pixelSize: 13 }
+            Label { text: qsTr("Add dictionaries"); color: root.uiSubFg; font.pixelSize: 13 }
 
             ListView {
                 Layout.fillWidth: true
@@ -1806,7 +1810,7 @@ ColumnLayout {
                             rightMargin: 4
                             verticalCenter: parent.verticalCenter
                         }
-                        text: "Add"
+                        text: qsTr("Add")
                         Accessible.name: "Add to group"
                         Accessible.role: Accessible.Button
                         onClicked: {
@@ -2119,7 +2123,7 @@ ColumnLayout {
                 TextField {
                     id: ftsInput
                     Layout.fillWidth: true
-                    placeholderText: "Full-text search"
+                    placeholderText: qsTr("Full-text search")
                     font.pixelSize: 18
                     enabled: !engine.buildingFts
                     Accessible.name: "Full-text search"
@@ -2128,7 +2132,7 @@ ColumnLayout {
                 }
                 CheckBox {
                     id: ftsWholeWords
-                    text: "Whole words"
+                    text: qsTr("Whole words")
                     Layout.alignment: Qt.AlignVCenter
                     Accessible.name: "Whole words"
                     Accessible.role: Accessible.CheckBox
@@ -2163,7 +2167,7 @@ ColumnLayout {
 
                 Button {
                     id: ftsSearchBtn
-                    text: "Search"
+                    text: qsTr("Search")
                     highlighted: true
                     enabled: !engine.buildingFts
                     Accessible.name: "Search"
@@ -2175,7 +2179,7 @@ ColumnLayout {
             Label {
                 Layout.fillWidth: true
                 visible: engine.lastError.length > 0
-                text: "engine error: " + engine.lastError
+                text: qsTr("engine error: %1").arg(engine.lastError)
                 color: Material.color(Material.Red)
                 wrapMode: Text.Wrap
             }
@@ -2225,7 +2229,7 @@ ColumnLayout {
         width: parent.width - 48
         height: parent.height * 0.8
         modal: true
-        title: "Select group"
+        title: qsTr("Select group")
         Accessible.name: "Select group"
         Accessible.role: Accessible.Dialog
         // No Cancel button — tapping outside (or Back) dismisses.
@@ -2265,7 +2269,7 @@ ColumnLayout {
                 Layout.fillWidth: true
                 Layout.leftMargin: 16
                 Layout.rightMargin: 16
-                text: "Groups"
+                text: qsTr("Groups")
                 font.pixelSize: 15
                 font.bold: true
                 color: root.uiSubFg

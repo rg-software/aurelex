@@ -17,7 +17,7 @@
     <application
         android:name="org.qtproject.qt.android.bindings.QtApplication"
         android:hardwareAccelerated="true"
-        android:label="Aurelex"
+        android:label="@string/app_name"
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher"
         android:allowBackup="true"
@@ -25,7 +25,7 @@
         <activity
             android:name=".AurelexActivity"
             android:configChanges="orientation|uiMode|screenLayout|screenSize|smallestScreenSize|layoutDirection|locale|fontScale|keyboard|keyboardHidden|navigation|mcc|mnc|density"
-            android:label="Aurelex"
+            android:label="@string/app_name"
             android:launchMode="singleInstance"
             android:screenOrientation="unspecified"
             android:exported="true">
@@ -58,7 +58,7 @@
         <!-- QS tile: clipboard lookup funnel -->
         <service
             android:name=".AurelexTileService"
-            android:label="Aurelex Lookup"
+            android:label="@string/tile_label"
             android:icon="@drawable/ic_tile_lookup"
             android:permission="android.permission.BIND_QUICK_SETTINGS_TILE"
             android:exported="true">
@@ -89,7 +89,7 @@
         <!-- Home-screen search widget -->
         <receiver
             android:name=".AurelexSearchWidget"
-            android:label="Aurelex Search"
+            android:label="@string/widget_label"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />

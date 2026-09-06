@@ -84,3 +84,48 @@ See `docs/ROADMAP.md` for the milestone tracker and cut register.
 
 Manual verification recipes live in `docs/TESTING.md` (build/install, lookup, article rendering,
 audio, groups, FTS, history/favorites, storage, external entry points).
+
+## Localization
+
+The app defaults its display language to the system UI language and ships
+**English (untranslated base) + Russian + Japanese**. All product copy lives in
+Qt translation catalogs; Android surfaces (app label, widgets, tiles,
+notifications) use `res/values*/strings.xml`.
+
+**How it works**
+
+- QML strings use `qsTr("…")` with `%1`-style placeholders
+  (`qsTr("Indexing (%1 of %2): %3").arg(a, b, c)`); imperative JS strings that
+  build WebView HTML (history/favorites chrome) are `qsTr` + `_escHtml`-escaped.
+  `Accessible.name` values are deliberately **not** translated — they are the
+  stable test IDs documented in `AGENTS.md`.
+- C++ user-visible strings use `tr()` (e.g. `EngineController::groupName`'s
+  "All" fallback). Diagnostic/protocol strings (`gd_* failed (rc=%1)`, HTTP
+  status bodies in `ArticleServer`) stay English behind the localized "engine
+  error:" banner.
+- `main.cpp` installs a `QTranslator` at startup from
+  `QLocale().uiLanguages()` (the Qt Android kit does not compile
+  `QGuiApplication::uiLanguages()`): tries `aurelex_<lang>.qm` then
+  `aurelex_<lang>_<region>.qm` from the embedded `:/i18n/` resource, and falls
+  back to English (with a `qInfo` line) without aborting.
+
+**Adding or updating text**
+
+1. Write the user-facing string with `qsTr`/`tr` in the QML/C++ source.
+2. Extract and compile catalogs:
+   `pwsh -File .\scripts\update-translations.ps1 -Languages @("ru","ja")`
+   (`-NoCompile` to refresh the `.ts` only). Requires Qt's `lupdate`/`lrelease`
+   (`AURELEX_QT_BASE`/`AURELEX_QT_HOST` default to `C:\Qt\6.6.3` /
+   `msvc2019_64`).
+3. Translate the new `<message>` blocks directly in `app/i18n/aurelex.ru.ts`
+   / `aurelex.ja.ts`, or run the script's `lrelease` step to regenerate the
+   `.qm` files from whatever the `.ts` holds.
+4. **Commit the compiled `.qm` files** — they are the shipped artifacts; both
+   are embedded via `app/i18n.qrc`.
+5. If a new system language is added, also extend `app/android/res/values-xx/`
+   (app label, tile/widget labels, notification strings) and add it to the
+   `-Languages` array.
+
+Android notification/launcher strings resolve via `getString(R.string.*)` in
+`StagingService`/`IndexingService`; the indexing-progress template is a c-format
+`formatted="false"` resource formatted at runtime (`%1$d of %2$d: %3$s`).

@@ -119,6 +119,26 @@ This adb-installs the result (`-Install`); without it the APK lands in
 | 48 | After onboarding, no dicts loaded | Empty search state: guidance to add dictionaries | ✅ |
 | 49 | Tagged release build | Signed APK produced on a `vX.Y.Z` tag push | ⬜ (Release Java build fixed + verified locally; first signed CI run pending a tag push — keystore secrets configured) |
 
+## Localization (app language)
+
+The app defaults its display language to the system UI language (`Settings` →
+Apps → Aurelex → language, or `app.forceShareDeviceLanguage` on later Android
+configs), falling back to English when no catalog matches. **RU** and **JA** are
+shipped; the toggling recipe below relies on a system-language switch that
+rebuilds the app's locale — on devices that don't offer per-app language,
+switch it, and relaunch. The catalog source of truth and the
+`update-translations.ps1` lupdate/lrelease workflow are documented under
+"Localization" in `docs/DEVELOPMENT.md`.
+
+| # | How to test | Expected | Status |
+| --- | --- | --- | --- |
+| 50 | Set device UI language to **Russian**, launch | Navigation, search placeholder, dictionary/group/FTS/favorites labels, onboarding, dialogs, banners ("Indexing (…)"), "engine error" wrapper, history "No lookups yet"/"Clear all", Not Found term in Russian; group names/dictionary names stay as-is | ⬜ (needs a device with RU; build.ps1 verified) |
+| 51 | Same with **Japanese** | Same set in Japanese | ⬜ (needs a device with JA) |
+| 52 | Set device UI language to one without a catalog (e.g. **Finnish**), launch | Falls back to English, no crash, `qInfo` log line "no translation for <lang>… using English" | ⬜ (needs a device with a non-RU/JA locale; install log can confirm the message) |
+| 53 | In RU/JA, import a dictionary and let FTS index | Android notifications: channel names ("Dictionary preparation" / "Full-text indexing" under Settings → Apps → Aurelex → Notifications), title, "Preparing dictionaries…", "Indexing (%1 of %2): name" shown in the device language | ⬜ (needs the RU/JA device + a dict import) |
+| 54 | In RU/JA, inspect the Quick Settings tile and home-screen widget | Tile/widget labels localize ("Поиск в Aurelex", "Aurelex で検索") | ⬜ (needs the RU/JA device) |
+| 55 | UIAutomator / Appium dump in RU or JA | `Accessible.name`/`content-desc`/`className` remain stable English IDs (localization never touches the accessibility names) | ⬜ (re-run the existing on-device flows under any locale) |
+
 ## Known gaps
 
 - `.mdd` images not exercised on-device (#18) — needs a real MDict fixture.

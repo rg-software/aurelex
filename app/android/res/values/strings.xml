@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Aurelex</string>
+    <string name="tile_label">Aurelex Lookup</string>
+    <string name="widget_label">Aurelex Search</string>
+    <string name="widget_search">Search Aurelex</string>
+    <string name="notification_channel_dict_processing">Dictionary preparation</string>
+    <string name="notification_channel_fts_indexing">Full-text indexing</string>
+    <string name="notification_title">Aurelex</string>
+    <string name="notification_staging">Preparing dictionaries…</string>
+    <string name="notification_indexing_done">Indexing dictionaries…</string>
+    <string name="notification_indexing_progress" formatted="false">Indexing (%1$d of %2$d): %3$s</string>
+</resources>

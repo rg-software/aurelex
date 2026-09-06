@@ -375,7 +375,7 @@ android {
     }
 
     defaultConfig {
-        resConfig "en"
+        resConfigs "en", "ru", "ja"
         minSdkVersion qtMinSdkVersion
         targetSdkVersion qtTargetSdkVersion
         ndk.abiFilters = qtTargetAbiList.split(",")
@@ -449,6 +449,17 @@ if ($Configuration -eq "Release") {
     if (-not (Test-Path $bgPath)) {
         Set-Content $bgPath (New-BaseBuildGradle) -NoNewline
         Write-Host "Wrote complete build.gradle for $Configuration (fresh tree)." -ForegroundColor Yellow
+    }
+}
+
+# androiddeployqt's own template narrows packaged resources to the English
+# config (resConfig "en"). The localization change ships ru/ja alternate
+# strings, so widen the kept configs on every run (idempotent patch).
+if (Test-Path $bgPath) {
+    $bgNow = Get-Content $bgPath -Raw
+    if ($bgNow -match 'resConfig\s+"en"') {
+        Set-Content $bgPath ($bgNow -replace 'resConfig\s+"en"', 'resConfigs "en", "ru", "ja"') -NoNewline
+        Write-Host "Patched resConfig to keep en/ru/ja locales." -ForegroundColor Yellow
     }
 }
 

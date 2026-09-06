@@ -3,9 +3,12 @@
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
 #include <QStandardPaths>
+#include <QStringList>
 #include <QUrl>
 #include <QDebug>
 #include <QFontDatabase>
+#include <QLocale>
+#include <QTranslator>
 #include <QtWebView/QtWebView>
 
 #include "EngineController.hpp"
@@ -21,6 +24,35 @@ int main(int argc, char *argv[])
     // qputenv("QT_IM_MODULE", QByteArray("qtvirtualkeyboard"));
     QtWebView::initialize();
     QGuiApplication app(argc, argv);
+
+    // Localization: install the best-matching compiled catalog for the
+    // device's UI language (embedded via i18n.qrc as :/i18n/aurelex_<lang>.qm).
+    // Try each full locale first, then its language-only code; the first that
+    // loads wins. No match falls back to English (no translator) — non-fatal.
+    QTranslator *translator = new QTranslator(&app);
+    QString loadedLocale;
+    const QStringList uiLangs = QLocale().uiLanguages();
+    for (const QString &localeName : uiLangs) {
+        const QString base = QString(localeName).replace(QLatin1Char('-'), QLatin1Char('_'));
+        const QStringList candidates = base.contains(QLatin1Char('_'))
+            ? QStringList{ base, base.section(QLatin1Char('_'), 0, 0) }
+            : QStringList{ base };
+        for (const QString &candidate : candidates) {
+            if (translator->load(QStringLiteral(":/i18n/aurelex_") + candidate)) {
+                if (app.installTranslator(translator)) {
+                    loadedLocale = candidate;
+                    break;
+                }
+            }
+        }
+        if (!loadedLocale.isEmpty())
+            break;
+    }
+    if (!loadedLocale.isEmpty())
+        qInfo() << "[aurelex] using translation catalog:" << loadedLocale
+                << "for" << uiLangs.join(QLatin1Char(','));
+    else
+        qInfo() << "[aurelex] no matching translation catalog; using English base strings";
 
     // Register the Material Icons font (bundled via fonts.qrc) so QML can render
     // glyphs with the "Material Icons" family. See qt-material-ui change design D6.

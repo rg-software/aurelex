@@ -1438,7 +1438,7 @@ QString EngineController::groupName(int groupId) const
             return m.value("name").toString();
     }
     // Unknown/deleted group id → treat as "All".
-    return QStringLiteral("All");
+    return tr("All");
 }
 
 void EngineController::setUserDarkOverride(bool on)

@@ -32,7 +32,6 @@ import androidx.core.content.ContextCompat;
 public class StagingService extends Service {
     private static final String TAG = "Aurelex";
     private static final String CHANNEL_ID = "dictionary-processing";
-    private static final String CHANNEL_NAME = "Dictionary preparation";
     private static final int NOTIFICATION_ID = 1002;
     private static final String EXTRA_TREE_URI = "treeUri";
     private static final String EXTRA_DISPLAY = "display";
@@ -176,7 +175,8 @@ public class StagingService extends Service {
     private void createChannel() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return;
         final NotificationChannel channel = new NotificationChannel(
-                CHANNEL_ID, CHANNEL_NAME, NotificationManager.IMPORTANCE_LOW);
+                CHANNEL_ID, getString(R.string.notification_channel_dict_processing),
+                NotificationManager.IMPORTANCE_LOW);
         try {
             getSystemService(NotificationManager.class).createNotificationChannel(channel);
         } catch (Exception e) {
@@ -193,8 +193,8 @@ public class StagingService extends Service {
                 ? new Notification.Builder(this, CHANNEL_ID)
                 : new Notification.Builder(this);
         return builder
-                .setContentTitle("Aurelex")
-                .setContentText("Preparing dictionaries\u2026")
+                .setContentTitle(getString(R.string.notification_title))
+                .setContentText(getString(R.string.notification_staging))
                 .setSmallIcon(R.drawable.ic_notification)
                 .setContentIntent(pi)
                 .setOngoing(true)

@@ -64,6 +64,7 @@ qt_add_executable(aurelex
     EngineController.cpp
     ArticleServer.cpp
     fonts.qrc
+    i18n.qrc
     $<TARGET_OBJECTS:aurelex_carve>
 )
 target_include_directories(aurelex PRIVATE

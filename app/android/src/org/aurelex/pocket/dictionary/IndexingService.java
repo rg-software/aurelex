@@ -33,7 +33,6 @@ import androidx.core.content.ContextCompat;
 public class IndexingService extends Service {
     private static final String TAG = "Aurelex";
     private static final String CHANNEL_ID = "fts-indexing";
-    private static final String CHANNEL_NAME = "Full-text indexing";
     private static final int NOTIFICATION_ID = 1001;
     private static final String PREFS_INDEXING = "indexing";
 
@@ -145,7 +144,8 @@ public class IndexingService extends Service {
     private void createChannel() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return;
         final NotificationChannel channel = new NotificationChannel(
-                CHANNEL_ID, CHANNEL_NAME, NotificationManager.IMPORTANCE_LOW);
+                CHANNEL_ID, getString(R.string.notification_channel_fts_indexing),
+                NotificationManager.IMPORTANCE_LOW);
         try {
             getSystemService(NotificationManager.class).createNotificationChannel(channel);
         } catch (Exception e) {
@@ -163,10 +163,10 @@ public class IndexingService extends Service {
                 ? new Notification.Builder(this, CHANNEL_ID)
                 : new Notification.Builder(this);
         final String text = (total > 0 && name != null && !name.isEmpty())
-                ? "Indexing (" + currentIndex + " of " + total + "): " + name
-                : "Indexing dictionaries\u2026";
+                ? getString(R.string.notification_indexing_progress, currentIndex, total, name)
+                : getString(R.string.notification_indexing_done);
         builder
-                .setContentTitle("Aurelex")
+                .setContentTitle(getString(R.string.notification_title))
                 .setContentText(text)
                 .setSmallIcon(R.drawable.ic_notification)
                 .setContentIntent(pi)
