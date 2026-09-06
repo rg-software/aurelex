@@ -13,7 +13,7 @@ Unknown words MUST NOT crash the app.
 - **WHEN** the user looks up a headword none of the active group's dictionaries contain
 - **THEN** the app shows a "not found" indication and offers a way to continue searching
 
-#### Scenario: Lookup from an external entry point uses the inline surface
+#### Scenario: Lookup from an external entry point opens inline
 - **WHEN** the user initiates a lookup via a share action, the clipboard, history, favorites, or a full-text-search result
 - **THEN** the article is rendered in the Search tab's inline article surface with the active group, the word is added to the lookup history, and it becomes part of the normal back/forward navigation
 
@@ -24,6 +24,10 @@ Unknown words MUST NOT crash the app.
 #### Scenario: Lookup respects the active group
 - **WHEN** a word is only present in dictionaries outside the active group
 - **THEN** the lookup does not show that dictionary's entry (it is treated as not found for that group)
+
+#### Scenario: Group with no dictionaries does not hang
+- **WHEN** the user types a query while the active group has no dictionaries
+- **THEN** suggestions are empty and returned promptly (no long stall), and a lookup in that group reports not-found rather than blocking
 
 ### Requirement: In-article link navigation
 The system SHALL open links within an article as in-app lookups of the linked word rather than leaving the app, and SHALL keep the user able to navigate back to the previous article. Navigation between articles SHALL be browser-like: a back path through previously opened articles and a forward path through articles the user has backed out of; each stack entry SHALL carry the dictionary group the article was produced in, and returning/forwarding SHALL restore that group before re-rendering. A fresh lookup clears the forward path.
@@ -44,12 +48,12 @@ The system SHALL open links within an article as in-app lookups of the linked wo
 - **WHEN** the user backs out of an article and then performs any fresh lookup (typed search, suggestion, history or favorites tap, or in-article link)
 - **THEN** the forward path is cleared and the forward control is unavailable
 
-### Requirement: Group-scope changes re-run the candidate surface
-The system SHALL NOT navigate or re-look-up the open article when the active dictionary group is changed from the Search group picker; instead, it SHALL re-run headword suggestions for the typed query (or re-show lookup history when the field is empty) scoped to the newly selected group.
+### Requirement: Group-scope changes from the Search picker
+When the active dictionary group is changed from the Search group picker: if the search field has text, the app SHALL perform an article lookup of that query in the newly selected group (setting it as the active group and recording the lookup in history); if the field is empty, the app SHALL set the group active and re-show the candidate surface (lookup history) without navigating.
 
-#### Scenario: Changing group re-runs suggestions
+#### Scenario: Changing group with a query triggers a lookup
 - **WHEN** the user selects a different group in the Search group picker while a query is typed
-- **THEN** the app re-runs headword suggestions against the newly selected group, and no navigation or article re-render occurs
+- **THEN** the app looks up that query in the newly selected group, makes it the active group, and records the entry in lookup history
 
 #### Scenario: Changing group with an empty field re-shows history
 - **WHEN** the user selects a different group in the Search group picker while the search field is empty

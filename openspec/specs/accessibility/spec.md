@@ -52,6 +52,10 @@ Every `ListView` SHALL have an `Accessible.name` that describes what list it is 
 - **WHEN** TalkBack navigates the Search candidate area while it shows suggestions or lookup history inside the article WebView
 - **THEN** it announces each entry from the WebView's DOM accessibility subtree (its content-desc)
 
+#### Scenario: Every article uses the unified inline surface
+- **WHEN** TalkBack navigates an article opened from any entry point (search, history, favorites, full-text search, share, clipboard)
+- **THEN** it is reached through the Search tab's inline article WebView with its Back, Forward, and favorites controls, and there is no separate full-pane article pane
+
 ### Requirement: Dialogs SHALL have Accessible.name describing their purpose
 
 Every `Dialog` element SHALL set an `Accessible.name` that describes what the dialog is for (e.g., "Remove dictionary confirmation", "Welcome").

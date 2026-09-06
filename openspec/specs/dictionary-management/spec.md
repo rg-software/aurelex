@@ -72,7 +72,7 @@ Lookup MUST NOT return results for a dictionary until its index build has finish
 - **THEN** the app rebuilds the index for that dictionary and informs the user that reindexing was needed
 
 ### Requirement: Dictionary groups
-The system SHALL let the user organize loaded dictionaries into multiple named groups, each an ordered subset, and SHALL let the user select which group is active for lookups. An implicit "All" group containing every loaded dictionary is always available. Managing groups, their membership, and their order is part of this capability.
+The system SHALL let the user organize loaded dictionaries into multiple named groups, each an ordered subset, and SHALL let the user select which group is active for lookups. An implicit "All" group containing every loaded dictionary is always available. Managing groups, their membership, their order, and the active group is part of this capability. Groups SHALL persist across app restarts (membership stored by stable dictionary identifier and re-resolved after dictionaries load).
 
 #### Scenario: All loaded dictionaries are the default group
 - **WHEN** the user first loads dictionaries without creating any group
@@ -81,6 +81,10 @@ The system SHALL let the user organize loaded dictionaries into multiple named g
 #### Scenario: Create a group
 - **WHEN** the user creates a named group and adds some dictionaries to it
 - **THEN** the group appears in the groups list with that membership
+
+#### Scenario: Groups survive restart
+- **WHEN** the user restarts the app after creating groups
+- **THEN** the same named groups, membership, order, and active selection are restored
 
 #### Scenario: Select the active group
 - **WHEN** the user picks a group as active

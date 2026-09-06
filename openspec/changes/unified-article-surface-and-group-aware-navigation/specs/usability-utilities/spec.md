@@ -23,6 +23,10 @@ The system SHALL record every successful article lookup and SHALL let the user b
 - **WHEN** the user removes a history item (or clears all history)
 - **THEN** the item (or all items) no longer appears in the history list, and the change survives a restart
 
+#### Scenario: Duplicate (word, group) is coalesced
+- **WHEN** the user looks up the same word in the same group more than once
+- **THEN** only the most recent entry remains, at the top of the list
+
 #### Scenario: Typing switches the surface to suggestions
 - **WHEN** the user starts typing after history is shown
 - **THEN** the candidate area switches to headword suggestions for the typed query
