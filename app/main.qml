@@ -1857,6 +1857,17 @@ ColumnLayout {
 
     Connections {
         target: engine
+        // The active group changed (a history/favorite item was opened, a group
+        // picked, or Back/Forward restored one). Keep the Search group combo in
+        // sync so both boxes reflect the item's data. The combo may not contain
+        // the group if it was deleted → _groupIndexForId falls back to All (0).
+        function onActiveGroupChanged() {
+            searchGroupCombo.currentIndex = root._groupIndexForId(engine.activeGroupId)
+        }
+    }
+
+    Connections {
+        target: engine
         // Dark mode flips the OPEN article in place: rewriteArticleUrls always
         // injects darkreader + a gdSetDarkMode controller, so on the toggle we
         // just call it on the live document — no re-lookup/reload, no scroll
