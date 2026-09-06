@@ -29,6 +29,11 @@
 #include <QTimer>
 #include <QUrl>
 #include <QStringList>
+#include <QFile>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QJsonParseError>
 #include <cstring>
 #include <exception>
 #include <mutex>
@@ -77,6 +82,9 @@ struct EngineState
   // gd_scan_failures() so the app can surface exactly which dictionaries are
   // broken and tell the user to re-add the folder.
   QStringList lastScanFailures;
+
+  // App-private config dir (from gd_init) — groups.json is persisted here.
+  QString groupsConfigDir;
 
   // Dictionary currently being full-text indexed, kept alive by a shared ref
   // so a progress reader (UI poller) can sample getIndexingFtsProgress() even
@@ -163,6 +171,88 @@ GroupDef * findGroupDef( unsigned id )
   return nullptr;
 }
 
+// --- group persistence -----------------------------------------------------
+// Groups live entirely in EngineState today and were never written to disk, so
+// every app start recreated only the implicit "All" group. Persist groupDefs +
+// activeGroupId to <configDir>/groups.json so user-defined groups survive
+// relaunches (and upgrades: the config dir is app-private and persists).
+//
+// Membership is stored as dictionary IDs (the MD5 over the source-file paths),
+// which are stable across restarts of the same staged dictionaries; on load we
+// resolve each ID back to its index. Unknown/lost dicts are simply dropped.
+
+QString groupsFilePath()
+{
+  return ( g_state && !g_state->groupsConfigDir.isEmpty() )
+    ? g_state->groupsConfigDir + QStringLiteral( "/groups.json" )
+    : QString();
+}
+
+void saveGroupsLocked()
+{
+  const QString path = groupsFilePath();
+  if ( path.isEmpty() ) return;
+  QJsonArray arr;
+  for ( const auto & def : g_state->groupDefs ) {
+    QJsonObject o;
+    o.insert( "id", static_cast< double >( def.id ) );
+    o.insert( "name", def.name );
+    QJsonArray ids;
+    for ( unsigned idx : def.dictIndices ) {
+      if ( idx < g_state->dictionaries.size() ) {
+        ids.append( QString::fromStdString( g_state->dictionaries[ idx ]->getId() ) );
+      }
+    }
+    o.insert( "dictIds", ids );
+    arr.append( o );
+  }
+  QJsonObject root;
+  root.insert( "activeGroupId", static_cast< double >( g_state->activeGroupId ) );
+  root.insert( "nextGroupId", static_cast< double >( g_state->nextGroupId ) );
+  root.insert( "groups", arr );
+  QFile f( path );
+  if ( f.open( QIODevice::WriteOnly | QIODevice::Truncate ) ) {
+    f.write( QJsonDocument( root ).toJson( QJsonDocument::Compact ) );
+    qInfo( "groups saved to %s", qPrintable( path ) );
+  }
+}
+
+void loadGroupsLocked()
+{
+  const QString path = groupsFilePath();
+  if ( path.isEmpty() ) return;
+  QFile f( path );
+  if ( !f.open( QIODevice::ReadOnly ) ) return;
+  QJsonParseError err;
+  const QJsonDocument doc = QJsonDocument::fromJson( f.readAll(), &err );
+  if ( err.error != QJsonParseError::NoError ) {
+    qWarning( "groups.json parse error" );
+    return;
+  }
+  const QJsonObject root = doc.object();
+  g_state->activeGroupId = static_cast< unsigned >( root.value( "activeGroupId" ).toInt( 0 ) );
+  g_state->nextGroupId   = static_cast< unsigned >( root.value( "nextGroupId" ).toInt( 1 ) );
+  for ( const QJsonValue &gv : root.value( "groups" ).toArray() ) {
+    const QJsonObject o = gv.toObject();
+    GroupDef def;
+    def.id   = static_cast< unsigned >( o.value( "id" ).toInt( 0 ) );
+    def.name = o.value( "name" ).toString();
+    // Resolve dict ids -> indices against the currently loaded dictionaries.
+    for ( const QJsonValue &idv : o.value( "dictIds" ).toArray() ) {
+      const QString want = idv.toString();
+      for ( size_t i = 0; i < g_state->dictionaries.size(); ++i ) {
+        if ( QString::fromStdString( g_state->dictionaries[ i ]->getId() ) == want ) {
+          def.dictIndices.push_back( static_cast< unsigned >( i ) );
+          break;
+        }
+      }
+    }
+    if ( def.id == 0 ) continue; // "All" is implicit
+    g_state->groupDefs.push_back( std::move( def ) );
+  }
+  qInfo( "groups loaded: %d user groups", static_cast< int >( g_state->groupDefs.size() ) );
+}
+
 } // namespace
 
 extern "C" {
@@ -196,6 +286,7 @@ int gd_init( const char * config_dir, const char * index_dir )
 
   g_state = new EngineState;
   g_state->indexDir = QString::fromUtf8( index_dir );
+  g_state->groupsConfigDir = QString::fromUtf8( config_dir );
   // "modern" display style enables the dark mode stylesheet variant
   // (article_maker only emits article-style-darkmode.css for displayStyle
   // "modern"); darkreader.js is emitted for any style when dark mode is on.
@@ -310,6 +401,11 @@ int gd_scan_dicts( const char * folder )
       } );
     }
   }
+
+  // Load persisted user groups now that dictionaries are known (membership is
+  // resolved from stored dict ids), then rebuild the materialized group set.
+  loadGroupsLocked();
+  rebuildGroups();
 
   g_state->articleMaker =
     std::make_unique< ArticleMaker >( g_state->dictionaries, g_state->groups, g_state->cfg.preferences );
@@ -694,6 +790,7 @@ int gd_group_create( const char * name, int * id_out )
   g_state->groupDefs.push_back( std::move( def ) );
   *id_out = static_cast< int >( g_state->groupDefs.back().id );
   rebuildGroups();
+  saveGroupsLocked();
   return 0;
 }
 
@@ -709,6 +806,7 @@ int gd_group_rename( int id, const char * name )
     return -1;
   def->name = QString::fromUtf8( name );
   rebuildGroups();
+  saveGroupsLocked();
   return 0;
 }
 
@@ -729,6 +827,7 @@ int gd_group_delete( int id )
     g_state->activeGroupId = 0;
   }
   rebuildGroups();
+  saveGroupsLocked();
   return 0;
 }
 
@@ -746,6 +845,7 @@ int gd_group_add_dict( int id, int dict_index )
   if ( std::find( def->dictIndices.begin(), def->dictIndices.end(), u ) == def->dictIndices.end() ) {
     def->dictIndices.push_back( u );
     rebuildGroups();
+    saveGroupsLocked();
   }
   return 0;
 }
@@ -765,6 +865,7 @@ int gd_group_remove_dict( int id, int dict_index )
   if ( it != v.end() ) {
     v.erase( it );
     rebuildGroups();
+    saveGroupsLocked();
   }
   return 0;
 }
@@ -788,6 +889,7 @@ int gd_group_move_dict( int id, int from, int to )
   v.erase( it );
   v.insert( v.begin() + to, item );
   rebuildGroups();
+  saveGroupsLocked();
   return 0;
 }
 
@@ -808,6 +910,7 @@ int gd_group_set_active( int id )
   if ( id != 0 && !findGroupDef( static_cast< unsigned >( id ) ) )
     return -1;
   g_state->activeGroupId = static_cast< unsigned >( id );
+  saveGroupsLocked();
   return 0;
 }
 
