@@ -96,7 +96,13 @@ ApplicationWindow {
     }
     onWidthChanged: root._refreshInsets()
     onHeightChanged: root._refreshInsets()
-    Component.onCompleted: root._refreshInsets()
+    Component.onCompleted: {
+        root._refreshInsets()
+        // First run: land on the Dicts tab (no inline WebView) so the welcome
+        // dialog overlays nothing and the user is already where "Add
+        // dictionaries" lives.
+        if (!engine.onboarded) root.state = 1
+    }
     function icon( name ) {
         var map = {
             "search": 0xe8b6,
@@ -777,7 +783,12 @@ ColumnLayout {
                     font.pixelSize: 18
                     onDisplayTextChanged: searchPane._doSuggest()
                     onAccepted: { input.focus = false; root._requestedWord = text.trim(); engine.lookup(text.trim()) }
-                    Component.onCompleted: forceActiveFocus()
+                    Component.onCompleted: {
+                        // Focus the field + show the keyboard only AFTER
+                        // onboarding — on first run the keyboard must not pop
+                        // up behind the welcome overlay.
+                        if (engine.onboarded) forceActiveFocus()
+                    }
                 }
 
                 ComboBox {
@@ -1429,6 +1440,62 @@ ColumnLayout {
 
             onAccepted: dictsPane._confirmRemove()
             onRejected: dictsPane._cancelRemove()
+        }
+
+        // --- onboarding overlay (first run) ---
+        // Rendered as a full-pane Rectangle inside the Dicts tab (not a Dialog):
+        // on Android, normal scene items receive taps reliably while popup
+        // overlays can miss them. First run routes to the Dicts tab, and this
+        // tab has no inline WebView, so the dim + card can't be punctured by a
+        // native surface. Fills the safe content-pane area exactly.
+        Rectangle {
+            id: onboardingOverlay
+            anchors.fill: parent
+            visible: !engine.onboarded
+            color: Qt.rgba(0, 0, 0, 0.5)
+
+            Rectangle {
+                anchors.centerIn: parent
+                width: parent.width - 80
+                implicitHeight: onbCol.implicitHeight + 48
+                color: root.uiCard
+                radius: 12
+                border.color: root.uiBorder
+
+                ColumnLayout {
+                    id: onbCol
+                    anchors.fill: parent
+                    anchors.margins: 24
+                    spacing: 16
+
+                    Label {
+                        Layout.fillWidth: true
+                        text: "Welcome to Aurelex"
+                        font.pixelSize: 22
+                        font.bold: true
+                        horizontalAlignment: Text.AlignHCenter
+                    }
+                    Label {
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        text: "Add dictionaries by tapping Add dictionaries below and picking a folder with dictionary files (.mdx, .dsl, .dsl.dz, .ifo) — the folder is copied into the app once (no system-wide storage access needed). Use the bottom bar to switch between Search, Dictionaries, Groups, FTS and Favorites."
+                        font.pixelSize: 15
+                        wrapMode: Text.Wrap
+                        horizontalAlignment: Text.AlignHCenter
+                        verticalAlignment: Text.AlignVCenter
+                        color: root.uiFg
+                    }
+                    Button {
+                        id: onboardingGetStarted
+                        Layout.alignment: Qt.AlignHCenter
+                        text: "Get started"
+                        highlighted: true
+                        Accessible.name: "Get started"
+                        Accessible.role: Accessible.Button
+                        onClicked: engine.onboarded = true
+                    }
+                }
+            }
         }
     }
 
@@ -2222,50 +2289,7 @@ ColumnLayout {
                         }
                         groupPicker.close()
                     }
-                }
-            }
-        }
-    }
-
-    // --- onboarding overlay (full-page Material Dialog) ---
-    Dialog {
-        anchors.centerIn: parent
-        width: parent.width
-        height: parent.height
-        modal: false
-        visible: !engine.onboarded
-        padding: 24
-        closePolicy: Popup.NoAutoClose
-        Accessible.name: "Welcome"
-        Accessible.role: Accessible.Dialog
-
-        contentItem: ColumnLayout {
-            anchors.fill: parent
-            spacing: 16
-
-            Label {
-                Layout.fillWidth: true
-                text: "Welcome to Aurelex"
-                font.pixelSize: 22
-                font.bold: true
-                horizontalAlignment: Text.AlignHCenter
-            }
-            Label {
-                Layout.fillWidth: true
-                Layout.fillHeight: true
-                text: "Add dictionaries by tapping Add dictionaries in the Dicts tab and picking a folder with dictionary files (.mdx, .dsl, .dsl.dz, .ifo) — the folder is copied into the app once (no system-wide file access needed). Use the bottom bar to switch between Search, Dictionaries, Groups, FTS and Favorites."
-                font.pixelSize: 15
-                wrapMode: Text.Wrap
-                horizontalAlignment: Text.AlignHCenter
-                verticalAlignment: Text.AlignVCenter
-            }
-            Button {
-                Layout.alignment: Qt.AlignHCenter
-                text: "Get started"
-                highlighted: true
-                Accessible.name: "Get started"
-                Accessible.role: Accessible.Button
-                onClicked: engine.onboarded = true
+}
             }
         }
     }
