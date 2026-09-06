@@ -371,7 +371,9 @@ android {
     aaptOptions { noCompress 'rcc' }
 
     buildTypes {
-        release { minifyEnabled false }
+        release {
+            minifyEnabled false
+        }
     }
 
     defaultConfig {
