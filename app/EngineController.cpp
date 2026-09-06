@@ -1430,6 +1430,17 @@ bool EngineController::groupExists(int groupId) const
     return false;
 }
 
+QString EngineController::groupName(int groupId) const
+{
+    for (const QVariant &g : m_groups) {
+        const QVariantMap m = g.toMap();
+        if (m.value("id").toInt() == groupId)
+            return m.value("name").toString();
+    }
+    // Unknown/deleted group id → treat as "All".
+    return QStringLiteral("All");
+}
+
 void EngineController::setUserDarkOverride(bool on)
 {
     if (m_userDarkOverride == on) return;
@@ -1604,7 +1615,8 @@ void EngineController::saveSettings()
 void EngineController::recordHistory(const QString &word)
 {
     if (word.isEmpty()) return;
-    // Dedupe + move-to-front (same word+group considered one entry), cap at 100.
+    // Dedupe + move-to-front (same word+group is a single entry; the older one
+    // is dropped), cap at 500.
     const int group = m_activeGroupId;
     QVariantList updated;
     QVariantMap head;
@@ -1617,7 +1629,7 @@ void EngineController::recordHistory(const QString &word)
             continue;
         updated.append(entry);
     }
-    while (updated.size() > 100) updated.removeLast();
+    while (updated.size() > 500) updated.removeLast();
     setHistory(updated);
     saveHistory();
 }

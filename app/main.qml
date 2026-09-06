@@ -305,11 +305,15 @@ ApplicationWindow {
                     const hwObj = words[h]
                     const hw = typeof hwObj === "string" ? hwObj : hwObj.word
                     const hg = (typeof hwObj === "string") ? 0 : (hwObj.group || 0)
+                    const hgName = root._escHtml(engine.groupName(hg))
                     html += '<div style="display:flex;align-items:center;border-bottom:1px solid ' + sep + ';">'
                         + '<a id="gd-sugg-link" href="javascript:;" data-action="open-history" data-w="' + root._escHtml(hw)
                         + '" data-group="' + hg
                         + '" style="flex:1;padding:12px 16px;text-decoration:none;color:inherit;overflow:hidden;'
-                        + 'text-overflow:ellipsis;white-space:nowrap;">' + root._escHtml(hw) + '</a>'
+                        + 'text-overflow:ellipsis;white-space:nowrap;">'
+                        + '<span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + root._escHtml(hw) + '</span>'
+                        + '<span style="display:block;font-size:11px;color:#888;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + hgName + '</span>'
+                        + '</a>'
                         + '<button data-action="remove-history" data-w="' + root._escHtml(hw)
                         + '" data-group="' + hg
                         + '" style="border:0;background:none;color:#999;font-size:18px;padding:4px 16px;">✕</button>'
@@ -1792,12 +1796,24 @@ ColumnLayout {
                 Accessible.role: Accessible.ListItem
                 contentItem: RowLayout {
                     spacing: 0
-                    Label {
+                    ColumnLayout {
                         Layout.fillWidth: true
-                        text: favRow.word
-                        elide: Text.ElideMiddle
-                        verticalAlignment: Text.AlignVCenter
-                        leftPadding: 16
+                        spacing: 0
+                        Label {
+                            Layout.fillWidth: true
+                            text: favRow.word
+                            elide: Text.ElideMiddle
+                            leftPadding: 16
+                            font.pixelSize: 16
+                        }
+                        Label {
+                            Layout.fillWidth: true
+                            text: engine.groupName(favRow.group)
+                            elide: Text.ElideMiddle
+                            leftPadding: 16
+                            font.pixelSize: 11
+                            color: root.uiSubFg
+                        }
                     }
                     // "X to remove" matches the history overlay (no swipe gesture).
                     ToolButton {
@@ -2178,15 +2194,20 @@ ColumnLayout {
                     onClicked: {
                         const g = engine.groups[index]
                         if (g) {
-                            engine.setActiveGroup(g.id)
                             searchGroupCombo.currentIndex = index
                             groupPickerList.currentIndex = index
-                            // Group change re-runs the candidate surface only —
-                            // no navigation or article re-render.
-                            if (input.displayText.trim().length > 0)
-                                searchPane._doSuggest()
-                            else
+                            const q = input.displayText.trim()
+                            if (q.length > 0) {
+                                // Switching the group actually triggers a lookup
+                                // of the typed query in the new group. This also
+                                // sets the active group and records the entry
+                                // (a fresh search → new history item).
+                                root._requestedWord = q
+                                engine.lookupInGroupWithSwitch(q, g.id)
+                            } else {
+                                engine.setActiveGroup(g.id)
                                 root._showHistoryOverlay()
+                            }
                         }
                         groupPicker.close()
                     }

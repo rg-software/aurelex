@@ -84,6 +84,8 @@ public:
     Q_INVOKABLE QStringList favoritesWords() const;
     // Does a group with this id exist (used for group-restore fallback to All)?
     Q_INVOKABLE bool groupExists(int groupId) const;
+    // Human-readable name of a group id (falls back to "All").
+    Q_INVOKABLE QString groupName(int groupId) const;
     bool darkMode() const { return m_darkMode; }
     bool systemDark() const { return m_systemDark; }
     bool userDarkOverride() const { return m_userDarkOverride; }

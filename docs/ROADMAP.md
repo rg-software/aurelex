@@ -64,10 +64,10 @@ Status legend: 🟢 planned · 🔵 in progress · ✅ done · ⏸ parked
   in-app search field (or starts lookup directly), reusing the tile's
   clipboard-read path. Needs an on-device check that the clipboard read happens
   in the foreground activity (Android 10+), same as the tile.
-- 🟢 **Show group label on history/favorites rows** — history and favorites now
-  persist the producing dictionary group per entry; a small secondary label on
-  each row (and/or a long-press detail) could surface which group an item
-  belongs to. Deliberately deferred from the unified-article-surface change.
+- 🟢 **Group label on history/favorites rows** — history and favorites rows now
+  show a small group-name line (implemented in the unified-article-surface
+  change). A possible follow-up: make the group name tappable (jump to that
+  group, trigger search) in both surfaces.
 
 ## Cut permanently (no future plans)
 
