@@ -671,18 +671,38 @@ ApplicationWindow {
                 }
             }
 
-            // Dark-mode toggle lives in the bottom dock (one slot wide).
+            // Dark-mode toggle lives in the bottom dock (one slot wide). It forces dark
+            // (or returns to following the system theme); kept even though we
+            // match the system by default, so users can override without
+            // changing the device setting.
             ToolButton {
+                id: themeBtn
                 Layout.preferredWidth: root.width / 6
                 Layout.fillHeight: true
-                text: root.icon("dark_mode")
-                font.family: root.iconFontFamily
-                font.pixelSize: 20
                 Accessible.name: engine.userDarkOverride || engine.systemDark ? "Light mode" : "Dark mode"
                 Accessible.role: Accessible.Button
                 onClicked: {
                     engine.toggleDarkOverride()
                     root._blurActive()
+                }
+                contentItem: Column {
+                    anchors.centerIn: parent
+                    spacing: 0
+                    Text {
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        text: root.icon("dark_mode")
+                        font.family: root.iconFontFamily
+                        font.pixelSize: 20
+                        color: themeBtn.down || themeBtn.checked
+                            ? themeBtn.Material.accentColor : themeBtn.Material.foreground
+                    }
+                    Text {
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        text: "Theme"
+                        font.pixelSize: 10
+                        color: themeBtn.down || themeBtn.checked
+                            ? themeBtn.Material.accentColor : themeBtn.Material.foreground
+                    }
                 }
             }
         }
