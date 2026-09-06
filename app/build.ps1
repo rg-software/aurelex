@@ -373,6 +373,7 @@ android {
     buildTypes {
         release {
             minifyEnabled false
+            ndk { debugSymbolLevel 'SYMBOL_TABLE' }
         }
     }
 
@@ -432,7 +433,7 @@ if ($Configuration -eq "Release") {
                 $bg = $bg.Substring(0, $insertAt) + "`n" + $signBlock.TrimStart() + "`n" + $bg.Substring($insertAt)
             }
             # Add signingConfig to the release build type
-            $bg = $bg -replace '(buildTypes\s*\{[^}]*release\s*\{)', "`$1`n            signingConfig signingConfigs.release"
+            $bg = $bg -replace '(buildTypes\s*\{[^}]*release\s*\{)', "`$1`n            signingConfig signingConfigs.release`n"
             Set-Content $bgPath $bg -NoNewline
             Write-Host "Injected release signing config (storeFile=$ksPath)." -ForegroundColor Yellow
         }
@@ -464,6 +465,18 @@ if (Test-Path $bgPath) {
     if ($bgNow -match 'resConfig\s+"en"') {
         Set-Content $bgPath ($bgNow -replace 'resConfig\s+"en"', 'resConfigs "en", "ru", "ja"') -NoNewline
         Write-Host "Patched resConfig to keep en/ru/ja locales." -ForegroundColor Yellow
+    }
+}
+
+# Embed native symbol tables (function names) into the AAB's
+# native-debug-symbols payload so Play can symbolize native crashes without a
+# manual upload. Keep this idempotent so it also fixes an androiddeployqt
+# generated build.gradle left behind on a dev machine.
+if (Test-Path $bgPath) {
+    $bgNow = Get-Content $bgPath -Raw
+    if ($bgNow -notmatch 'debugSymbolLevel') {
+        Set-Content $bgPath ($bgNow -replace '(buildTypes\s*\{[^}]*release\s*\{)', "`$1`n            ndk { debugSymbolLevel 'SYMBOL_TABLE' }`n") -NoNewline
+        Write-Host "Patched release buildType with ndk debugSymbolLevel SYMBOL_TABLE." -ForegroundColor Yellow
     }
 }
 
