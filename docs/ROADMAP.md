@@ -44,6 +44,14 @@ Status legend: 🟢 planned · 🔵 in progress · ✅ done · ⏸ parked
   done; remaining: the foreground `IndexingService` (3.1–3.3) so a long build
   survives backgrounding, and the on-device verification pass (4.1–4.4).
 
+## Recently completed
+
+- ✅ **Search history in the candidate surface + browser-style article
+  navigation** (`search-history-and-article-nav`, archived 2026-09-06): the
+  History tab was abolished (history shows in the empty/fallback Search
+  surface), in-WebView Back/Forward with a forward (redo) stack, and the
+  frameless right-justified article header. Main specs synced.
+
 ## Candidate future milestones
 
 - 🟢 **Translate-later / word-list export** — extract headwords/definitions to
