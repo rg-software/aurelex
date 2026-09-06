@@ -71,6 +71,13 @@ SHALL/MUST language) — follow the instructions output before writing any artif
 - Before any upstream bump: build the engine, run the CI smoke test, and update specs only if
   observable behavior changed (never massage specs to fit a refactor).
 - Work flows through OpenSpec changes first; implementation does not run ahead of the plan.
+- **Localization:** English is the source language. If user-visible English text changes in Qt
+  sources (`qsTr`/`tr` arguments) or in `app/android/res/values/strings.xml`, the other shipped
+  languages (RU, JA) MUST be updated in the same change: run
+  `scripts/update-translations.ps1`, translate the new catalog entries in `app/i18n/*.ts`, mirror
+  the change in `values-ru/` + `values-ja/`, and recommit the compiled `app/i18n/*.qm`. Qt catalog
+  entries are source-keyed: never edit `<source>` inside a `.ts` (edit the code, then re-extract),
+  and changing English retires the old key so its translation must be re-entered per catalog.
 
 ## Accessible element IDs (for automated testing)
 

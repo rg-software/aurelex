@@ -109,17 +109,37 @@ notifications) use `res/values*/strings.xml`.
   `aurelex_<lang>_<region>.qm` from the embedded `:/i18n/` resource, and falls
   back to English (with a `qInfo` line) without aborting.
 
+**Source strings are the catalog keys** — this matters when editing English.
+
+Unlike Android `strings.xml` (where the resource `name` is a language-independent
+key and only the value changes per locale), a Qt catalog entry is keyed by the
+literal English `qsTr`/`tr` argument it was extracted from (`<source>`). Two
+consequences:
+
+- **Never edit `<source>` inside a `.ts`.** Its only true home is the QML/C++
+  code; `lupdate` regenerates it and (`-no-obsolete`) deletes any message whose
+  source no longer appears in the sources — a hand-edited key just vanishes on
+  the next extract.
+- **Changing English copy means retranslating in every catalog.** Edit the
+  string in the source and re-extract: the old message is dropped as obsolete
+  and a fresh `<message>` appears with an *empty* `<translation>`. Fill it in
+  each shipped catalog — no translation carries over, because the key changed.
+
 **Adding or updating text**
 
-1. Write the user-facing string with `qsTr`/`tr` in the QML/C++ source.
+1. Write or edit the user-facing string with `qsTr`/`tr` in the QML/C++
+   source. If only the target-language text changes (English stays correct),
+   skip to step 3 and edit translations directly.
 2. Extract and compile catalogs:
    `pwsh -File .\scripts\update-translations.ps1 -Languages @("ru","ja")`
-   (`-NoCompile` to refresh the `.ts` only). Requires Qt's `lupdate`/`lrelease`
-   (`AURELEX_QT_BASE`/`AURELEX_QT_HOST` default to `C:\Qt\6.6.3` /
-   `msvc2019_64`).
-3. Translate the new `<message>` blocks directly in `app/i18n/aurelex.ru.ts`
-   / `aurelex.ja.ts`, or run the script's `lrelease` step to regenerate the
-   `.qm` files from whatever the `.ts` holds.
+   (`-NoCompile` to refresh the `.ts` only). `lupdate` updates the `.ts` to
+   match the sources; `lrelease` then recompiles the `.qm`. Requires Qt's
+   `lupdate`/`lrelease` (`AURELEX_QT_BASE`/`AURELEX_QT_HOST` default to
+   `C:\Qt\6.6.3` / `msvc2019_64`).
+3. Translate: fill the `<translation>` of any new (or freshly emptied)
+   `<message>` directly in `app/i18n/aurelex.ru.ts` / `aurelex.ja.ts`, then
+   re-run the script to recompile the `.qm`. Translation-only tweaks do not
+   need step 2.
 4. **Commit the compiled `.qm` files** — they are the shipped artifacts; both
    are embedded via `app/i18n.qrc`.
 5. If a new system language is added, also extend `app/android/res/values-xx/`
