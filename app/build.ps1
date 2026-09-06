@@ -8,10 +8,10 @@
 #   pthread_cond_clockwait >= 30)
 # - NDK bionic sysroot include needed for iconv.h
 # - Gradle must run under JDK 17 (AGP 7.4.1 + JDK 21 -> D8 NPE); Unity ships 17.0.9
-# - compileSdk is bumped to android-35 for Play's targetSdk 35 requirement.
-#   AGP 7.4.1 predates SDK 35, so android.suppressUnsupportedCompileSdk silences
+# - compileSdk is bumped to android-36 for Play's targetSdk 36 requirement.
+#   AGP 7.4.1 predates SDK 36, so android.suppressUnsupportedCompileSdk silences
 #   its "not supported" warning. AGP's default aapt2 (7.4.1-8841542) cannot link
-#   against SDK 35's android.jar, so gradle.properties pins
+#   against SDK 36's android.jar, so gradle.properties pins
 #   android.aapt2FromMavenOverride to the aapt2 from build-tools 36.0.0.
 # - androiddeployqt regenerates local.properties/gradle.properties -> re-apply overrides
 # - Qt has no qt_add_apk_target in the aqt carve subset -> package via androiddeployqt
@@ -283,7 +283,7 @@ $sdkProp = ($sdkDir -replace '\\', '/') -replace ':', '\:'
 Set-Content (Join-Path $ApkDir "local.properties") "sdk.dir=$sdkProp" -NoNewline
 $gpPath = Join-Path $ApkDir "gradle.properties"
 # aapt2 from AGP 7.4.1's default Maven artifact (7.4.1-8841542) cannot link
-# against SDK 35's android.jar, so override aapt2 with the newer binary shipped
+# against SDK 36's android.jar, so override aapt2 with the newer binary shipped
 # in build-tools 36.0.0. The property key is android.aapt2FromMavenOverride.
 $Aapt2Exe = (Join-Path $sdkDir "build-tools\36.0.0\aapt2.exe") -replace '\\', '/'
 # androiddeployqt in the carve-subset kit may not generate gradle.properties on
@@ -298,23 +298,23 @@ org.gradle.jvmargs=-Xmx2500m -XX:MaxMetaspaceSize=768m -Dfile.encoding=UTF-8
 android.useAndroidX=true
 android.aapt2FromMavenOverride=$Aapt2Exe
 androidBuildToolsVersion=35.0.0
-androidCompileSdkVersion=android-35
+androidCompileSdkVersion=android-36
 androidNdkVersion=23.2.8568313
 buildDir=build
 qt5AndroidDir=$qtAndroidDir
 qtAndroidDir=$qtAndroidDir
 qtMinSdkVersion=23
-android.suppressUnsupportedCompileSdk=35
+android.suppressUnsupportedCompileSdk=36
 qtTargetAbiList=arm64-v8a
-qtTargetSdkVersion=35
+qtTargetSdkVersion=36
 "@ | Set-Content $gpPath -NoNewline
 } else {
     $gp = Get-Content $gpPath -Raw
-    $gp = $gp -replace 'androidCompileSdkVersion=android-\d+', 'androidCompileSdkVersion=android-35'
+    $gp = $gp -replace 'androidCompileSdkVersion=android-\d+', 'androidCompileSdkVersion=android-36'
     $gp = $gp -replace 'androidBuildToolsVersion=[\d.]+', 'androidBuildToolsVersion=35.0.0'
-    $gp = $gp -replace 'qtTargetSdkVersion=\d+', 'qtTargetSdkVersion=35'
+    $gp = $gp -replace 'qtTargetSdkVersion=\d+', 'qtTargetSdkVersion=36'
     if ($gp -notmatch 'suppressUnsupportedCompileSdk') {
-        $gp = $gp -replace '(qtTargetSdkVersion=\d+)', "`$1`nandroid.suppressUnsupportedCompileSdk=35"
+        $gp = $gp -replace '(qtTargetSdkVersion=\d+)', "`$1`nandroid.suppressUnsupportedCompileSdk=36"
     }
     if ($gp -notmatch 'aapt2FromMavenOverride') {
         $gp = $gp.TrimEnd() + "`nandroid.aapt2FromMavenOverride=$Aapt2Exe`n"

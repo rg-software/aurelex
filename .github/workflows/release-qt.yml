@@ -114,7 +114,7 @@ jobs:
           $previewLicense = "8933bad161af4178b1185d1a37fbf41ea5269c55"
           Add-Content -Path "$licensesDir\android-sdk-preview-license" -Value $previewLicense -Encoding ASCII
           & "$env:ANDROID_SDK_ROOT\cmdline-tools\latest\bin\sdkmanager.bat" --sdk_root="$env:ANDROID_SDK_ROOT" `
-            "platforms;android-34" "platforms;android-35" "build-tools;35.0.0" "build-tools;36.0.0" "platform-tools"
+            "platforms;android-34" "platforms;android-35" "platforms;android-36" "build-tools;35.0.0" "build-tools;36.0.0" "platform-tools"
           if ($LASTEXITCODE -ne 0) { throw "sdkmanager failed (exit $LASTEXITCODE)" }
           if (-not (Test-Path "$env:ANDROID_SDK_ROOT\build-tools\36.0.0")) {
             throw "build-tools/36.0.0 not installed under $env:ANDROID_SDK_ROOT"
