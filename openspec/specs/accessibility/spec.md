@@ -28,6 +28,10 @@ Every element that a user can interact with (buttons, text fields, list items, c
 - **WHEN** TalkBack focuses the article forward button
 - **THEN** it announces "Forward"
 
+#### Scenario: Article zoom controls have descriptive accessible names
+- **WHEN** TalkBack focuses the article zoom controls
+- **THEN** it announces their purpose, e.g. "Zoom in" and "Zoom out", without any raw English zoom-count state in the names
+
 ### Requirement: Every interactive QML element SHALL have an Accessible.role
 
 Every interactive element SHALL set an `Accessible.role` matching its semantic function. Roles SHALL use the Qt `Accessible.role` enum values (`Accessible.Button`, `Accessible.EditableText`, `Accessible.List`, `Accessible.ListItem`, `Accessible.TabBar`, `Accessible.TabButton`, `Accessible.ComboBox`, `Accessible.CheckBox`, `Accessible.Dialog`, `Accessible.Menu`, `Accessible.MenuItem`, `Accessible.WebView`, `Accessible.Group`, `Accessible.ToolBar`, `Accessible.ProgressBar`).
@@ -54,7 +58,7 @@ Every `ListView` SHALL have an `Accessible.name` that describes what list it is 
 
 #### Scenario: Every article uses the unified inline surface
 - **WHEN** TalkBack navigates an article opened from any entry point (search, history, favorites, full-text search, share, clipboard)
-- **THEN** it is reached through the Search tab's inline article WebView with its Back, Forward, and favorites controls, and there is no separate full-pane article pane
+- **THEN** it is reached through the Search tab's inline article WebView with its Back, Forward, favorites, and zoom controls, and there is no separate full-pane article pane
 
 ### Requirement: Dialogs SHALL have Accessible.name describing their purpose
 
