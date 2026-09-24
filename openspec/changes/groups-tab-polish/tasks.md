@@ -45,7 +45,7 @@
 - [x] 7.1 Make the group name row tappable again (`onClicked` → `_openMembership`, non-"All" only); remove the per-row pencil button (rename stays in the editor)
 - [x] 7.2 Remove the `"Group:"` prefix from the membership editor header (just the name)
 - [x] 7.3 Drop the now-obsolete `Group: %1` string from the Qt catalogs
-- [x] 7.4 Decided: smooth drag-follow-finger is DEFERRED (ListView recycles delegates + no per-row ghost/translate API → overlay-ghost or non-recycled layout = high effort, Android jank risk, borderline benefit). Live reorder at row boundaries is the accepted behavior; the dragged row is HIGHLIGHTED via `_dragIndex` → member delegate `highlighted` so the active line is visible. See design.md Risks.
+- [x] 7.4 Decided: smooth drag-follow-finger is DEFERRED (ListView recycles delegates + no per-row ghost/translate API → overlay-ghost or non-recycled layout = high effort, Android jank risk, borderline benefit). Live reorder at row boundaries is the accepted behavior; the dragged row is HIGHLIGHTED via `_dragIndex` → member delegate `highlighted`, and cleared by a 400 ms no-motion watchdog (the MouseArea `released` can be lost when the ListView recycles its delegate mid-drag). See design.md Risks.
 
 ## 8. Verify on device
 

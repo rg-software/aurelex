@@ -136,8 +136,12 @@ a `Reorder` drag handle; no more Move-up/Move-down buttons).
   risk for a borderline UX gain. Accepted: reorder happens live at row
   boundaries instead of a smooth glide; the row under the finger IS marked
   (`groupsPane._dragIndex` bound to the member delegate's `highlighted`), so the
-  active line is always visible while dragging. Revisit the smooth glide only if
-  the user decides the cost is worth it.
+  active line is always visible while dragging. Because the ListView recycles the
+  delegate mid-drag (the MouseArea's `released` can be lost), ending the drag does
+  NOT rely on release: a single-shot 400 ms watchdog restarts on every
+  press/move and finalizes the drag when the finger goes still — so the highlight
+  always clears after the finger lifts. Revisit the smooth glide only if the
+  user decides the cost is worth it.
 
 ## Migration Plan
 

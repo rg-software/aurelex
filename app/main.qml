@@ -1592,10 +1592,14 @@ text: root._stagingActive
         property real _dragStartY: 0
         property int _dragLastTo: -1
         property bool _dragArmed: false
-        // memberIndex of the row currently being dragged; -1 when idle. The
-        // member delegate binds its `highlighted` to this so the row under the
-        // finger stays visually marked while it moves.
+        // Mark the row that's being dragged/reordered so the active
+        // line is visible while the finger moves it.
         property int _dragIndex: -1
+        // Single-shot watchdog for the reorder gesture. The member MouseArea's
+        // `released` can be lost (the ListView recycles its delegate mid-drag),
+        // so ending the drag must not depend on it: every press/move restarts
+        // this timer, and when it fires (~300 ms of no motion = finger up) the
+        // drag is finalized and the highlight clears.
 
         function _dragBegin(index, mouseY) {
             // Any row can be dragged up or down; _dragMove clamps to the list
@@ -1605,9 +1609,11 @@ text: root._stagingActive
             groupsPane._dragLastTo = index
             groupsPane._dragIndex = index
             groupsPane._dragArmed = true
+            dragWatchdog.restart()
         }
         function _dragMove(mouseY) {
             if (!groupsPane._dragArmed) return
+            dragWatchdog.restart()
             const dy = mouseY - groupsPane._dragStartY
             // 44 = member row height. Round to the nearest row boundary; each
             // crossed boundary moves the row one slot (delta-based, so it works
@@ -1625,6 +1631,13 @@ text: root._stagingActive
             groupsPane._dragFrom = -1
             groupsPane._dragLastTo = -1
             groupsPane._dragIndex = -1
+            dragWatchdog.stop()
+        }
+        Timer {
+            id: dragWatchdog
+            interval: 400
+            repeat: false
+            onTriggered: groupsPane._dragEnd()
         }
 
         function _openMembership(id, name) {
