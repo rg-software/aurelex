@@ -46,7 +46,14 @@ elseif(ANDROID_ABI STREQUAL "x86_64")
     set(VCPKG_TRIPLET "x64-android")
 elseif(NOT DEFINED ANDROID_ABI OR ANDROID_ABI STREQUAL "")
     set(QT_ANDROID_ROOT "${QT_BASE}")
-    set(VCPKG_TRIPLET "x64-windows")
+    # Host builds (the CI smoke tool) pick the vcpkg triplet for the host OS.
+    if(WIN32)
+        set(VCPKG_TRIPLET "x64-windows")
+    elseif(APPLE)
+        set(VCPKG_TRIPLET "x64-osx")
+    else()
+        set(VCPKG_TRIPLET "x64-linux")
+    endif()
 else()
     message(FATAL_ERROR "Unsupported ABI: ${ANDROID_ABI}")
 endif()
@@ -139,10 +146,17 @@ set(AURELEX_CARVE_LIBS
     fmt
 )
 
-# Host (Windows) builds need GNU libiconv for <iconv.h>; Android gets iconv
-# from bionic at API 28+ (design D6) via the platform.
-if(NOT ANDROID_ABI OR ANDROID_ABI STREQUAL "")
+# Host (Windows) builds need GNU libiconv for <iconv.h>; Linux/macOS provide
+# iconv() in libc (vcpkg's libiconv port builds nothing there). Android gets
+# iconv from bionic at API 28+ (design D6) via the platform.
+if(WIN32 AND NOT ANDROID)
     list(APPEND AURELEX_CARVE_LIBS iconv)
+endif()
+
+# Linux/macOS xapian links against libuuid (the vcpkg xapian port pulls libuuid
+# in as a dependency for those triplets); the Android carve uses bionic's uuid.
+if(NOT WIN32 AND NOT ANDROID)
+    list(APPEND AURELEX_CARVE_LIBS uuid)
 endif()
 
 # NOTE: deliberately NOT defining MAKE_CHINESE_CONVERSION_SUPPORT — that

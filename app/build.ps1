@@ -74,7 +74,7 @@ $gradleTask = "assemble$Configuration"
 function Write-QtLibResources {
     param([string]$ApkDir, [string]$Abi)
 
-    $libDir = Join-Path $ApkDir "libs\$Abi"
+    $libDir = Join-Path $ApkDir "libs/$Abi"
     if (-not (Test-Path $libDir)) { return }
 
     # bundled_libs: EVERY .so the APK ships (Qt runtime + QML modules + plugins
@@ -140,7 +140,7 @@ $loc
     <string name="system_libs_prefix"></string>
 </resources>
 "@
-    $resValues = Join-Path $ApkDir "res\values"
+    $resValues = Join-Path $ApkDir "res/values"
     New-Item -ItemType Directory -Force -Path $resValues | Out-Null
     Set-Content (Join-Path $resValues "libs.xml") $xml -Encoding UTF8 -NoNewline
     Write-Host "Wrote res/values/libs.xml ($($all.Count) libs)." -ForegroundColor Yellow
@@ -172,7 +172,7 @@ Write-Host "== [3/5] stage app .so + Qt runtime/QML libs into apk libs ==" -Fore
 $soName = "libaurelex_$Abi.so"
 $soPath = Join-Path $BuildDir $soName
 if (-not (Test-Path $soPath)) { throw "built .so not found: $soPath" }
-$LibOut = "$ApkDir\libs\$Abi"
+$LibOut = "$ApkDir/libs/$Abi"
 New-Item -ItemType Directory -Force -Path $LibOut | Out-Null
 Copy-Item $soPath $LibOut -Force
 # NOTE (qt-material-ui): androiddeployqt's --no-build path in the aqt carve
@@ -182,17 +182,22 @@ Copy-Item $soPath $LibOut -Force
 # broke on a clean checkout (APK with only the app .so -> UnsatisfiedLinkError).
 # Stage the complete Qt runtime set explicitly so the APK is self-contained and
 # reproducible. Gradle packages this dir via jniLibs.srcDirs = ['libs'].
-$KitRoot = if ($Abi -eq "arm64-v8a") { "$QtBase\android_arm64_v8a" }
-           elseif ($Abi -eq "x86_64") { "$QtBase\android_x86_64" }
+$KitRoot = if ($Abi -eq "arm64-v8a") { "$QtBase/android_arm64_v8a" }
+           elseif ($Abi -eq "x86_64") { "$QtBase/android_x86_64" }
            else { throw "unsupported ABI $Abi" }
-Get-ChildItem -Path "$KitRoot\lib" -Filter "*.so" -ErrorAction SilentlyContinue |
+Get-ChildItem -Path "$KitRoot/lib" -Filter "*.so" -ErrorAction SilentlyContinue |
     Copy-Item -Destination $LibOut -Force
-Get-ChildItem -Path "$KitRoot\qml" -Recurse -Filter "libqml_*.so" -ErrorAction SilentlyContinue |
+Get-ChildItem -Path "$KitRoot/qml" -Recurse -Filter "libqml_*.so" -ErrorAction SilentlyContinue |
     Copy-Item -Destination $LibOut -Force
-Get-ChildItem -Path "$KitRoot\plugins" -Recurse -Filter "libplugins_*.so" -ErrorAction SilentlyContinue |
+Get-ChildItem -Path "$KitRoot/plugins" -Recurse -Filter "libplugins_*.so" -ErrorAction SilentlyContinue |
     Copy-Item -Destination $LibOut -Force
-# libc++_shared.so ships from the NDK sysroot, not the Qt kit.
-$cppShared = "$NdkRoot\toolchains\llvm\prebuilt\windows-x86_64\sysroot\usr\lib\aarch64-linux-android\libc++_shared.so"
+# libc++_shared.so ships from the NDK (host-agnostic path in r23c; the host
+# sysroot is the pre-r23 location). Try both so the script runs on any host OS.
+$cppShared = "$NdkRoot/sources/cxx-stl/llvm-libc++/libs/arm64-v8a/libc++_shared.so"
+if (-not (Test-Path $cppShared)) {
+    $prebuiltHost = if ($IsWindows) { "windows-x86_64" } else { "linux-x86_64" }
+    $cppShared = "$NdkRoot/toolchains/llvm/prebuilt/$prebuiltHost/sysroot/usr/lib/aarch64-linux-android/libc++_shared.so"
+}
 if (Test-Path $cppShared) { Copy-Item $cppShared $LibOut -Force }
 
 # The carve-subset androiddeployqt does not fill the Qt resource template
@@ -209,10 +214,10 @@ Write-QtLibResources -ApkDir $ApkDir -Abi $Abi
 # in the carve-subset --no-build path does not copy them into apk/libs, so the
 # Java compile can't find org.qtproject...QtNative. Stage them into libs/ (the
 # build.gradle `implementation fileTree(dir:'libs')` picks them up).
-$KitJarDir = "$KitRoot\jar"
+$KitJarDir = "$KitRoot/jar"
 if (Test-Path $KitJarDir) {
     Get-ChildItem -Path $KitJarDir -Filter "*.jar" -ErrorAction SilentlyContinue |
-        Copy-Item -Destination "$ApkDir\libs\" -Force
+        Copy-Item -Destination "$ApkDir/libs/" -Force
 }
 
 Write-Host "== [4/5] androiddeployqt (stage + generate project, --no-build) ==" -ForegroundColor Cyan
@@ -225,7 +230,7 @@ $settings = Join-Path $BuildDir "android-aurelex-deployment-settings.json"
 # androiddeployqt regenerates AndroidManifest.xml from its template and does
 # not merge the package-source manifest (custom activity / intent-filters /
 # Java sources). Re-copy them after the deploy step.
-Copy-Item (Join-Path $AppDir "android\AndroidManifest.xml") (Join-Path $ApkDir "AndroidManifest.xml") -Force
+Copy-Item (Join-Path $AppDir "android/AndroidManifest.xml") (Join-Path $ApkDir "AndroidManifest.xml") -Force
 # Version stamping for release builds (CI sets AURELEX_VERSION_NAME / _CODE
 # from the tag; local builds keep the manifest's 0.0.1 / 1 defaults).
 if ($env:AURELEX_VERSION_NAME) {
@@ -238,7 +243,7 @@ if ($env:AURELEX_VERSION_NAME) {
     Set-Content $mPath $m -NoNewline
     Write-Host "Stamped manifest versionName=$env:AURELEX_VERSION_NAME versionCode=$env:AURELEX_VERSION_CODE" -ForegroundColor Yellow
 }
-if (Test-Path (Join-Path $AppDir "android\src")) {
+if (Test-Path (Join-Path $AppDir "android/src")) {
     $stageSrc = Join-Path $ApkDir "src"
     New-Item -ItemType Directory -Force -Path $stageSrc | Out-Null
     # androiddeployqt may have left stale Java sources from a previous build
@@ -247,18 +252,18 @@ if (Test-Path (Join-Path $AppDir "android\src")) {
     if (Test-Path (Join-Path $stageSrc "com")) { Remove-Item (Join-Path $stageSrc "com") -Recurse -Force }
     if (Test-Path (Join-Path $stageSrc "aurelex")) { Remove-Item (Join-Path $stageSrc "aurelex") -Recurse -Force }
     if (Test-Path (Join-Path $stageSrc "org")) { Remove-Item (Join-Path $stageSrc "org") -Recurse -Force }
-    Copy-Item (Join-Path $AppDir "android\src\*") $stageSrc -Recurse -Force
+    Copy-Item (Join-Path $AppDir "android/src/*") $stageSrc -Recurse -Force
 }
-if (Test-Path (Join-Path $AppDir "android\res")) {
+if (Test-Path (Join-Path $AppDir "android/res")) {
     New-Item -ItemType Directory -Force -Path (Join-Path $ApkDir "res") | Out-Null
-    Copy-Item (Join-Path $AppDir "android\res\*") (Join-Path $ApkDir "res\") -Recurse -Force
+    Copy-Item (Join-Path $AppDir "android/res/*") (Join-Path $ApkDir "res/") -Recurse -Force
 }
 # Article asset mirror (engine qrc:/// -> APK assets/). androiddeployqt in the
 # carve-subset kit does not always propagate QT_ANDROID_PACKAGE_SOURCE_DIR/assets
 # into the gradle staging tree, so copy explicitly.
-if (Test-Path (Join-Path $AppDir "android\assets")) {
+if (Test-Path (Join-Path $AppDir "android/assets")) {
     New-Item -ItemType Directory -Force -Path (Join-Path $ApkDir "assets") | Out-Null
-    Copy-Item (Join-Path $AppDir "android\assets\*") (Join-Path $ApkDir "assets\") -Recurse -Force
+    Copy-Item (Join-Path $AppDir "android/assets/*") (Join-Path $ApkDir "assets/") -Recurse -Force
 }
 # QML module source overlay (qt-material-ui). androiddeployqt's createRCC path in
 # the aqt carve subset does not reliably stage the imported QML module sources
@@ -267,9 +272,9 @@ if (Test-Path (Join-Path $AppDir "android\assets")) {
 # & styles are QML-based, unlike the compiled QtQuick core) from the qml import
 # tree under assets:/qml plus their plugin .so in jniLibs. Copy the kit's whole
 # qml tree deterministically so the Material UI modules import at runtime.
-if (Test-Path "$KitRoot\qml") {
-    New-Item -ItemType Directory -Force -Path (Join-Path $ApkDir "assets\qml") | Out-Null
-    Copy-Item (Join-Path $KitRoot "qml\*") (Join-Path $ApkDir "assets\qml\") -Recurse -Force
+if (Test-Path "$KitRoot/qml") {
+    New-Item -ItemType Directory -Force -Path (Join-Path $ApkDir "assets/qml") | Out-Null
+    Copy-Item (Join-Path $KitRoot "qml/*") (Join-Path $ApkDir "assets/qml/") -Recurse -Force
 }
 
 if ($LASTEXITCODE -ne 0) { throw "androiddeployqt failed" }
@@ -285,7 +290,8 @@ $gpPath = Join-Path $ApkDir "gradle.properties"
 # aapt2 from AGP 7.4.1's default Maven artifact (7.4.1-8841542) cannot link
 # against SDK 36's android.jar, so override aapt2 with the newer binary shipped
 # in build-tools 36.0.0. The property key is android.aapt2FromMavenOverride.
-$Aapt2Exe = (Join-Path $sdkDir "build-tools\36.0.0\aapt2.exe") -replace '\\', '/'
+$aapt2Name = if ($IsWindows) { "aapt2.exe" } else { "aapt2" }
+$Aapt2Exe = (Join-Path $sdkDir "build-tools/36.0.0/$aapt2Name") -replace '\\', '/'
 # androiddeployqt in the carve-subset kit may not generate gradle.properties on
 # a fresh tree (it exists locally only because a prior run left it behind). If
 # absent, write one with our pinned values; otherwise patch the existing file.
@@ -393,7 +399,7 @@ if ($Configuration -eq "Release") {
     if ($env:AURELEX_KEYSTORE_PATH -and (Test-Path $env:AURELEX_KEYSTORE_PATH)) {
         $ksPath = $env:AURELEX_KEYSTORE_PATH
     } else {
-        $localDebug = Join-Path $env:USERPROFILE ".android\debug.keystore"
+        $localDebug = Join-Path $HOME ".android/debug.keystore"
         if (Test-Path $localDebug) { $ksPath = $localDebug }
     }
     if ($ksPath) {
@@ -487,21 +493,32 @@ try {
     # the gradle distribution from AURELEX_GRADLE_HOME (CI installs it) or the
     # system gradle.
     function Invoke-Gradle([string[]]$Tasks) {
+        # Prefer the native launcher for the host OS: the Android Gradle
+        # distribution ships BOTH bin/gradle and bin/gradle.bat everywhere, and
+        # pwsh on Linux cannot exec a .bat. Preference order — on Windows:
+        #   <apk>/gradlew.bat, AURELEX_GRADLE_HOME/bin/gradle.bat,
+        #   GRADLE_HOME/bin/gradle.bat, gradle.bat on PATH;
+        # on Linux the non-.bat equivalents.
+        $isWin = $IsWindows
         foreach ($t in $Tasks) {
-            if (Test-Path ".\gradlew.bat") {
-                & ".\gradlew.bat" --no-daemon $t
-            } elseif ($env:AURELEX_GRADLE_HOME -and (Test-Path (Join-Path $env:AURELEX_GRADLE_HOME "bin\gradle.bat"))) {
-                & (Join-Path $env:AURELEX_GRADLE_HOME "bin\gradle.bat") --no-daemon $t
-            } elseif ($env:GRADLE_HOME -and (Test-Path (Join-Path $env:GRADLE_HOME "bin\gradle.bat"))) {
-                & (Join-Path $env:GRADLE_HOME "bin\gradle.bat") --no-daemon $t
-            } else {
-                $wt = Get-Command "gradle.bat" -ErrorAction SilentlyContinue
-                if ($wt) {
-                    & $wt.Source --no-daemon $t
-                } else {
-                    throw "no gradlew.bat, no gradle-wrapper.jar, no gradle on PATH in $ApkDir — cannot run gradle"
+            $runners = @()
+            $runners += if ($isWin) { ".\gradlew.bat" } else { "./gradlew" }
+            foreach ($base in @($env:AURELEX_GRADLE_HOME, $env:GRADLE_HOME)) {
+                if ($base) {
+                    $runners += (Join-Path $base ("bin/" + $(if ($isWin) { "gradle.bat" } else { "gradle" })))
                 }
             }
+            $wt = Get-Command $(if ($isWin) { "gradle.bat" } else { "gradle" }) -ErrorAction SilentlyContinue
+            if ($wt) { $runners += $wt.Source }
+
+            $runner = $null
+            foreach ($cand in $runners) {
+                if ($cand -and (Test-Path $cand)) { $runner = $cand; break }
+            }
+            if (-not $runner) {
+                throw "no gradlew.bat, no gradle-wrapper.jar, no gradle on PATH in $ApkDir — cannot run gradle"
+            }
+            & $runner --no-daemon $t
             if ($LASTEXITCODE -ne 0) { throw "gradle $t failed" }
         }
     }
@@ -517,20 +534,21 @@ try {
 }
 
 $configLower = $Configuration.ToLower()
-$apkDir2 = "$ApkDir\build\outputs\apk\$configLower"
+$apkDir2 = "$ApkDir/build/outputs/apk/$configLower"
 $apk = Get-ChildItem $apkDir2 -Filter "*.apk" | Select-Object -First 1
 if (-not $apk) { throw "APK not produced in $apkDir2" }
 Write-Host "== DONE: $($apk.FullName) ($([math]::Round($apk.Length/1MB,1)) MB) ==" -ForegroundColor Green
 
 if ($Bundle -and $Configuration -eq "Release") {
-    $aabDir = "$ApkDir\build\outputs\bundle\release"
+    $aabDir = "$ApkDir/build/outputs/bundle/release"
     $aab = Get-ChildItem $aabDir -Filter "*.aab" | Select-Object -First 1
     if (-not $aab) { throw "AAB not produced in $aabDir (did -Bundle run bundleRelease?)" }
     Write-Host "== AAB: $($aab.FullName) ($([math]::Round($aab.Length/1MB,1)) MB) ==" -ForegroundColor Green
 }
 
 if ($Install) {
-    $adb = "$RealSdk\platform-tools\adb.exe"
+    $adbName = if ($IsWindows) { "adb.exe" } else { "adb" }
+    $adb = "$RealSdk/platform-tools/$adbName"
     & $adb install -r $apk.FullName
     & $adb shell "am start -n org.aurelex.pocket.dictionary/.AurelexActivity"
     Write-Host "Installed + launched." -ForegroundColor Green

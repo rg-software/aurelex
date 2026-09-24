@@ -33,6 +33,7 @@ vcpkg_installed/
 # qt-quick experiment build outputs
 /build-qtquick/
 /build-smoke/
+/build-gh/
 
 aqtinstall.log
 
