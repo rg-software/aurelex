@@ -42,6 +42,13 @@ class EngineController : public QObject
     Q_PROPERTY(bool systemDark READ systemDark NOTIFY systemDarkChanged)
     Q_PROPERTY(bool userDarkOverride READ userDarkOverride WRITE setUserDarkOverride NOTIFY userDarkOverrideChanged)
     Q_PROPERTY(bool onboarded READ onboarded WRITE setOnboarded NOTIFY onboardedChanged)
+    // Article reflow zoom (percent, 75-250 in 25 steps; 100 = default). Persisted
+    // in settings.json; rewriteArticleUrls bakes it into the article CSS, and
+    // QML applies live changes via the injected gdSetZoom(...) controller.
+    Q_PROPERTY(qreal articleZoom READ articleZoom NOTIFY articleZoomChanged)
+    Q_PROPERTY(qreal articleZoomMin READ articleZoomMin CONSTANT)
+    Q_PROPERTY(qreal articleZoomMax READ articleZoomMax CONSTANT)
+    Q_PROPERTY(qreal articleZoomStep READ articleZoomStep CONSTANT)
     Q_PROPERTY(bool buildingFts READ buildingFts NOTIFY buildingFtsChanged)
     // Full-text index batch progress: while buildingFts is true, ftsIndexDone /
     // ftsIndexTotal report "N of M" dictionaries COMPLETED (0/0 when idle).
@@ -95,6 +102,14 @@ public:
     bool systemDark() const { return m_systemDark; }
     bool userDarkOverride() const { return m_userDarkOverride; }
     void setUserDarkOverride(bool on);
+    qreal articleZoom() const { return m_articleZoom; }
+    qreal articleZoomMin() const { return kArticleZoomMin; }
+    qreal articleZoomMax() const { return kArticleZoomMax; }
+    qreal articleZoomStep() const { return kArticleZoomStep; }
+    // Set the article reflow zoom (percent). Clamped to [kArticleZoomMin,
+    // kArticleZoomMax] and snapped to kArticleZoomStep; no-ops (no signal) when
+    // the clamped value is unchanged, so QML does not churn JS calls.
+    Q_INVOKABLE void setArticleZoom(qreal zoom);
     bool onboarded() const { return m_onboarded; }
     void setOnboarded(bool v);
     QVariantList scanFailures() const { return m_scanFailures; }
@@ -263,6 +278,7 @@ signals:
     void articleBaseUrlChanged();
     void systemDarkChanged();
     void userDarkOverrideChanged();
+    void articleZoomChanged();
     void scanFailuresChanged();
     void ftsIndexProgressChanged();
     // Emitted from the index-build worker thread after each dictionary finishes
@@ -376,6 +392,10 @@ private:
     bool m_darkMode = false;
     bool m_systemDark = false;
     bool m_userDarkOverride = false;
+    qreal m_articleZoom = 100.0;
+    static constexpr qreal kArticleZoomMin = 75.0;
+    static constexpr qreal kArticleZoomMax = 250.0;
+    static constexpr qreal kArticleZoomStep = 25.0;
     bool m_onboarded = false;
     QString m_appDir;
     QString m_stagedDir;

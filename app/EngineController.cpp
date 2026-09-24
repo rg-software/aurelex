@@ -5,6 +5,8 @@
 #include <QStandardPaths>
 #include <QDir>
 #include <QDebug>
+#include <QElapsedTimer>
+#include <QtMessageHandler>
 #include <QVariantMap>
 #include <QPair>
 #include <QFile>
@@ -16,9 +18,73 @@
 #include <QRegularExpression>
 #include <QXmlStreamReader>
 #include <QGuiApplication>
+#include <QThread>
+#include <cmath>
+#include <algorithm>
 #if defined(Q_OS_ANDROID)
 #include <QJniObject>
 #endif
+
+// --- diagnostic log (aurelex.log) ---
+// qInfo/qWarning normally go to stderr, which on Android is not retrieveable.
+// Redirect everything to <appDir>/aurelex.log (app-private storage) with a
+// monotonic-millisecond timestamp and the emitting thread id, so the delay in
+// any gd_* call (mutex wait vs. event-loop pump) can be reconstructed after a
+// slow-search reproduction. The default handler is still invoked, so console
+// output (Linux dev loop, smoke tool) is preserved.
+static QMutex s_diagLogMutex;
+static QString s_diagLogPath;
+static QElapsedTimer s_diagLogClock;
+static bool s_diagLogStarted = false;
+static qint64 s_diagLogBytesSinceRotate = 0;
+static QtMessageHandler s_diagLogPrevHandler = nullptr;
+static const qint64 kDiagLogMaxBytes = 512 * 1024;
+
+static void diagLogMessage(QtMsgType type, const QMessageLogContext &context,
+                           const QString &message)
+{
+    if (s_diagLogPrevHandler)
+        s_diagLogPrevHandler(type, context, message);
+    else
+        qt_message_output(type, context, message);
+
+    if (s_diagLogPath.isEmpty())
+        return;
+    QMutexLocker lock(&s_diagLogMutex);
+    if (s_diagLogPath.isEmpty())
+        return;
+    if (!s_diagLogStarted) {
+        s_diagLogStarted = true;
+        s_diagLogClock.start();
+    }
+    const char sev = type == QtDebugMsg ? 'D'
+                   : type == QtInfoMsg ? 'I'
+                   : type == QtWarningMsg ? 'W' : 'E';
+    const QByteArray line = QByteArray::number(s_diagLogClock.elapsed()) + "ms ["
+        + QByteArray::number(qlonglong(QThread::currentThreadId())) + "] " + sev + ": "
+        + message.toUtf8() + "\n";
+    QFile f(s_diagLogPath);
+    if (!f.open(QIODevice::Append | QIODevice::WriteOnly))
+        return;
+    const qint64 written = f.write(line);
+    f.close();
+    s_diagLogBytesSinceRotate += written;
+    if (s_diagLogBytesSinceRotate > kDiagLogMaxBytes) {
+        // Rotate: keep one small .prev so the timestamps around the moment of
+        // the last reproduction are not destroyed.
+        QFile::remove(s_diagLogPath + ".prev");
+        QFile::rename(s_diagLogPath, s_diagLogPath + ".prev");
+        s_diagLogBytesSinceRotate = 0;
+    }
+}
+
+static void installDiagLog(const QString &appDir)
+{
+    s_diagLogPath = appDir + "/aurelex.log";
+    if (!s_diagLogPrevHandler) {
+        s_diagLogPrevHandler = qInstallMessageHandler(diagLogMessage);
+    }
+}
 EngineController::EngineController(QObject *parent)
     : QObject(parent)
 {
@@ -448,6 +514,7 @@ void EngineController::ensureFtsWorker()
 void EngineController::initialize(const QString &appDir, const QString &stagedDir) {
     m_appDir = appDir;
     m_stagedDir = stagedDir;
+    installDiagLog(appDir);
     QDir().mkpath(appDir);
     QDir().mkpath(stagedDir);
     const QString indexDir = appDir + "/index";
@@ -906,6 +973,11 @@ QString EngineController::rewriteArticleUrls(const QString &html) const {
     out.remove(QRegularExpression(
         QStringLiteral(R"(<script>\s*function\s+gd_init_QtWebChannel.*?</script>)"),
         QRegularExpression::DotMatchesEverythingOption));
+    // Some extended article templates ship their own viewport meta; strip it so
+    // the mobile fit-width meta injected below is the only one the WebView sees.
+    out.remove(QRegularExpression(
+        QStringLiteral(R"(<meta\b[^>]*\bname\s*=\s*["']viewport["'][^>]*>)"),
+        QRegularExpression::CaseInsensitiveOption));
 
     // --- unified dark-mode injection ---
     // The engine bakes darkreader.js + a one-shot enable() into the article HTML
@@ -991,11 +1063,40 @@ window.__gdDarkMode=%2;
 </script>
 )").arg(base).arg(darkInit);
 
+    // --- mobile reflow + article zoom ---
+    // Fit the article to the device-width viewport and kill native pinch page
+    // scaling (pinch on the fixed-width article is what produced the wide page /
+    // horizontal slider). Zoom is a CSS root font-size multiplied by a baked
+    // default here; the live gdSetZoom(percent) controller reflows the OPEN
+    // article in place (mirror of gdSetDarkMode above).
+    const QString zoomCtrl = QStringLiteral(
+        R"(
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<style>
+html { font-size: %1%; max-width: 100%; overflow-x: hidden !important; }
+body { max-width: 100%; overflow-x: hidden !important; }
+.gdarticlebody, .gdarticle, .gdarticles { max-width: 100% !important; overflow-wrap: break-word !important; }
+img, table { max-width: 100% !important; height: auto; }
+.gdarticlebody pre, .gdarticlebody code { white-space: pre-wrap; overflow-wrap: break-word; }
+.gdarticlebody a { overflow-wrap: break-word; }
+</style>
+<script>
+window.__gdZoom=%1;
+window.gdSetZoom=function(p){
+  p=+p||100;
+  if(window.__gdZoom===p)return;
+  window.__gdZoom=p;
+  if(document.documentElement)document.documentElement.style.fontSize=p+'%';
+};
+if(window.__gdZoom!==100)window.gdSetZoom(window.__gdZoom);
+</script>
+)").arg(m_articleZoom, 0, 'f', 0);
+
     const int headEnd = out.indexOf(QStringLiteral("</head>"));
     if (headEnd >= 0)
-        out.insert(headEnd, plainCss + darkCtrl);
+        out.insert(headEnd, zoomCtrl + plainCss + darkCtrl);
     else
-        out.append(plainCss + darkCtrl);
+        out.append(zoomCtrl + plainCss + darkCtrl);
     return out;
 }
 
@@ -1074,25 +1175,32 @@ void EngineController::clearArticleCache() {
     m_articleCacheOrder.clear();
 }
 
-// Background-prefetch `word`'s article into the cache so the next lookup of it
-// (suggestion tap / Enter) hits the cache and renders without a gd_lookup wait.
+// Subordinate background warm-up: prefetch `word`'s article into the cache so
+// the next lookup of it (suggestion tap / Enter) hits the cache and renders
+// without a gd_lookup wait. Never delays user work: the job bails out (before
+// touching the engine) if a newer suggest superseded it or the user already
+// issued a lookup — so a tap's lookup is served at most one in-flight call
+// behind, and queued prefetches can't pile up in front of interactive work.
 void EngineController::prefetchArticle(const QString &word) {
     if (word.trimmed().isEmpty()) return;
     const QString key = articleCacheKey(word);
     if (m_articleCache.contains(key)) return;
     const QByteArray utf = word.toUtf8();
-    // Serial engine pool (see header): prefetch is subordinate to user lookups
-    // and must not compete with them or with the carve's index subtasks.
-    QFuture<QString> f = QtConcurrent::run(&m_enginePool, [utf]{
+    const int sgen = m_suggestGeneration.load();
+    const int lgen = m_lookupGeneration.load();
+    QFuture<QString> f = QtConcurrent::run(&m_enginePool, [this, utf, sgen, lgen]{
+        if (sgen != m_suggestGeneration.load()) return QString(); // a newer suggest superseded this
+        if (lgen != m_lookupGeneration.load()) return QString();  // the user already asked for something
         std::vector<char> buf(1 << 20);
         const int sz = gd_lookup(utf.constData(), buf.data(), static_cast<int>(buf.size()));
         if (sz <= 0) return QString();
         return QString::fromUtf8(buf.data(), sz);
     });
     auto *w = new QFutureWatcher<QString>(this);
-    connect(w, &QFutureWatcher<QString>::finished, this, [this, key, w]{
+    connect(w, &QFutureWatcher<QString>::finished, this, [this, key, sgen, lgen, w]{
         w->deleteLater();
         if (m_articleCache.contains(key)) return;
+        if (sgen != m_suggestGeneration.load() || lgen != m_lookupGeneration.load()) return;
         const QString html = w->result();
         if (!html.isEmpty()) cacheArticle(key, html);
     });
@@ -1109,9 +1217,11 @@ void EngineController::lookup(const QString &word) {
         m_articleCacheOrder.removeAll(key);
         m_articleCacheOrder.append(key);
         recordHistory(word);
+        qInfo() << "[aurelex] lookup cache-hit:" << word;
         emit articleLoaded(word, it.value());
         return;
     }
+    QElapsedTimer wall; wall.start();
     QFuture<QString> f = QtConcurrent::run(&m_enginePool, [this, word, key, gen]{
         if (gen != m_lookupGeneration.load()) return QString(); // superseded; don't touch the engine
         std::vector<char> buf(1 << 20);
@@ -1121,9 +1231,12 @@ void EngineController::lookup(const QString &word) {
         return QString::fromUtf8(buf.data(), sz);
     });
     auto *w = new QFutureWatcher<QString>(this);
-    connect(w, &QFutureWatcher<QString>::finished, this, [this, word, key, gen, w]{
+    connect(w, &QFutureWatcher<QString>::finished, this, [this, word, key, gen, wall, w]{
         const bool stale = gen != m_lookupGeneration.load();
         const QString html = w->result();
+        qInfo() << "[aurelex] lookup done:" << word
+                << (stale ? "(stale)" : (html.isEmpty() ? "not-found" : "loaded"))
+                << "enqueue->ready:" << wall.elapsed() << "ms";
         if (!stale) {
             if (html.isEmpty()) {
                 emit articleNotFound(word);
@@ -1211,6 +1324,7 @@ void EngineController::suggest(const QString &prefix) {
     // dropped before they even start, and any older result that still lands
     // late is ignored below. Last request wins.
     const int gen = ++m_suggestGeneration;
+    QElapsedTimer wall; wall.start();
     QFuture<QStringList> f = QtConcurrent::run(&m_enginePool, [this, prefix, gen]{
         if (gen != m_suggestGeneration.load()) return QStringList(); // superseded; don't touch the engine
         std::vector<char> buf(1 << 16);
@@ -1220,17 +1334,21 @@ void EngineController::suggest(const QString &prefix) {
         return QString::fromLocal8Bit(buf.data(), strlen(buf.data())).split('\n', Qt::SkipEmptyParts);
     });
     auto *w = new QFutureWatcher<QStringList>(this);
-    connect(w, &QFutureWatcher<QStringList>::finished, this, [this, prefix, gen, w]{
+    connect(w, &QFutureWatcher<QStringList>::finished, this, [this, prefix, gen, wall, w]{
         if (gen != m_suggestGeneration) {
             qInfo() << "[aurelex] suggest stale, dropped:" << prefix;
             w->deleteLater();
             return;
         }
-        qInfo() << "[aurelex] suggest ready:" << prefix << "count:" << w->result().size();
+        qInfo() << "[aurelex] suggest ready:" << prefix
+                << "count:" << w->result().size()
+                << "enqueue->ready:" << wall.elapsed() << "ms";
         emit suggestionsReady(prefix, w->result());
-        // Prefetch the typed headword so the first suggestion tap / Enter is
-        // near-instant (cache hit instead of a fresh gd_lookup).
-        if (!w->result().isEmpty()) prefetchArticle(prefix);
+        // Prefetch the top candidate — the likely tap target — so the first
+        // suggestion tap / Enter is near-instant (cache hit instead of a fresh
+        // gd_lookup). Prefetching the raw prefix would be a useless not-found
+        // lookup; this warms the headword the dropdown is about to show.
+        if (!w->result().isEmpty()) prefetchArticle(w->result().first());
         w->deleteLater();
     });
     w->setFuture(f);
@@ -1492,6 +1610,19 @@ void EngineController::toggleDarkOverride()
     setUserDarkOverride(!m_userDarkOverride);
 }
 
+void EngineController::setArticleZoom(qreal zoom)
+{
+    // Snap to step then clamp to [75, 250]; the header buttons step by exactly
+    // one kArticleZoomStep so snap keeps their values stable. Out-of-range or
+    // unchanged writes are a no-op (no signal) so QML isn't churned.
+    qreal snapped = std::round(zoom / kArticleZoomStep) * kArticleZoomStep;
+    snapped = std::max(kArticleZoomMin, std::min(kArticleZoomMax, snapped));
+    if (qFuzzyCompare(m_articleZoom, snapped)) return;
+    m_articleZoom = snapped;
+    saveSettings();
+    emit articleZoomChanged();
+}
+
 bool EngineController::readSystemDark() const
 {
 #if defined(Q_OS_ANDROID)
@@ -1628,6 +1759,9 @@ void EngineController::loadSettings()
         m_userDarkOverride = obj.value("userDarkOverride").toBool(false);
     else if (obj.value("darkMode").toBool(false))
         m_userDarkOverride = true;
+    // Article reflow zoom: default 100 when absent; snap/clamp the persisted
+    // value so a hand-edited settings.json can't push it out of range.
+    setArticleZoom(obj.value("articleZoom").toDouble(100.0));
     // One-off import model: a persisted "sources" array (from older builds) is
     // intentionally ignored — the app-private staged copies remain on disk and
     // are the single source of dictionaries; they re-scan on startup.
@@ -1643,6 +1777,7 @@ void EngineController::saveSettings()
     QJsonObject obj;
     obj.insert("userDarkOverride", m_userDarkOverride);
     obj.insert("onboarded", m_onboarded);
+    obj.insert("articleZoom", m_articleZoom);
     f.write(QJsonDocument(obj).toJson(QJsonDocument::Compact));
 }
 

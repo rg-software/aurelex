@@ -125,6 +125,8 @@ elements in automated tests:
 | Article | Back button | `"Back"` |
 | Article | Forward button | `"Forward"` (enabled only when a backed-out article exists) |
 | Article | Favorites star | `"Add to favorites"` / `"Remove from favorites"` (dynamic) |
+| Article | Zoom out button | `"Zoom out"` (disabled at the 75% minimum) |
+| Article | Zoom in button | `"Zoom in"` (disabled at the 250% maximum) |
 | Article | WebView | `"Dictionary article"` (inline in the Search tab; no separate full-pane article surface) |
 | FTS | TextField | `"Full-text search"` |
 | FTS | Whole words checkbox | `"Whole words"` |

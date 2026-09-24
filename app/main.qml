@@ -119,7 +119,9 @@ ApplicationWindow {
             "add": 0xe145,
             "delete": 0xe872,
             "bookmark": 0xe866,
-            "dark_mode": 0xe51c
+            "dark_mode": 0xe51c,
+            "zoom_in": 0xe8ff,
+            "zoom_out": 0xe900
         }
         return map[name] !== undefined ? String.fromCharCode(map[name]) : "\uFFFD"
     }
@@ -959,6 +961,28 @@ ColumnLayout {
                             Accessible.name: active ? "Remove from favorites" : "Add to favorites"
                             Accessible.role: Accessible.Button
                             onClicked: engine.toggleFavorite(root.currentWord)
+                        }
+
+                        // Article reflow zoom: icon-only controls (no visible text),
+                        // disabled at the range bounds so the header never offers a
+                        // no-op tap. engine.setArticleZoom clamps/snaps anyway.
+                        ToolButton {
+                            text: root.icon("zoom_out")
+                            font.family: root.iconFontFamily
+                            font.pixelSize: 20
+                            enabled: engine.articleZoom > engine.articleZoomMin
+                            Accessible.name: "Zoom out"
+                            Accessible.role: Accessible.Button
+                            onClicked: engine.setArticleZoom(engine.articleZoom - engine.articleZoomStep)
+                        }
+                        ToolButton {
+                            text: root.icon("zoom_in")
+                            font.family: root.iconFontFamily
+                            font.pixelSize: 20
+                            enabled: engine.articleZoom < engine.articleZoomMax
+                            Accessible.name: "Zoom in"
+                            Accessible.role: Accessible.Button
+                            onClicked: engine.setArticleZoom(engine.articleZoom + engine.articleZoomStep)
                         }
                     }
                 }
@@ -1972,6 +1996,17 @@ text: root._stagingActive
 
     Connections {
         target: engine
+        // Article zoom reflows the OPEN article in place via the injected
+        // gdSetZoom controller — no reload, scroll preserved (same contract as
+        // onDarkModeChanged). A not-loaded WebView is a no-op; freshly rendered
+        // articles get the level baked in by rewriteArticleUrls anyway.
+        function onArticleZoomChanged() {
+            root._applyArticleZoom()
+        }
+    }
+
+    Connections {
+        target: engine
         function onArticleBaseUrlChanged() {
             if (root.inlineArticle && currentHtml.length > 0)
                 _loadArticleNow()
@@ -2009,6 +2044,15 @@ text: root._stagingActive
         if (root.inlineWv && root.inlineWv.url.toString().length > 5) {
             root.inlineWv.runJavaScript("try{if(window.gdSetDarkMode)gdSetDarkMode("
                 + (engine.darkMode ? 1 : 0) + ");}catch(e){}")
+        }
+    }
+    // Reflow the OPEN article to the current zoom via the injected gdSetZoom
+    // controller — instant, no reload. No live document? rewriteArticleUrls bakes
+    // the saved level into the next render, so nothing to do here.
+    function _applyArticleZoom() {
+        if (root.inlineWv && root.inlineWv.url.toString().length > 5) {
+            root.inlineWv.runJavaScript("try{if(window.gdSetZoom)gdSetZoom("
+                + engine.articleZoom + ");}catch(e){}")
         }
     }
     Timer {
