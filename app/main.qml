@@ -96,12 +96,28 @@ ApplicationWindow {
     }
     onWidthChanged: root._refreshInsets()
     onHeightChanged: root._refreshInsets()
-    Component.onCompleted: {
-        root._refreshInsets()
-        // First run: land on the Dicts tab (no inline WebView) so the welcome
-        // dialog overlays nothing and the user is already where "Add
-        // dictionaries" lives.
-        if (!engine.onboarded) root.state = 1
+    Component.onCompleted: root._refreshInsets()
+    // First-launch tab routing happens on onBoardedChanged (not here):
+    // engine.onboarded is only final after EngineController's ASYNC gd_init +
+    // loadSettings() completes, so at Component.onCompleted it is still the
+    // default false and the onboarding decision cannot be trusted yet.
+    // Routing from the async signal is guarded by _bootRouted so the "Get
+    // started" toggle (which also emits onboardedChanged) can never hijack the
+    // user away from a tab they already navigated to.
+    property bool _bootRouted: false
+
+    Connections {
+        target: engine
+        function onBoardedChanged() {
+            if (!root._bootRouted) {
+                // The async init reported the real onboarding state: first run
+                // lands on the Dicts tab (the welcome card overlays the Dicts
+                // pane, which has no inline WebView); once onboarded, every
+                // fresh launch must start on Search.
+                root._bootRouted = true
+                root.state = engine.onboarded ? 0 : 1
+            }
+        }
     }
     function icon( name ) {
         var map = {
@@ -117,6 +133,8 @@ ApplicationWindow {
             "arrow_forward": 0xe5c8,
             "close": 0xe5cd,
             "add": 0xe145,
+            "edit": 0xe150,
+            "drag_handle": 0xe25d,
             "delete": 0xe872,
             "bookmark": 0xe866,
             "dark_mode": 0xe51c,
@@ -1540,7 +1558,12 @@ text: root._stagingActive
                         highlighted: true
                         Accessible.name: "Get started"
                         Accessible.role: Accessible.Button
-                        onClicked: engine.onboarded = true
+                        onClicked: {
+                            engine.onboarded = true
+                            // Onboarding is over (the Dicts tab was only chosen
+                            // to host the welcome overlay) — land on Search.
+                            root.state = 0
+                        }
                     }
                 }
             }
@@ -1557,11 +1580,78 @@ text: root._stagingActive
         property string editingGroupName: ""
         property var groupMembers: []
         property var groupNonMembers: []
+        property int renameGroupId: -1
+        property string renameGroupName: ""
+        property int deleteGroupId: -1
+        property string deleteGroupName: ""
+        // Drag-to-reorder state for the member list. _dragFrom is the member
+        // index the gesture started on; _dragStartY the finger's Y at
+        // press-and-hold; _dragLastTo the last index we moved to (so crossing a
+        // row boundary fires exactly one engine move). Cleared on release.
+        property int _dragFrom: -1
+        property real _dragStartY: 0
+        property int _dragLastTo: -1
+        property bool _dragArmed: false
+        // memberIndex of the row currently being dragged; -1 when idle. The
+        // member delegate binds its `highlighted` to this so the row under the
+        // finger stays visually marked while it moves.
+        property int _dragIndex: -1
+
+        function _dragBegin(index, mouseY) {
+            // Any row can be dragged up or down; _dragMove clamps to the list
+            // bounds and no-ops within the same slot.
+            groupsPane._dragFrom = index
+            groupsPane._dragStartY = mouseY
+            groupsPane._dragLastTo = index
+            groupsPane._dragIndex = index
+            groupsPane._dragArmed = true
+        }
+        function _dragMove(mouseY) {
+            if (!groupsPane._dragArmed) return
+            const dy = mouseY - groupsPane._dragStartY
+            // 44 = member row height. Round to the nearest row boundary; each
+            // crossed boundary moves the row one slot (delta-based, so it works
+            // regardless of the list's scroll offset).
+            const to = groupsPane._dragFrom + Math.round(dy / 44)
+            const n = groupsPane.groupMembers.length
+            if (to < 0 || to >= n || to === groupsPane._dragLastTo) return
+            groupsPane._dragLastTo = to
+            engine.groupMoveDict(groupsPane.editingGroup, groupsPane._dragFrom, to)
+            groupsPane._dragFrom = to
+            groupsPane._dragIndex = to
+        }
+        function _dragEnd() {
+            groupsPane._dragArmed = false
+            groupsPane._dragFrom = -1
+            groupsPane._dragLastTo = -1
+            groupsPane._dragIndex = -1
+        }
 
         function _openMembership(id, name) {
             editingGroup = id
             editingGroupName = name
             engine.groupDicts(id)
+        }
+        function _openRename(id, name) {
+            if (id <= 0) return // "All" cannot be renamed
+            renameGroupId = id
+            renameGroupName = name
+            renameGroupDialog.open()
+        }
+        function _requestDeleteGroup(id, name) {
+            if (id <= 0) return // "All" cannot be deleted
+            deleteGroupId = id
+            deleteGroupName = name
+        }
+        function _confirmDeleteGroup() {
+            const id = deleteGroupId
+            deleteGroupId = -1
+            deleteGroupName = ""
+            if (id > 0) engine.deleteGroup(id)
+        }
+        function _cancelDeleteGroup() {
+            deleteGroupId = -1
+            deleteGroupName = ""
         }
         function _refreshMembership() {
             if (editingGroup !== -1) {
@@ -1584,6 +1674,10 @@ text: root._stagingActive
             target: engine
             function onGroupsChanged() { groupsList.model = engine.groups }
             function onReadyChanged() { if (engine.ready) engine.refreshGroups() }
+            // The engine committed a group-membership mutation (add/remove/move).
+            // _refreshMembership() re-queries AFTER the async commit, so the
+            // member list and the row dict-count always reflect the new state.
+            function onGroupMembersChanged() { groupsPane._refreshMembership() }
             function onGroupDictsReady(groupId, dicts) {
                 if (groupId !== groupsPane.editingGroup) return
                 const m = []
@@ -1591,6 +1685,19 @@ text: root._stagingActive
                 for (let i = 0; i < dicts.length; i++) {
                     if (dicts[i].member) m.push(dicts[i])
                     else nm.push(dicts[i])
+                }
+                // Members must display in the GROUP's order (memberIndex = the
+                // position inside the group's membership list), not in the
+                // global dictionary order the query happens to return them in.
+                // Without this, "Move up"/"Move down" changes were invisible.
+                for (let i = 1; i < m.length; ++i) {
+                    const row = m[i]
+                    let j = i - 1
+                    while (j >= 0 && m[j].memberIndex > row.memberIndex) {
+                        m[j + 1] = m[j]
+                        --j
+                    }
+                    m[j + 1] = row
                 }
                 groupsPane.groupMembers = m
                 groupsPane.groupNonMembers = nm
@@ -1617,9 +1724,10 @@ text: root._stagingActive
                     Accessible.role: Accessible.EditableText
                     onAccepted: groupsPane._createGroup()
                 }
-                Button {
-                    text: qsTr("Create")
-                    highlighted: true
+                ToolButton {
+                    text: root.icon("add")
+                    font.family: root.iconFontFamily
+                    font.pixelSize: 22
                     Accessible.name: "Create"
                     Accessible.role: Accessible.Button
                     onClicked: groupsPane._createGroup()
@@ -1644,19 +1752,16 @@ text: root._stagingActive
                     Accessible.name: groupRow.groupData.name
                     Accessible.role: Accessible.ListItem
 
-                    contentItem: ColumnLayout {
-                        spacing: 0
-                        Label {
-                            text: qsTr("%1 (%2)").arg(groupRow.groupData.name).arg(groupRow.groupData.dictCount)
-                            font.pixelSize: 16
-                            font.bold: true
-                            Layout.fillWidth: true
-                        }
-                        Label {
-                            text: groupRow.groupData.id === 0 ? qsTr("All dictionaries") : qsTr("id=%1").arg(groupRow.groupData.id)
-                            color: root.uiSubFg
-                            font.pixelSize: 11
-                        }
+                    // Tapping the group name opens the membership editor; the
+                    // trash asks for confirmation before deleting. Rename lives
+                    // inside the editor (no pencil on the row).
+                    contentItem: Label {
+                        text: qsTr("%1 (%2)").arg(groupRow.groupData.name).arg(groupRow.groupData.dictCount)
+                        font.pixelSize: 16
+                        font.bold: true
+                        elide: Text.ElideMiddle
+                        verticalAlignment: Text.AlignVCenter
+                        rightPadding: 56
                     }
 
                     RowLayout {
@@ -1667,46 +1772,107 @@ text: root._stagingActive
                         }
                         spacing: 2
 
+                        // Trash asks for confirmation first.
                         ToolButton {
-                            text: qsTr("Dicts")
+                            text: root.icon("delete")
+                            font.family: root.iconFontFamily
+                            font.pixelSize: 20
                             visible: groupRow.groupData.id !== 0
-                            Accessible.name: "Edit group dictionaries"
+                            Accessible.name: "Delete"
                             Accessible.role: Accessible.Button
-                            onClicked: groupsPane._openMembership(groupRow.groupData.id, groupRow.groupData.name)
+                            onClicked: groupsPane._requestDeleteGroup(groupRow.groupData.id, groupRow.groupData.name)
                         }
-                        Menu {
-                            id: groupMenu
-                            Accessible.name: "Group options menu"
-                            Accessible.role: Accessible.Menu
-                            MenuItem {
-                                text: qsTr("Rename")
-                                Accessible.name: "Rename"
-                                Accessible.role: Accessible.MenuItem
-                                onTriggered: {
-                                    const id = groupRow.groupData.id
-                                    if (id !== 0) engine.renameGroup(id, groupRow.groupData.name + "_r")
-                                }
-                            }
-                            MenuItem {
-                                text: qsTr("Delete")
-                                Accessible.name: "Delete"
-                                Accessible.role: Accessible.MenuItem
-                                onTriggered: {
-                                    const id = groupRow.groupData.id
-                                    if (id !== 0) engine.deleteGroup(id)
-                                }
-                            }
-                        }
-                        ToolButton {
-                            text: "..."
-                            visible: groupRow.groupData.id !== 0
-                            Accessible.name: "Group options"
-                            Accessible.role: Accessible.Button
-                            onClicked: groupMenu.popup()
-                        }
+                    }
+
+                    onClicked: {
+                        // Only editable groups open the membership editor;
+                        // "All" is a fixed, always-present group.
+                        if (groupRow.groupData.id !== 0)
+                            groupsPane._openMembership(groupRow.groupData.id, groupRow.groupData.name)
                     }
                 }
             }
+        }
+
+        // --- rename-group dialog ---
+        // A working rename (the old menu item just appended "_r" to the name).
+        // Prefills the current name and puts the cursor in the field (NO full
+        // selection — the user can edit in place). Empty names are rejected
+        // (gd_group_rename refuses empty names anyway).
+        Dialog {
+            id: renameGroupDialog
+            anchors.centerIn: parent
+            width: Math.min(parent.width - 80, 360)
+            modal: true
+            title: qsTr("Rename group")
+            Accessible.name: "Rename group"
+            Accessible.role: Accessible.Dialog
+            standardButtons: Dialog.Cancel | Dialog.Ok
+
+            contentItem: TextField {
+                id: renameGroupInput
+                width: parent.width
+                font.pixelSize: 16
+                Accessible.name: "New group name"
+                Accessible.role: Accessible.EditableText
+                onAccepted: renameGroupDialog.accept()
+            }
+
+            onOpened: {
+                renameGroupInput.text = groupsPane.renameGroupName
+                // Place the caret at the end instead of selecting the whole
+                // name: the user may want to append, and the field is never
+                // left with an accidental full overwrite.
+                renameGroupInput.cursorPosition = renameGroupInput.text.length
+                renameGroupInput.forceActiveFocus()
+            }
+            onAccepted: {
+                const name = renameGroupInput.text.trim()
+                if (name.length > 0 && groupsPane.renameGroupId > 0) {
+                    engine.renameGroup(groupsPane.renameGroupId, name)
+                    // The editor header keeps its own copy of the group name;
+                    // refresh it so the title stops showing a stale name until
+                    // the list re-renders (renameGroup is async, but the editor
+                    // remains open showing "Group: <name>").
+                    if (groupsPane.editingGroup === groupsPane.renameGroupId)
+                        groupsPane.editingGroupName = name
+                }
+            }
+        }
+
+        // --- delete-group confirm dialog ---
+        // Deleting a group is destructive (membership is gone for good), so ask
+        // before acting. Mirrors the remove-dictionary confirmation style.
+        Dialog {
+            id: deleteGroupDialog
+            anchors.centerIn: parent
+            width: Math.min(parent.width - 80, 360)
+            modal: true
+            title: qsTr("Delete group")
+            visible: groupsPane.deleteGroupId > 0
+            Accessible.name: "Delete group confirmation"
+            Accessible.role: Accessible.Dialog
+
+            ColumnLayout {
+                width: parent.width
+                spacing: 8
+                Label {
+                    Layout.fillWidth: true
+                    text: qsTr('Delete group "%1"?').arg(groupsPane.deleteGroupName)
+                    wrapMode: Text.Wrap
+                }
+                Label {
+                    Layout.fillWidth: true
+                    color: root.uiSubFg
+                    text: qsTr("The group and its dictionary order are removed. The dictionaries themselves are not deleted.")
+                    wrapMode: Text.Wrap
+                }
+            }
+
+            standardButtons: Dialog.Cancel | Dialog.Ok
+
+            onAccepted: groupsPane._confirmDeleteGroup()
+            onRejected: groupsPane._cancelDeleteGroup()
         }
 
         // --- membership editor mode ---
@@ -1720,18 +1886,30 @@ text: root._stagingActive
                 Layout.fillWidth: true
                 spacing: 10
 
-                Button {
-                    text: qsTr("<- Back")
+                ToolButton {
+                    text: root.icon("arrow_back")
+                    font.family: root.iconFontFamily
+                    font.pixelSize: 22
                     Accessible.name: "Back"
                     Accessible.role: Accessible.Button
                     onClicked: groupsPane.editingGroup = -1
                 }
                 Label {
                     Layout.fillWidth: true
-                    text: qsTr("Group: %1").arg(groupsPane.editingGroupName)
+                    // Just the group name — it's inside the group's editor, so
+                    // a "Group: " prefix would be redundant.
+                    text: groupsPane.editingGroupName
                     font.pixelSize: 16
                     font.bold: true
                     elide: Text.ElideMiddle
+                }
+                ToolButton {
+                    text: root.icon("edit")
+                    font.family: root.iconFontFamily
+                    font.pixelSize: 22
+                    Accessible.name: "Rename group"
+                    Accessible.role: Accessible.Button
+                    onClicked: groupsPane._openRename(groupsPane.editingGroup, groupsPane.editingGroupName)
                 }
             }
 
@@ -1752,13 +1930,52 @@ text: root._stagingActive
                     width: ListView.view.width
                     height: 44
                     padding: 4
+                    // Mark the row that's being dragged/reordered so the active
+                    // line is visible while the finger moves it.
+                    highlighted: memberRow.rowData.memberIndex === groupsPane._dragIndex
                     Accessible.name: memberRow.rowData.name
                     Accessible.role: Accessible.ListItem
 
-                    contentItem: Label {
-                        text: memberRow.rowData.name
-                        elide: Text.ElideMiddle
-                        verticalAlignment: Text.AlignVCenter
+                    contentItem: RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 6
+
+                        // The whole row is the drag surface: grab anywhere on
+                        // the member and drag up/down to reorder. The row's
+                        // delegate has no tap action, so there's nothing for an
+                        // accidental tap to break; the right-hand Remove button
+                        // sits above this bag and still receives its taps.
+                        MouseArea {
+                            anchors { top: parent.top; bottom: parent.bottom; left: parent.left; right: parent.right }
+                            // Leave the right-most sliver clear so the Remove
+                            // button (a sibling overlapping this bag) still gets
+                            // its taps; the whole NAME area stays draggable.
+                            anchors.rightMargin: 90
+                            // Keep the ListView's flick-scroll from stealing the
+                            // gesture once a reorder drag starts.
+                            preventStealing: true
+                            Accessible.name: "Reorder"
+                            Accessible.role: Accessible.Button
+                            onPressed: (mouse) => {
+                                groupsPane._dragBegin(memberRow.rowData.memberIndex, mouse.y)
+                            }
+                            onPositionChanged: (mouse) => {
+                                groupsPane._dragMove(mouse.y)
+                            }
+                            onReleased: groupsPane._dragEnd()
+                        }
+                        Label {
+                            text: root.icon("drag_handle")
+                            font.family: root.iconFontFamily
+                            font.pixelSize: 20
+                            color: root.uiSubFg
+                        }
+                        Label {
+                            Layout.fillWidth: true
+                            text: memberRow.rowData.name
+                            elide: Text.ElideMiddle
+                            verticalAlignment: Text.AlignVCenter
+                        }
                     }
 
                     RowLayout {
@@ -1769,35 +1986,12 @@ text: root._stagingActive
                         }
                         spacing: 2
                         ToolButton {
-                            text: qsTr("Up")
-                            enabled: memberRow.rowData.memberIndex > 0
-                            Accessible.name: "Move up"
-                            Accessible.role: Accessible.Button
-                            onClicked: {
-                                const pos = memberRow.rowData.memberIndex
-                                engine.groupMoveDict(groupsPane.editingGroup, pos, pos - 1)
-                                groupsPane._refreshMembership()
-                            }
-                        }
-                        ToolButton {
-                            text: qsTr("Down")
-                            enabled: memberRow.rowData.memberIndex < groupsPane.groupMembers.length - 1
-                            Accessible.name: "Move down"
-                            Accessible.role: Accessible.Button
-                            onClicked: {
-                                const pos = memberRow.rowData.memberIndex
-                                engine.groupMoveDict(groupsPane.editingGroup, pos, pos + 1)
-                                groupsPane._refreshMembership()
-                            }
-                        }
-                        ToolButton {
-                            text: qsTr("Remove")
+                            text: root.icon("close")
+                            font.family: root.iconFontFamily
+                            font.pixelSize: 20
                             Accessible.name: "Remove from group"
                             Accessible.role: Accessible.Button
-                            onClicked: {
-                                engine.groupRemoveDict(groupsPane.editingGroup, memberRow.rowData.index)
-                                groupsPane._refreshMembership()
-                            }
+                            onClicked: engine.groupRemoveDict(groupsPane.editingGroup, memberRow.rowData.index)
                         }
                     }
                 }
@@ -1834,13 +2028,12 @@ text: root._stagingActive
                             rightMargin: 4
                             verticalCenter: parent.verticalCenter
                         }
-                        text: qsTr("Add")
+                        text: root.icon("add")
+                        font.family: root.iconFontFamily
+                        font.pixelSize: 20
                         Accessible.name: "Add to group"
                         Accessible.role: Accessible.Button
-                        onClicked: {
-                            engine.groupAddDict(groupsPane.editingGroup, nonMemberRow.rowData.index)
-                            groupsPane._refreshMembership()
-                        }
+                        onClicked: engine.groupAddDict(groupsPane.editingGroup, nonMemberRow.rowData.index)
                     }
                 }
             }

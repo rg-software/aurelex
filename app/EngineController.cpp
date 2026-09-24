@@ -889,7 +889,11 @@ void EngineController::groupAddDict(int groupId, int dictIndex) {
     connect(w, &QFutureWatcher<int>::finished, this, [this, groupId, w]{
         const int rc = w->result();
         qInfo() << "[aurelex] groupAddDict group=" << groupId << "rc=" << rc;
-        if (rc != 0) setLastError(QStringLiteral("group_add_dict failed (rc=%1)").arg(rc));
+        if (rc != 0) {
+            setLastError(QStringLiteral("group_add_dict failed (rc=%1)").arg(rc));
+        } else {
+            emit groupMembersChanged();
+        }
         w->deleteLater();
     });
     w->setFuture(f);
@@ -904,7 +908,11 @@ void EngineController::groupRemoveDict(int groupId, int dictIndex) {
     connect(w, &QFutureWatcher<int>::finished, this, [this, groupId, w]{
         const int rc = w->result();
         qInfo() << "[aurelex] groupRemoveDict group=" << groupId << "rc=" << rc;
-        if (rc != 0) setLastError(QStringLiteral("group_remove_dict failed (rc=%1)").arg(rc));
+        if (rc != 0) {
+            setLastError(QStringLiteral("group_remove_dict failed (rc=%1)").arg(rc));
+        } else {
+            emit groupMembersChanged();
+        }
         w->deleteLater();
     });
     w->setFuture(f);
@@ -919,7 +927,11 @@ void EngineController::groupMoveDict(int groupId, int from, int to) {
     connect(w, &QFutureWatcher<int>::finished, this, [this, groupId, w]{
         const int rc = w->result();
         qInfo() << "[aurelex] groupMoveDict rc=" << rc;
-        if (rc != 0) setLastError(QStringLiteral("group_move_dict failed (rc=%1)").arg(rc));
+        if (rc != 0) {
+            setLastError(QStringLiteral("group_move_dict failed (rc=%1)").arg(rc));
+        } else {
+            emit groupMembersChanged();
+        }
         w->deleteLater();
     });
     w->setFuture(f);

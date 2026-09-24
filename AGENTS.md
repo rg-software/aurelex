@@ -110,15 +110,14 @@ elements in automated tests:
 | Groups | New group input | `"New group name"` |
 | Groups | Create button | `"Create"` |
 | Groups | ListView | `"Groups list"` |
-| Groups | Edit dicts button | `"Edit group dictionaries"` |
-| Groups | Overflow menu | `"Group options"` |
-| Groups | Menu | `"Group options menu"` |
-| Groups | Rename | `"Rename"` |
-| Groups | Delete | `"Delete"` |
+| Groups | Group row | Named `<group name>`; tapping the row opens the group's membership editor (no separate edit/pencil button in the list) |
+| Groups | Delete | `"Delete"` (per-row trash icon, asks for confirmation) |
+| Groups | Delete confirmation | `"Delete group confirmation"` (OK/Cancel) |
+| Groups | Rename dialog | `"Rename group"` (`"New group name"` field inside) |
 | Membership | Back button | `"Back"` |
+| Membership | Rename group | `"Rename group"` (header button in the membership editor) |
 | Membership | Members list | `"Group members"` |
-| Membership | Move up | `"Move up"` |
-| Membership | Move down | `"Move down"` |
+| Membership | Reorder surface | Whole member row drags to reorder; drag anywhere on the row |
 | Membership | Remove from group | `"Remove from group"` |
 | Membership | Non-members list | `"Available dictionaries to add"` |
 | Membership | Add to group | `"Add to group"` |

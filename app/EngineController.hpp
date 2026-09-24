@@ -268,6 +268,10 @@ signals:
     void buildingFtsChanged();
     void stagingActiveChanged();
     void groupDictsReady(int groupId, const QVariantList &dicts);
+    // Emitted after a group's membership or order changed (add/remove/move) and
+    // the engine has committed it, so QML can re-query groupDicts(editingGroup)
+    // AFTER the async mutation lands (avoids reading stale order).
+    void groupMembersChanged();
     void historyChanged();
     void favoritesChanged();
     void darkModeChanged();
