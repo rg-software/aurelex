@@ -22,6 +22,12 @@
 EngineController::EngineController(QObject *parent)
     : QObject(parent)
 {
+    // Serial engine dispatch: at most one interactive gd_* call in flight (see
+    // m_enginePool in the header). The single thread is kept alive so rapid
+    // typing/lookups never pay a thread-spawn cost.
+    m_enginePool.setMaxThreadCount(1);
+    m_enginePool.setExpiryTimeout(-1);
+
     // Incoming-lookup poller: AurelexActivity writes shared_prefs/intent.xml
     // for every share/deep-link/PROCESS_TEXT/tile intent (cold or warm). Consume
     // it here as soon as the engine is ready; words arriving before gd_init
@@ -70,7 +76,14 @@ EngineController::EngineController(QObject *parent)
     m_articleServer->listen();
 }
 
-EngineController::~EngineController() = default;
+EngineController::~EngineController()
+{
+    // Engine jobs capture this to read the generation counters; drop queued
+    // ones and wait out the in-flight request so no worker outlives the
+    // controller. (They only ever call gd_* + build a QString, no signals.)
+    m_enginePool.clear();
+    m_enginePool.waitForDone();
+}
 
 void EngineController::setDictCount(int n) {
     if (m_dictCount == n) return;
@@ -1068,7 +1081,9 @@ void EngineController::prefetchArticle(const QString &word) {
     const QString key = articleCacheKey(word);
     if (m_articleCache.contains(key)) return;
     const QByteArray utf = word.toUtf8();
-    QFuture<QString> f = QtConcurrent::run([utf]{
+    // Serial engine pool (see header): prefetch is subordinate to user lookups
+    // and must not compete with them or with the carve's index subtasks.
+    QFuture<QString> f = QtConcurrent::run(&m_enginePool, [utf]{
         std::vector<char> buf(1 << 20);
         const int sz = gd_lookup(utf.constData(), buf.data(), static_cast<int>(buf.size()));
         if (sz <= 0) return QString();
@@ -1085,6 +1100,8 @@ void EngineController::prefetchArticle(const QString &word) {
 }
 
 void EngineController::lookup(const QString &word) {
+    // Last request wins: a newer lookup supersedes any queued/older one.
+    const int gen = ++m_lookupGeneration;
     const QString key = articleCacheKey(word);
     const auto it = m_articleCache.constFind(key);
     if (it != m_articleCache.constEnd()) {
@@ -1095,7 +1112,8 @@ void EngineController::lookup(const QString &word) {
         emit articleLoaded(word, it.value());
         return;
     }
-    QFuture<QString> f = QtConcurrent::run([word]{
+    QFuture<QString> f = QtConcurrent::run(&m_enginePool, [this, word, key, gen]{
+        if (gen != m_lookupGeneration.load()) return QString(); // superseded; don't touch the engine
         std::vector<char> buf(1 << 20);
         const int sz = gd_lookup(word.toLocal8Bit().constData(),
                                  buf.data(), static_cast<int>(buf.size()));
@@ -1103,14 +1121,17 @@ void EngineController::lookup(const QString &word) {
         return QString::fromUtf8(buf.data(), sz);
     });
     auto *w = new QFutureWatcher<QString>(this);
-    connect(w, &QFutureWatcher<QString>::finished, this, [this, word, key, w]{
+    connect(w, &QFutureWatcher<QString>::finished, this, [this, word, key, gen, w]{
+        const bool stale = gen != m_lookupGeneration.load();
         const QString html = w->result();
-        if (html.isEmpty()) {
-            emit articleNotFound(word);
-        } else {
-            cacheArticle(key, html);
-            recordHistory(word);
-            emit articleLoaded(word, html);
+        if (!stale) {
+            if (html.isEmpty()) {
+                emit articleNotFound(word);
+            } else {
+                cacheArticle(key, html);
+                recordHistory(word);
+                emit articleLoaded(word, html);
+            }
         }
         w->deleteLater();
     });
@@ -1118,7 +1139,9 @@ void EngineController::lookup(const QString &word) {
 }
 
 void EngineController::lookupInGroup(const QString &word, int groupId) {
-    QFuture<QString> f = QtConcurrent::run([word, groupId]{
+    const int gen = ++m_lookupGeneration;
+    QFuture<QString> f = QtConcurrent::run(&m_enginePool, [this, word, groupId, gen]{
+        if (gen != m_lookupGeneration.load()) return QString(); // superseded; don't touch the engine
         std::vector<char> buf(1 << 20);
         const int sz = gd_lookup_in_group(word.toLocal8Bit().constData(), groupId,
                                           buf.data(), static_cast<int>(buf.size()));
@@ -1126,13 +1149,16 @@ void EngineController::lookupInGroup(const QString &word, int groupId) {
         return QString::fromUtf8(buf.data(), sz);
     });
     auto *w = new QFutureWatcher<QString>(this);
-    connect(w, &QFutureWatcher<QString>::finished, this, [this, word, w]{
+    connect(w, &QFutureWatcher<QString>::finished, this, [this, word, gen, w]{
+        const bool stale = gen != m_lookupGeneration.load();
         const QString html = w->result();
-        if (html.isEmpty()) {
-            emit articleNotFound(word);
-        } else {
-            recordHistory(word);
-            emit articleLoaded(word, html);
+        if (!stale) {
+            if (html.isEmpty()) {
+                emit articleNotFound(word);
+            } else {
+                recordHistory(word);
+                emit articleLoaded(word, html);
+            }
         }
         w->deleteLater();
     });
@@ -1144,8 +1170,10 @@ void EngineController::lookupInGroup(const QString &word, int groupId) {
 // Search scope + history recording agree); otherwise fall back to "All" (0).
 void EngineController::lookupInGroupWithSwitch(const QString &word, int groupId)
 {
+    const int gen = ++m_lookupGeneration;
     const int target = groupExists(groupId) ? groupId : 0;
-    QFuture<QPair<int, QString>> f = QtConcurrent::run([word, target]{
+    QFuture<QPair<int, QString>> f = QtConcurrent::run(&m_enginePool, [this, word, target, gen]{
+        if (gen != m_lookupGeneration.load()) return QPair<int, QString>(0, QString()); // superseded
         int rc = gd_group_set_active(target);
         int active = 0;
         if (rc == 0) gd_group_active(&active);
@@ -1157,7 +1185,11 @@ void EngineController::lookupInGroupWithSwitch(const QString &word, int groupId)
         return QPair<int, QString>(active, html);
     });
     auto *w = new QFutureWatcher<QPair<int, QString>>(this);
-    connect(w, &QFutureWatcher<QPair<int, QString>>::finished, this, [this, word, w]{
+    connect(w, &QFutureWatcher<QPair<int, QString>>::finished, this, [this, word, gen, w]{
+        if (gen != m_lookupGeneration.load()) {
+            w->deleteLater();
+            return;
+        }
         const QPair<int, QString> result = w->result();
         setActiveGroupId(result.first);
         const QString html = result.second;
@@ -1174,11 +1206,13 @@ void EngineController::lookupInGroupWithSwitch(const QString &word, int groupId)
 
 void EngineController::suggest(const QString &prefix) {
     qInfo() << "[aurelex] suggest firing:" << prefix;
-    // Only the latest request may emit: while the user keeps typing (or the
-    // IME rewrites composing text), older results would otherwise land late
-    // and repopulate the list with stale content.
+    // Only the latest request may reach the engine (and emit): while the user
+    // keeps typing (or the IME rewrites composing text), older requests are
+    // dropped before they even start, and any older result that still lands
+    // late is ignored below. Last request wins.
     const int gen = ++m_suggestGeneration;
-    QFuture<QStringList> f = QtConcurrent::run([prefix]{
+    QFuture<QStringList> f = QtConcurrent::run(&m_enginePool, [this, prefix, gen]{
+        if (gen != m_suggestGeneration.load()) return QStringList(); // superseded; don't touch the engine
         std::vector<char> buf(1 << 16);
         const int n = gd_suggest(prefix.toLocal8Bit().constData(),
                                   buf.data(), static_cast<int>(buf.size()));

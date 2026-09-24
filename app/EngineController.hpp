@@ -10,8 +10,11 @@
 #include <QPointer>
 #include <QTimer>
 #include <QMutex>
+#include <QThreadPool>
 #include <QList>
 #include <QHash>
+
+#include <atomic>
 
 class ArticleServer;
 
@@ -20,8 +23,10 @@ extern "C" {
 }
 
 // EngineController: QML-facing wrapper around the in-process goldendict engine.
-// Owns the engine lifetime; calls are off-thread (QtConcurrent) so the UI
-// thread never blocks on the (potentially slow) gd_* C API.
+// Owns the engine lifetime; calls are off-thread so the UI thread never blocks
+// on the (potentially slow) gd_* C API. User-facing calls (suggest/lookup/
+// prefetch) run serially on a single worker (m_enginePool) with last-wins
+// semantics; management calls (scan/groups/FTS) run on QtConcurrent.
 class EngineController : public QObject
 {
     Q_OBJECT
@@ -342,7 +347,22 @@ private:
     QTimer m_scanWatchdog;
     static constexpr int kScanWatchdogMs = 90000;
     int m_clipboardRetries = 0;
-    int m_suggestGeneration = 0;
+    // Serial engine dispatcher (last-wins). Every user-facing engine call
+    // (suggest/lookup/prefetch) runs one-at-a-time on this single worker
+    // instead of the global pool. The blocking gd_* calls already serialize
+    // inside the carve on its own engine mutex, and their results must not
+    // overwrite each other (that was the "suggestion dropdown takes ~10s"
+    // bug: keystroke requests flooded the global pool, the carve's internal
+    // index lookups — which ALSO schedule on the global pool — starved, and
+    // every request burned its full 10s/15s loop bound). With one in-flight
+    // request the global pool always has a thread for the inner lookups, and
+    // queued-but-superseded jobs bail out on a stale generation before ever
+    // touching the engine.
+    QThreadPool m_enginePool;
+    // Monotonic "last request wins" generations, bumped on the UI thread;
+    // a queued job whose generation is no longer current skips the engine.
+    std::atomic<int> m_suggestGeneration{0};
+    std::atomic<int> m_lookupGeneration{0};
 
     int m_dictCount = 0;
     bool m_ready = false;
