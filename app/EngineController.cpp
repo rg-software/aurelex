@@ -38,6 +38,7 @@ static QElapsedTimer s_diagLogClock;
 static bool s_diagLogStarted = false;
 static qint64 s_diagLogBytesSinceRotate = 0;
 static QtMessageHandler s_diagLogPrevHandler = nullptr;
+static QFile s_diagLogFile;
 static const qint64 kDiagLogMaxBytes = 512 * 1024;
 
 static void diagLogMessage(QtMsgType type, const QMessageLogContext &context,
@@ -63,15 +64,18 @@ static void diagLogMessage(QtMsgType type, const QMessageLogContext &context,
     const QByteArray line = QByteArray::number(s_diagLogClock.elapsed()) + "ms ["
         + QByteArray::number(qlonglong(QThread::currentThreadId())) + "] " + sev + ": "
         + message.toUtf8() + "\n";
-    QFile f(s_diagLogPath);
-    if (!f.open(QIODevice::Append | QIODevice::WriteOnly))
+    // Keep the handle open across writes (flush after each line so the tail is
+    // always readable); opening/closing per log line is flash I/O churn on the
+    // UI thread, which is exactly what we are trying to measure.
+    if (!s_diagLogFile.isOpen() && !s_diagLogFile.open(QIODevice::Append | QIODevice::WriteOnly))
         return;
-    const qint64 written = f.write(line);
-    f.close();
+    const qint64 written = s_diagLogFile.write(line);
+    s_diagLogFile.flush();
     s_diagLogBytesSinceRotate += written;
     if (s_diagLogBytesSinceRotate > kDiagLogMaxBytes) {
         // Rotate: keep one small .prev so the timestamps around the moment of
         // the last reproduction are not destroyed.
+        s_diagLogFile.close();
         QFile::remove(s_diagLogPath + ".prev");
         QFile::rename(s_diagLogPath, s_diagLogPath + ".prev");
         s_diagLogBytesSinceRotate = 0;
@@ -1217,7 +1221,6 @@ void EngineController::lookup(const QString &word) {
         m_articleCacheOrder.removeAll(key);
         m_articleCacheOrder.append(key);
         recordHistory(word);
-        qInfo() << "[aurelex] lookup cache-hit:" << word;
         emit articleLoaded(word, it.value());
         return;
     }
@@ -1234,9 +1237,12 @@ void EngineController::lookup(const QString &word) {
     connect(w, &QFutureWatcher<QString>::finished, this, [this, word, key, gen, wall, w]{
         const bool stale = gen != m_lookupGeneration.load();
         const QString html = w->result();
-        qInfo() << "[aurelex] lookup done:" << word
-                << (stale ? "(stale)" : (html.isEmpty() ? "not-found" : "loaded"))
-                << "enqueue->ready:" << wall.elapsed() << "ms";
+        // Fast lookups log nothing (the diag logger does file I/O); only slow
+        // or stale ones are worth a line when hunting a latency bug.
+        if (stale || wall.elapsed() >= 20)
+            qInfo() << "[aurelex] lookup done:" << word
+                    << (stale ? "(stale)" : (html.isEmpty() ? "not-found" : "loaded"))
+                    << "enqueue->ready:" << wall.elapsed() << "ms";
         if (!stale) {
             if (html.isEmpty()) {
                 emit articleNotFound(word);
@@ -1340,9 +1346,12 @@ void EngineController::suggest(const QString &prefix) {
             w->deleteLater();
             return;
         }
-        qInfo() << "[aurelex] suggest ready:" << prefix
-                << "count:" << w->result().size()
-                << "enqueue->ready:" << wall.elapsed() << "ms";
+        // Fast suggests log nothing (diag logger does file I/O); only slow ones
+        // matter when hunting the delay.
+        if (wall.elapsed() >= 20)
+            qInfo() << "[aurelex] suggest ready:" << prefix
+                    << "count:" << w->result().size()
+                    << "enqueue->ready:" << wall.elapsed() << "ms";
         emit suggestionsReady(prefix, w->result());
         // Prefetch the top candidate — the likely tap target — so the first
         // suggestion tap / Enter is near-instant (cache hit instead of a fresh

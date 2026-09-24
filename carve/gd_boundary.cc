@@ -26,6 +26,9 @@
 #include <QDir>
 #include <QDirIterator>
 #include <QEventLoop>
+#include <QElapsedTimer>
+#include <QThread>
+#include <QThreadPool>
 #include <QTimer>
 #include <QUrl>
 #include <QStringList>
@@ -253,6 +256,18 @@ void loadGroupsLocked()
   qInfo( "groups loaded: %d user groups", static_cast< int >( g_state->groupDefs.size() ) );
 }
 
+void gdLogCall( const char * name, const char * word, qint64 mutexMs, qint64 pumpMs, bool finished )
+{
+  // Only log calls that took (or waited) noticeably long: the diagnostic file
+  // logger does synchronous I/O, so logging every fast call would itself add
+  // latency to the very engine calls we are trying to measure. A call that
+  // never finished is inherently slow (it burned its loop bound), so it logs.
+  if ( mutexMs < 20 && pumpMs < 20 && finished )
+    return;
+  qInfo( "%s word=%s mutex=%lldms pump=%lldms finished=%d",
+         name, word, mutexMs, pumpMs, finished ? 1 : 0 );
+}
+
 } // namespace
 
 extern "C" {
@@ -313,6 +328,7 @@ int gd_init( const char * config_dir, const char * index_dir )
 
 int gd_scan_dicts( const char * folder )
 {
+  QElapsedTimer wall; wall.start();
   std::lock_guard< std::mutex > lock( g_engineMutex );
   if ( !g_state )
     return -1;
@@ -410,6 +426,8 @@ int gd_scan_dicts( const char * folder )
   g_state->articleMaker =
     std::make_unique< ArticleMaker >( g_state->dictionaries, g_state->groups, g_state->cfg.preferences );
 
+  qInfo( "gd_scan_dicts took %lld ms", wall.elapsed() );
+
   return static_cast< int >( g_state->dictionaries.size() - before );
 }
 
@@ -433,9 +451,12 @@ int gd_scan_failures( char * out, int out_size )
 
 int gd_suggest( const char * word, char * out, int out_size )
 {
+  QElapsedTimer wall; wall.start();
   std::lock_guard< std::mutex > lock( g_engineMutex );
   if ( !g_state || !out || out_size <= 0 )
     return -1;
+
+  const qint64 mutexMs = wall.restart();
 
   // Suggest only within the active group (0 = "All"), matching gd_lookup's
   // scoping so the Search tab's selected group scopes suggestions too. groups[0]
@@ -462,18 +483,30 @@ int gd_suggest( const char * word, char * out, int out_size )
   }
 
   WordFinder wf( nullptr );
-  bool done = false;
-  QObject::connect( &wf, &WordFinder::finished, &wf, [ &done ]() {
-    done = true;
+  QAtomicInt finishedFlag = 0;
+  QEventLoop loop;
+  QTimer::singleShot( 10000, &loop, &QEventLoop::quit );
+
+  // Register the loop-quit connection BEFORE prefixMatch(): WordFinder can
+  // complete synchronously on a small/fast dictionary (the finished signal
+  // fires inside prefixMatch itself). A connection made after that point would
+  // miss the emit and loop.exec() would only exit via the 10s timer — the
+  // "suggestion dropdown takes ~10s" bug on small dictionaries.
+  QObject::connect( &wf, &WordFinder::finished, &loop, &QEventLoop::quit );
+  QObject::connect( &wf, &WordFinder::finished, &wf, [ &finishedFlag ]() {
+    finishedFlag.storeRelaxed( 1 );
   } );
   wf.prefixMatch( QString::fromUtf8( word ), *dicts, 100 );
 
-  // Drive the async search to completion with a real event loop (WordFinder
-  // uses a 1s results timer + queued signals). Bounded at ~10s.
-  QEventLoop loop;
-  QTimer::singleShot( 10000, &loop, &QEventLoop::quit );
-  QObject::connect( &wf, &WordFinder::finished, &loop, &QEventLoop::quit );
-  loop.exec();
+  // Drive the async search to completion with a real event loop. If the search
+  // already finished synchronously, skip the pump entirely (mirrors
+  // gd_lookup's `if (!req->isFinished())` guard); otherwise exec() runs until
+  // finished (connection above) or the 10s bound.
+  wall.restart();
+  if ( !finishedFlag.loadRelaxed() )
+    loop.exec();
+
+  gdLogCall( "gd_suggest", word, mutexMs, wall.elapsed(), finishedFlag.loadRelaxed() != 0 );
 
   const WordFinder::SearchResults results = wf.getResults();
 
@@ -492,9 +525,11 @@ int gd_suggest( const char * word, char * out, int out_size )
 
 int gd_lookup( const char * word, char * out, int out_size )
 {
+  QElapsedTimer wall; wall.start();
   std::lock_guard< std::mutex > lock( g_engineMutex );
   if ( !g_state || !out || out_size <= 0 )
     return -1;
+  const qint64 mutexMs = wall.restart();
 
   const QString w = QString::fromUtf8( word );
   // Use the active group (0 = "All"); article_maker filters to its dictionaries.
@@ -508,6 +543,8 @@ int gd_lookup( const char * word, char * out, int out_size )
   QObject::connect( req.get(), &Dictionary::Request::finished, &loop, &QEventLoop::quit );
   if ( !req->isFinished() )
     loop.exec();
+
+  gdLogCall( "gd_lookup", word, mutexMs, wall.elapsed(), req->isFinished() );
 
   if ( !req->isFinished() )
     return -3;
@@ -523,9 +560,11 @@ int gd_lookup( const char * word, char * out, int out_size )
 
 int gd_lookup_in_group( const char * word, int group_id, char * out, int out_size )
 {
+  QElapsedTimer wall; wall.start();
   std::lock_guard< std::mutex > lock( g_engineMutex );
   if ( !g_state || !out || out_size <= 0 || group_id < 0 )
     return -1;
+  const qint64 mutexMs = wall.restart();
 
   const QString w = QString::fromUtf8( word );
   // Empty group (no dictionaries): nothing can match — return empty immediately
@@ -549,6 +588,8 @@ int gd_lookup_in_group( const char * word, int group_id, char * out, int out_siz
   QObject::connect( req.get(), &Dictionary::Request::finished, &loop, &QEventLoop::quit );
   if ( !req->isFinished() )
     loop.exec();
+
+  gdLogCall( "gd_lookup_in_group", word, mutexMs, wall.elapsed(), req->isFinished() );
 
   if ( !req->isFinished() )
     return -3;
@@ -977,6 +1018,7 @@ int gd_set_dark_mode( int on )
 
 int gd_fts_index( int dict_index )
 {
+  QElapsedTimer wall; wall.start();
   std::lock_guard< std::mutex > lock( g_engineMutex );
   if ( !g_state || dict_index < 0 || dict_index >= static_cast< int >( g_state->dictionaries.size() ) )
     return -1;
@@ -1010,6 +1052,8 @@ int gd_fts_index( int dict_index )
     std::lock_guard< std::mutex > plock( g_ftsProgressMutex );
     g_state->ftsProgressDict.reset();
   }
+  qInfo( "gd_fts_index dict=%d rc=%d took %lld ms",
+         dict_index, rc, wall.elapsed() );
   return rc;
 }
 
