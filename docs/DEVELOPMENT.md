@@ -32,8 +32,10 @@ The app is a Qt Quick/WebView Android app built from `app/`.
 Requirements: JDK 17, Android SDK + NDK r23c, Qt 6.6.3 android + desktop kits, vcpkg deps
 (`zlib bzip2 liblzma lzo fmt xapian`), and **PowerShell 7 (`pwsh`)** — the script
 uses PS7-only syntax and UTF-8 characters; running it under the legacy
-`powershell` 5.1 misdecodes the UTF-8 and fails to parse. Apply the engine
-patches first, then run the one-shot build script:
+`powershell` 5.1 misdecodes the UTF-8 and fails to parse. On a fresh clone,
+populate the engine submodule first (`git submodule update --init`, or clone
+with `--recursive`), apply the engine patches, then run the one-shot build
+script:
 
 ```powershell
 pwsh -File .\app\build.ps1 -Configuration Release            # signed release APK
