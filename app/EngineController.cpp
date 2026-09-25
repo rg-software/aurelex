@@ -321,6 +321,15 @@ void EngineController::runScan() {
     // dictionaries. gd_scan_dicts recurses, so scanning the root picks up every
     // staged/<sourceId>/... import.
     const QString stagedBase = m_stagedDir;
+    // Diagnostics: log the staged import folders present on disk so it's clear
+    // what the scan is about to look at.
+    qInfo() << "[aurelex] scan start; staged root =" << stagedBase;
+    {
+        QDir sr(stagedBase);
+        const QStringList dirs = sr.entryList(QDir::Dirs | QDir::NoDotAndDotDot);
+        qInfo() << "[aurelex] staged import folders:" << dirs.size();
+        for (const QString &d : dirs) qInfo() << "  staged/" << d;
+    }
     // Show "Scanning dictionaries…" while the carve loads dicts so the Dicts
     // processing banner stays visible continuously from folder pick -> staging
     // -> scan -> indexing.
@@ -341,7 +350,7 @@ void EngineController::runScan() {
     connect(w, &QFutureWatcher<QPair<int, int>>::finished, this, [this, w]{
         m_scanWatchdog.stop();
         const QPair<int, int> result = w->result();
-        qInfo() << "[aurelex] scan ->" << result.first;
+        qInfo() << "[aurelex] scan done; gd_dict_count =" << result.second;
         setDictCount(result.second);
         setScanningActive(false);
         w->deleteLater();
@@ -387,6 +396,8 @@ void EngineController::autoIndexMissing()
     connect(w, &QFutureWatcher<QStringList>::finished, this, [this, w]{
         const QStringList missing = w->result();
         w->deleteLater();
+        qInfo() << "[aurelex] autoIndexMissing: dictionaries lacking an FTS index ="
+                << missing;
         // Enqueue IDs not already queued; start the single worker if idle.
         // A re-import mid-build appends and the running worker picks them up
         // (design D1).
@@ -428,6 +439,7 @@ void EngineController::ensureFtsWorker()
     }
     setFtsIndexProgress(0, runTotal, QString());
     setBuildingFts(true);
+    qInfo() << "[aurelex] FTS indexing batch start; total =" << runTotal;
 
     // The worker drains the shared queue. Each popped ID is re-resolved to the
     // CURRENT engine index (a dictionary removed mid-run simply no longer
@@ -598,7 +610,17 @@ void EngineController::refreshDictionaries() {
     });
     auto *w = new QFutureWatcher<QVariantList>(this);
     connect(w, &QFutureWatcher<QVariantList>::finished, this, [this, w]{
-        setDictionaries(w->result());
+        const QVariantList list = w->result();
+        setDictionaries(list);
+        // Diagnostics: the full set of loaded dictionaries (id/name/source), so
+        // the log shows exactly what is available after a scan / import.
+        qInfo() << "[aurelex] dictionaries available:" << list.size();
+        for (const QVariant &v : list) {
+            const QVariantMap m = v.toMap();
+            qInfo().noquote() << "  -" << m.value("name").toString()
+                              << "[" << m.value("pair").toString() << "]"
+                              << m.value("source").toString();
+        }
         w->deleteLater();
     });
     w->setFuture(f);
@@ -609,7 +631,11 @@ void EngineController::removeDictionary(int index) {
     // Capture the dictionary id (engine mutex) + its primary source file path
     // BEFORE gd_remove_dict shifts indices. The id capture runs off-thread so
     // the UI never blocks behind a long FTS build holding the engine mutex.
-    const QString sourceFile = m_dictionaries.at(index).toMap().value("source").toString();
+    const QVariantMap removed = m_dictionaries.at(index).toMap();
+    const QString sourceFile = removed.value("source").toString();
+    const QString removedName = removed.value("name").toString();
+    qInfo().noquote() << "[aurelex] removeDictionary requested:"
+                      << removedName << "src=" << sourceFile << "idx=" << index;
     const QString stagedRoot = m_stagedDir;
     const QString appDir = m_appDir;
 
@@ -623,12 +649,14 @@ void EngineController::removeDictionary(int index) {
     });
     auto *w = new QFutureWatcher<QPair<QString, QPair<int, int>>>(this);
     connect(w, &QFutureWatcher<QPair<QString, QPair<int, int>>>::finished, this,
-            [this, w, sourceFile, stagedRoot, appDir]{
+            [this, w, sourceFile, removedName, stagedRoot, appDir]{
         const QPair<QString, QPair<int, int>> result = w->result();
         const QString dictId = result.first;
         const int rc = result.second.first;
         const int count = result.second.second;
-        qInfo() << "[aurelex] remove dict" << rc;
+        qInfo().noquote() << "[aurelex] removeDictionary result: rc=" << rc
+                          << "name=" << removedName << "id=" << dictId
+                          << "remaining=" << count;
         if (rc == 0) {
             // Permanent delete: remove the app's copy + its index cache.
             deleteDictionaryFiles(sourceFile, dictId, stagedRoot, appDir);
@@ -664,11 +692,22 @@ void EngineController::deleteDictionaryFiles(const QString &sourceFile,
             QFileInfo fi(full);
             if (fi.isDir()) QDir(full).removeRecursively();
             else QFile::remove(full);
+            qInfo() << "[aurelex] removed index entry" << full;
         }
+    }
+    // Delete the dictionary's OWN staged source file. This must happen even when
+    // the import folder is shared with sibling dictionaries (e.g. one GoldenDict
+    // import holding many dicts): otherwise the removed dict's file stays on
+    // disk and the next startup scan re-adds it (the "deleted dictionaries
+    // reappear" bug).
+    if (!sourceFile.isEmpty() && QFileInfo::exists(sourceFile)) {
+        const bool ok = QFile::remove(sourceFile);
+        qInfo() << "[aurelex] removed staged source file" << sourceFile << "ok=" << ok;
     }
     // Delete the staged copy's folder (files/staged/<sourceId>) only if no other
     // loaded dictionary still uses it (a single import folder can hold several
-    // dictionaries; removing one must not delete its siblings).
+    // dictionaries; removing one must not delete its siblings). When shared, the
+    // per-file delete above already removed this dictionary's file.
     if (!sourceFile.isEmpty() && !stagedRoot.isEmpty()) {
         const QString stagedDir = stagedAncestor(sourceFile, stagedRoot);
         if (!stagedDir.isEmpty()) {
@@ -682,8 +721,11 @@ void EngineController::deleteDictionaryFiles(const QString &sourceFile,
                 }
             }
             if (!shared) {
-                qInfo() << "[aurelex] removing staged copy" << stagedDir;
+                qInfo() << "[aurelex] removing staged copy dir" << stagedDir;
                 QDir(stagedDir).removeRecursively();
+            } else {
+                qInfo() << "[aurelex] staged copy dir kept (shared by siblings)"
+                        << stagedDir;
             }
         }
     }
@@ -816,14 +858,15 @@ void EngineController::renameGroup(int groupId, const QString &newName) {
 }
 
 void EngineController::deleteGroup(int groupId) {
-    if (!m_ready) return;
+    if (!m_ready) { qInfo() << "[aurelex] deleteGroup skipped: not ready"; return; }
+    qInfo() << "[aurelex] deleteGroup requested id=" << groupId;
     QFuture<int> f = QtConcurrent::run([groupId]{
         return gd_group_delete(groupId);
     });
     auto *w = new QFutureWatcher<int>(this);
     connect(w, &QFutureWatcher<int>::finished, this, [this, w]{
         const int rc = w->result();
-        qInfo() << "[aurelex] deleteGroup" << rc;
+        qInfo() << "[aurelex] deleteGroup done rc=" << rc;
         if (rc == 0) refreshGroups();
         else setLastError(QStringLiteral("group_delete failed (rc=%1)").arg(rc));
         w->deleteLater();

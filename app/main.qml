@@ -105,7 +105,7 @@ ApplicationWindow {
     onWidthChanged: root._refreshInsets()
     onHeightChanged: root._refreshInsets()
     Component.onCompleted: root._refreshInsets()
-    // First-launch tab routing happens on onBoardedChanged (not here):
+    // First-launch tab routing happens on onOnboardedChanged (not here):
     // engine.onboarded is only final after EngineController's ASYNC gd_init +
     // loadSettings() completes, so at Component.onCompleted it is still the
     // default false and the onboarding decision cannot be trusted yet.
@@ -116,7 +116,7 @@ ApplicationWindow {
 
     Connections {
         target: engine
-        function onBoardedChanged() {
+        function onOnboardedChanged() {
             if (!root._bootRouted) {
                 // The async init reported the real onboarding state: first run
                 // lands on the Dicts tab (the welcome card overlays the Dicts
@@ -218,7 +218,7 @@ ApplicationWindow {
             // article is PRESERVED (currentHtml); returning re-renders it.
             root._returningToSearch = true
             root.inlineWebReady = false
-            root.inlineWebTimer.stop()
+            inlineWebTimer.stop()
         } else if (root._returningToSearch) {
             root._returningToSearch = false
             if (root.inlineArticle) {
@@ -679,7 +679,7 @@ ApplicationWindow {
                 spacing: 0
                 clip: true
                 Accessible.name: "Main navigation"
-                Accessible.role: Accessible.TabBar
+                Accessible.role: Accessible.PageTabList
                 // 5.2: highlight the active tab by driving the TabBar's own
                 // selection (TabButton has no `highlighted` in Qt 6.6). State ->
                 // tab position via _tabIndexForState(); article pane has no tab.
@@ -715,7 +715,7 @@ ApplicationWindow {
                             }
                         }
                         Accessible.name: modelData.a11y
-                        Accessible.role: Accessible.TabButton
+                        Accessible.role: Accessible.PageTab
                         onClicked: root._navTo(modelData.idx)
                     }
                 }
@@ -1066,7 +1066,7 @@ ColumnLayout {
                             id: searchArticleView
                             anchors.fill: parent
                             Accessible.name: "Dictionary article"
-                            Accessible.role: Accessible.WebView
+                            Accessible.role: Accessible.WebDocument
                             onUrlChanged: {
                                 const u = url.toString()
                                 const base = engine.articleBaseUrl
@@ -1699,16 +1699,20 @@ text: root._stagingActive
             if (id <= 0) return // "All" cannot be deleted
             deleteGroupId = id
             deleteGroupName = name
+            deleteGroupDialog.open()
         }
+        // The standard OK/Cancel buttons close the dialog themselves; we only
+        // manage state. Clear deleteGroupId (hides) but NOT deleteGroupName: the
+        // dialog animates shut, and blanking the name during the close animation
+        // made it flash "Delete group ''?" (which looked like a second dialog).
+        // _requestDeleteGroup always re-sets the name before reopening.
         function _confirmDeleteGroup() {
             const id = deleteGroupId
             deleteGroupId = -1
-            deleteGroupName = ""
             if (id > 0) engine.deleteGroup(id)
         }
         function _cancelDeleteGroup() {
             deleteGroupId = -1
-            deleteGroupName = ""
         }
         function _refreshMembership() {
             if (editingGroup !== -1) {
@@ -2035,7 +2039,6 @@ text: root._stagingActive
             width: Math.min(parent.width - 80, 360)
             modal: true
             title: qsTr("Delete group")
-            visible: groupsPane.deleteGroupId > 0
             Accessible.name: "Delete group confirmation"
             Accessible.role: Accessible.Dialog
 
