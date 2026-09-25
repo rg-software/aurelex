@@ -53,6 +53,10 @@ ApplicationWindow {
     // Material icon font family (registered from fonts.qrc in main.cpp) + the
     // icon-name -> codepoint helper (qt-material-ui task 7.2).
     property string iconFontFamily: "Material Icons"
+    // Secondary icon font: a Material Symbols Outlined subset holding glyphs the
+    // classic Material Icons set lacks. The registered family is the subset's
+    // name (log: "Material Symbols Outlined"); symbolIcon emits the codepoints.
+    property string symbolFontFamily: "Material Symbols Outlined"
     // Android system-window insets (logical px): the Qt window is edge-to-edge,
     // so our own chrome must sit below the status bar / above the navigation
     // bar. Converted from physical px returned by the activity via JNI. They are
@@ -133,13 +137,24 @@ ApplicationWindow {
             "arrow_forward": 0xe5c8,
             "close": 0xe5cd,
             "add": 0xe145,
+            "check": 0xe5ca,
             "edit": 0xe150,
             "drag_handle": 0xe25d,
+            "translate": 0xe8e2,
             "delete": 0xe872,
             "bookmark": 0xe866,
             "dark_mode": 0xe51c,
             "zoom_in": 0xe8ff,
             "zoom_out": 0xe900
+        }
+        return map[name] !== undefined ? String.fromCharCode(map[name]) : "\uFFFD"
+    }
+    // Material Symbols icons (rendered with symbolFontFamily): glyphs that only
+    // exist in the Material Symbols Outlined subset (folder_open, match_word).
+    function symbolIcon( name ) {
+        var map = {
+            "folder_open": 0xe2c8,
+            "match_word": 0xf6f0
         }
         return map[name] !== undefined ? String.fromCharCode(map[name]) : "\uFFFD"
     }
@@ -195,16 +210,24 @@ ApplicationWindow {
         if (root.state !== 0) {
             // Leaving the Search tab: mark that a return should restore the
             // field's focus and re-trigger suggestions (the inline WebView and
-            // its suggestion overlay are destroyed on leaving).
+            // its suggestion overlay are destroyed on leaving). An inline
+            // article is PRESERVED (currentHtml); returning re-renders it.
             root._returningToSearch = true
             root.inlineWebReady = false
             root.inlineWebTimer.stop()
         } else if (root._returningToSearch) {
-            // Back on the Search tab: refocus the field (so Enter works again)
-            // and re-populate candidates for the text that's still typed. The
+            root._returningToSearch = false
+            if (root.inlineArticle) {
+                // An article was showing when we left; the loader re-creates
+                // the WebView and re-renders currentHtml on its own (onLoaded
+                // restarts articleLoadTimer). Don't force-suggest or refocus so
+                // the article (and its field text) survives the round trip.
+                return
+            }
+            // No article: refocus the field (so Enter works again) and
+            // re-populate candidates for the text that's still typed. The
             // fresh inline WebView is (re)created by inlineWebTimer shortly
             // after; the pending suggestions are flushed once it's ready.
-            root._returningToSearch = false
             input.forceActiveFocus()
             if (input.displayText.trim().length > 0) searchPane._doSuggest()
         }
@@ -441,19 +464,12 @@ ApplicationWindow {
         articleLoadTimer.restart()
     }
     function _backFromArticle() {
+        // Back/Forward only navigate between SEARCH RESULTS (previous/next
+        // looked-up articles). At the oldest result there is nothing to go back
+        // to — do nothing (the button is disabled), and never fall back to
+        // popping the suggestion/history dropdown, which was confusing.
         if (navStack.length === 0) {
-            // No more articles in the stack.
-            if (root.inlineArticle) {
-                // Clear inline article and return to the candidate surface. The
-                // query is still in the field, so re-show its candidates (the
-                // regular typing path doesn't fire — the text didn't change).
-                root._clearInlineArticle()
-                searchPane._doSuggest()
-                root.fwdStack = []
-                return
-            }
             root.fwdStack = []
-            state = 0
             return
         }
         const prev = root.navStack[root.navStack.length - 1]
@@ -529,7 +545,8 @@ ApplicationWindow {
     function _blurActive() {
         if (root.activeFocusItem && root.activeFocusItem.forceActiveFocus === undefined) return
         if (input.activeFocus) input.focus = false
-        if (newGroupInput.activeFocus) newGroupInput.focus = false
+        if (renameGroupInput.activeFocus) renameGroupInput.focus = false
+        if (createGroupNameInput.activeFocus) createGroupNameInput.focus = false
         if (ftsInput.activeFocus) ftsInput.focus = false
     }
     function _openDicts() {
@@ -544,7 +561,9 @@ ApplicationWindow {
     }
     function _openFts() {
         _blurActive()
-        ftsResults = []
+        // Don't clear ftsResults here: switching tabs must be idempotent, so
+        // the last search results survive a round trip (the field keeps its
+        // query and the results stay valid). A new search replaces them.
         state = 4
     }
     function _openFavorites() {
@@ -587,9 +606,9 @@ ApplicationWindow {
             // An article left over from another pane (full-pane article opened
             // from Favs/FTS) must not carry into a fresh Search — a stale
             // article would steal the WebView and the typed query's suggestions
-            // would never show. Inline articles (opened IN Search) were already
-            // wiped above on the way out. The session back/forward history is
-            // retained so a later lookup can still reach the previous article.
+            // would never show. Inline articles (opened IN Search) are kept:
+            // leaving the tab only hides the WebView (the loader tears it down),
+            // and returning re-renders currentHtml, so the article reappears.
             if (root.currentHtml.length > 0 && !root.inlineArticle) {
                 root.currentWord = ""
                 root.currentHtml = ""
@@ -597,10 +616,10 @@ ApplicationWindow {
             state = 0
             return
         }
-        // Leaving the search tab: clear any inline article state.
-        if (root.inlineArticle) {
-            root._clearInlineArticle()
-        }
+        // Leaving the search tab: keep any inline article state (currentWord /
+        // currentHtml / navStack) so a return restores the shown article. The
+        // inline WebView itself is destroyed by the loader, not here — no
+        // need to wipe anything; returning re-renders from currentHtml.
         if (idx === 1) { _openDicts(); return }
         if (idx === 3) { _openGroups(); return }
         if (idx === 4) { _openFts(); return }
@@ -634,18 +653,23 @@ ApplicationWindow {
     Rectangle {
         id: navDock
         anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
-        height: navRow.height + root._insetBottom
+        height: 56 + root._insetBottom
         z: 5
         color: root.uiBg
 
-        RowLayout {
+        Row {
             id: navRow
             anchors { left: parent.left; right: parent.right; top: parent.top }
+            height: 56
             spacing: 0
 
             TabBar {
                 id: navBar
-                Layout.fillWidth: true
+                // Five nav tabs take 5/6 of the dock; the theme cell (a sibling
+                // below) takes the last 1/6. As a sibling — not a TabBar child —
+                // it can never become the "active tab".
+                width: navRow.width - Math.round(navRow.width / 6)
+                height: navRow.height
                 // TabBar tabs tile the bar exactly (spacing 0 + exact-fill
                 // widths) so the row is never horizontally scrollable.
                 spacing: 0
@@ -662,9 +686,8 @@ ApplicationWindow {
                     model: root.navItems
                     delegate: TabButton {
                         id: tabBtn
-                        // Equal-width tabs: five tabs + the Theme slot tile the
-                        // bar in six equal cells.
-                        width: navBar.width / 6
+                        // Five equal nav cells across the TabBar.
+                        width: navBar.width / 5
                         height: parent.height
                         // icon glyph + label in the theme font (a single-font
                         // `text` would render the icon glyphs as broken Latin).
@@ -692,39 +715,40 @@ ApplicationWindow {
                         onClicked: root._navTo(modelData.idx)
                     }
                 }
+            }
 
-                // Theme toggle: a 6th tab in the bar so its icon+label align
-                // exactly with the other cells. It forces dark (or returns to
-                // following the system theme); it does not navigate.
-                TabButton {
-                    id: themeBtn
-                    width: navBar.width / 6
-                    height: parent.height
-                    contentItem: Column {
-                        anchors.centerIn: parent
-                        spacing: 0
-                        Text {
-                            anchors.horizontalCenter: parent.horizontalCenter
-                            text: root.icon("dark_mode")
-                            font.family: root.iconFontFamily
-                            font.pixelSize: 18
-                            color: themeBtn.down || themeBtn.checked ? themeBtn.Material.accentColor
-                                                                     : themeBtn.Material.foreground
-                        }
-                        Text {
-                            anchors.horizontalCenter: parent.horizontalCenter
-                            text: qsTr("Theme")
-                            font.pixelSize: 10
-                            color: themeBtn.down || themeBtn.checked ? themeBtn.Material.accentColor
-                                                                      : themeBtn.Material.foreground
-                        }
+            // Theme toggle: the 6th cell, a SIBLING of the TabBar so it can
+            // never become the selected tab. Forces dark (or follows the system
+            // theme); does not navigate.
+            Button {
+                id: themeBtn
+                width: navRow.width - navBar.width
+                height: navRow.height
+                flat: true
+                contentItem: Column {
+                    anchors.centerIn: parent
+                    spacing: 0
+                    Text {
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        text: root.icon("dark_mode")
+                        font.family: root.iconFontFamily
+                        font.pixelSize: 18
+                        color: themeBtn.down ? themeBtn.Material.accentColor
+                                            : themeBtn.Material.foreground
                     }
-                    Accessible.name: engine.userDarkOverride || engine.systemDark ? "Light mode" : "Dark mode"
-                    Accessible.role: Accessible.TabButton
-                    onClicked: {
-                        engine.toggleDarkOverride()
-                        root._blurActive()
+                    Text {
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        text: qsTr("Theme")
+                        font.pixelSize: 10
+                        color: themeBtn.down ? themeBtn.Material.accentColor
+                                            : themeBtn.Material.foreground
                     }
+                }
+                Accessible.name: engine.userDarkOverride || engine.systemDark ? "Light mode" : "Dark mode"
+                Accessible.role: Accessible.Button
+                onClicked: {
+                    engine.toggleDarkOverride()
+                    root._blurActive()
                 }
             }
         }
@@ -957,6 +981,7 @@ ColumnLayout {
                             text: root.icon("arrow_back")
                             font.family: root.iconFontFamily
                             font.pixelSize: 22
+                            enabled: root.navStack.length > 0
                             Accessible.name: "Back"
                             Accessible.role: Accessible.Button
                             onClicked: root._backFromArticle()
@@ -1100,10 +1125,8 @@ ColumnLayout {
         visible: root.state === 1
 
         Component.onCompleted: engine.refreshDictionaries()
-        property int removeIndex: -1
-        property string removeName: ""
         property bool byPair: false
-        // Indices of selected dictionary rows (for RemoveSelected).
+        // Indices of selected dictionary rows (for Delete selection).
         property var selectedDicts: []
         // Flattened model for By-Pair view: entries are either
         // {type:"header", pair:...} or {type:"dict", ...dict}. Rebuilt whenever
@@ -1126,14 +1149,6 @@ ColumnLayout {
             }
             dictsPane.groupedModel = rows
         }
-        function _requestRemove(index, name) { removeIndex = index; removeName = name }
-        function _confirmRemove() {
-            const idx = removeIndex
-            if (idx >= 0) engine.removeDictionary(idx)
-            removeIndex = -1
-            removeName = ""
-        }
-        function _cancelRemove() { removeIndex = -1; removeName = "" }
         function _toggleSelect(idx) {
             const sel = dictsPane.selectedDicts
             const i = sel.indexOf(idx)
@@ -1141,19 +1156,42 @@ ColumnLayout {
             else sel.push(idx)
             dictsPane.selectedDicts = sel
         }
+        // True when every dictionary in `pair` is selected (header check mark).
+        function _pairSelected(pair) {
+            const sel = dictsPane.selectedDicts
+            for (let i = 0; i < engine.dictionaries.length; i++) {
+                if (root.fmtPair(engine.dictionaries[i]) === pair
+                    && sel.indexOf(i) < 0)
+                    return false
+            }
+            return true
+        }
+        // Tap a pair (section) header to select or clear every dictionary in
+        // that pair. Mixed state: selects the unselected ones (full select);
+        // fully selected pair: clears the whole section.
+        function _toggleSelectPair(pair) {
+            const idxs = []
+            for (let i = 0; i < engine.dictionaries.length; i++) {
+                if (root.fmtPair(engine.dictionaries[i]) === pair) idxs.push(i)
+            }
+            const allSelected = idxs.every(i => dictsPane.selectedDicts.indexOf(i) >= 0)
+            const sel = dictsPane.selectedDicts.slice()
+            if (allSelected) {
+                // Clear only this pair's indices, keep other selections.
+                dictsPane.selectedDicts = sel.filter(i => idxs.indexOf(i) < 0)
+            } else {
+                for (const i of idxs) {
+                    if (sel.indexOf(i) < 0) sel.push(i)
+                }
+                dictsPane.selectedDicts = sel
+            }
+        }
         function _removeSelected() {
             // Copy indices high-to-low so removal doesn't shift later ones; then
             // clear the selection and refresh.
             const sel = dictsPane.selectedDicts.slice().sort((a,b)=>b-a)
             for (const idx of sel) engine.removeDictionary(idx)
             dictsPane.selectedDicts = []
-        }
-        // Per-pair removal: remove every dictionary whose pair == the caption's.
-        function _removePair(pair) {
-            for (let i = engine.dictionaries.length - 1; i >= 0; i--) {
-                if (root.fmtPair(engine.dictionaries[i]) === pair)
-                    engine.removeDictionary(i)
-            }
         }
         Connections {
             target: engine
@@ -1240,30 +1278,52 @@ text: root._stagingActive
                 Layout.fillWidth: true
                 spacing: 8
 
-                // 8.2: "Add dictionaries" (folder-scoped SAF picker). Qt 6.6
-                // RoundButton stands in for the Material 3 FloatingActionButton.
+                // "Add" (folder-scoped SAF picker). Qt 6.6 RoundButton stands in
+                // for the Material 3 FloatingActionButton; the folder-open icon
+                // signals importing from local storage.
                 RoundButton {
-                    text: qsTr("Add dictionaries")
                     highlighted: true
-                    Accessible.name: "Add dictionaries"
+                    Accessible.name: "Add"
                     Accessible.role: Accessible.Button
                     onClicked: engine.addDictionaryFolder()
+                    contentItem: RowLayout {
+                        spacing: 6
+                        Label {
+                            text: root.symbolIcon("folder_open")
+                            font.family: root.symbolFontFamily
+                            font.pixelSize: 18
+                            color: Material.primaryHighlightedTextColor
+                            Layout.alignment: Qt.AlignVCenter
+                        }
+                        Label {
+                            text: qsTr("Add")
+                            font.pixelSize: 14
+                            font.bold: true
+                            color: Material.primaryHighlightedTextColor
+                            Layout.alignment: Qt.AlignVCenter
+                        }
+                    }
                 }
-                // By Pair toggle: group the dictionary list by Source/Target.
-                Button {
-                    text: qsTr("By Pair")
-                    highlighted: dictsPane.byPair
-                    Accessible.name: "By Pair"
-                    Accessible.role: Accessible.Button
-                    onClicked: dictsPane.byPair = !dictsPane.byPair
-                }
-                // Multi-select removal (enabled when >=1 row is selected).
+                // Delete selection: sits right next to Add, styled like the
+                // By Pair toggle — gray while nothing is selected, magenta
+                // (highlighted) once a selection exists.
                 Button {
                     text: qsTr("Remove")
+                    highlighted: dictsPane.selectedDicts.length > 0
                     enabled: dictsPane.selectedDicts.length > 0
                     Accessible.name: "Remove"
                     Accessible.role: Accessible.Button
                     onClicked: dictsPane._removeSelected()
+                }
+                // By Pair toggle: group the dictionary list by Source/Target.
+                Button {
+                    text: root.icon("translate")
+                    font.family: root.iconFontFamily
+                    font.pixelSize: 18
+                    highlighted: dictsPane.byPair
+                    Accessible.name: "By Pair"
+                    Accessible.role: Accessible.Button
+                    onClicked: dictsPane.byPair = !dictsPane.byPair
                 }
             }
 
@@ -1370,12 +1430,6 @@ text: root._stagingActive
                                 Layout.fillWidth: true
                             }
                         }
-                        ToolButton {
-                            text: qsTr("Remove")
-                            Accessible.name: "Remove"
-                            Accessible.role: Accessible.Button
-                            onClicked: dictsPane._requestRemove(dictRow.dictIndex, dictRow.dictData.name)
-                        }
                     }
                 }
             }
@@ -1424,13 +1478,24 @@ text: root._stagingActive
                                 color: root.uiSubFg
                                 verticalAlignment: Text.AlignVCenter
                             }
-                            ToolButton {
-                                text: qsTr("Remove pair")
-                                Accessible.name: "Remove pair"
-                                Accessible.role: Accessible.Button
-                                onClicked: dictsPane._removePair(modelData.pair)
+                            // Check indicator: reflects whether every dictionary
+                            // in this pair is selected.
+                            Label {
+                                text: root.icon("check")
+                                font.family: root.iconFontFamily
+                                font.pixelSize: 16
+                                color: root.uiSubFg
+                                visible: dictsPane._pairSelected(modelData.pair)
                             }
                         }
+                    }
+
+                    // The pair header tap toggles the whole section's selection.
+                    onClicked: {
+                        if (modelData.type === "header")
+                            dictsPane._toggleSelectPair(modelData.pair)
+                        else
+                            dictsPane._toggleSelect(modelData.dictIndex)
                     }
 
                     Component {
@@ -1458,54 +1523,10 @@ text: root._stagingActive
                                     Layout.fillWidth: true
                                 }
                             }
-                            ToolButton {
-                                text: qsTr("Remove")
-                                Accessible.name: "Remove"
-                                Accessible.role: Accessible.Button
-                                onClicked: dictsPane._requestRemove(modelData.dictIndex, modelData.item.name)
-                            }
                         }
                     }
-
-                    onClicked: {
-                        if (modelData.type !== "header")
-                            dictsPane._toggleSelect(modelData.dictIndex)
-                    }
                 }
             }
-        }
-
-        // --- remove-dictionary confirm dialog ---
-        Dialog {
-            id: removeDialog
-            anchors.centerIn: parent
-            width: Math.min(parent.width - 80, 360)
-            modal: true
-            title: qsTr("Remove dictionary")
-            visible: dictsPane.removeIndex >= 0
-            Accessible.name: "Remove dictionary confirmation"
-            Accessible.role: Accessible.Dialog
-
-            ColumnLayout {
-                width: parent.width
-                spacing: 8
-                Label {
-                    Layout.fillWidth: true
-                    text: qsTr('Remove dictionary "%1"?').arg(dictsPane.removeName !== "" ? dictsPane.removeName : qsTr("(unknown)"))
-                    wrapMode: Text.Wrap
-                }
-                Label {
-                    Layout.fillWidth: true
-                    color: root.uiSubFg
-                    text: qsTr("It will be permanently removed: the app's copy of the dictionary files and its search index will be deleted. The original folder is never touched.")
-                    wrapMode: Text.Wrap
-                }
-            }
-
-            standardButtons: Dialog.Cancel | Dialog.Ok
-
-            onAccepted: dictsPane._confirmRemove()
-            onRejected: dictsPane._cancelRemove()
         }
 
         // --- onboarding overlay (first run) ---
@@ -1582,8 +1603,11 @@ text: root._stagingActive
         property var groupNonMembers: []
         property int renameGroupId: -1
         property string renameGroupName: ""
+        property string renameGroupNameError: ""
         property int deleteGroupId: -1
         property string deleteGroupName: ""
+        // "Add group" dialog state: the pending name and any inline error.
+        property string createGroupNameError: ""
         // Drag-to-reorder state for the member list. _dragFrom is the member
         // index the gesture started on; _dragStartY the finger's Y at
         // press-and-hold; _dragLastTo the last index we moved to (so crossing a
@@ -1643,12 +1667,19 @@ text: root._stagingActive
         function _openMembership(id, name) {
             editingGroup = id
             editingGroupName = name
+            // Reset the child lists so opening always starts blank: stale
+            // members from a previous open can linger otherwise, and the
+            // membership ColumnLayout shows stale rows until the async
+            // onGroupDictsReady replaces them.
+            groupsPane.groupMembers = []
+            groupsPane.groupNonMembers = []
             engine.groupDicts(id)
         }
         function _openRename(id, name) {
             if (id <= 0) return // "All" cannot be renamed
             renameGroupId = id
             renameGroupName = name
+            renameGroupNameError = ""     // fresh open: no stale "already exists"
             renameGroupDialog.open()
         }
         function _requestDeleteGroup(id, name) {
@@ -1672,14 +1703,51 @@ text: root._stagingActive
                 engine.refreshGroups()
             }
         }
-        function _createGroup() {
-            const name = newGroupInput.text.trim()
+        function _openCreateGroup(initial) {
+            groupsPane.createGroupNameError = ""
+            createGroupNameInput.text = initial !== undefined ? initial : ""
+            createGroupNameInput.forceActiveFocus()
+            createGroupDialog.open()
+        }
+        function _confirmCreateGroup() {
+            const name = createGroupNameInput.text.trim()
             if (name.length === 0) return
+            // Immediate duplicate check on the in-memory group list (the engine
+            // is the backstop but emits asynchronously). Case-insensitive, same
+            // rule as gd_group_create. On a duplicate the dialog stays open and
+            // shows the inline error — no reopen dance needed.
+            for (let i = 0; i < engine.groups.length; ++i) {
+                if (String(engine.groups[i].name).toLowerCase() === name.toLowerCase()) {
+                    groupsPane.createGroupNameError = qsTr("A group named \"%1\" already exists").arg(name)
+                    createGroupNameInput.forceActiveFocus()
+                    return
+                }
+            }
             engine.createGroup(name)
-            newGroupInput.text = ""
-            // Keep focus + re-open the IME so the user can immediately type the
-            // next group name.
-            newGroupInput.forceActiveFocus()
+            createGroupDialog.close()
+        }
+        function _confirmRenameGroup() {
+            const name = renameGroupInput.text.trim()
+            const id = groupsPane.renameGroupId
+            if (name.length === 0 || id <= 0) return
+            // Immediate duplicate check (in-memory list) — on a duplicate the
+            // dialog stays open showing the inline error.
+            for (let i = 0; i < engine.groups.length; ++i) {
+                const g = engine.groups[i]
+                if (g.id === id) continue
+                if (String(g.name).toLowerCase() === name.toLowerCase()) {
+                    groupsPane.renameGroupNameError = qsTr("A group named \"%1\" already exists").arg(name)
+                    renameGroupInput.forceActiveFocus()
+                    return
+                }
+            }
+            engine.renameGroup(id, name)
+            // The editor header keeps its own copy of the group name; refresh
+            // it so the title stops showing a stale name until the list
+            // re-renders (renameGroup is async, but the editor stays open).
+            if (groupsPane.editingGroup === id)
+                groupsPane.editingGroupName = name
+            renameGroupDialog.close()
         }
 
         Component.onCompleted: engine.refreshGroups()
@@ -1691,6 +1759,27 @@ text: root._stagingActive
             // _refreshMembership() re-queries AFTER the async commit, so the
             // member list and the row dict-count always reflect the new state.
             function onGroupMembersChanged() { groupsPane._refreshMembership() }
+            // A group was created: land straight in its membership editor.
+            function onGroupCreated(groupId, name) {
+                if (groupId > 0)
+                    groupsPane._openMembership(groupId, name)
+            }
+            // The name is taken (create or rename): surface it inline.
+            function onGroupNameTaken(name) {
+                // Rename or create: the standard OK button already closed the
+                // dialog, so re-open it with the error and the typed name.
+                // Set the error AFTER (re)opening — _openCreateGroup clears it
+                // for a fresh open, so the message must land after the dialog
+                // is back up.
+                if (groupsPane.renameGroupId > 0 || renameGroupName !== "") {
+                    groupsPane.renameGroupName = name
+                    renameGroupDialog.open()
+                    groupsPane.renameGroupNameError = qsTr("A group named \"%1\" already exists").arg(name)
+                    return
+                }
+                _openCreateGroup(name)
+                groupsPane.createGroupNameError = qsTr("A group named \"%1\" already exists").arg(name)
+            }
             function onGroupDictsReady(groupId, dicts) {
                 if (groupId !== groupsPane.editingGroup) return
                 const m = []
@@ -1714,6 +1803,14 @@ text: root._stagingActive
                 }
                 groupsPane.groupMembers = m
                 groupsPane.groupNonMembers = nm
+                // The membership editor may be freshly shown (or the same group
+                // reopened): force the two lists to re-layout so dict names are
+                // always drawn, not left blank from a stale frame.
+                Qt.callLater(function() {
+                    if (groupsPane.editingGroup !== groupId) return
+                    memberList.forceLayout()
+                    if (nonMemberList) nonMemberList.forceLayout()
+                })
             }
         }
 
@@ -1728,22 +1825,14 @@ text: root._stagingActive
                 Layout.fillWidth: true
                 spacing: 8
 
-                TextField {
-                    id: newGroupInput
-                    Layout.fillWidth: true
-                    placeholderText: qsTr("New group name")
-                    font.pixelSize: 18
-                    Accessible.name: "New group name"
-                    Accessible.role: Accessible.EditableText
-                    onAccepted: groupsPane._createGroup()
-                }
-                ToolButton {
-                    text: root.icon("add")
-                    font.family: root.iconFontFamily
-                    font.pixelSize: 22
-                    Accessible.name: "Create"
+                // "Add" button opens the name dialog; a new group is created and
+                // the membership editor opens immediately on OK.
+                Button {
+                    text: qsTr("Add group")
+                    highlighted: true
+                    Accessible.name: "Add group"
                     Accessible.role: Accessible.Button
-                    onClicked: groupsPane._createGroup()
+                    onClicked: groupsPane._openCreateGroup()
                 }
             }
 
@@ -1807,6 +1896,60 @@ text: root._stagingActive
             }
         }
 
+        // --- create-group dialog ---
+        // Add a group by typing a name then OK: the group is created and the
+        // membership editor opens immediately. Duplicate names show an inline
+        // error (the engine also rejects them).
+        Dialog {
+            id: createGroupDialog
+            anchors.centerIn: parent
+            width: Math.min(parent.width - 80, 360)
+            modal: true
+            title: qsTr("Add group")
+            Accessible.name: "Add group"
+            Accessible.role: Accessible.Dialog
+            standardButtons: Dialog.NoButton
+
+            contentItem: ColumnLayout {
+                width: parent.width
+                spacing: 8
+                TextField {
+                    id: createGroupNameInput
+                    Layout.fillWidth: true
+                    placeholderText: qsTr("New group name")
+                    font.pixelSize: 16
+                    Accessible.name: "New group name"
+                    Accessible.role: Accessible.EditableText
+                    onAccepted: groupsPane._confirmCreateGroup()
+                }
+                Label {
+                    Layout.fillWidth: true
+                    visible: groupsPane.createGroupNameError.length > 0
+                    text: groupsPane.createGroupNameError
+                    color: Material.color(Material.Red)
+                    wrapMode: Text.Wrap
+                }
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 8
+                    Item { Layout.fillWidth: true }
+                    Button {
+                        text: qsTr("Cancel")
+                        Accessible.name: "Cancel"
+                        Accessible.role: Accessible.Button
+                        onClicked: createGroupDialog.close()
+                    }
+                    Button {
+                        text: qsTr("Create")
+                        highlighted: true
+                        Accessible.name: "Create"
+                        Accessible.role: Accessible.Button
+                        onClicked: groupsPane._confirmCreateGroup()
+                    }
+                }
+            }
+        }
+
         // --- rename-group dialog ---
         // A working rename (the old menu item just appended "_r" to the name).
         // Prefills the current name and puts the cursor in the field (NO full
@@ -1820,15 +1963,44 @@ text: root._stagingActive
             title: qsTr("Rename group")
             Accessible.name: "Rename group"
             Accessible.role: Accessible.Dialog
-            standardButtons: Dialog.Cancel | Dialog.Ok
+            standardButtons: Dialog.NoButton
 
-            contentItem: TextField {
-                id: renameGroupInput
+            contentItem: ColumnLayout {
                 width: parent.width
-                font.pixelSize: 16
-                Accessible.name: "New group name"
-                Accessible.role: Accessible.EditableText
-                onAccepted: renameGroupDialog.accept()
+                spacing: 8
+                TextField {
+                    id: renameGroupInput
+                    Layout.fillWidth: true
+                    font.pixelSize: 16
+                    Accessible.name: "New group name"
+                    Accessible.role: Accessible.EditableText
+                    onAccepted: groupsPane._confirmRenameGroup()
+                }
+                Label {
+                    Layout.fillWidth: true
+                    visible: groupsPane.renameGroupNameError.length > 0
+                    text: groupsPane.renameGroupNameError
+                    color: Material.color(Material.Red)
+                    wrapMode: Text.Wrap
+                }
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 8
+                    Item { Layout.fillWidth: true }
+                    Button {
+                        text: qsTr("Cancel")
+                        Accessible.name: "Cancel"
+                        Accessible.role: Accessible.Button
+                        onClicked: renameGroupDialog.close()
+                    }
+                    Button {
+                        text: qsTr("Rename")
+                        highlighted: true
+                        Accessible.name: "Rename group"
+                        Accessible.role: Accessible.Button
+                        onClicked: groupsPane._confirmRenameGroup()
+                    }
+                }
             }
 
             onOpened: {
@@ -1838,18 +2010,6 @@ text: root._stagingActive
                 // left with an accidental full overwrite.
                 renameGroupInput.cursorPosition = renameGroupInput.text.length
                 renameGroupInput.forceActiveFocus()
-            }
-            onAccepted: {
-                const name = renameGroupInput.text.trim()
-                if (name.length > 0 && groupsPane.renameGroupId > 0) {
-                    engine.renameGroup(groupsPane.renameGroupId, name)
-                    // The editor header keeps its own copy of the group name;
-                    // refresh it so the title stops showing a stale name until
-                    // the list re-renders (renameGroup is async, but the editor
-                    // remains open showing "Group: <name>").
-                    if (groupsPane.editingGroup === groupsPane.renameGroupId)
-                        groupsPane.editingGroupName = name
-                }
             }
         }
 
@@ -2013,6 +2173,7 @@ text: root._stagingActive
             Label { text: qsTr("Add dictionaries"); color: root.uiSubFg; font.pixelSize: 13 }
 
             ListView {
+                id: nonMemberList
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 clip: true
@@ -2368,11 +2529,12 @@ text: root._stagingActive
 
             RowLayout {
                 Layout.fillWidth: true
-                spacing: 8
+                spacing: 6
 
                 TextField {
                     id: ftsInput
                     Layout.fillWidth: true
+                    Layout.preferredWidth: 7
                     placeholderText: qsTr("Full-text search")
                     font.pixelSize: 18
                     enabled: !engine.buildingFts
@@ -2380,30 +2542,82 @@ text: root._stagingActive
                     Accessible.role: Accessible.EditableText
                     onAccepted: { ftsInput.focus = false; root._runFts() }
                 }
-                CheckBox {
+
+                // Group scope for full-text search (mirrors the Search tab's
+                // scope). "All" (index 0) is first and selected by
+                // default; choosing a group searches only that group's dicts.
+                // A transparent MouseArea routes taps to the same modal group
+                // picker the Search tab uses (its native popup would render
+                // oddly here; the dialog is the established pattern).
+                ComboBox {
+                    id: ftsGroupCombo
+                    Layout.fillWidth: true
+                    Layout.preferredWidth: 3
+                    enabled: engine.groups.length > 1
+                    model: engine.groups
+                    textRole: "name"
+                    Accessible.name: "Full-text search group scope"
+                    Accessible.role: Accessible.ComboBox
+                    MouseArea {
+                        anchors.fill: parent
+                        enabled: ftsGroupCombo.enabled
+                        z: parent.z + 1
+                        onClicked: {
+                            if (engine.groups.length > 1) {
+                                ftsInput.focus = false
+                                groupPicker.openAt(ftsGroupCombo.currentIndex, "fts")
+                            }
+                        }
+                    }
+                    // Floating "Group" caption (mirrors the Search tab's combo).
+                    Label {
+                        text: qsTr("Group")
+                        font.pixelSize: Math.round(input.font.pixelSize * 0.75)
+                        color: root.uiSubFg
+                        z: 3
+                        anchors.left: parent.left
+                        anchors.top: parent.top
+                        anchors.leftMargin: 10
+                        anchors.topMargin: -6
+                        background: Rectangle {
+                            color: root.uiBg
+                            anchors.fill: parent
+                            anchors.leftMargin: -3
+                            anchors.rightMargin: -3
+                            anchors.topMargin: 2
+                            anchors.bottomMargin: 3
+                        }
+                    }
+                }
+
+                // Whole-words toggle as an icon button, styled like the Dicts "By Pair"
+                // switch: `highlighted` fills it with the accent color when
+                // whole-words matching is ON (white glyph), and it stays a flat
+                // gray glyph when OFF. Reads in light and dark mode.
+                Button {
                     id: ftsWholeWords
-                    text: qsTr("Whole words")
-                    Layout.alignment: Qt.AlignVCenter
+                    checkable: true
+                    checked: false
+                    highlighted: ftsWholeWords.checked
+                    Layout.preferredWidth: 48
+                    enabled: !engine.buildingFts
                     Accessible.name: "Whole words"
                     Accessible.role: Accessible.CheckBox
-                }
-            }
-
-            // Group scope for full-text search. "All" (index 0) is first and
-            // selected by default; choosing a group searches only that group's
-            // dictionaries.
-            ComboBox {
-                id: ftsGroupCombo
-                Layout.fillWidth: true
-                model: engine.groups
-                textRole: "name"
-                Accessible.name: "Full-text search group scope"
-                Accessible.role: Accessible.ComboBox
-                // Dismiss the FTS field's IME when the dropdown opens.
-                popup.onOpened: ftsInput.focus = false
-                // Re-run the FTS for the newly selected group's scope.
-                onActivated: (index) => {
-                    if (ftsInput.text.trim().length > 0) root._runFts()
+                    onClicked: { if (ftsInput.text.trim().length > 0) root._runFts() }
+                    // Explicit contentItem (like the Add button) so the Material
+                    // Symbols glyph reliably uses symbolFontFamily — the default
+                    // IconLabel path didn't pick up the secondary icon font.
+                    // White on the magenta fill when ON; foreground when OFF.
+                    contentItem: Label {
+                        text: root.symbolIcon("match_word")
+                        font.family: root.symbolFontFamily
+                        font.pixelSize: 20
+                        horizontalAlignment: Text.AlignHCenter
+                        verticalAlignment: Text.AlignVCenter
+                        color: ftsWholeWords.checked
+                            ? ftsWholeWords.Material.primaryHighlightedTextColor
+                            : ftsWholeWords.Material.foreground
+                    }
                 }
             }
 
@@ -2471,6 +2685,10 @@ text: root._stagingActive
     // dialog). When this flips back to false, the loader re-creates the WebView
     // and the suggestion/history overlay is re-applied via onLoadingChanged.
     property bool _pickerOpen: false
+    // Which scope the modal picker was opened for: "search" or "fts". Decides
+    // which combo to update on selection and whether the Search WebView needs
+    // the teardown/restore dance (only the Search tab has an inline WebView).
+    property string _pickerTarget: "search"
     Dialog {
         id: groupPicker
         anchors.centerIn: parent
@@ -2484,16 +2702,23 @@ text: root._stagingActive
         Accessible.role: Accessible.Dialog
         // No Cancel button — tapping outside (or Back) dismisses.
         closePolicy: Popup.CloseOnPressOutside | Popup.CloseOnEscape
-        function openAt(index) {
-            // Tear down the inline WebView so its native surface can't sit above
-            // the modal dialog. Its document/history survive in currentHtml; the
-            // loader recreates it when _pickerOpen goes back to false.
-            root._pickerOpen = true
-            root.inlineWv = null
-            input.focus = false
+        function openAt(index, target) {
+            root._pickerTarget = target !== undefined ? target : "search"
+            if (root._pickerTarget === "search") {
+                // Tear down the inline WebView so its native surface can't sit
+                // above the modal dialog. Its document/history survive in
+                // currentHtml; the loader recreates it when _pickerOpen goes
+                // back to false. The FTS tab has no WebView, so skip.
+                root._pickerOpen = true
+                root.inlineWv = null
+                input.focus = false
+            }
             groupPicker.open()
         }
         onClosed: {
+            const wasSearch = root._pickerTarget === "search"
+            root._pickerTarget = "search"
+            if (!wasSearch) return // FTS: no WebView teardown happened
             root._pickerOpen = false
             // Loader binding re-evaluates to create the WebView (state 0 &&
             // inlineWebReady && !_pickerOpen). If inlineWebReady was toggled off
@@ -2508,22 +2733,17 @@ text: root._stagingActive
         }
         onOpened: {
             // Scroll to the currently-active group.
-            if (searchGroupCombo.currentIndex >= 0 && searchGroupCombo.currentIndex < engine.groups.length)
-                groupPickerList.positionViewAtIndex(searchGroupCombo.currentIndex, ListView.Center)
+            let activeIndex = 0
+            if (root._pickerTarget === "fts")
+                activeIndex = ftsGroupCombo.currentIndex
+            else
+                activeIndex = searchGroupCombo.currentIndex
+            if (activeIndex >= 0 && activeIndex < engine.groups.length)
+                groupPickerList.positionViewAtIndex(activeIndex, ListView.Center)
         }
 
         contentItem: ColumnLayout {
             spacing: 8
-
-            Label {
-                Layout.fillWidth: true
-                Layout.leftMargin: 16
-                Layout.rightMargin: 16
-                text: qsTr("Groups")
-                font.pixelSize: 15
-                font.bold: true
-                color: root.uiSubFg
-            }
 
             ListView {
                 id: groupPickerList
@@ -2531,7 +2751,6 @@ text: root._stagingActive
                 Layout.fillHeight: true
                 model: engine.groups
                 clip: true
-                currentIndex: searchGroupCombo.currentIndex
                 boundsBehavior: Flickable.StopAtBounds
                 Accessible.name: "Select group"
                 Accessible.role: Accessible.List
@@ -2546,19 +2765,25 @@ text: root._stagingActive
                     onClicked: {
                         const g = engine.groups[index]
                         if (g) {
-                            searchGroupCombo.currentIndex = index
                             groupPickerList.currentIndex = index
-                            const q = input.displayText.trim()
-                            if (q.length > 0) {
-                                // Switching the group actually triggers a lookup
-                                // of the typed query in the new group. This also
-                                // sets the active group and records the entry
-                                // (a fresh search → new history item).
-                                root._requestedWord = q
-                                engine.lookupInGroupWithSwitch(q, g.id)
+                            if (root._pickerTarget === "fts") {
+                                ftsGroupCombo.currentIndex = index
+                                // Re-run the FTS for the new scope if a query is present.
+                                if (ftsInput.text.trim().length > 0) root._runFts()
                             } else {
-                                engine.setActiveGroup(g.id)
-                                root._showHistoryOverlay()
+                                searchGroupCombo.currentIndex = index
+                                const q = input.displayText.trim()
+                                if (q.length > 0) {
+                                    // Switching the group actually triggers a lookup
+                                    // of the typed query in the new group. This also
+                                    // sets the active group and records the entry
+                                    // (a fresh search → new history item).
+                                    root._requestedWord = q
+                                    engine.lookupInGroupWithSwitch(q, g.id)
+                                } else {
+                                    engine.setActiveGroup(g.id)
+                                    root._showHistoryOverlay()
+                                }
                             }
                         }
                         groupPicker.close()

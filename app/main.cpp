@@ -65,6 +65,19 @@ int main(int argc, char *argv[])
                 << QFontDatabase::applicationFontFamilies(fontId);
     }
 
+    // Material Symbols Outlined (subset): a small secondary icon font holding a
+    // few glyphs the classic Material Icons set doesn't have (folder_open and
+    // match_word in the Material Symbols design). Rendered with the
+    // "Material Symbols" family. See the groups-tab-polish change.
+    const int msFontId = QFontDatabase::addApplicationFont(
+        QStringLiteral(":/fonts/MaterialSymbols-Outlined-subset.ttf"));
+    if (msFontId < 0) {
+        qWarning() << "[aurelex] failed to register Material Symbols font";
+    } else {
+        qInfo() << "[aurelex] Material Symbols font families:"
+                << QFontDatabase::applicationFontFamilies(msFontId);
+    }
+
     const QString home = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
     const QString staged = home + QStringLiteral("/staged");
     QDir().mkpath(home);

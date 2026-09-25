@@ -776,15 +776,18 @@ void EngineController::createGroup(const QString &name) {
         return QPair<int, int>(rc, idOut);
     });
     auto *w = new QFutureWatcher<QPair<int, int>>(this);
-    connect(w, &QFutureWatcher<QPair<int, int>>::finished, this, [this, w]{
+    connect(w, &QFutureWatcher<QPair<int, int>>::finished, this, [this, name, w]{
         const QPair<int, int> result = w->result();
         const int rc = result.first;
         const int newId = result.second;
         qInfo() << "[aurelex] createGroup rc=" << rc << " id=" << newId;
-        if (rc != 0) {
+        if (rc == -2) {
+            emit groupNameTaken(name);
+        } else if (rc != 0) {
             setLastError(QStringLiteral("group_create failed (rc=%1)").arg(rc));
         } else {
             refreshGroups();
+            emit groupCreated(newId, name);
         }
         w->deleteLater();
     });
@@ -797,11 +800,16 @@ void EngineController::renameGroup(int groupId, const QString &newName) {
         return gd_group_rename(groupId, newName.toLocal8Bit().constData());
     });
     auto *w = new QFutureWatcher<int>(this);
-    connect(w, &QFutureWatcher<int>::finished, this, [this, w]{
+    connect(w, &QFutureWatcher<int>::finished, this, [this, newName, w]{
         const int rc = w->result();
         qInfo() << "[aurelex] renameGroup" << rc;
-        if (rc == 0) refreshGroups();
-        else setLastError(QStringLiteral("group_rename failed (rc=%1)").arg(rc));
+        if (rc == -2) {
+            emit groupNameTaken(newName);
+        } else if (rc == 0) {
+            refreshGroups();
+        } else {
+            setLastError(QStringLiteral("group_rename failed (rc=%1)").arg(rc));
+        }
         w->deleteLater();
     });
     w->setFuture(f);

@@ -51,3 +51,55 @@
 
 - [x] 8.1 Build the Debug APK (`app/build.ps1 -Configuration Debug`)
 - [x] 8.2 Installed + verified on the attached device: Search start tab, group-row tap opens membership, header shows just the name (no "Group:"), rename inside editor updates the header, delete asks for confirmation, whole-row drag reorder works in both directions (drag active row is highlighted), Remove button still works (drag surface leaves the right sliver clear), add/remove/icons all present, no per-row pencil in the list
+
+## 9. Group-creation dialog + duplicate names
+
+- [x] 9.1 Remove the inline "new group" input; "Add group" button opens a name dialog (OK/Cancel)
+- [x] 9.2 On OK: create the group and open its membership editor immediately (`groupCreated` signal carries the id)
+- [x] 9.3 Unique group names: `gd_group_create`/`gd_group_rename` reject case-insensitive duplicates (rc -2); `groupNameTaken` signal shows an inline error and re-opens the dialog
+- [x] 9.4 Force member-list redraw on group open (`forceLayout` after `onGroupDictsReady`; reset member arrays in `_openMembership`) — fixes dictionary names sometimes not shown
+
+## 10. Dicts: single deletion path + pair-header select-all
+
+- [x] 10.1 Remove per-row and per-pair delete controls; the multi-select "Remove" button is the only deletion path
+- [x] 10.2 Pair (section) header tap selects/unselects all dictionaries in that pair; a check indicator reflects full selection
+- [x] 10.3 Rename the import button "Add dictionaries" → "Add" (folder-open glyph + "Add" label); move "Remove" next to "Add" (gray when disabled, magenta when a selection exists); "By Pair" becomes a translate (文/A) glyph icon
+- [x] 10.4 Tab idempotency: switching away from Search preserves an inline article and restoring it on return (no wipe + refocus); the no-article case still re-suggests
+
+## 10.5 FTS layout mirrors Search
+
+- [x] 10.5.1 Put the FTS input + group scope combo side by side in one row (like Search)
+- [x] 10.5.2 Replace the "Whole words" checkbox with a match-word glyph icon button (pressed when on, like Search's clipboard)
+- [x] 10.5.3 High-contrast pressed style: active = magenta background + white glyph (mirrors the Add button; reads in light & dark), inactive = gray glyph
+
+## 10.6 Material Symbols font (correct glyphs)
+
+- [x] 10.6.1 Build a Material Symbols Outlined subset (instanced wght 400) with just `folder_open` (U+E2C8) + `match_word` (U+F6F0); ~2 KB, shipped as `MaterialSymbols-Outlined-subset.ttf`
+- [x] 10.6.2 Register it in `fonts.qrc` + `main.cpp` as the "Material Symbols" family
+- [x] 10.6.3 Add `symbolIcon()` / `symbolFontFamily`; use Material Symbols glyphs on the Dicts "Add" button (open folder) and the FTS whole-words toggle (ab-with-underscore)
+
+## 10.7 Article Back/Forward never shows the dropdown
+
+- [x] 10.7.1 `Back` disabled when there is no previous search result; remove the `_backFromArticle` fallback that cleared the article and popped the suggestion/history dropdown
+- [x] 10.7.2 Back/Forward only step previous/next search results
+
+## 11. Docs, a11y, i18n
+
+- [x] 11.1 Update `AGENTS.md` accessible-element table (Dicts: Delete only, pair-header select-all; Groups: Add-group button/dialog; Article Back disabled at oldest; FTS whole-words styling)
+- [x] 11.2 Refresh Qt catalogs (`Add group`, `A group named "%1" already exists`; drop `Remove`/`Remove pair`/remove-dialog strings); recompile `.qm`
+- [x] 11.3 Static-check `app/main.qml` with `qmllint`
+
+## 12. Verify on device
+
+- [x] 12.1 Build the Debug APK
+- [x] 12.2 Install and verify: Add-group dialog creates+opens membership, duplicate name rejected inline, group open always shows dict names, pair-header select-all toggles, only the Delete selection button deletes
+- [x] 12.3 Verify: Add button shows open-folder glyph; whole-words toggle shows ab-with-underscore and magenta/white when pressed (light+dark); article Back/Forward step results without opening the dropdown
+
+## 13. FTS polish + nav UX
+
+- [x] 13.1 FTS tab idempotence: don't clear `ftsResults` in `_openFts` (results survive tab switches)
+- [x] 13.2 Theme control is a plain `Button` that is a SIBLING of the TabBar (not a TabButton) in the 6th dock slot — never becomes the selected tab; nav tabs take 5/6, theme 1/6
+- [x] 13.3 FTS group scope opens the same modal `Select group` picker as Search (`_pickerTarget` "fts" vs "search"); picker subtitle removed
+- [x] 13.4 Whole-words toggle is a `Button` with `highlighted` (accent fill when ON) like the By Pair switch; explicit `contentItem` Label so the Material Symbols glyph renders
+- [x] 13.5 Nav icon sizes reverted to a fixed 18 px (the `iconSize()` normalization over-corrected; revisit later)
+- [x] 13.6 Verified: theme toggles dark mode without becoming the active tab; FTS toggle has correct fill + glyph; Search/FTS group pickers both open with no subtitle

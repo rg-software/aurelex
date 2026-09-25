@@ -15,8 +15,16 @@ technical subtitle (such as an internal id).
 - **THEN** lookups use an implicit "All" group containing every loaded dictionary
 
 #### Scenario: Create a group
-- **WHEN** the user creates a named group and adds some dictionaries to it
-- **THEN** the group appears in the groups list with that membership
+- **WHEN** the user taps "Add group", types a name in the dialog, and confirms
+- **THEN** the group is created and its membership editor opens immediately
+
+#### Scenario: Duplicate group name is rejected
+- **WHEN** the user creates a group whose name (case-insensitive) already exists
+- **THEN** no group is created and an inline error is shown asking for another name
+
+#### Scenario: Rename to an existing name is rejected
+- **WHEN** the user renames a group to a name (case-insensitive) another group already has
+- **THEN** the group keeps its old name and an inline error is shown
 
 #### Scenario: Groups survive restart
 - **WHEN** the user restarts the app after creating groups
@@ -77,3 +85,38 @@ technical subtitle (such as an internal id).
 #### Scenario: The All group is not editable
 - **WHEN** the user views the "All" group row in the groups list
 - **THEN** it has no edit or delete controls, and it cannot be deleted or renamed
+
+### Requirement: Batch and per-pair dictionary removal
+The system SHALL let the user remove several selected dictionaries at once via a
+single "Delete" control; this is the only dictionary-deletion path. There SHALL
+be no per-row delete button and no remove-a-whole-pair caption action. In the
+By-Pair view, tapping a pair (section) header selects or clears every dictionary
+in that pair as a whole, as a shortcut for building a selection to delete.
+
+#### Scenario: Remove a language pair
+- **WHEN** the user taps a pair (section) header in the By-Pair view twice
+- **THEN** the pair's dictionaries are selected then deselected again — pair
+  header taps only select/clear, they never delete; removal uses the selection
+  Delete button
+
+#### Scenario: Multi-select and RemoveSelected
+- **WHEN** the user taps dictionary rows to select them (at least one) and then
+  taps Delete (RemoveSelected)
+- **THEN** all selected dictionaries are permanently removed and the selection is
+  cleared
+
+#### Scenario: RemoveSelected is disabled with no selection
+- **WHEN** no dictionary rows are selected
+- **THEN** the Delete/RemoveSelected button is disabled; it becomes enabled once at
+  least one dictionary is selected
+
+#### Scenario: No per-row or per-pair delete actions
+- **WHEN** the user views the dictionary list (flat or by-pair)
+- **THEN** there is no delete control on individual dictionary rows and no remove
+  action on pair caption rows; deletion happens only through the selection
+  Delete button
+
+#### Scenario: Pair header selects the whole section
+- **WHEN** the user taps a pair (section) header in the By-Pair view
+- **THEN** every dictionary in that pair becomes selected (the header shows a
+  check); tapping again clears the pair's selection

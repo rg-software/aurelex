@@ -107,6 +107,65 @@ The trash ToolButton now opens a modal `Delete group confirmation` dialog
 membership/order with no undo. `visible` is bound to a `deleteGroupId > -1`
 pick state, mirroring the remove-dictionary confirmation dialog.
 
+### 4.5 Group creation via dialog + unique names
+The inline "new group" row is gone. "Add group" opens a modal dialog with a name
+field + inline error label. OK calls `engine.createGroup`; the async success
+result comes back as `groupCreated(id, name)` and QML opens that group's
+membership editor directly (no need to wait for the group list refresh). The
+engine boundary now enforces case-insensitive unique names — `gd_group_create`
+and `gd_group_rename` return `-2` for a taken name — and the controller maps
+`-2` to a `groupNameTaken(name)` signal so QML re-opens the dialog with an
+inline "already exists" error. This keeps the invariant even for the CI smoke
+tool (which still creates one fresh name).
+
+### 4.6 Dicts: single deletion path + pair-header select-all
+Per-row remove buttons (flat + by-pair) and the per-pair "Remove pair" action
+are removed; the multi-select "Remove" button is the only delete control. In the
+By-Pair view the section header becomes a tap target that selects/clears every
+dictionary in that pair (`_toggleSelectPair`) with a check indicator
+(`_pairSelected`), as a shortcut for assembling a deletion selection. The
+remove-dictionary confirmation dialog and its per-row trigger are deleted.
+The import control is re-labelled "Add" with a folder-open glyph (the custom
+`contentItem` labels use `Material.primaryHighlightedTextColor` — `Material.accent`
+would be invisible on the accent-filled highlighted RoundButton) and the delete
+button sits next to it, tinted like the By Pair toggle (gray when no selection,
+magenta when selected). "By Pair" becomes a translate (文/A) glyph-only button.
+
+### 4.6b Tab idempotency for the article pane
+Switching away from the Search tab (to Dicts/Groups/FTS/Favs) used to call
+`_clearInlineArticle()` — wiping `currentWord`/`currentHtml` — so returning to
+Search showed an empty pane and refocused the search field. Articles now
+survive the round trip: `_navTo` no longer clears inline article state when
+leaving, and `onStateChanged` skips its re-suggest/refocus when `inlineArticle`
+is still set. The loader's `onLoaded` re-renders `currentHtml` on return (the
+WebView is torn down on leave by the `active` binding and rebuilt on return).
+The no-article case (typed query / suggestions / history) keeps the old
+refocus-and-re-suggest behavior.
+
+### 4.7 Force member-list redraw on group open
+The membership editor could open with blank dict rows when a group was reopened:
+stale `groupMembers` lingered and the recycled ListViews didn't redraw. Two
+changes: `_openMembership` clears both member arrays (fresh bindings), and
+`onGroupDictsReady` schedules `forceLayout()` on both lists (`Qt.callLater`),
+guarding that the editor still targets the same group.
+
+### 4.8 FTS layout mirrors Search
+The Full-text search tab now mirrors the Search tab's input row: the FTS field
+and the group-scope combo sit side by side in one RowLayout (7:3 split), and the
+"Whole words" checkbox is replaced by a checkable match-word glyph icon button
+(like the Search clipboard button) with `checked` toggling whole-word matching.
+The search button remains below, disabled while the FTS build is running.
+
+### 4.9 Bottom-dock theme cell is a TabBar sibling; icon sizes stay fixed
+The dark-mode toggle must not look like the selected tab. A `TabButton` inside
+the `TabBar` is silently added to its exclusive selection group (tapping it sets
+`checked`/`currentIndex`), and a plain `Button` inside the `TabBar` wasn't laid
+out as a tab. The dock is therefore a plain `Row`: the `TabBar` takes 5/6 and the
+theme `Button` is a SIBLING taking 1/6, so it can never become the active tab.
+The nav icons render at a fixed 18 px again: an earlier per-glyph normalization
+(`iconSize()`) made the short `manage_search` glyph visibly *larger* than the
+rest, so it was reverted pending a better approach.
+
 ### 5. Icon set, localization, element IDs
 Adds Material glyphs to the root `icon()` map (family already registered):
 `edit` (`0xe150`), `drag_handle` (`0xe25d`); `add`/`close`/`arrow_back` already

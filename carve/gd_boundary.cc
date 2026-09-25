@@ -845,9 +845,16 @@ int gd_group_create( const char * name, int * id_out )
   std::lock_guard< std::mutex > lock( g_engineMutex );
   if ( !g_state || !id_out || !name || !*name )
     return -1;
+  const QString n = QString::fromUtf8( name );
+  // Unique group names: reject an exact (case-insensitive) duplicate so no two
+  // groups can share a name. -2 = "name already exists" (distinct from -1).
+  for ( const GroupDef & d : g_state->groupDefs ) {
+    if ( d.name.compare( n, Qt::CaseInsensitive ) == 0 )
+      return -2;
+  }
   GroupDef def;
   def.id   = g_state->nextGroupId++;
-  def.name = QString::fromUtf8( name );
+  def.name = n;
   g_state->groupDefs.push_back( std::move( def ) );
   *id_out = static_cast< int >( g_state->groupDefs.back().id );
   rebuildGroups();
@@ -865,7 +872,13 @@ int gd_group_rename( int id, const char * name )
   GroupDef * def = findGroupDef( static_cast< unsigned >( id ) );
   if ( !def )
     return -1;
-  def->name = QString::fromUtf8( name );
+  const QString n = QString::fromUtf8( name );
+  for ( const GroupDef & d : g_state->groupDefs ) {
+    if ( d.id != static_cast< unsigned >( id )
+         && d.name.compare( n, Qt::CaseInsensitive ) == 0 )
+      return -2; // another group already has this name
+  }
+  def->name = n;
   rebuildGroups();
   saveGroupsLocked();
   return 0;

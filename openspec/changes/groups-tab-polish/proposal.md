@@ -31,6 +31,15 @@ should land somewhere useful: Search.
   (cursor placed at the end — no full selection); OK calls the existing
   `gd_group_rename` path (empty names are rejected) and the editor header updates
   in place. It works for any non-"All" group.
+- Group creation moves into an "Add group" dialog: the inline new-group input is
+  removed, OK creates the group and jumps straight into its membership editor,
+  and duplicate names (case-insensitive) are rejected both in the UI and at the
+  engine boundary (`gd_group_create`/`gd_group_rename` return -2 for a taken
+  name; the controller emits `groupCreated(id, name)` / `groupNameTaken(name)`).
+- Dictionary deletion is a single path: the multi-select "Delete" button is the
+  only delete control (per-row and per-pair remove buttons removed). In the
+  By-Pair view, tapping a pair header selects/unselects that whole section (with
+  a check indicator) as a shortcut for building a deletion selection.
 
 ## Capabilities
 

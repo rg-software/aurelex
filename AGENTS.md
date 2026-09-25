@@ -95,20 +95,20 @@ elements in automated tests:
 | Nav | Groups tab | `"Groups"` |
 | Nav | Full-text search tab | `"Full-text search"` |
 | Nav | Favorites tab | `"Favorites"` |
-| Nav | Dark-mode toggle | `"Light mode"` / `"Dark mode"` (dynamic); the last (6th) slot in the bottom dock |
+| Nav | Dark-mode toggle | `"Light mode"` / `"Dark mode"` (dynamic); a plain button that is a SIBLING of the TabBar (not a TabButton) in the last (6th) slot of the bottom dock — never becomes the active tab |
 | Top | Status strip | No interactive content — paints the edge-to-edge window's top chrome in the app background |
-| Search | ComboBox | `"Search group scope"` |
+| Search | ComboBox | `"Search group scope"` (taps open the modal `Select group` picker, which has no "Groups" subtitle) |
 | Search | TextField | `"Search dictionaries"` |
 | Search | Clipboard button | `"Clipboard"` |
 | Search | Suggestion dropdown | Rendered as an HTML `<a>` panel (`#gd-sugg`) *inside* the article WebView — QML controls can't stack above Android's native WebView surface. Each entry carries a `data-w` word and dispatches via the QML link poller (`engine.lookup`), so no page navigation happens; the panel collapses when the article loads. UIAutomator sees entries via the WebView's own DOM accessibility subtree (content-desc = the word). No separate Qt node. |
-| Dicts | Add dict button | `"Add dictionaries"` |
-| Dicts | By Pair toggle | `"By Pair"` |
-| Dicts | Remove button | `"Remove"` |
+| Dicts | Add dict button | `"Add"` (was `"Add dictionaries"`; imports a dictionary folder) |
+| Dicts | By Pair toggle | `"By Pair"` (translate glyph icon; highlighted when on) |
+| Dicts | Delete button | `"Remove"` (deletes the current multi-selection; the only dict deletion path; gray when nothing selected, magenta when a selection exists) |
 | Dicts | Flat list | `"Dictionaries list"` |
 | Dicts | Grouped list | `"Dictionaries list by pair"` |
-| Dicts | Remove confirmation | `"Remove dictionary confirmation"` |
-| Groups | New group input | `"New group name"` |
-| Groups | Create button | `"Create"` |
+| Dicts | Pair header | Tapping a pair (section) header selects/unselects all dictionaries in that pair (shows a check when fully selected) |
+| Groups | Add button | `"Add group"` (opens the name dialog; on OK the group is created and its membership editor opens) |
+| Groups | Add-group dialog | `"Add group"` (`"New group name"` field inside; OK/Cancel) |
 | Groups | ListView | `"Groups list"` |
 | Groups | Group row | Named `<group name>`; tapping the row opens the group's membership editor (no separate edit/pencil button in the list) |
 | Groups | Delete | `"Delete"` (per-row trash icon, asks for confirmation) |
@@ -121,15 +121,15 @@ elements in automated tests:
 | Membership | Remove from group | `"Remove from group"` |
 | Membership | Non-members list | `"Available dictionaries to add"` |
 | Membership | Add to group | `"Add to group"` |
-| Article | Back button | `"Back"` |
+| Article | Back button | `"Back"` (disabled at the oldest article; navigates previous/next search results, never opens the suggestion dropdown) |
 | Article | Forward button | `"Forward"` (enabled only when a backed-out article exists) |
 | Article | Favorites star | `"Add to favorites"` / `"Remove from favorites"` (dynamic) |
 | Article | Zoom out button | `"Zoom out"` (disabled at the 75% minimum) |
 | Article | Zoom in button | `"Zoom in"` (disabled at the 250% maximum) |
 | Article | WebView | `"Dictionary article"` (inline in the Search tab; no separate full-pane article surface) |
 | FTS | TextField | `"Full-text search"` |
-| FTS | Whole words checkbox | `"Whole words"` |
-| FTS | Group combo | `"Full-text search group scope"` |
+| FTS | Whole words toggle | `"Whole words"` (Material Symbols "match word" glyph; magenta-filled when on, gray when off) |
+| FTS | Group combo | `"Full-text search group scope"` (sits inline next to the field, like Search; opens the same modal `Select group` picker) |
 | FTS | Search button | `"Search"` |
 | FTS | Results list | `"Full-text search results"` |
 | History | Clear all | Rendered as a `data-action="clear-history"` row *inside* the article WebView when the search field is empty |

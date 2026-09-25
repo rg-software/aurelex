@@ -272,6 +272,11 @@ signals:
     // the engine has committed it, so QML can re-query groupDicts(editingGroup)
     // AFTER the async mutation lands (avoids reading stale order).
     void groupMembersChanged();
+    // Emitted when a group is created successfully (the create ran on a worker
+    // thread). QML uses the id to jump straight into the new group's editor.
+    void groupCreated(int groupId, const QString &name);
+    // Emitted when group creation/rename is rejected because the name is taken.
+    void groupNameTaken(const QString &name);
     void historyChanged();
     void favoritesChanged();
     void darkModeChanged();
