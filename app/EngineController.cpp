@@ -679,6 +679,18 @@ void EngineController::refreshDictionaries() {
 
 void EngineController::removeDictionary(int index) {
     if (!m_ready || index < 0 || index >= m_dictionaries.size()) return;
+    // Refuse removals while the app is processing (staging / scanning / FTS
+    // build). Every gd_* call serializes on g_engineMutex, which the scan and
+    // the build hold for their whole duration, so a removal issued now would
+    // queue for minutes; and because gd_remove_dict takes an ENGINE INDEX that
+    // shifts after each erase, several queued removals would run against stale
+    // indices and delete the wrong dictionaries. The QML Remove button is
+    // disabled on the same flag; this guards any other/future caller and an
+    // in-flight tap whose flag flipped after the click.
+    if (m_processingActive) {
+        qInfo() << "[aurelex] removeDictionary ignored: processing in progress";
+        return;
+    }
     // Capture the dictionary id (engine mutex) + its primary source file path
     // BEFORE gd_remove_dict shifts indices. The id capture runs off-thread so
     // the UI never blocks behind a long FTS build holding the engine mutex.

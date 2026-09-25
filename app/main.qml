@@ -1308,10 +1308,17 @@ text: root._stagingActive
                 // Delete selection: sits right next to Add, styled like the
                 // By Pair toggle — gray while nothing is selected, magenta
                 // (highlighted) once a selection exists.
+                // Disabled while the app is processing (staging / scanning /
+                // indexing): every gd_* call serializes on g_engineMutex, which
+                // the scan and the FTS build hold for their whole duration, so a
+                // removal tapped then would queue for minutes and — on repeated
+                // taps — run against stale indices after the list shifts.
                 Button {
                     text: qsTr("Remove")
                     highlighted: dictsPane.selectedDicts.length > 0
+                        && !engine.processingActive
                     enabled: dictsPane.selectedDicts.length > 0
+                        && !engine.processingActive
                     Accessible.name: "Remove"
                     Accessible.role: Accessible.Button
                     onClicked: dictsPane._removeSelected()
