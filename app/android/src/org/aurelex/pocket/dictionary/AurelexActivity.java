@@ -336,21 +336,49 @@ public class AurelexActivity extends QtActivity {
             intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION
                     | Intent.FLAG_GRANT_WRITE_URI_PERMISSION
                     | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
-            // Start the picker at the PRIMARY shared-storage volume instead of
-            // whatever location DocumentsUI last remembered (which is often the
-            // storage ROOT — a location Android refuses to grant, so the picker
-            // shows "blocked"/empty and the user is stuck). Opening at
-            // "primary" lands on the browsable device-storage root.
+            // Open the picker INSIDE a normal, grantable folder rather than the
+            // shared-storage ROOT. Android refuses to hand out access to the
+            // storage root, so a picker that opens there shows the "Выберите
+            // другую папку / protected" card and the user is stuck (and
+            // DocumentsUI remembers that location, so every later pick lands
+            // there again). We point EXTRA_INITIAL_URI at "primary:Aurelex", a
+            // folder we create if missing; the user can still navigate anywhere
+            // (e.g. GoldenDict) from there.
             try {
-                intent.putExtra(android.provider.DocumentsContract.EXTRA_INITIAL_URI,
-                        android.provider.DocumentsContract.buildRootUri(
-                                "com.android.externalstorage.documents", "primary"));
+                final String startPath = ensureDefaultImportDir();
+                android.net.Uri startUri = android.provider.DocumentsContract.buildRootUri(
+                        "com.android.externalstorage.documents", "primary");
+                if (startPath != null && !startPath.isEmpty()) {
+                    startUri = android.provider.DocumentsContract.buildDocumentUri(
+                            "com.android.externalstorage.documents",
+                            "primary:" + startPath);
+                }
+                intent.putExtra(android.provider.DocumentsContract.EXTRA_INITIAL_URI, startUri);
             } catch (Exception ignored) {
                 // EXTRA_INITIAL_URI is API 26+; older devices just open default.
             }
             activity.startActivityForResult(intent, REQUEST_PICK_DICTIONARY_FOLDER);
         } catch (Exception e) {
             android.util.Log.w(TAG, "pickDictionaryFolder failed: " + e);
+        }
+    }
+
+    /**
+     * Ensures a normal, grantable folder exists for imports and returns its
+     * path relative to the primary shared-storage volume (e.g. "Aurelex"), or
+     * "" when it cannot be created/verified. App-private external storage needs
+     * no permission, so this works even before any SAF grant exists.
+     */
+    private static String ensureDefaultImportDir() {
+        try {
+            java.io.File ext = android.os.Environment.getExternalStorageDirectory();
+            if (ext == null) return "";
+            java.io.File dir = new java.io.File(ext, "Aurelex");
+            if (!dir.exists() && !dir.mkdirs()) return "";
+            return "Aurelex";
+        } catch (Exception e) {
+            android.util.Log.w(TAG, "ensureDefaultImportDir failed: " + e);
+            return "";
         }
     }
 
