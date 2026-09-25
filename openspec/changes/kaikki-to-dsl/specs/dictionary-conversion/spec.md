@@ -150,14 +150,23 @@ without failing the run.
 ### Requirement: Sample and preview output
 
 The system SHALL provide a sample mode that produces a small dictionary
-containing only the first N selected headwords, and SHALL provide a preview that
-renders the sample's articles in a human-readable form. The sample MUST be small
-enough to review the article shape and formatting before a full run.
+containing at most N selected headwords, and SHALL provide a preview that renders
+the sample's articles in a human-readable form. The sample's headwords SHALL be
+selected either from the start of the snapshot or as a random subset, and the
+selection SHALL be reproducible so repeated runs on the same snapshot and options
+produce the same sample. The sample MUST be small enough to review the article
+shape and formatting before a full run.
 
 #### Scenario: Sample contains a bounded subset
 
 - **WHEN** the user requests a sample of N headwords
 - **THEN** the output contains at most N headwords
+
+#### Scenario: Random sample is reproducible
+
+- **WHEN** the user requests a random sample and the tool is run twice with the
+  same snapshot and options
+- **THEN** the two samples contain the same headwords
 
 #### Scenario: Preview renders articles
 

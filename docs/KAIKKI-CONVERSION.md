@@ -30,6 +30,10 @@ python scripts\kaikki-to-dsl.py `
 
 Then open `dist/kaikki-en-en.preview.html`.
 
+For a sample that spreads across the whole snapshot (more representative of
+schema variety) rather than the first N words, add `--sample-mode random`; the
+selection is deterministic, so re-running yields the same sample.
+
 A tiny committed sample (built from the synthetic test fixture, not real data)
 lives in `examples/kaikki-sample/` — open its `kaikki-sample-en.preview.html` to
 see the article shape without running anything.
@@ -68,6 +72,7 @@ phone (same folder) and add that folder in Aurelex.
 | `--audio-lang TAG` | Prefer audio whose tags match this language/accent (e.g. `US`). |
 | `--audio-layout {zip,dir}` | Bundle audio as one archive (default) or a loose directory. |
 | `--sample N` | Emit at most N headwords (good for reviewing output first). |
+| `--sample-mode {first,random}` | How `--sample` picks headwords: first N in file order, or a reproducible random spread across the snapshot (default `first`). |
 | `--preview` | Also write `<name>.preview.html`. |
 | `--force-download` | Re-download cached files. |
 | `--timeout SECONDS` | Network timeout (default 60). |

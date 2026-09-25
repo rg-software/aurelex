@@ -30,6 +30,7 @@ from __future__ import annotations
 import argparse
 import gzip
 import hashlib
+import heapq
 import importlib.util
 import json
 import os
@@ -211,6 +212,7 @@ def download_cached(url: str, dest: str, force: bool = False, timeout: int = 60)
     if not force and verify_sidecar(dest):
         return dest
     part = dest + ".part"
+    print(f"downloading {url} ...", file=sys.stderr)
     request = urllib.request.Request(url, headers={"User-Agent": "aurelex-kaikki-to-dsl/1.0"})
     with urllib.request.urlopen(request, timeout=timeout) as response, open(part, "wb") as out:
         while True:
@@ -289,6 +291,35 @@ def iter_candidate_headwords(path: str, source_code: str) -> Iterator[str]:
         word = record.get("word")
         if word:
             yield str(word)
+
+
+def select_headwords(
+    path: str, source_code: str, sample: Optional[int], sample_mode: str
+) -> Set[str]:
+    """The set of headwords that will be indexed (drives cross-reference safety).
+
+    Without ``--sample`` this is every candidate headword. With ``--sample`` it
+    is the emitted subset: the first N candidates (``first``) or a deterministic
+    random subset (``random``) chosen by the smallest sha256 keys, so the same
+    snapshot and options always select the same words.
+    """
+    if not sample:
+        return set(iter_candidate_headwords(path, source_code))
+    if sample_mode == "first":
+        selected: Set[str] = set()
+        for word in iter_candidate_headwords(path, source_code):
+            selected.add(word)
+            if len(selected) >= sample:
+                break
+        return selected
+    heap: List[Tuple[int, str]] = []  # max-heap of (-key, word), size <= sample
+    for word in iter_candidate_headwords(path, source_code):
+        key = int.from_bytes(hashlib.sha256(word.encode("utf-8")).digest()[:8], "big")
+        if len(heap) < sample:
+            heapq.heappush(heap, (-key, word))
+        elif (key, word) < (-heap[0][0], heap[0][1]):
+            heapq.heapreplace(heap, (-key, word))
+    return {word for _, word in heap}
 
 
 def collect_forms(record: dict) -> List[str]:
@@ -687,7 +718,6 @@ def build(args) -> Report:
     snapshot = Snapshot(args.dump_date, args.cache_dir, args.jsonl_url, args.audio_url)
     jsonl_path = args.jsonl
     if not jsonl_path:
-        print(f"downloading {snapshot.jsonl_url} ...", file=sys.stderr)
         jsonl_path = download_cached(
             snapshot.jsonl_url, snapshot.jsonl_path, args.force_download, args.timeout
         )
@@ -696,8 +726,9 @@ def build(args) -> Report:
     audio = AudioPlan(args.audio_per_word, args.audio_lang, want_audio)
 
     # First pass: the set of indexed headwords, so cross-references never point
-    # at words this dictionary does not contain. Bounded by headword count.
-    known: Set[str] = set(iter_candidate_headwords(jsonl_path, args.source_lang))
+    # at words this dictionary does not contain. For a sample this is the
+    # emitted subset (deterministic), keeping refs live in sampled output too.
+    known = select_headwords(jsonl_path, args.source_lang, args.sample, args.sample_mode)
 
     header_name = args.name or f"kaikki-{args.source_lang}-{args.target_lang}"
 
@@ -754,6 +785,8 @@ def build(args) -> Report:
             report.skipped_inflected += 1
             continue
         word = str(record.get("word"))
+        if args.sample and word not in known:
+            continue
         if word != current_word:
             flush()
             if args.sample and report.cards >= args.sample:
@@ -798,7 +831,6 @@ def build(args) -> Report:
     if want_audio and audio.referenced:
         audio_path = args.audio_tar
         if not audio_path:
-            print(f"downloading {snapshot.audio_url} ...", file=sys.stderr)
             audio_path = download_cached(
                 snapshot.audio_url, snapshot.audio_path, args.force_download, args.timeout
             )
@@ -860,7 +892,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--no-audio", action="store_true", help="do not bundle audio (and do not download the archive)")
     parser.add_argument("--audio-lang", help="prefer audio whose tags match this language/accent (e.g. US)")
     parser.add_argument("--audio-layout", choices=["zip", "dir"], default="zip", help="how to bundle audio (default zip)")
-    parser.add_argument("--sample", type=int, help="emit only the first N headwords")
+    parser.add_argument("--sample", type=int, help="emit only N headwords")
+    parser.add_argument(
+        "--sample-mode", choices=["first", "random"], default="first",
+        help="how --sample picks headwords: first N in file order, or a "
+        "deterministic random subset across the whole snapshot (default first)",
+    )
     parser.add_argument("--preview", action="store_true", help="also write a human-readable HTML preview")
     parser.add_argument("--force-download", action="store_true", help="re-download cached files")
     parser.add_argument("--skip-date-check", action="store_true", help="skip verifying the dump date against kaikki.org")

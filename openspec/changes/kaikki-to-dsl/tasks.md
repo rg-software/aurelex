@@ -43,6 +43,7 @@
 - [x] 6.1 Add `--sample N` to emit a dictionary containing at most N selected headwords
 - [x] 6.2 Add a preview mode that renders the sample's articles in a human-readable form for review
 - [x] 6.3 Produce a reviewable sample under `examples/dictionaries/` (or a documented output path)
+- [x] 6.4 Add `--sample-mode {first,random}` (deterministic random selection across the snapshot) and keep cross-references live within a sample
 
 ## 7. Provenance, packaging, and determinism
 

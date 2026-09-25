@@ -144,6 +144,17 @@ Existing projects are references only: `pyglossary` cannot write DSL, and
 `kaikki-to-yomitan` targets a different format but is a useful model for the
 filter/group/audio stages.
 
+### D11. Sample selection: first-N or deterministic random
+
+`--sample N` bounds the output; `--sample-mode first` (default) takes the first
+N headwords in file order, while `--sample-mode random` selects a spread across
+the whole snapshot. Random selection keeps the N smallest sha256 keys of the
+headwords in a bounded heap, so it is reproducible (same snapshot + options ⇒
+same sample) and cheap in memory. The set of selected headwords also becomes the
+cross-reference universe for a sample, so `See also:` links stay live in sampled
+output. A random sample is the useful choice when reviewing schema variety;
+first-N is enough for shape/format review.
+
 ## Risks / Trade-offs
 
 | Risk | Mitigation |

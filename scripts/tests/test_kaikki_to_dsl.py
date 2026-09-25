@@ -38,7 +38,11 @@ def read_dz(path):
 
 
 def headword_lines(text):
-    return [ln for ln in text.splitlines() if ln and not ln[0].isspace() and not ln.startswith("#")]
+    return [
+        ln for ln in text.splitlines()
+        if ln and not ln[0].isspace() and not ln.startswith("#")
+        and ln != "About this dictionary"
+    ]
 
 
 def make_tar(path, names):
@@ -103,6 +107,30 @@ class ConverterTests(unittest.TestCase):
             TOOL.build(self.args(tmp, "--sample", "20", "--include-inflections"))
             text = read_dz(os.path.join(tmp, "kaikki-en-ru.dsl.dz"))
             self.assertIn("ran", headword_lines(text))
+
+    def test_sample_mode_random_is_deterministic(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            def build(out):
+                args = TOOL.build_parser().parse_args(
+                    [
+                        "--source-lang", "en", "--target-lang", "ru",
+                        "--jsonl", FIXTURE, "--out-dir", out,
+                        "--sample", "3", "--sample-mode", "random", "--no-audio",
+                    ]
+                )
+                return TOOL.build(args)
+
+            out1, out2 = os.path.join(tmp, "a"), os.path.join(tmp, "b")
+            build(out1)
+            build(out2)
+            dz1 = os.path.join(out1, "kaikki-en-ru.dsl.dz")
+            dz2 = os.path.join(out2, "kaikki-en-ru.dsl.dz")
+            with open(dz1, "rb") as f1, open(dz2, "rb") as f2:
+                self.assertEqual(f1.read(), f2.read())
+            heads = headword_lines(read_dz(dz1))
+            self.assertEqual(len(heads), 3)
+            for head in heads:
+                self.assertIn(head, ["run", "runner", "escape", "multi"])
 
     def test_unsupported_pair(self):
         with tempfile.TemporaryDirectory() as tmp:
