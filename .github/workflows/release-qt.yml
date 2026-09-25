@@ -1,10 +1,16 @@
 name: release build (Qt)
 
 # On tag push (vX.Y.Z) builds a SIGNED release APK + AAB from the Qt app
-# (app/) and attaches them to a GitHub release. The AAB is the Google Play
-# upload artifact (uploaded manually to Play Console); the APK covers
-# GitHub/F-Droid/sideload. The Kotlin app (app/ — historically the Compose UI)
-# was removed; this is the only release workflow.
+# (app/), attaches them to a GitHub release, and — for well-formed release tags
+# only — publishes the AAB to the Google Play internal testing track. The APK
+# covers GitHub/F-Droid/sideload (~/pkg org.aurelex.pocket.dictionary); the AAB
+# is the Google Play upload artifact. The Kotlin app (app/ — historically the
+# Compose UI) was removed; this is the only release workflow.
+#
+# Publishing policy: master pushes and workflow_dispatch NEVER publish to any
+# store — only a well-formed release tag (vMAJOR.MINOR.PATCH, each < 100) opens
+# the publish gate, the same predicate that derives the versionCode. If the Play
+# publish fails, the signed APK + AAB are already attached to the GitHub release.
 #
 # Why Windows: app/build.ps1 targets a Windows aqt 6.6.3
 # layout. The carve (engine/) compiles under the same script. Build time is
@@ -16,6 +22,10 @@ name: release build (Qt)
 #   AURELEX_KEYSTORE_PASSWORD keystore password
 #   AURELEX_KEY_ALIAS         key alias
 #   AURELEX_KEY_PASSWORD      key password
+#
+# Play publishing secret (per docs/SIGNING.md):
+#   PLAY_SERVICE_ACCOUNT_JSON Google Cloud service account JSON with release
+#                             access to this app in Play Console
 
 on:
   push:
@@ -196,14 +206,25 @@ jobs:
       - name: Derive version props from the release tag
         shell: bash
         run: |
-          if [[ "${GITHUB_REF_NAME:-}" =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+          # A well-formed release tag both encodes a versionCode and opens the
+          # Play publish gate (release-qt.yml header). The gate is only set for
+          # tags whose components fit the encoding (each < 100), so the
+          # deterministic versionCode cannot collide; any other ref (branch push,
+          # workflow_dispatch) leaves it unset and publishes nothing.
+          publish=""
+          if [[ "${GITHUB_REF_NAME:-}" =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+)$ ]] \
+             && (( BASH_REMATCH[1] < 100 && BASH_REMATCH[2] < 100 && BASH_REMATCH[3] < 100 )); then
             vc=$(( BASH_REMATCH[1] * 10000 + BASH_REMATCH[2] * 100 + BASH_REMATCH[3] ))
             echo "AURELEX_VERSION_NAME=${BASH_REMATCH[1]}.${BASH_REMATCH[2]}.${BASH_REMATCH[3]}" >> "$GITHUB_ENV"
             echo "AURELEX_VERSION_CODE=$vc" >> "$GITHUB_ENV"
+            publish=1
           else
             echo "AURELEX_VERSION_NAME=" >> "$GITHUB_ENV"
             echo "AURELEX_VERSION_CODE=" >> "$GITHUB_ENV"
           fi
+          echo "AURELEX_PUBLISH=$publish" >> "$GITHUB_ENV"
+          echo "AURELEX_PUBLISH=$publish" >> "$GITHUB_OUTPUT"
+        id: version
 
       - name: Build signed release APK + AAB
         shell: pwsh
@@ -254,3 +275,16 @@ jobs:
             ${{ steps.artifacts.outputs.APK_PATH }}
             ${{ steps.artifacts.outputs.AAB_PATH }}
           generate_release_notes: true
+
+      # Runs only for a well-formed release tag (see the version step's gate) and
+      # only after the signed AAB is located and the GitHub release has been
+      # created, so a Play failure never costs the release artifacts (D4).
+      - name: Publish AAB to Play internal testing
+        if: steps.version.outputs.AURELEX_PUBLISH == '1'
+        uses: r0adkll/upload-google-play@v1.1.3
+        with:
+          serviceAccountJsonPlainText: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+          packageName: org.aurelex.pocket.dictionary
+          releaseFiles: ${{ steps.artifacts.outputs.AAB_PATH }}
+          track: internal
+          status: completed

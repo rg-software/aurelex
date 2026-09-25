@@ -21,6 +21,18 @@ locally.) `versionName` is the tag (`vX.Y.Z` → `X.Y.Z`); `versionCode` is deri
 deterministically as `major*10000 + minor*100 + patch`. Locally (no props)
 builds fall back to `versionCode 1` / `versionName 0.0.1`.
 
+## Play publishing policy — tag only
+
+CI publishes to Google Play **only for a well-formed release tag**, and only to
+the **internal testing** track. The gate is the same predicate that derives the
+versionCode: `vMAJOR.MINOR.PATCH` with each component `< 100`. Everything else —
+branch pushes, `workflow_dispatch` dry-runs — builds and attaches artifacts but
+publishes nothing. The "each < 100" bound is what keeps the deterministic
+versionCode collision-free (`v1.2.3` and `v1.2.03` would otherwise both encode
+`10203`), so a tag that cannot be encoded cannot be published. A Play publish
+failure fails the workflow but the signed APK + AAB are already attached to the
+GitHub release.
+
 ## Google Play — Play App Signing (cloud signing)
 
 Play App Signing (mandatory for new apps on Play) uses **two keys**:
@@ -35,6 +47,35 @@ Play App Signing (mandatory for new apps on Play) uses **two keys**:
 This is the only "cloud signing" in the stack — it exists on Play, and only for
 the final app-signing key. Sideloaded/GitHub APKs are signed with our key, not
 Google's.
+
+### Automated upload to internal testing
+
+CI uploads the tagged AAB to the **internal testing** track with
+`r0adkll/upload-google-play`, using a **Google Cloud service account**. Setup is
+one-time and per-app:
+
+1. In Google Cloud, create a project and a **service account**; enable the
+   **Google Play Android Developer API**.
+2. Create a JSON key for that service account and store it as the repo secret
+   `PLAY_SERVICE_ACCOUNT_JSON` (plain JSON, not base64). Never commit the key.
+3. In **Play Console → Users and permissions**, invite the service account's
+   email and grant it **release** access to the Aurelex app only (release-only,
+   single app — not account admin).
+4. The first AAB of the app must already have been uploaded by hand through Play
+   Console (it has been — internal testing works today). API uploads are only
+   permitted after that initial upload establishes Play App Signing.
+
+Notes:
+
+- Target track is `internal`, release status `completed`; there is no staged
+  rollout on this track and release notes may be blank.
+- The service account is only used by the release workflow's publish step; the
+  keystore secrets above are unchanged.
+- **Rotation:** if the key is lost or revoked, create a new JSON key for the
+  service account and replace `PLAY_SERVICE_ACCOUNT_JSON`. No app re-keying is
+  involved (the app-signing key lives in Play, the upload key is separate).
+- Republishing the same tag is rejected by Play (duplicate versionCode); fix a
+  bad release with a new patch version, never by re-tagging.
 
 ## F-Droid — no cloud signing
 
