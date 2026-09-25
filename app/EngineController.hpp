@@ -52,10 +52,17 @@ class EngineController : public QObject
     Q_PROPERTY(bool buildingFts READ buildingFts NOTIFY buildingFtsChanged)
     // True from the moment the controller starts enumerating which dictionaries
     // still need an FTS index until buildingFts flips true (or the batch ends
-    // with nothing to do). Bridges the gap between a finished scan and the first
-    // progress sample so the Dicts banner shows a placeholder instead of
-    // flickering off during that window.
+    // with nothing to do). Only used to pick the banner's label text; the
+    // banner's VISIBILITY is driven by processingActive.
     Q_PROPERTY(bool ftsStarting READ ftsStarting NOTIFY ftsStartingChanged)
+    // Single continuous "long-running processing" flag driving the Dicts
+    // processing banner's VISIBILITY. True for the whole staging -> scan -> FTS
+    // enumeration -> FTS build chain and false only when all of it is done, so
+    // the banner never blinks off between phases (the old design OR'd four
+    // independent phase flags and could paint a phase-boundary frame with none
+    // of them set). stagingActive/scanningActive/buildingFts/ftsStarting remain
+    // the per-phase flags that choose the banner's label text.
+    Q_PROPERTY(bool processingActive READ processingActive NOTIFY processingActiveChanged)
     // Full-text index batch progress: while buildingFts is true, ftsIndexDone /
     // ftsIndexTotal report "N of M" dictionaries COMPLETED (0/0 when idle).
     // ftsCurrentDictIndex is the currently-indexing dictionary number (1-based).
@@ -214,6 +221,7 @@ public:
     QString ftsCurrentDictName() const { return m_ftsCurrentDictName; }
     bool stagingActive() const { return m_stagingActive; }
     bool scanningActive() const { return m_scanningActive; }
+    bool processingActive() const { return m_processingActive; }
 
     // Lookup a word. `articleLoaded(word, html)` on success, or
     // `articleNotFound(word)` when the engine returned a "no match" article.
@@ -274,6 +282,7 @@ signals:
     void ftsSearchReady(const QString &query, const QVariantList &results);
     void buildingFtsChanged();
     void ftsStartingChanged();
+    void processingActiveChanged();
     void stagingActiveChanged();
     void groupDictsReady(int groupId, const QVariantList &dicts);
     // Emitted after a group's membership or order changed (add/remove/move) and
@@ -333,6 +342,7 @@ private:
     void setFtsStarting(bool b);
     void setStagingActive(bool b);
     void setScanningActive(bool b);
+    void setProcessingActive(bool b);
     void setFtsIndexProgress(int done, int total, const QString &name);
     void setFtsFraction(qreal allFraction, qreal dictFraction);
     void pollFtsProgress();
@@ -421,6 +431,7 @@ private:
     QVariantList m_scanFailures;
     bool m_stagingActive = false;
     bool m_scanningActive = false;
+    bool m_processingActive = false;
     int m_ftsIndexDone = 0;
     int m_ftsIndexTotal = 0;
     qreal m_ftsIndexFraction = 0.0;

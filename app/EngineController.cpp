@@ -117,7 +117,10 @@ EngineController::EngineController(QObject *parent)
                      "complete in %d ms (engine mutex likely parked). "
                      "Closing the banner; restart the app to rescan.",
                      kScanWatchdogMs);
+            // The scan never completes, so autoIndexMissing will never run to end
+            // the processing chain; clear both flags or the banner would hang.
             setScanningActive(false);
+            setProcessingActive(false);
         }
     });
 
@@ -297,6 +300,12 @@ void EngineController::setScanningActive(bool b) {
     emit scanningActiveChanged();
 }
 
+void EngineController::setProcessingActive(bool b) {
+    if (m_processingActive == b) return;
+    m_processingActive = b;
+    emit processingActiveChanged();
+}
+
 void EngineController::setScanFailures(const QVariantList &list) {
     if (m_scanFailures == list) return;
     m_scanFailures = list;
@@ -345,8 +354,11 @@ void EngineController::runScan() {
     }
     // Show "Scanning dictionaries…" while the carve loads dicts so the Dicts
     // processing banner stays visible continuously from folder pick -> staging
-    // -> scan -> indexing.
+    // -> scan -> indexing. Raise the continuous processing indicator here too so
+    // a startup scan (no staging phase) also shows the banner; it is cleared
+    // only once the whole scan + index chain finishes.
     setScanningActive(true);
+    setProcessingActive(true);
     // Failsafe: gd_scan must always eventually return; if the engine mutex is
     // parked (a wedged worker holds it) the QtConcurrent call below never
     // returns and the banner would show forever. Kick a watchdog so the UI
@@ -384,11 +396,19 @@ void EngineController::runScan() {
 
 void EngineController::autoIndexMissing()
 {
-    if (!m_ready) return;
+    if (!m_ready) {
+        // Nothing can be indexed; end the processing chain so the banner clears.
+        setProcessingActive(false);
+        return;
+    }
     // Flag the pending enumeration so the Dicts banner shows a "preparing"
-    // placeholder in the window between a finished scan and the first FTS
-    // progress sample (otherwise the banner blinks off and the tab looks idle).
+    // placeholder between a finished scan and the first FTS progress sample.
     setFtsStarting(true);
+    // Keep the continuous processing indicator raised across the hand-off; the
+    // worker's watcher clears it when the batch is truly empty (see
+    // ensureFtsWorker). Re-raised here so an entry that skipped runScan's raise
+    // (non-scan callers) still shows the banner.
+    setProcessingActive(true);
     // Enumerate missing dictionary IDs OFF the UI thread: gd_dict_count/
     // gd_fts_index_state/gd_dict_id take g_engineMutex, which the running FTS
     // worker holds for the whole duration of a large dictionary build. Doing
@@ -416,8 +436,10 @@ void EngineController::autoIndexMissing()
         qInfo() << "[aurelex] autoIndexMissing: dictionaries lacking an FTS index ="
                 << missing;
         // Enumeration done: drop the placeholder. If there is work, the worker
-        // below flips buildingFts true in this same event-loop turn, so the
-        // banner never blinks off between the two states.
+        // below flips buildingFts true in this same event-loop turn so the
+        // banner never blinks off between the two states. If there is NOTHING to
+        // index, no worker will ever run, so this is where the continuous
+        // processing chain ends (otherwise the banner would hang).
         setFtsStarting(false);
         // Enqueue IDs not already queued; start the single worker if idle.
         // A re-import mid-build appends and the running worker picks them up
@@ -432,8 +454,12 @@ void EngineController::autoIndexMissing()
                 }
             }
         }
-        if (anyNew && !m_ftsWorkerRunning)
+        if (anyNew && !m_ftsWorkerRunning) {
             ensureFtsWorker();
+        } else if (!m_ftsWorkerRunning) {
+            // Nothing to index and no worker draining: the chain is over.
+            setProcessingActive(false);
+        }
     });
     w->setFuture(f);
 }
@@ -536,6 +562,10 @@ void EngineController::ensureFtsWorker()
         if (empty) {
             setFtsIndexProgress(0, 0, QString());
             setBuildingFts(false);
+            // Batch genuinely done: end the continuous processing chain so the
+            // Dicts banner clears. No phase hand-off follows, so this is the
+            // single place the whole staging -> scan -> index lifecycle ends.
+            setProcessingActive(false);
             // Indexing + scanning finished: at this point the staged tree is
             // consistent, so purge any leftover temporary staging dirs (partial
             // copies from a killed/interrupted stage). See the "clear stale
@@ -2061,11 +2091,21 @@ void EngineController::pollPendingLookup()
     // root so the imported dictionaries load + are indexed.
     {
         const bool active = peekStagingActive();
-        if (active && !m_stagingActive) setStagingActive(true);
-        else if (!active && m_stagingActive) {
+        if (active && !m_stagingActive) {
+            setStagingActive(true);
+            // Start the continuous processing indicator; runScan/autoIndexMissing
+            // keep it raised across the phase hand-offs and it is lowered only
+            // when the whole staging -> scan -> index chain is done.
+            setProcessingActive(true);
+        } else if (!active && m_stagingActive) {
             setStagingActive(false);
             removeStagingFile();
-            if (m_ready) runScan();
+            if (m_ready) {
+                runScan();
+            } else {
+                // No scan will follow to carry the chain; clear it explicitly.
+                setProcessingActive(false);
+            }
         }
     }
 

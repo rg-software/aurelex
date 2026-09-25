@@ -1203,9 +1203,13 @@ ColumnLayout {
             // automatic full-text index build (foreground IndexingService). Both
             // run in the background, so without this the Dicts tab looks frozen
             // for tens of seconds while dictionaries "quietly" load.
+            // Visibility is driven by the single continuous processingActive
+            // flag (raised for the whole staging -> scan -> index chain) rather
+            // than OR-ing the per-phase flags, which could paint a phase-boundary
+            // frame with none of them set and blink the banner off.
             Rectangle {
                 Layout.fillWidth: true
-                visible: root._stagingActive || engine.scanningActive || engine.buildingFts || engine.ftsStarting
+                visible: engine.processingActive
                 color: Material.color(Material.Purple, Material.Shade50)
                 radius: 4
                 height: processingCol.implicitHeight + 20
