@@ -1212,12 +1212,22 @@ ColumnLayout {
                 visible: engine.processingActive
                 color: Material.color(Material.Purple, Material.Shade50)
                 radius: 4
-                height: processingCol.implicitHeight + 20
+                // Height from the column's implicitHeight; the column's WIDTH is
+                // bound explicitly (not anchors.fill) so its wrapped-label height
+                // is computed against a known width and does not feed back into
+                // the height (a fill/height circular binding undercounted the
+                // wrapped header and let the row below overlap the banner).
+                implicitHeight: processingCol.implicitHeight + 20
+                height: implicitHeight
+                // Guarantee a clear seam above the Add/Remove row even if the
+                // banner's computed height is momentarily short.
+                Layout.bottomMargin: 8
 
                 ColumnLayout {
                     id: processingCol
-                    anchors.fill: parent
-                    anchors.margins: 10
+                    x: 10
+                    y: 10
+                    width: parent.width - 20
                     spacing: 6
 
                     // Header carries the currently-indexing dictionary (1-based).
