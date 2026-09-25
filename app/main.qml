@@ -730,7 +730,13 @@ ApplicationWindow {
                 height: navRow.height
                 flat: true
                 contentItem: Column {
-                    anchors.centerIn: parent
+                    // The theme cell is sibling to the TabBar (no active-tab
+                    // underline), and the Material Button's content area sits a
+                    // touch lower than the TabButtons' — nudge it up so the
+                    // icon+label line up with the tabs.
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    anchors.verticalCenter: parent.verticalCenter
+                    anchors.verticalCenterOffset: -2
                     spacing: 0
                     Text {
                         anchors.horizontalCenter: parent.horizontalCenter
