@@ -34,6 +34,10 @@ ApplicationWindow {
     property string currentWord: ""
     property string currentHtml: ""
     property var ftsResults: []
+    // Whole-words FTS toggle state. Driven by a plain Button (like the "By Pair"
+    // switch) rather than Button.checked so it renders exactly the same accent
+    // fill as the other magenta buttons.
+    property bool ftsWholeWordsOn: false
     // The article WebView is the Search tab's inline pane (articleLoader aliases
     // it); there is no separate full-pane article view — every article opens in
     // the inline Search surface.
@@ -578,7 +582,7 @@ ApplicationWindow {
         let gid = 0
         if (ftsGroupCombo.currentIndex >= 0 && engine.groups.length > 0)
             gid = engine.groups[ftsGroupCombo.currentIndex].id
-        engine.ftsSearch(ftsInput.text, 2, gid, ftsWholeWords.checked)
+        engine.ftsSearch(ftsInput.text, 2, gid, root.ftsWholeWordsOn)
     }
     // Navigation labels/icons for the bottom TabBar. The visible `label` is
     // translated; `a11y` stays the literal English accessibility name so the
@@ -966,7 +970,10 @@ ColumnLayout {
                     visible: root.inlineArticle
                     width: parent.width
                     height: root.inlineArticle ? 40 : 0
-                    // Frameless header: the icons sit directly on the pane.
+                    // Frameless header: the icons sit directly on the pane. The
+                    // background MUST be themed (a Rectangle defaults to white,
+                    // which broke dark mode for this stripe).
+                    color: root.uiBg
 
                     RowLayout {
                         anchors.fill: parent
@@ -2590,31 +2597,34 @@ text: root._stagingActive
                     }
                 }
 
-                // Whole-words toggle as an icon button, styled like the Dicts "By Pair"
-                // switch: `highlighted` fills it with the accent color when
-                // whole-words matching is ON (white glyph), and it stays a flat
-                // gray glyph when OFF. Reads in light and dark mode.
+                // Whole-words toggle as an icon button, styled exactly like the Dicts
+                // "By Pair" switch: NOT checkable (an external bool drives
+                // `highlighted`), so it uses the same accent fill as the other
+                // magenta buttons. Filled + white glyph when ON, flat gray glyph
+                // when OFF. Reads in light and dark mode.
                 Button {
                     id: ftsWholeWords
-                    checkable: true
-                    checked: false
-                    highlighted: ftsWholeWords.checked
+                    highlighted: root.ftsWholeWordsOn
                     Layout.preferredWidth: 48
+                    // The Material Button's default padding is icon-aware and
+                    // asymmetric; equalize it so the centered glyph really sits
+                    // in the middle of the button.
+                    leftPadding: 12
+                    rightPadding: 12
                     enabled: !engine.buildingFts
                     Accessible.name: "Whole words"
                     Accessible.role: Accessible.CheckBox
-                    onClicked: { if (ftsInput.text.trim().length > 0) root._runFts() }
-                    // Explicit contentItem (like the Add button) so the Material
-                    // Symbols glyph reliably uses symbolFontFamily — the default
-                    // IconLabel path didn't pick up the secondary icon font.
-                    // White on the magenta fill when ON; foreground when OFF.
-                    contentItem: Label {
+                    onClicked: {
+                        root.ftsWholeWordsOn = !root.ftsWholeWordsOn
+                        if (ftsInput.text.trim().length > 0) root._runFts()
+                    }
+                    contentItem: Text {
                         text: root.symbolIcon("match_word")
                         font.family: root.symbolFontFamily
                         font.pixelSize: 20
                         horizontalAlignment: Text.AlignHCenter
                         verticalAlignment: Text.AlignVCenter
-                        color: ftsWholeWords.checked
+                        color: root.ftsWholeWordsOn
                             ? ftsWholeWords.Material.primaryHighlightedTextColor
                             : ftsWholeWords.Material.foreground
                     }
