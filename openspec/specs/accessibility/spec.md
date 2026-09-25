@@ -37,16 +37,16 @@ Every element that a user can interact with (buttons, text fields, list items, c
 Every interactive element SHALL set an `Accessible.role` matching its semantic function. Roles SHALL use the Qt `Accessible.role` enum values (`Accessible.Button`, `Accessible.EditableText`, `Accessible.List`, `Accessible.ListItem`, `Accessible.TabBar`, `Accessible.TabButton`, `Accessible.ComboBox`, `Accessible.CheckBox`, `Accessible.Dialog`, `Accessible.Menu`, `Accessible.MenuItem`, `Accessible.WebView`, `Accessible.Group`, `Accessible.ToolBar`, `Accessible.ProgressBar`).
 
 #### Scenario: Button role is announced
-- **WHEN** TalkBack focuses the "Create" button in the Groups pane
+- **WHEN** TalkBack focuses the "Add group" button in the Groups pane
 - **THEN** it announces the role as a button
 
 #### Scenario: List role is announced
-- **WHEN** TalkBack enters the suggestions ListView in the Search pane
-- **THEN** it announces "Search suggestions, list" (name + role)
+- **WHEN** TalkBack enters a Qt list such as the dictionaries list in the Dicts pane
+- **THEN** it announces the list's accessible name plus its list role
 
 ### Requirement: List container elements SHALL have Accessible.name identifying their content
 
-Every `ListView` SHALL have an `Accessible.name` that describes what list it is (e.g., "Search suggestions", "Dictionaries list", "Groups list", "Lookup history", "Favorites", "Full-text search results", "Group members", "Available dictionaries to add"). Surfaces rendered inside the article WebView (search suggestions and the empty-state lookup history) expose their entries through the WebView's DOM accessibility subtree rather than as Qt list nodes.
+Every `ListView` SHALL have an `Accessible.name` that describes what list it is (e.g., "Dictionaries list", "Groups list", "Favorites", "Full-text search results", "Group members", "Available dictionaries to add"). Surfaces rendered inside the article WebView (the search-suggestion panel and the empty-state lookup history) expose their entries through the WebView's DOM accessibility subtree rather than as Qt list nodes.
 
 #### Scenario: ListView announces its purpose
 - **WHEN** TalkBack navigates into a Qt ListView
@@ -62,11 +62,11 @@ Every `ListView` SHALL have an `Accessible.name` that describes what list it is 
 
 ### Requirement: Dialogs SHALL have Accessible.name describing their purpose
 
-Every `Dialog` element SHALL set an `Accessible.name` that describes what the dialog is for (e.g., "Remove dictionary confirmation", "Welcome").
+Every `Dialog` element SHALL set an `Accessible.name` that describes what the dialog is for (e.g., "Delete group confirmation", "Add group", "Welcome").
 
 #### Scenario: Confirmation dialog is identifiable
-- **WHEN** the remove-dictionary confirmation dialog opens
-- **THEN** TalkBack announces "Remove dictionary confirmation, dialog"
+- **WHEN** the delete-group confirmation dialog opens
+- **THEN** TalkBack announces "Delete group confirmation, dialog"
 
 ### Requirement: Informational elements SHALL have appropriate Accessible.role
 

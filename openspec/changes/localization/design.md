@@ -25,8 +25,8 @@ Constraints that shape the approach:
 
 - All app-generated user-visible strings become translatable via standard Qt
   catalogs; English remains the base/source language.
-- Display language follows the device's first UI language at startup (region
-  variant → language → English).
+- Display language follows the device's first UI language at startup (full locale
+  → language → English).
 - Initial catalogs ship for RU and JA to prove the pipeline incl. non-Latin
   script handling (Cyrillic, Japanese kana/kanji).
 - Android system surfaces (launcher label, QS tile, widget, notifications)
@@ -56,10 +56,14 @@ idiom this codebase already follows).
 
 ### D2. Locale selection at startup (`main.cpp`)
 
-After `QGuiApplication` construction and before the QML engine loads:
+After `QGuiApplication` construction and before the QML engine loads. The Qt
+Android kit does not compile `QGuiApplication::uiLanguages()`, so the code uses
+`QLocale().uiLanguages()`:
 
-1. Iterate `QLocale::system().uiLanguages()` in order (e.g. `pt-BR`, then `pt`)
-   and try to load `:/i18n/aurelex_<lang>.qm` → `QTranslator::load` from qrc.
+1. Iterate `QLocale().uiLanguages()` in order (e.g. `pt-BR`, then `pt`) and try
+   to load `:/i18n/aurelex_<locale>.qm` → `QTranslator::load` from qrc. For each
+   UI language, try the full locale first (`aurelex_pt_BR.qm`) then the
+   language-only code (`aurelex_pt.qm`).
 2. First successful load is installed and iteration stops.
 3. No match → no translator → English base strings are shown.
 
@@ -69,8 +73,9 @@ system-preference default with the required fallback chain.
 
 ### D3. Catalog placement and embedding: `app/i18n/` + qrc
 
-- `.ts` sources and compiled `.qm` files live in `app/i18n/` named
-  `aurelex.<lang>.ts` / `aurelex_<lang>.qm`.
+- `.ts` sources and compiled `.qm` files live in `app/i18n/`: source catalogs
+  are `aurelex.<lang>.ts` (e.g. `aurelex.ru.ts`) and compiled catalogs are
+  `aurelex_<lang>.qm` (e.g. `aurelex_ru.qm`).
 - `.qm` are embedded in the APK via a small `.qrc` added to the app target
   (referenced as `:/i18n/aurelex_ru.qm` etc.).
 - **Alternative rejected:** shipping `.qm` under `assets/` and loading from a

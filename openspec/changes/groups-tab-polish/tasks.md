@@ -8,9 +8,9 @@
 ## 2. Groups list declutter
 
 - [x] 2.1 Remove the row subtitle (`All dictionaries` / `id=N` label)
-- [x] 2.2 Remove the "Dicts" button and the group-name drill-in; the row is static
+- [x] 2.2 Remove the separate "Dicts" button; the row itself opens the membership editor (superseded by 7.1)
 - [x] 2.3 Remove the "..." overflow menu and its `Menu`/`MenuItem`s
-- [x] 2.4 Pencil button opens the membership editor (`Accessible.name "Edit group dictionaries"`), trash requests delete confirmation — both right-justified, `visible` only for non-"All"
+- [x] 2.4 Keep the delete trash right-justified and `visible` only for non-"All", requesting confirmation (an interim pencil button was then removed in 7.1)
 - [x] 2.5 Add the `edit` Material glyph (`0xe150`) to the root `icon()` map
 - [x] 2.6 Add the `Delete group` confirmation dialog (OK/cancel; `_requestDeleteGroup`/`_confirmDeleteGroup`/`_cancelDeleteGroup`)
 
@@ -22,7 +22,7 @@
 
 ## 4. Docs, a11y, i18n
 
-- [x] 4.1 Update `AGENTS.md` accessible-element table (Groups rows: static row, edit-dictionaries pencil, delete confirmation, rename dialog; Membership: rename-group button)
+- [x] 4.1 Update `AGENTS.md` accessible-element table (Groups rows: tappable row, delete confirmation, rename dialog; Membership: rename-group button)
 - [x] 4.2 Refresh Qt catalogs: run `scripts/update-translations.ps1`; add RU/JA for `Rename group` + the delete strings; recompile `.qm`
 - [x] 4.3 Static-check `app/main.qml` with `qmllint` (no new error classes)
 
@@ -35,14 +35,14 @@
 
 ## 6. Drag-to-reorder + cleanup
 
-- [x] 6.1 Add whole-row drag reorder to member rows (`MouseArea` over the full row): `onPressed` arms, `onPositionChanged` moves by row index, `onReleased` ends; `preventStealing: true` so the list's flick-scroll doesn't steal the gesture
+- [x] 6.1 Add drag reorder to member rows (`MouseArea` over the name area, right sliver reserved for Remove): `onPressed` arms, `onPositionChanged` moves by row index, `onReleased` ends; `preventStealing: true` so the list's flick-scroll doesn't steal the gesture
 - [x] 6.2 Remove the Move up / Move down arrow buttons and their icon-map entries once the drag gesture was verified on-device (Phrasebook↔Basic drag works)
 - [x] 6.3 Remove the drag handle from the "available dictionaries" (non-member) rows — no dragging needed there
 - [x] 6.4 Fix stale group-name header after rename: `onAccepted` writes the new name into `editingGroupName` when the renamed group is the one being edited
 
 ## 7. Group-row drill-in + header cleanup
 
-- [x] 7.1 Make the group name row tappable again (`onClicked` → `_openMembership`, non-"All" only); remove the per-row pencil button (rename stays in the editor)
+- [x] 7.1 Make the group row tappable (`onClicked` → `_openMembership`, including "All" in reorder-only mode); remove the per-row pencil button (rename stays in the editor)
 - [x] 7.2 Remove the `"Group:"` prefix from the membership editor header (just the name)
 - [x] 7.3 Drop the now-obsolete `Group: %1` string from the Qt catalogs
 - [x] 7.4 Decided: smooth drag-follow-finger is DEFERRED (ListView recycles delegates + no per-row ghost/translate API → overlay-ghost or non-recycled layout = high effort, Android jank risk, borderline benefit). Live reorder at row boundaries is the accepted behavior; the dragged row is HIGHLIGHTED via `_dragIndex` → member delegate `highlighted`, and cleared by a 400 ms no-motion watchdog (the MouseArea `released` can be lost when the ListView recycles its delegate mid-drag). See design.md Risks.
@@ -61,7 +61,7 @@
 
 ## 10. Dicts: single deletion path + pair-header select-all
 
-- [x] 10.1 Remove per-row and per-pair delete controls; the multi-select "Remove" button is the only deletion path
+- [x] 10.1 Remove per-row and per-pair delete controls; the multi-select "Remove" button is the only deletion path (immediate, no confirmation)
 - [x] 10.2 Pair (section) header tap selects/unselects all dictionaries in that pair; a check indicator reflects full selection
 - [x] 10.3 Rename the import button "Add dictionaries" → "Add" (folder-open glyph + "Add" label); move "Remove" next to "Add" (gray when disabled, magenta when a selection exists); "By Pair" becomes a translate (文/A) glyph icon
 - [x] 10.4 Tab idempotency: switching away from Search preserves an inline article and restoring it on return (no wipe + refocus); the no-article case still re-suggests

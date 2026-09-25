@@ -11,11 +11,12 @@ Status legend: 🟢 planned · 🔵 in progress · ✅ done · ⏸ parked
 ## Completed (baseline)
 
 - ✅ Mobile MVP: search + article rendering + dictionary management (mdict/DSL/
-  StarDict), separate-process engine, SAF scanning, dark mode, engine smoke CI.
-  See `openspec/changes/archive/2026-08-31-goldendict-mobile-port/`.
+  StarDict), in-process carved engine, SAF folder-scoped import, dark mode, engine
+  smoke CI. See `openspec/changes/archive/2026-08-31-goldendict-mobile-port/`.
 - ✅ Everyday usability (utilities) — share-sheet / intent lookup, clipboard
-  lookup, history, favorites, TTS, settings persistence. `everyday-usability-utilities`
-  archived 2026-08-31 (14/14).
+  lookup, history, favorites, settings persistence. `everyday-usability-utilities`
+  archived 2026-08-31 (14/14). TTS was subsequently cut from v1 and is absent
+  from the code; see `usability-utilities`.
 - ✅ Multi-group management — group CRUD + reorder via the boundary.
   `multi-group-management` archived 2026-09-01 (12/12).
 - ✅ Full-text search (xapian) — FTS in the carve, `gd_fts_*` boundary calls,
@@ -39,10 +40,12 @@ Status legend: 🟢 planned · 🔵 in progress · ✅ done · ⏸ parked
 
 ## In progress (not yet archived)
 
-- 🔵 **Bulk FTS indexing background service** (`bulk-fts-indexing`, 6/11
-  done): auto-index-missing on scan + dropping the per-dict Index button are
-  done; remaining: the foreground `IndexingService` (3.1–3.3) so a long build
-  survives backgrounding, and the on-device verification pass (4.1–4.4).
+- 🔵 **Groups tab polish** (`groups-tab-polish`) and **localization**
+  (`localization`, 27/29): group-row/membership cleanup and the RU/JA catalogs.
+  See `openspec list`.
+- ✅ **Bulk FTS indexing background service** (`bulk-fts-indexing`): the
+  foreground `IndexingService` survives app backgrounding; auto-index-missing on
+  scan and the removal of the per-dict Index button shipped.
 
 ## Recently completed
 

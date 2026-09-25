@@ -32,7 +32,7 @@ simply belong to the app's dictionary set until removed.
   nothing is imported
 
 #### Scenario: User selects a folder via the SAF picker
-- **WHEN** the user taps Add dictionaries and selects a folder inside an allowed
+- **WHEN** the user taps Add and selects a folder inside an allowed
   location
 - **THEN** the app imports that folder's supported files as a one-off
   (stage-copy + scan) without requesting system-wide storage access
@@ -102,6 +102,20 @@ The system SHALL let the user organize loaded dictionaries into multiple named g
 - **WHEN** the user deletes the currently active group
 - **THEN** the app falls back to the "All" group so lookups keep working
 
+#### Scenario: Group row opens its membership editor
+- **WHEN** the user taps a group row in the groups list
+- **THEN** that group's membership editor opens, where its dictionaries can be
+  added, removed, and reordered
+
+#### Scenario: The "All" group opens in reorder-only mode
+- **WHEN** the user taps the "All" group row
+- **THEN** the editor opens showing every dictionary in article order, with no
+  add/remove/rename controls; dragging a row changes the search article order
+
+#### Scenario: Delete needs confirmation
+- **WHEN** the user taps the trash control on a non-"All" group row
+- **THEN** the app asks for confirmation before the group is removed
+
 ### Requirement: Remove a loaded dictionary
 The system SHALL let the user permanently remove an imported dictionary from the
 app, deleting its staged copy and its built indexes, and SHALL remove it
@@ -123,10 +137,10 @@ reference it.
 - **THEN** full-text search results no longer include matches from it, and the
   index is deleted
 
-#### Scenario: Confirmation before removal
-- **WHEN** the user triggers a dictionary removal
-- **THEN** the app asks for confirmation before the dictionary is removed,
-  stating that removal deletes the app's copy of the dictionary
+#### Scenario: Multi-select removal is immediate
+- **WHEN** the user selects one or more dictionaries and taps Remove
+- **THEN** the selected dictionaries are removed immediately, without a
+  confirmation dialog, and their staged files and indexes are deleted
 
 #### Scenario: Re-add after removal
 - **WHEN** the user imports the same folder again after removing a dictionary

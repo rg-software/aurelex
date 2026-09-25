@@ -34,7 +34,8 @@ uses PS7-only syntax and UTF-8 characters; running it under the legacy
 patches first, then run the one-shot build script:
 
 ```powershell
-pwsh -File .\app\build.ps1 -Configuration Release   # signed/shippable
+pwsh -File .\app\build.ps1 -Configuration Release            # signed release APK
+pwsh -File .\app\build.ps1 -Configuration Release -Bundle    # signed release APK + AAB
 ```
 
 **Iterative on-device flow.** For local device testing and debugging, use the
@@ -105,9 +106,10 @@ notifications) use `res/values*/strings.xml`.
   error:" banner.
 - `main.cpp` installs a `QTranslator` at startup from
   `QLocale().uiLanguages()` (the Qt Android kit does not compile
-  `QGuiApplication::uiLanguages()`): tries `aurelex_<lang>.qm` then
-  `aurelex_<lang>_<region>.qm` from the embedded `:/i18n/` resource, and falls
-  back to English (with a `qInfo` line) without aborting.
+  `QGuiApplication::uiLanguages()`): for each UI language it tries the full
+  locale first (`aurelex_ru_RU.qm`) then the language-only code
+  (`aurelex_ru.qm`) from the embedded `:/i18n/` resource, and falls back to
+  English (with a `qInfo` line) without aborting.
 
 **Source strings are the catalog keys** — this matters when editing English.
 

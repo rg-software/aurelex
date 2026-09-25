@@ -9,7 +9,7 @@
 
 ## 2. Qt i18n runtime
 
-- [x] 2.1 Add `QTranslator` install loop in `app/main.cpp` after `QGuiApplication` construction and before the QML engine loads: iterate `QLocale::system().uiLanguages()` trying `:/i18n/aurelex_<lang>.qm`, install the first that loads, fall back to no translator (English)
+- [x] 2.1 Add `QTranslator` install loop in `app/main.cpp` after `QGuiApplication` construction and before the QML engine loads: iterate `QLocale().uiLanguages()` trying the full locale (`:/i18n/aurelex_<locale>.qm`) then the base language, install the first that loads, fall back to no translator (English)
 - [x] 2.2 Log the resolved catalog (or fallback) via `qInfo`; confirm a failed load is non-fatal
 
 ## 3. Catalog tooling and embedding
@@ -44,6 +44,6 @@
 - [x] 7.2 On a Russian-locale device: `adb logcat` shows `[aurelex] using translation catalog for ru-RU,…`; uiautomator dump shows Russian UI text live (hint label) and English `content-desc` on all interactive elements; visual pass pending user (model cannot read screenshots)
 - [ ] 7.3 On a Japanese-locale device: same check, incl. CJK glyph rendering — deferred to release testing (no JA device available; catalogs built, packaged, logcat-verified load path on ru catalog)
 - [ ] 7.4 On an unsupported-locale device (e.g. `fi`): UI shows the English base strings — deferred to release testing (catalog-load failure path is symptom-less English fallback by design)
-- [x] 7.5 `Accessible.name` content-desc values unchanged from the pre-change build — uiautomator dump on the installed RU build: `"Main navigation"`, `"Search"`, `"Dicts"`, `"Groups"`, `"FTS"`, `"Favs"`, `"Dark mode"`, `"Add dictionaries"`, `"By Pair"`, `"Remove"`, `"Dictionaries list"` all English (informational labels correctly announce translated text for screen readers)
+- [x] 7.5 `Accessible.name` content-desc values unchanged from the pre-change build — uiautomator dump on the installed RU build: `"Main navigation"`, `"Search"`, `"Dictionaries"`, `"Groups"`, `"Full-text search"`, `"Favorites"`, `"Light mode"`/`"Dark mode"`, `"Add group"`, `"Add"`, `"By Pair"`, `"Remove"`, `"Dictionaries list"` all English (informational labels correctly announce translated text for screen readers)
 - [x] 7.6 Update `docs/TESTING.md` with locale-verification rows and the `update-translations.ps1` workflow
 - [x] 7.7 Update `docs/DEVELOPMENT.md` with a "Localization" section explaining how to add or modify localized strings: wrap new visible text with `qsTr`/`tr`, avoid concatenation (use `%1` placeholders), keep `Accessible.name` untranslated, run `scripts/update-translations.ps1`, translate in `app/i18n/*.ts`, and commit the `.qm` output

@@ -70,9 +70,11 @@ without falsely completing the overall progress.
   files, and it no longer appears in full-text search results
 
 ### Requirement: Full-text search query
-The system SHALL let the user run a full-text search across the active group's
-dictionaries, supporting at least the plain-text matching mode, and must match
-dictionary articles whose body text contains the queried term.
+The system SHALL let the user run a full-text search across the dictionaries of
+the group selected in the full-text search pane's own scope control (independent
+of the Search pane's active group), supporting at least the plain-text matching
+mode, and must match dictionary articles whose body text contains the queried
+term.
 
 #### Scenario: Plain-text match
 - **WHEN** the user enters a term present in an article body but not as a headword
@@ -99,14 +101,14 @@ dictionary articles whose body text contains the queried term.
 ### Requirement: Full-text search results
 The system SHALL present full-text search results as a list of matching
 headwords and SHALL let the user run a normal article lookup on any result, in
-the active group, exactly like a typed headword lookup.
+the FTS scope group, exactly like a typed headword lookup.
 
 #### Scenario: Results lead to articles
 - **WHEN** the user taps a full-text search result
-- **THEN** the app shows that headword's article in the active group
+- **THEN** the app shows that headword's article in the FTS scope group
 
-#### Scenario: Result respects the active group
-- **WHEN** a full-text search is run in a specific group
+#### Scenario: Result respects the FTS scope
+- **WHEN** a full-text search is run with a specific FTS scope group
 - **THEN** results come from that group's dictionaries and opens respect the group
 
 #### Scenario: Search state survives navigation

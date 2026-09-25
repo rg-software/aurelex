@@ -3,12 +3,13 @@
 ### Requirement: Dictionary groups
 The system SHALL let the user organize loaded dictionaries into multiple named groups, each an ordered subset, and SHALL let the user select which group is active for lookups. An implicit "All" group containing every loaded dictionary is always available. Managing groups, their membership, their order, and the active group is part of this capability. Groups SHALL persist across app restarts (membership stored by stable dictionary identifier and re-resolved after dictionaries load).
 
-The groups list SHALL present each group as a row tap: tapping a non-"All"
-group's name opens its membership editor directly; the "All" group is not
-editable (no membership editor, no rename, no delete). Each non-"All" row SHALL
-expose only a delete control on the row (rename lives inside the membership
-editor; there is no per-row edit/pencil control). The row SHALL NOT show a
-technical subtitle (such as an internal id).
+The groups list SHALL present each group as a row tap: tapping a group row opens
+its membership editor directly. A non-"All" group's editor supports add, remove,
+and reorder; the "All" group opens the same editor in reorder-only mode (no
+add/remove/rename, and "All" itself cannot be renamed or deleted). Each non-"All"
+row SHALL expose only a delete control on the row (rename lives inside the
+membership editor; there is no per-row edit/pencil control). The row SHALL NOT
+show a technical subtitle (such as an internal id).
 
 #### Scenario: All loaded dictionaries are the default group
 - **WHEN** the user first loads dictionaries without creating any group
@@ -35,7 +36,7 @@ technical subtitle (such as an internal id).
 - **THEN** subsequent lookups use only that group's dictionaries, in that group's order
 
 #### Scenario: Reorder dictionaries within a group
-- **WHEN** the user drags a group member up or down within the members list (grabbing anywhere on the member row)
+- **WHEN** the user drags a group member up or down within the members list (grabbing the row's name area; the trailing Remove control is excluded)
 - **THEN** the combined article for that group respects the new order, the member list re-orders live as the row crosses row boundaries, and the row being dragged stays visually highlighted while the gesture is active
 
 #### Scenario: Reorder affordance is only on group members
@@ -55,8 +56,9 @@ technical subtitle (such as an internal id).
 - **THEN** the editor's header (the group name alone, no "Group:" prefix) updates to the new name immediately, without requiring a screen refresh
 
 #### Scenario: Open the membership editor from the group row
-- **WHEN** the user taps a non-"All" group's name in the groups list
-- **THEN** the membership editor for that group opens (add/remove dictionaries and reorder)
+- **WHEN** the user taps a group's row in the groups list
+- **THEN** the membership editor for that group opens (for non-"All" groups:
+  add/remove dictionaries and reorder; for "All": reorder only)
 
 #### Scenario: Rename a group from within the membership editor
 - **WHEN** the user opens a group's membership editor, taps its rename action, and confirms a new non-empty name
@@ -82,16 +84,31 @@ technical subtitle (such as an internal id).
 - **WHEN** the user deletes the currently active group
 - **THEN** the app falls back to the "All" group so lookups keep working
 
-#### Scenario: The All group is not editable
-- **WHEN** the user views the "All" group row in the groups list
-- **THEN** it has no edit or delete controls, and it cannot be deleted or renamed
+#### Scenario: The All group is reorder-only
+- **WHEN** the user opens the "All" group
+- **THEN** its editor has no add, remove, rename, or delete controls, and dragging
+  its rows changes the search article order
+
+#### Scenario: Group row opens its membership editor
+- **WHEN** the user taps a group's row in the groups list
+- **THEN** the membership editor for that group opens (for non-"All" groups:
+  add/remove dictionaries and reorder; for "All": reorder only)
+
+#### Scenario: The "All" group opens in reorder-only mode
+- **WHEN** the user taps the "All" group row
+- **THEN** the editor opens showing every dictionary in article order, with no
+  add/remove/rename controls; dragging a row changes the search article order
+
+#### Scenario: Delete needs confirmation
+- **WHEN** the user taps the trash control on a non-"All" group row
+- **THEN** the app asks for confirmation before the group is removed
 
 ### Requirement: Batch and per-pair dictionary removal
 The system SHALL let the user remove several selected dictionaries at once via a
-single "Delete" control; this is the only dictionary-deletion path. There SHALL
+single "Remove" control; this is the only dictionary-deletion path. There SHALL
 be no per-row delete button and no remove-a-whole-pair caption action. In the
 By-Pair view, tapping a pair (section) header selects or clears every dictionary
-in that pair as a whole, as a shortcut for building a selection to delete.
+in that pair as a whole, as a shortcut for building a selection to remove.
 
 #### Scenario: Remove a language pair
 - **WHEN** the user taps a pair (section) header in the By-Pair view twice
@@ -101,14 +118,14 @@ in that pair as a whole, as a shortcut for building a selection to delete.
 
 #### Scenario: Multi-select and RemoveSelected
 - **WHEN** the user taps dictionary rows to select them (at least one) and then
-  taps Delete (RemoveSelected)
-- **THEN** all selected dictionaries are permanently removed and the selection is
-  cleared
+  taps Remove
+- **THEN** all selected dictionaries are permanently removed immediately (with no
+  confirmation) and the selection is cleared
 
 #### Scenario: RemoveSelected is disabled with no selection
 - **WHEN** no dictionary rows are selected
-- **THEN** the Delete/RemoveSelected button is disabled; it becomes enabled once at
-  least one dictionary is selected
+- **THEN** the Remove button is disabled; it becomes enabled once at least one
+  dictionary is selected
 
 #### Scenario: No per-row or per-pair delete actions
 - **WHEN** the user views the dictionary list (flat or by-pair)

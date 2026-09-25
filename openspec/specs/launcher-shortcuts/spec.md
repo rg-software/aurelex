@@ -1,6 +1,6 @@
 ## Purpose
 
-Lets a user trigger a word lookup from outside the app: a Quick Settings tile that looks up the current clipboard text, and a home-screen widget with a search field. Both reuse the existing lookup flow and do not require opening the app first.
+Lets a user trigger a word lookup from outside the app: a Quick Settings tile that looks up the current clipboard text, and a home-screen shortcut widget. Both reuse the existing lookup flow and do not require opening the app first.
 
 ## Requirements
 
@@ -23,24 +23,16 @@ The system SHALL provide a Quick Settings tile that, when tapped, looks up the c
 - **WHEN** the user opens the Quick Settings shade
 - **THEN** the tile is present, visible, and discoverable with a label and icon
 
-### Requirement: Home-screen search widget
-The system SHALL provide a home-screen widget with a search field. Entering a word and confirming the entry SHALL open the article for that word in the same way as a typed lookup, including the standard "word not found" handling.
+### Requirement: Home-screen shortcut widget
+The system SHALL provide a home-screen widget that is a shortcut into Aurelex. RemoteViews cannot capture typed text, so the widget SHALL NOT present a search field; tapping the whole widget surface SHALL open the app on the Search tab.
 
-#### Scenario: Widget search opens the article
-- **WHEN** the user enters a word in the widget and confirms it
-- **THEN** the app opens and shows the article for that word
-
-#### Scenario: Widget opens search screen
-- **WHEN** the user taps the widget's search field without a word being confirmed
-- **THEN** the app opens to the search screen with focus on the field
-
-#### Scenario: Widget search not found
-- **WHEN** the user confirms a word in the widget that matches no dictionary entry
-- **THEN** the app opens and shows the standard "word not found" indication
+#### Scenario: Widget opens the search screen
+- **WHEN** the user taps anywhere on the home-screen widget
+- **THEN** the app opens to the Search tab and no typed query is entered
 
 #### Scenario: Add and resize the widget
 - **WHEN** the user adds the widget to the home screen
-- **THEN** it appears at a standard size and remains usable after the device rescales it
+- **THEN** it appears at a standard size and remains tappable after the device rescales it
 
 ### Requirement: No dictionary interference
 Launcher shortcuts SHALL respect the currently active group: a lookup launched by the tile or widget uses the same group settings as a typed lookup and must not change the active group or dictionary order.

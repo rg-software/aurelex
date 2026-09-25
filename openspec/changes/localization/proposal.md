@@ -45,8 +45,9 @@ catalogs instead of literals scattered through QML/HTML/Java).
   chrome (history/favorites rows, "Clear all", suggestion overlay, banner strings
   like "Preparing dictionaries…") wrapped in `qsTr()`; `Accessible.name` left
   literal.
-- `app/main.cpp` — install a `QTranslator` chosen from `QLocale::system()` at
-  startup.
+- `app/main.cpp` — install a `QTranslator` chosen from `QLocale().uiLanguages()`
+  at startup (the Qt Android kit lacks `QGuiApplication::uiLanguages()`),
+  trying the full locale before the base language.
 - `app/EngineController.cpp` — add `tr()` only if the string inventory finds
   user-visible text (logs are not translated); extend if needed.
 - `app/CMakeLists.txt` — embed the compiled `.qm` catalogs via qrc.

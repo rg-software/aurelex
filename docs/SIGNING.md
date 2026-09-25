@@ -8,16 +8,16 @@ signatures.
 ## Artifacts produced by CI
 
 On a `vX.Y.Z` tag push, CI (`.github/workflows/release-qt.yml`, windows-latest)
-builds a signed release APK from the Qt app (`app/`) and
-attaches it to a GitHub release:
+builds a signed release APK **and** AAB from the Qt app (`app/`) and
+attaches both to a GitHub release:
 
 | Artifact | Path | Used by |
 | --- | --- | --- |
 | `.apk` | `build-qtquick/apk/build/outputs/apk/release/aurelex-release.apk` | GitHub releases / F-Droid / sideload |
+| `.aab` | `build-qtquick/apk/build/outputs/bundle/release/aurelex-release.aab` | Google Play upload |
 
-(An AAB is not produced: the Qt app is released via APK on GitHub/F-Droid; if a
-Play upload is ever wanted, `bundleRelease` can be added to the same build.)
-`versionName` is the tag (`vX.Y.Z` → `X.Y.Z`); `versionCode` is derived
+(`app/build.ps1 -Configuration Release -Bundle` produces the same pair
+locally.) `versionName` is the tag (`vX.Y.Z` → `X.Y.Z`); `versionCode` is derived
 deterministically as `major*10000 + minor*100 + patch`. Locally (no props)
 builds fall back to `versionCode 1` / `versionName 0.0.1`.
 
@@ -41,16 +41,18 @@ Google's.
 F-Droid **has no cloud-key / enrollment service**. It builds the app **from
 source** and signs with one of:
 
-- **(a) Our keystore** (chosen for v1) — we give F-Droid our release keystore
-  (or its public fingerprint) so every source-built APK carries our signature.
-  Requires keeping an offline backup: losing it breaks F-Droid updates.
-- **(b) F-Droid's own key** — if we provide none, F-Droid maintains a key; the
-  app's identity on F-Droid then belongs to F-Droid, not us.
-- **(c) Reproducible build** — F-Droid byte-compares its source build to a
-  published APK of ours; identical ⇒ interchangeable, using our signature
-  *without* sharing the keystore. **Not achieved for v1**: the Qt/NDK carved
-  engine embeds build ids / timestamps, so byte-reproducibility is non-trivial
-  (a stretch goal).
+- **(a) F-Droid's own key** (default) — F-Droid maintains the signing key; the
+  app's F-Droid identity then belongs to F-Droid, not us.
+- **(b) Reproducible build / signature copying** — F-Droid rebuilds from source
+  and, when the build is reproducible, ships the APK signed with our published
+  signature. This does **not** require handing over the private keystore; it
+  relies on matching a published APK byte-for-byte (or on F-Droid's upstream
+  signature-copying flow). **Not achieved for v1**: the Qt/NDK carved engine
+  embeds build ids / timestamps, so byte-reproducibility is non-trivial (a
+  stretch goal). See `https://f-droid.org/docs/Reproducible_Builds/`.
+- **Never give F-Droid the project's private release keystore.** F-Droid does not
+  need it, and sharing it would put every GitHub/Play sideload update at risk.
+  See `https://f-droid.org/docs/Signing_Process/`.
 
 ## Channel separation
 
@@ -75,14 +77,11 @@ must uninstall first.
 
 ## Letting F-Droid build
 
-F-Droid submits a recipe pointing at this repository. For path (a): upload our
-keystore to F-Droid's submission form (#F-Droid requests the
-`keystore/release signature`). Provide:
-- the release keystore (or its SHA256 certificate fingerprint),
-- the alias + passwords used by CI.
-
-F-Droid then signs every build it produces from source with our key, keeping
-updates compatible with GitHub/Play-upload sideloads.
+F-Droid submits a recipe pointing at this repository and builds from source.
+By default F-Droid signs the result with its own key. Do **not** upload the
+private release keystore or its passwords. If we later want F-Droid builds to
+carry our signature, pursue the reproducible-build / signature-copying path (and
+document the exact fingerprint), not keystore sharing.
 
 ## App icon & the indexing notification
 

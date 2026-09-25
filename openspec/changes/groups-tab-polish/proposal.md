@@ -16,10 +16,13 @@ should land somewhere useful: Search.
   starts on Search.
 - Groups list rows are decluttered:
   - The `All dictionaries` / `id=N` subtitle is removed.
-  - Tapping the group name opens the membership editor (drill-in restored); the
-    per-row pencil is removed — the only per-row control is the delete trash.
+  - Tapping any group row opens the membership editor (drill-in restored); the
+    per-row pencil is removed — the only per-row control is the delete trash on
+    non-"All" rows.
+  - The "All" row opens the editor in reorder-only mode; non-"All" groups support
+    add/remove/reorder plus rename.
   - Delete asks for confirmation (OK/cancel) before removing the group.
-  - "Create group" is an icon-only (add/plus) control.
+  - "Add group" is a visible button that opens a name dialog.
 - The membership editor is icon-driven (Back, Rename, Add/Remove are icons), its
   header shows just the group name (no "Group:" prefix), and members reorder by
   **dragging anywhere on the row** (up/down arrows removed). Only the "in this
@@ -36,10 +39,10 @@ should land somewhere useful: Search.
   and duplicate names (case-insensitive) are rejected both in the UI and at the
   engine boundary (`gd_group_create`/`gd_group_rename` return -2 for a taken
   name; the controller emits `groupCreated(id, name)` / `groupNameTaken(name)`).
-- Dictionary deletion is a single path: the multi-select "Delete" button is the
+- Dictionary deletion is a single path: the multi-select "Remove" button is the
   only delete control (per-row and per-pair remove buttons removed). In the
   By-Pair view, tapping a pair header selects/unselects that whole section (with
-  a check indicator) as a shortcut for building a deletion selection.
+  a check indicator) as a shortcut for building a removal selection.
 
 ## Capabilities
 

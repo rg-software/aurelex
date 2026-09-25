@@ -17,8 +17,9 @@ pattern already used by the favorites and dicts row delegates.
 
 **Goals:**
 - Search is the start tab whenever onboarding is not showing.
-- Groups rows: static name, per-row membership-edit + confirmed-delete controls,
-  no subtitle, no overflow menu.
+- Groups rows: tappable to open the membership editor, one confirmed-delete
+  trash control on non-"All" rows, no subtitle, no overflow menu; "All" opens in
+  reorder-only mode.
 - A real, usable rename dialog backed by the existing `gd_group_rename` path,
   reachable from inside the group's membership editor.
 
@@ -47,17 +48,19 @@ still flips `root.state = 0` directly (the guard prevents the second
   observable benefit; the spec only requires starting on Search.
 
 ### 2. Group name row is the membership-editor entry point
-The group row is tappable: `onClicked` on the row opens the membership editor
-(guarded to non-"All"), so there is no pencil/edit control on the row — the only
-per-row control is the delete trash. `rightPadding` keeps the name clear of that
-one icon. Rename lives inside the editor (header pencil button).
+The group row is tappable: `onClicked` on the row opens the membership editor for
+any group, including "All" (which opens in reorder-only mode). There is no
+pencil/edit control on the row — the only per-row control is the delete trash on
+non-"All" rows. `rightPadding` keeps the name clear of that one icon. Rename
+lives inside the editor (header pencil button).
 
 ### 2.5 Membership editor is all-icon, reorder by dragging the whole row
 Back (arrow_back), Rename (edit) and Remove-from-group (close) are icon-only
 `ToolButton`s; Add-to-group (add) likewise. The editor header shows just the
 group name (no redundant "Group:" prefix). Reordering is by **drag across the
-whole member row**: a full-width `MouseArea` bags the row (`anchors.fill`), so
-grabbing anywhere on a member starts a reorder — no 40px handle strip. The
+member row's name area**: a `MouseArea` bags the row except for the right-most
+sliver reserved for the Remove control (`anchors.rightMargin`), so grabbing the
+name starts a reorder — no 40px handle strip. The
 handle's `onPressed` arms the move immediately, `onPositionChanged` recomputes
 the target row from the finger Y delta (`Math.round(dy / 44)` row height —
 delta-based, so it works regardless of list scroll offset) and calls
@@ -183,13 +186,13 @@ a `Reorder` drag handle; no more Move-up/Move-down buttons).
 
 ## Risks / Trade-offs
 
-- [Rename moved behind an extra tap] → Deleting that tap was the user's explicit
-  call (row is static); the membership editor is one pencil-tap away and rename
-  is a header button there.
+- [Rename moved behind an extra tap] → Removing the per-row pencil was the user's
+  explicit call; the row opens the membership editor in one tap and rename is a
+  header button there.
 - [Delete confirmation modal on a destructive act] → Intended; mirrors the
   remove-dictionary confirmation and gives an undo-free action a decision point.
-- [Name label underlaps the right-aligned icons] → `rightPadding: 108` reserves
-  room; long names also elide (`Text.ElideMiddle`).
+- [Name label underlaps the right-aligned icons] → `rightPadding: 56` reserves
+  room for the delete trash; long names also elide (`Text.ElideMiddle`).
 - [Rename dialog IME / focus] → prefilled + `forceActiveFocus` on open mirrors the
   group-create field; keyboard appears with the dialog, which is acceptable since
   the remove-dict dialog also focuses its content.

@@ -97,11 +97,11 @@ elements in automated tests:
 | Pane | Element | `Accessible.name` |
 |------|---------|-------------------|
 | Nav | TabBar | `"Main navigation"` |
-| Nav | Search tab | `"Search"` |
-| Nav | Dictionaries tab | `"Dictionaries"` |
-| Nav | Groups tab | `"Groups"` |
-| Nav | Full-text search tab | `"Full-text search"` |
-| Nav | Favorites tab | `"Favorites"` |
+| Nav | Search tab | `"Search"` (invariant English test ID; the visible label is localized) |
+| Nav | Dictionaries tab | `"Dictionaries"` (label localized) |
+| Nav | Groups tab | `"Groups"` (label localized) |
+| Nav | Full-text search tab | `"Full-text search"` (label localized) |
+| Nav | Favorites tab | `"Favorites"` (label localized) |
 | Nav | Dark-mode toggle | `"Light mode"` / `"Dark mode"` (dynamic); a plain button that is a SIBLING of the TabBar (not a TabButton) in the last (6th) slot of the bottom dock — never becomes the active tab |
 | Top | Status strip | No interactive content — paints the edge-to-edge window's top chrome in the app background |
 | Search | Group button | `"Search group scope"` (shows the current group in the magenta accent scheme; always tappable — taps open the modal `Select group` picker, which has no "Groups" subtitle) |
@@ -114,17 +114,17 @@ elements in automated tests:
 | Dicts | Flat list | `"Dictionaries list"` |
 | Dicts | Grouped list | `"Dictionaries list by pair"` |
 | Dicts | Pair header | Tapping a pair (section) header selects/unselects all dictionaries in that pair (shows a check when fully selected) |
-| Groups | Add button | `"Add group"` (opens the name dialog; on OK the group is created and its membership editor opens) |
+| Groups | Add button | `"Add group"` (opens the name dialog; on OK the group is created and its membership editor opens) — a visible button, not an icon-only control |
 | Groups | Add-group dialog | `"Add group"` (`"New group name"` field inside; OK/Cancel) |
 | Groups | ListView | `"Groups list"` |
 | Groups | Group row | Named `<group name>`; tapping the row opens the group's membership editor (no separate edit/pencil button in the list). The `All` row opens the same editor in reorder-only mode (no add/remove/rename): dragging sets the article order used by search |
-| Groups | Delete | `"Delete"` (per-row trash icon, asks for confirmation) |
+| Groups | Delete | `"Delete"` (per-row trailing trash icon on non-`All` rows, asks for confirmation) |
 | Groups | Delete confirmation | `"Delete group confirmation"` (OK/Cancel) |
 | Groups | Rename dialog | `"Rename group"` (`"New group name"` field inside) |
 | Membership | Back button | `"Back"` |
 | Membership | Rename group | `"Rename group"` (header button in the membership editor) |
 | Membership | Members list | `"Group members"` |
-| Membership | Reorder surface | Whole member row drags to reorder; drag anywhere on the row |
+| Membership | Reorder surface | Drag the member row's name area to reorder; the trailing `Remove from group` sliver is excluded |
 | Membership | Remove from group | `"Remove from group"` |
 | Membership | Non-members list | `"Available dictionaries to add"` |
 | Membership | Add to group | `"Add to group"` |

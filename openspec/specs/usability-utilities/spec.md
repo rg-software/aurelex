@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Adds everyday conveniences that make Aurelex useful as a daily dictionary: looking up words from other apps or the clipboard, browsing recent lookups and favorites, and pronouncing headwords with on-device text-to-speech.
+Adds everyday conveniences that make Aurelex useful as a daily dictionary: looking up words from other apps or the clipboard, and browsing recent lookups and favorites.
 
 ## Requirements
 
@@ -67,22 +67,11 @@ The system SHALL let the user save the current article as a favorite, remove a s
 - **WHEN** the user taps a word in the favorites list
 - **THEN** the app switches to the group stored with that entry and shows the article for that word; if the stored group no longer exists, the app uses the "All" group
 
-### Requirement: Text-to-speech pronunciation
-The system SHALL pronounce a looked-up headword using the on-device text-to-speech engine when one is available, and SHALL degrade gracefully (no crash) when no engine is available or speech fails.
-
-#### Scenario: Pronounce the headword
-- **WHEN** the user chooses to pronounce the current article's word
-- **THEN** the device speaks the word using its text-to-speech engine
-
-#### Scenario: No TTS engine available
-- **WHEN** the user chooses to pronounce a word but no text-to-speech engine is available
-- **THEN** the app does not speak and indicates the feature is unavailable, without crashing
-
 ### Requirement: Settings persistence
-The system SHALL persist user preferences (favorites, history, text-to-speech enabled, the article dark-mode toggle, and the article zoom level) across app restarts.
+The system SHALL persist user preferences (favorites, history, the app dark-mode override, and the article zoom level) across app restarts.
 
 #### Scenario: Preferences survive restart
-- **WHEN** the user changes a preference (e.g. dark mode, TTS on/off, article zoom) or modifies favorites/history and then restarts the app
+- **WHEN** the user changes a preference (e.g. dark mode, article zoom) or modifies favorites/history and then restarts the app
 - **THEN** the preferences and lists retain the user's changes
 
 #### Scenario: Zoom level survives restart
