@@ -54,6 +54,16 @@ Status legend: 🟢 planned · 🔵 in progress · ✅ done · ⏸ parked
 
 ## Candidate future milestones
 
+- 🟢 **Off-thread FTS indexing (UI responsiveness)** — `gd_fts_index` holds the
+  global `g_engineMutex` for the entire `makeFTSIndex()` build, and every other
+  `gd_*` call (lookup, groups, `pollFtsProgress`) takes the same lock. While a
+  large dictionary is being indexed the UI thread blocks on it, so **search is
+  effectively unusable until the build finishes** (and a group delete queues
+  behind it). Interim mitigation already in tree: the progress poller was
+  slowed to 1s (VeryCoarse). Real fix: stop holding the engine mutex across the
+  build (build into a side buffer and swap under a short lock), or run the
+  build against a snapshot so lookups can proceed concurrently. Boundary
+  change; needs care with `rebuildGroups()`/dictionary-removal ordering.
 - 🟢 **Translate-later / word-list export** — extract headwords/definitions to
   a file/anki. (Not yet proposed.)
 - 🟢 **Pre-built desktop-generated index caches** — copy indexes along with

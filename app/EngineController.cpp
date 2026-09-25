@@ -132,7 +132,14 @@ EngineController::EngineController(QObject *parent)
 
     // Smooth in-flight progress: while a batch builds, sample the engine's own
     // per-dictionary percent so the bar fills even for a single huge dict.
-    m_ftsProgressTimer.setInterval(400);
+    // 1s, VeryCoarse: each tick takes g_engineMutex (pollFtsProgress ->
+    // gd_fts_progress), which the FTS build holds for the whole dictionary. On
+    // the UI thread that means every tick can block behind the build, so a fast
+    // (400ms) cadence was stuttering the UI for no visible benefit. TODO: this
+    // contention is the main "search unusable while indexing" cause — the real
+    // fix is to stop holding g_engineMutex across makeFTSIndex (or move this
+    // poll off the UI thread); see docs/ROADMAP.md.
+    m_ftsProgressTimer.setInterval(1000);
     m_ftsProgressTimer.setTimerType(Qt::VeryCoarseTimer);
     connect(&m_ftsProgressTimer, &QTimer::timeout, this, &EngineController::pollFtsProgress);
 
@@ -1091,6 +1098,10 @@ QString EngineController::rewriteArticleUrls(const QString &html) const {
     const QString plainCss = QStringLiteral(
         R"(<style>
 html, body { background: var(--gd-bg, #ffffff) !important; }
+/* Clear the inline nav toolbar: the WebView surface starts right under it, and
+   without this the first line of the article (the dictionary-name heading) can
+   tuck under the toolbar's buttons. */
+body { padding-top: 8px !important; }
 .gdarticle { border: none !important; border-radius: 0 !important;
              background: transparent !important; box-shadow: none !important;
              padding: 0 !important;
