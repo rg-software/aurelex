@@ -118,7 +118,7 @@ elements in automated tests:
 | Groups | Add button | `"Add group"` (opens the name dialog; on OK the group is created and its membership editor opens) |
 | Groups | Add-group dialog | `"Add group"` (`"New group name"` field inside; OK/Cancel) |
 | Groups | ListView | `"Groups list"` |
-| Groups | Group row | Named `<group name>`; tapping the row opens the group's membership editor (no separate edit/pencil button in the list) |
+| Groups | Group row | Named `<group name>`; tapping the row opens the group's membership editor (no separate edit/pencil button in the list). The `All` row opens the same editor in reorder-only mode (no add/remove/rename): dragging sets the article order used by search |
 | Groups | Delete | `"Delete"` (per-row trash icon, asks for confirmation) |
 | Groups | Delete confirmation | `"Delete group confirmation"` (OK/Cancel) |
 | Groups | Rename dialog | `"Rename group"` (`"New group name"` field inside) |

@@ -1922,10 +1922,10 @@ text: root._stagingActive
                     }
 
                     onClicked: {
-                        // Only editable groups open the membership editor;
-                        // "All" is a fixed, always-present group.
-                        if (groupRow.groupData.id !== 0)
-                            groupsPane._openMembership(groupRow.groupData.id, groupRow.groupData.name)
+                        // Any group opens the editor. "All" opens in reorder-only
+                        // mode (its membership is fixed; only the article order
+                        // is editable — see the editor below).
+                        groupsPane._openMembership(groupRow.groupData.id, groupRow.groupData.name)
                     }
                 }
             }
@@ -2114,18 +2114,32 @@ text: root._stagingActive
                     text: root.icon("edit")
                     font.family: root.iconFontFamily
                     font.pixelSize: 22
+                    // "All" is fixed: it cannot be renamed.
+                    visible: groupsPane.editingGroup !== 0
                     Accessible.name: "Rename group"
                     Accessible.role: Accessible.Button
                     onClicked: groupsPane._openRename(groupsPane.editingGroup, groupsPane.editingGroupName)
                 }
             }
 
-            Label { text: qsTr("In this group (%1)").arg(groupsPane.groupMembers.length); color: root.uiSubFg; font.pixelSize: 13 }
+            Label {
+                Layout.fillWidth: true
+                text: groupsPane.editingGroup === 0
+                    // "All" holds every dictionary; only the order is editable.
+                    ? qsTr("Article order: drag to set which dictionary's results come first.")
+                    : qsTr("In this group (%1)").arg(groupsPane.groupMembers.length)
+                color: root.uiSubFg
+                font.pixelSize: 13
+                wrapMode: Text.Wrap
+            }
 
             ListView {
                 id: memberList
                 Layout.fillWidth: true
                 Layout.preferredHeight: 190
+                // "All" has no add/remove section below, so let its list fill the
+                // pane.
+                Layout.fillHeight: groupsPane.editingGroup === 0
                 clip: true
                 model: groupsPane.groupMembers
                 spacing: 2
@@ -2196,6 +2210,8 @@ text: root._stagingActive
                             text: root.icon("close")
                             font.family: root.iconFontFamily
                             font.pixelSize: 20
+                            // "All" membership is fixed: reorder only, no removal.
+                            visible: groupsPane.editingGroup !== 0
                             Accessible.name: "Remove from group"
                             Accessible.role: Accessible.Button
                             onClicked: engine.groupRemoveDict(groupsPane.editingGroup, memberRow.rowData.index)
@@ -2204,13 +2220,18 @@ text: root._stagingActive
                 }
             }
 
-            Label { text: qsTr("Add dictionaries"); color: root.uiSubFg; font.pixelSize: 13 }
+            Label {
+                Layout.fillWidth: true
+                visible: groupsPane.editingGroup !== 0
+                text: qsTr("Add dictionaries"); color: root.uiSubFg; font.pixelSize: 13
+            }
 
             ListView {
                 id: nonMemberList
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 clip: true
+                visible: groupsPane.editingGroup !== 0
                 model: groupsPane.groupNonMembers
                 spacing: 2
                 Accessible.name: "Available dictionaries to add"

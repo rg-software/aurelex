@@ -79,6 +79,12 @@ struct EngineState
   unsigned activeGroupId   = 0;
   unsigned nextGroupId     = 1;
   vector< GroupDef > groupDefs;
+  // User-defined order of the implicit "All" group, as dictionary IDs. The
+  // underlying `dictionaries` vector stays in load order (groupDefs reference it
+  // by index); rebuildGroups() materializes "All" in this order and normalizes
+  // the list (drops removed dicts, appends newly imported ones). Empty = load
+  // order. Persisted in groups.json.
+  vector< std::string > allOrder;
 
   // Primary dictionary files that failed to load in the most recent
   // gd_scan_dicts calls (a corrupt/truncated/unparseable source). Consumed by
@@ -142,10 +148,34 @@ void rebuildGroups()
   vector< Instances::Group > built;
   built.reserve( st.groupDefs.size() );
 
-  // Group 0 = "All": every dictionary in global order.
+  // Group 0 = "All": every dictionary, in the user's chosen order (allOrder),
+  // with any dictionary not yet listed appended in load order. Normalize
+  // allOrder here so it always mirrors what is actually shown (and so a move
+  // can index into it directly).
   {
     Instances::Group all( 0, QStringLiteral( "All" ) );
-    all.dictionaries = st.dictionaries;
+    all.dictionaries.reserve( st.dictionaries.size() );
+    vector< std::string > normalized;
+    normalized.reserve( st.dictionaries.size() );
+    vector< bool > used( st.dictionaries.size(), false );
+    for ( const auto & id : st.allOrder ) {
+      for ( size_t i = 0; i < st.dictionaries.size(); ++i ) {
+        if ( !used[ i ] && st.dictionaries[ i ]->getId() == id ) {
+          all.dictionaries.push_back( st.dictionaries[ i ] );
+          normalized.push_back( id );
+          used[ i ] = true;
+          break;
+        }
+      }
+    }
+    for ( size_t i = 0; i < st.dictionaries.size(); ++i ) {
+      if ( !used[ i ] ) {
+        all.dictionaries.push_back( st.dictionaries[ i ] );
+        normalized.push_back( st.dictionaries[ i ]->getId() );
+        used[ i ]      = true;
+      }
+    }
+    g_state->allOrder = std::move( normalized );
     built.push_back( std::move( all ) );
   }
   for ( const auto & def : st.groupDefs ) {
@@ -213,6 +243,10 @@ void saveGroupsLocked()
   root.insert( "activeGroupId", static_cast< double >( g_state->activeGroupId ) );
   root.insert( "nextGroupId", static_cast< double >( g_state->nextGroupId ) );
   root.insert( "groups", arr );
+  QJsonArray order;
+  for ( const auto & id : g_state->allOrder )
+    order.append( QString::fromStdString( id ) );
+  root.insert( "allOrder", order );
   QFile f( path );
   if ( f.open( QIODevice::WriteOnly | QIODevice::Truncate ) ) {
     f.write( QJsonDocument( root ).toJson( QJsonDocument::Compact ) );
@@ -235,6 +269,10 @@ void loadGroupsLocked()
   const QJsonObject root = doc.object();
   g_state->activeGroupId = static_cast< unsigned >( root.value( "activeGroupId" ).toInt( 0 ) );
   g_state->nextGroupId   = static_cast< unsigned >( root.value( "nextGroupId" ).toInt( 1 ) );
+  // Reload (not append): loadGroupsLocked may run on every scan.
+  g_state->allOrder.clear();
+  for ( const QJsonValue &v : root.value( "allOrder" ).toArray() )
+    g_state->allOrder.push_back( v.toString().toStdString() );
   for ( const QJsonValue &gv : root.value( "groups" ).toArray() ) {
     const QJsonObject o = gv.toObject();
     GroupDef def;
@@ -949,8 +987,21 @@ int gd_group_move_dict( int id, int from, int to )
   std::lock_guard< std::mutex > lock( g_engineMutex );
   if ( !g_state )
     return -1;
-  if ( id == 0 )
-    return -1; // "All" order is the global dictionary order (gd_move_dict)
+  if ( id == 0 ) {
+    // "All" is reorderable (it drives article order) but not addable/removable.
+    // g_state->allOrder was normalized to the shown order by the last
+    // rebuildGroups(), so from/to index into it directly.
+    auto & v = g_state->allOrder;
+    const int n = static_cast< int >( v.size() );
+    if ( from < 0 || to < 0 || from >= n || to >= n )
+      return -1;
+    std::string item = v[ from ];
+    v.erase( v.begin() + from );
+    v.insert( v.begin() + to, item );
+    rebuildGroups();
+    saveGroupsLocked();
+    return 0;
+  }
   GroupDef * def = findGroupDef( static_cast< unsigned >( id ) );
   if ( !def )
     return -1;
@@ -995,11 +1046,21 @@ int gd_group_dicts( int id, int * out, int out_capacity )
     return -1;
 
   if ( id == 0 ) {
-    const int n = static_cast< int >( g_state->dictionaries.size() );
+    // Global indices in the user's All order (rebuildGroups keeps allOrder in
+    // sync with the loaded dictionaries).
+    const int n = static_cast< int >( g_state->allOrder.size() );
     if ( n > out_capacity )
       return -1;
-    for ( int i = 0; i < n; ++i )
-      out[ i ] = i;
+    for ( int k = 0; k < n; ++k ) {
+      int idx = -1;
+      for ( size_t i = 0; i < g_state->dictionaries.size(); ++i ) {
+        if ( g_state->dictionaries[ i ]->getId() == g_state->allOrder[ k ] ) {
+          idx = static_cast< int >( i );
+          break;
+        }
+      }
+      out[ k ] = idx;
+    }
     return n;
   }
 

@@ -55,6 +55,9 @@
 // - gd_group_add_dict / remove_dict / move_dict: edit a group's membership and
 //                 order. The dictionary is referenced by its index in the
 //                 global loaded set. Returns 0 on success, -1 on error.
+//                 For id 0 ("All") only move_dict is valid (membership is fixed
+//                 to every dictionary; moving sets the ARTICLE ORDER); add/remove
+//                 return -1.
 // - gd_group_active: query (store into *id_out) or set the active group id for
 //                 lookups. Returns 0/-1.
 // - gd_set_dark_mode: toggle article dark mode (task 7.1). on=1 → the engine
