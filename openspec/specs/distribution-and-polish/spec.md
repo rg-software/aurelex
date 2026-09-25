@@ -5,9 +5,7 @@
 Lets a user install and recognize Aurelex by shipping signed, versioned release
 artifacts through Google Play and F-Droid (and sideload), an app icon, and
 first-run onboarding with helpful empty states.
-
 ## Requirements
-
 ### Requirement: Signed release artifacts
 The system SHALL produce a signed release AAB and APK from CI using a signing
 keystore supplied via CI secrets (never committed to the repository), and SHALL
@@ -76,8 +74,8 @@ The system SHALL guide a new user through first steps on first launch and SHALL
 show helpful guidance when the app has no dictionaries yet. On first launch the
 app SHALL land on the Dictionaries tab (which has no article WebView), show an
 onboarding card teaching how to add dictionaries, and SHALL NOT pop the onscreen
-keyboard. Once onboarding is complete, every launch SHALL start on the Search
-tab.
+keyboard. Once onboarding is complete (no onboarding screen shown), the app SHALL
+start on the Search tab on every launch.
 
 #### Scenario: First launch shows onboarding on the Dictionaries tab
 - **WHEN** the app is launched for the first time
@@ -90,10 +88,11 @@ tab.
   to the Search tab
 
 #### Scenario: Subsequent launches start on Search
-- **WHEN** the app is opened after onboarding is complete
-- **THEN** it starts on the Search tab with no onboarding card
+- **WHEN** the user opens the app after onboarding is complete
+- **THEN** the app starts on the Search tab (no onboarding screen)
 
 #### Scenario: Empty search state
 - **WHEN** the user opens search with no dictionaries loaded
 - **THEN** the app explains (via onboarding guidance or a non-blank empty state)
   that dictionaries must be added first, instead of showing a blank screen
+
