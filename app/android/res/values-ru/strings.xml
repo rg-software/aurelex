@@ -10,4 +10,5 @@
     <string name="notification_staging">Подготовка словарей…</string>
     <string name="notification_indexing_done">Индексация словарей…</string>
     <string name="notification_indexing_progress" formatted="false">Индексация (%1$d из %2$d): %3$s</string>
+    <string name="import_no_supported">Новые словари не добавлены (уже импортированы или поддерживаемые файлы не найдены).</string>
 </resources>

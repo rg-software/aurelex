@@ -334,7 +334,20 @@ public class AurelexActivity extends QtActivity {
             android.content.Intent intent =
                     new android.content.Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
             intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION
-                    | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
+                    | Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                    | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
+            // Start the picker at the PRIMARY shared-storage volume instead of
+            // whatever location DocumentsUI last remembered (which is often the
+            // storage ROOT — a location Android refuses to grant, so the picker
+            // shows "blocked"/empty and the user is stuck). Opening at
+            // "primary" lands on the browsable device-storage root.
+            try {
+                intent.putExtra(android.provider.DocumentsContract.EXTRA_INITIAL_URI,
+                        android.provider.DocumentsContract.buildRootUri(
+                                "com.android.externalstorage.documents", "primary"));
+            } catch (Exception ignored) {
+                // EXTRA_INITIAL_URI is API 26+; older devices just open default.
+            }
             activity.startActivityForResult(intent, REQUEST_PICK_DICTIONARY_FOLDER);
         } catch (Exception e) {
             android.util.Log.w(TAG, "pickDictionaryFolder failed: " + e);

@@ -10,4 +10,5 @@
     <string name="notification_staging">Preparing dictionaries…</string>
     <string name="notification_indexing_done">Indexing dictionaries…</string>
     <string name="notification_indexing_progress" formatted="false">Indexing (%1$d of %2$d): %3$s</string>
+    <string name="import_no_supported">No new dictionaries were added (already imported, or no supported files found).</string>
 </resources>

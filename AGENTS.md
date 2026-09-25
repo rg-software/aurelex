@@ -51,7 +51,13 @@ milestone tracker).
 - **Storage:** dictionaries are imported one-off via folder-scoped SAF pickers:
   supported files are stage-copied into app-private `files/staged/` and scanned
   recursively. There is no persistent "sources" list and no Rescan; removing a
-  dictionary permanently deletes its staged copy and index. No `MANAGE_EXTERNAL_STORAGE`.
+  dictionary permanently deletes its staged copy and index. No
+  `MANAGE_EXTERNAL_STORAGE` and **no runtime storage permission is requested**:
+  the picker is `ACTION_OPEN_DOCUMENT_TREE`, whose per-folder URI grant covers
+  the copy (read via `ContentResolver`, not by path). Android refuses to grant
+  the storage root / `Download` / `Android/data` (the picker shows "blocked");
+  the user must pick a normal folder. If DocumentsUI on a test image gets stuck
+  on a blocked root ("Nothing here"), a device reboot clears it.
 
 ## OpenSpec commands
 

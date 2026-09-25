@@ -88,16 +88,35 @@ public class StagingService extends Service {
         final String display = intent == null ? "" : intent.getStringExtra(EXTRA_DISPLAY);
         // The copy must NOT run on the service's main thread.
         new Thread(() -> {
+            boolean attempted = false;
+            int totalCopied = 0;
             try {
-                if (treeUriStr != null)
-                    stageOne(treeUriStr, display);
+                if (treeUriStr != null) {
+                    attempted = true;
+                    totalCopied += stageOne(treeUriStr, display);
+                }
                 // Drain picks that queued while the copy above was running
                 // (or that the activity queued because this service was already
                 // active). Each is a separate one-off import.
                 for (;;) {
                     final String[] pick = AurelexActivity.nextPendingPick();
                     if (pick == null) break;
-                    stageOne(pick[0], pick[1]);
+                    attempted = true;
+                    totalCopied += stageOne(pick[0], pick[1]);
+                }
+                // Nothing supported was staged from any pick: tell the user
+                // instead of silently doing nothing (a blocked/empty folder, or
+                // a folder with no .mdx/.dsl/.ifo files looks like a no-op).
+                if (attempted && totalCopied <= 0) {
+                    final android.content.Context app = getApplicationContext();
+                    new android.os.Handler(getMainLooper()).post(() -> {
+                        try {
+                            android.widget.Toast.makeText(app,
+                                    app.getString(R.string.import_no_supported),
+                                    android.widget.Toast.LENGTH_LONG).show();
+                        } catch (Exception ignored) {
+                        }
+                    });
                 }
             } catch (Exception e) {
                 android.util.Log.w(TAG, "staging failed: " + e);
@@ -110,8 +129,9 @@ public class StagingService extends Service {
         return START_NOT_STICKY;
     }
 
-    /** Stages a single folder pick: temp-copy into files/staged/<sourceId>. */
-    private void stageOne(String treeUriStr, String display) {
+    /** Stages a single folder pick: temp-copy into files/staged/<sourceId>.
+     *  Returns the number of files copied (0 when nothing supported/unchanged). */
+    private int stageOne(String treeUriStr, String display) {
         try {
             android.util.Log.i(TAG, "staging " + display);
             final android.net.Uri treeUri = android.net.Uri.parse(treeUriStr);
@@ -130,29 +150,31 @@ public class StagingService extends Service {
                 // 0 may mean "nothing new" (already-local/unchanged/deduped) or
                 // "no supported files at all". StageService.log still has the
                 // detailed counts from stageTreeInto when supported files were
-                // found; surface a hint either way so the pick isn't a silent
-                // no-op.
+                // found; the caller surfaces a hint either way so the pick isn't
+                // a silent no-op.
                 android.util.Log.w(TAG, "no new dictionary files staged from " + treeUri
                         + " (displaying " + display + "); the dictionary is likely "
                         + "already added, or the folder has no supported files.");
                 // Clean up the temp dir we would have filled.
                 if (tmpDir.exists()) AurelexActivity.deleteRecursively(tmpDir);
-                return;
+                return 0;
             }
             // Swap temp -> final; a stale final dir is only our snapshot.
             if (stagedDir.exists()) AurelexActivity.deleteRecursively(stagedDir);
             if (!tmpDir.renameTo(stagedDir)) {
                 android.util.Log.e(TAG, "stage rename failed, discarding " + tmpDir);
                 AurelexActivity.deleteRecursively(tmpDir);
-                return;
+                return 0;
             }
             // One-off import: no source.xml registration (that was the old
             // "persistent sources" model). Clearing the staging marker below is
             // the C++ poller's signal to scan the staged root.
             android.util.Log.i(TAG, "dictionary import staged: " + display
                     + " staged=" + copied + " files into " + stagedDir);
+            return copied;
         } catch (Exception e) {
             android.util.Log.w(TAG, "stageOne failed for " + display + ": " + e);
+            return 0;
         }
     }
 
