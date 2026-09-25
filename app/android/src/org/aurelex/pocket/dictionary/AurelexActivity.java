@@ -470,7 +470,7 @@ public class AurelexActivity extends QtActivity {
         // load it twice (ids hash the file path). Dedup by (name, size, mtime).
         return stageTreeInto(treeUri,
                 android.provider.DocumentsContract.getTreeDocumentId(treeUri),
-                cr, dir, stageRoot, 0, new StageVisited());
+                cr, dir, stageRoot, 0, new StageVisited(), false);
     }
 
     /**
@@ -500,7 +500,8 @@ public class AurelexActivity extends QtActivity {
                                      java.io.File destDir,
                                      java.io.File stageRoot,
                                      int depth,
-                                     StageVisited state) {
+                                     StageVisited state,
+                                     boolean inResourceDir) {
         final String[] cols = {
                 android.provider.DocumentsContract.Document.COLUMN_DOCUMENT_ID,
                 android.provider.DocumentsContract.Document.COLUMN_DISPLAY_NAME,
@@ -554,11 +555,16 @@ public class AurelexActivity extends QtActivity {
                             continue;
                         }
                         copied += stageTreeInto(treeUri, docId, cr, sub, stageRoot,
-                                depth + 1, state);
+                                depth + 1, state, inResourceDir || isResourceDirName(name));
                         continue;
                     }
                     sawFiles++;
-                    if (!isSupportedDictionaryName(name)) continue;
+                    // Inside a "<name>.files" resource tree, copy EVERYTHING (DSL
+                    // sounds are .wav/.ogg/.mp3 next to images, etc.) so
+                    // pronunciation links and inline assets resolve. Elsewhere
+                    // keep the supported-dictionary filter.
+                    final boolean resource = inResourceDir;
+                    if (!resource && !isSupportedDictionaryName(name)) continue;
                     supported++;
                     final long srcSize = c.isNull(3) ? -1 : c.getLong(3);
                     final long srcModified = c.isNull(4) ? 0 : c.getLong(4);
@@ -573,8 +579,11 @@ public class AurelexActivity extends QtActivity {
                     // Intersecting pick (same dictionary under another source):
                     // if an identical (name, size, mtime) copy already exists
                     // elsewhere in the stage root, skip it so the engine doesn't
-                    // load a path-hashed duplicate id twice.
-                    if (hasStagedCopy(stageRoot, name, srcSize, srcModified, destDir)) {
+                    // load a path-hashed duplicate id twice. Resource files are
+                    // exempt: they don't create engine ids and the full-tree scan
+                    // would be O(n^2) across a dictionary's tens of thousands of
+                    // sound files.
+                    if (!resource && hasStagedCopy(stageRoot, name, srcSize, srcModified, destDir)) {
                         deduped++;
                         continue;
                     }
@@ -691,8 +700,21 @@ public class AurelexActivity extends QtActivity {
         final String lower = name.toLowerCase(java.util.Locale.ROOT);
         return lower.endsWith(".mdx") || lower.endsWith(".mdd")
                 || lower.endsWith(".dsl") || lower.endsWith(".dsl.dz")
-                || lower.endsWith(".ifo");
-}
+                || lower.endsWith(".ifo")
+                // DSL resource archive (sounds/images); the engine opens it via
+                // findFirstExistingFile("<name>.dsl.files.zip").
+                || lower.endsWith(".files.zip");
+    }
+
+    /**
+     * DSL keeps a dictionary's sounds and inline images in a sibling tree named
+     * "&lt;dictionary file&gt;.files" (the engine's resourceDir1/resourceDir2).
+     * Its contents are copied wholesale so gd_get_audio (pronunciations) and
+     * gd_get_resource (images) can resolve them.
+     */
+    private static boolean isResourceDirName(String name) {
+        return name.toLowerCase(java.util.Locale.ROOT).endsWith(".files");
+    }
 
     @Override
     protected void onResume() {

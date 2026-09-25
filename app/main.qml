@@ -168,6 +168,15 @@ ApplicationWindow {
     property color uiBorder: Material.dividerColor
     property color uiFg: Material.foreground
     property color uiSubFg: Material.secondaryTextColor
+    // Section stripe for the By-Pair dictionary list. A full-width tinted band
+    // that reads as a separator between pairs in both themes (the pair headers
+    // were previously a pale, half-width rect and were nearly invisible).
+    property color uiSectionBg: engine.darkMode
+        ? Material.color(Material.Purple, Material.Shade900)
+        : Material.color(Material.Purple, Material.Shade100)
+    property color uiSectionFg: engine.darkMode
+        ? Material.color(Material.Purple, Material.Shade100)
+        : Material.color(Material.Purple, Material.Shade900)
 
     // Human-readable byte size: 145 MB, 1.2 GB, 500 KB, 42 B.
     function fmtSize(bytes) {
@@ -1045,7 +1054,7 @@ ColumnLayout {
 
                 Loader {
                     id: searchArticleLoader
-                    anchors { top: parent.top; topMargin: inlineArticleToolbar.height; left: parent.left; right: parent.right; bottom: parent.bottom }
+                    anchors { top: parent.top; topMargin: inlineArticleToolbar.height + 6; left: parent.left; right: parent.right; bottom: parent.bottom }
                     // Defer WebView creation until the scene is measured.
                     // On Android, a WebView created before layout runs locks its
                     // native surface to a wrong (full-window) size that then
@@ -1463,7 +1472,7 @@ text: root._stagingActive
                 delegate: ItemDelegate {
                     id: bpRow
                     width: ListView.view.width
-                    height: modelData.type === "header" ? 34 : 76
+                    height: modelData.type === "header" ? 40 : 76
                     padding: 8
                     // Selected (for batch removal) highlight on dict rows.
                     highlighted: modelData.type !== "header"
@@ -1477,31 +1486,37 @@ text: root._stagingActive
 
                     Component {
                         id: headerComp
-                        RowLayout {
+                        Item {
                             anchors.fill: parent
-                            spacing: 8
+                            // Full-width tinted stripe so a pair boundary is an
+                            // obvious separator, not a pale half-width block.
                             Rectangle {
-                                Layout.fillWidth: true
-                                Layout.fillHeight: true
-                                color: Material.color(Material.Purple, Material.Shade50)
-                                z: -1
+                                anchors.fill: parent
+                                color: root.uiSectionBg
                             }
-                            Label {
-                                Layout.fillWidth: true
-                                text: modelData.pair
-                                font.pixelSize: 12
-                                font.bold: true
-                                color: root.uiSubFg
-                                verticalAlignment: Text.AlignVCenter
-                            }
-                            // Check indicator: reflects whether every dictionary
-                            // in this pair is selected.
-                            Label {
-                                text: root.icon("check")
-                                font.family: root.iconFontFamily
-                                font.pixelSize: 16
-                                color: root.uiSubFg
-                                visible: dictsPane._pairSelected(modelData.pair)
+                            RowLayout {
+                                anchors.fill: parent
+                                anchors.leftMargin: 10
+                                anchors.rightMargin: 10
+                                spacing: 8
+                                Label {
+                                    Layout.fillWidth: true
+                                    text: modelData.pair
+                                    font.pixelSize: 13
+                                    font.bold: true
+                                    color: root.uiSectionFg
+                                    verticalAlignment: Text.AlignVCenter
+                                    elide: Text.ElideMiddle
+                                }
+                                // Check indicator: reflects whether every
+                                // dictionary in this pair is selected.
+                                Label {
+                                    text: root.icon("check")
+                                    font.family: root.iconFontFamily
+                                    font.pixelSize: 16
+                                    color: root.uiSectionFg
+                                    visible: dictsPane._pairSelected(modelData.pair)
+                                }
                             }
                         }
                     }
@@ -2462,11 +2477,20 @@ text: root._stagingActive
                 + "else if(n.tagName==='A'){window.__suggWord=n.getAttribute('data-w');}"
                 + "e.preventDefault();return;}"
                 + "var a=e.target.closest?e.target.closest('a'):null;"
-                + "window.__tapped=(a?a.href:'');},true);"
+                + "var h=a?a.href:'';"
+                // Keep audio and gdlookup taps INSIDE the WebView: play the
+                // sound / open the entry in place. Without preventDefault the
+                // WebView navigates to the loopback audio URL, which hands it to
+                // Android's native media player and blanks the article.
+                + "if(h.indexOf('/gdau/')>=0||h.indexOf('/gdlookup/')>=0||h.indexOf('gdlookup://')===0){e.preventDefault();}"
+                + "window.__tapped=h;},true);"
                 + "window.__probeInstalled=true;}"
                 + "var act=window.__gdAction||'';window.__gdAction='';"
                 + "var s=window.__suggWord||'';window.__suggWord='';"
-                + "(act ? 'ACT:'+act : (s ? 'SUGG:'+s : (window.__tapped || '')))",
+                // Consume the tap so a second tap on the same audio link still
+                // replays (the value must not persist between polls).
+                + "var tap=window.__tapped||'';window.__tapped='';"
+                + "(act ? 'ACT:'+act : (s ? 'SUGG:'+s : tap))",
                 function(v){
                     if (!v) return
                     if (v.indexOf("ACT:") === 0) {
@@ -2505,13 +2529,12 @@ text: root._stagingActive
                         }
                         return
                     }
-                    if (v !== articleLinkPoller._prev) {
-                        articleLinkPoller._prev = v
-                        _handleArticleLink(v)
-                    }
+                    // Anchor taps (audio / gdlookup) are consumed in-page each
+                    // poll, so every tap reaches here — including replaying the
+                    // same audio link twice.
+                    _handleArticleLink(v)
                 })
         }
-        property string _prev: ""
         property string _lastSugg: ""
     }
 

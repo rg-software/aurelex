@@ -49,8 +49,10 @@ milestone tracker).
   `docs/ROADMAP.md`.
 - **Audio:** ogg/mp3/wav play; speex (`.spx`) is unsupported-but-graceful in v1.
 - **Storage:** dictionaries are imported one-off via folder-scoped SAF pickers:
-  supported files are stage-copied into app-private `files/staged/` and scanned
-  recursively. There is no persistent "sources" list and no Rescan; removing a
+  supported dictionary files (`.mdx`/`.mdd`/`.dsl`/`.dsl.dz`/`.ifo`) are
+  stage-copied into app-private `files/staged/` and scanned recursively, and any
+  sibling `<dict>.files` resource tree (DSL sounds/images) is copied wholesale so
+  pronunciation audio resolves. There is no persistent "sources" list and no Rescan; removing a
   dictionary permanently deletes its staged copy and index. No
   `MANAGE_EXTERNAL_STORAGE` and **no runtime storage permission is requested**:
   the picker is `ACTION_OPEN_DOCUMENT_TREE`, whose per-folder URI grant covers

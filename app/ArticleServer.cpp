@@ -216,6 +216,16 @@ void ArticleServer::handle(QTcpSocket *socket, const QString &method, const QStr
         return;
     }
 
+    if (sz == 0) {
+        // The engine resolved the URL but has no bytes for it (e.g. a DSL
+        // spelling sound whose ".dsl.files" tree was not imported). Answer 404
+        // so the media backend fails fast instead of preparing an empty stream.
+        qWarning() << "[article-server] empty resource:" << engineUrl;
+        writeNotFound(socket);
+        socket->disconnectFromHost();
+        return;
+    }
+
     QMimeDatabase db;
     const QMimeType mt = db.mimeTypeForFileNameAndData(engineUrl, QByteArray(buf.data(), sz));
     QString contentType = mt.name();
