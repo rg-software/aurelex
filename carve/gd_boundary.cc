@@ -113,9 +113,20 @@ struct ProgressSink : Dictionary::Initializing
 EngineState * g_state = nullptr;
 
 // The engine (its dict backends, ArticleMaker, WordFinder) is not thread-safe.
-// Kotlin calls through JNI on a background dispatcher, so serialize every
-// entry point here. All gd_* functions are blocking and share g_state.
-std::mutex g_engineMutex;
+// Calls arrive from several threads (the app's engine pool, the FTS worker, and
+// the Qt thread running the loopback ArticleServer), so serialize every entry
+// point here. All gd_* functions are blocking and share g_state.
+//
+// RECURSIVE: several gd_* functions drive an async engine request to completion
+// by pumping a nested QEventLoop (gd_lookup, gd_suggest, fetchResource, ...).
+// A nested loop processes that thread's other events, so the SAME thread can
+// re-enter a gd_* function while it still holds the lock. That happens in
+// practice: the ArticleServer handles parallel bres:// request sockets on the
+// Qt thread, and the first fetchResource's nested loop delivers the next
+// socket's readyRead -> fetchResource again on the same thread. With a plain
+// std::mutex that self-deadlocks (frozen UI, no crash). A recursive mutex lets
+// the re-entrant call proceed while still serializing across different threads.
+std::recursive_mutex g_engineMutex;
 
 // Separate mutex for the FTS-progress slot. A long gd_fts_index build holds
 // g_engineMutex for the whole run; a progress reader must be able to read the
@@ -312,7 +323,7 @@ extern "C" {
 
 int gd_init( const char * config_dir, const char * index_dir )
 {
-  std::lock_guard< std::mutex > lock( g_engineMutex );
+  std::lock_guard< std::recursive_mutex > lock( g_engineMutex );
   if ( g_state )
     return 0;
 
@@ -367,7 +378,7 @@ int gd_init( const char * config_dir, const char * index_dir )
 int gd_scan_dicts( const char * folder )
 {
   QElapsedTimer wall; wall.start();
-  std::lock_guard< std::mutex > lock( g_engineMutex );
+  std::lock_guard< std::recursive_mutex > lock( g_engineMutex );
   if ( !g_state )
     return -1;
 
@@ -471,7 +482,7 @@ int gd_scan_dicts( const char * folder )
 
 int gd_scan_failures( char * out, int out_size )
 {
-  std::lock_guard< std::mutex > lock( g_engineMutex );
+  std::lock_guard< std::recursive_mutex > lock( g_engineMutex );
   if ( !g_state )
     return -1;
   if ( g_state->lastScanFailures.isEmpty() )
@@ -490,7 +501,7 @@ int gd_scan_failures( char * out, int out_size )
 int gd_suggest( const char * word, char * out, int out_size )
 {
   QElapsedTimer wall; wall.start();
-  std::lock_guard< std::mutex > lock( g_engineMutex );
+  std::lock_guard< std::recursive_mutex > lock( g_engineMutex );
   if ( !g_state || !out || out_size <= 0 )
     return -1;
 
@@ -564,7 +575,7 @@ int gd_suggest( const char * word, char * out, int out_size )
 int gd_lookup( const char * word, char * out, int out_size )
 {
   QElapsedTimer wall; wall.start();
-  std::lock_guard< std::mutex > lock( g_engineMutex );
+  std::lock_guard< std::recursive_mutex > lock( g_engineMutex );
   if ( !g_state || !out || out_size <= 0 )
     return -1;
   const qint64 mutexMs = wall.restart();
@@ -599,7 +610,7 @@ int gd_lookup( const char * word, char * out, int out_size )
 int gd_lookup_in_group( const char * word, int group_id, char * out, int out_size )
 {
   QElapsedTimer wall; wall.start();
-  std::lock_guard< std::mutex > lock( g_engineMutex );
+  std::lock_guard< std::recursive_mutex > lock( g_engineMutex );
   if ( !g_state || !out || out_size <= 0 || group_id < 0 )
     return -1;
   const qint64 mutexMs = wall.restart();
@@ -652,7 +663,7 @@ static int fetchResource( const QString & urlString, char * out, int out_size )
   const QUrl url( urlString );
   const string id = url.host().toStdString();
 
-  std::lock_guard< std::mutex > lock( g_engineMutex );
+  std::lock_guard< std::recursive_mutex > lock( g_engineMutex );
 
   Dictionary::Class * found = nullptr;
   for ( const auto & d : g_state->dictionaries ) {
@@ -705,7 +716,7 @@ int gd_get_audio( const char * url, char * out, int out_size )
 
 int gd_dict_count()
 {
-  std::lock_guard< std::mutex > lock( g_engineMutex );
+  std::lock_guard< std::recursive_mutex > lock( g_engineMutex );
   return g_state ? static_cast< int >( g_state->dictionaries.size() ) : 0;
 }
 
@@ -713,7 +724,7 @@ int gd_dict_info( int index, char * name, int name_size, char * file, int file_s
 {
   if ( !g_state || !name || name_size <= 0 || !file || file_size <= 0 )
     return -1;
-  std::lock_guard< std::mutex > lock( g_engineMutex );
+  std::lock_guard< std::recursive_mutex > lock( g_engineMutex );
 
   if ( index < 0 || index >= static_cast< int >( g_state->dictionaries.size() ) )
     return -1;
@@ -740,7 +751,7 @@ int gd_dict_id( int index, char * out, int out_size )
 {
   if ( !g_state || !out || out_size <= 0 )
     return -1;
-  std::lock_guard< std::mutex > lock( g_engineMutex );
+  std::lock_guard< std::recursive_mutex > lock( g_engineMutex );
   if ( index < 0 || index >= static_cast< int >( g_state->dictionaries.size() ) )
     return -1;
   const string id = g_state->dictionaries[ index ]->getId();
@@ -756,7 +767,7 @@ int gd_dict_meta( int index, char * lang_from, int lang_from_size,
   if ( !g_state || !size_bytes || !lang_from || lang_from_size <= 0
        || !lang_to || lang_to_size <= 0 )
     return -1;
-  std::lock_guard< std::mutex > lock( g_engineMutex );
+  std::lock_guard< std::recursive_mutex > lock( g_engineMutex );
   if ( index < 0 || index >= static_cast< int >( g_state->dictionaries.size() ) )
     return -1;
 
@@ -788,7 +799,7 @@ int gd_move_dict( int from, int to )
 {
   if ( !g_state )
     return -1;
-  std::lock_guard< std::mutex > lock( g_engineMutex );
+  std::lock_guard< std::recursive_mutex > lock( g_engineMutex );
 
   const int n = static_cast< int >( g_state->dictionaries.size() );
   if ( from < 0 || to < 0 || from >= n || to >= n )
@@ -810,7 +821,7 @@ int gd_remove_dict( int dict_index )
 {
   if ( !g_state )
     return -1;
-  std::lock_guard< std::mutex > lock( g_engineMutex );
+  std::lock_guard< std::recursive_mutex > lock( g_engineMutex );
 
   const int n = static_cast< int >( g_state->dictionaries.size() );
   if ( dict_index < 0 || dict_index >= n )
@@ -842,7 +853,7 @@ int gd_remove_dict( int dict_index )
 
 int gd_group_count()
 {
-  std::lock_guard< std::mutex > lock( g_engineMutex );
+  std::lock_guard< std::recursive_mutex > lock( g_engineMutex );
   if ( !g_state )
     return 0;
   // 1 (the implicit "All") + user groups.
@@ -851,7 +862,7 @@ int gd_group_count()
 
 int gd_group_info( int index, int * id_out, char * name, int name_size, int * dict_count_out )
 {
-  std::lock_guard< std::mutex > lock( g_engineMutex );
+  std::lock_guard< std::recursive_mutex > lock( g_engineMutex );
   if ( !g_state || !id_out || !name || name_size <= 0 || !dict_count_out )
     return -1;
   if ( index < 0 || index > static_cast< int >( g_state->groupDefs.size() ) )
@@ -880,7 +891,7 @@ int gd_group_info( int index, int * id_out, char * name, int name_size, int * di
 
 int gd_group_create( const char * name, int * id_out )
 {
-  std::lock_guard< std::mutex > lock( g_engineMutex );
+  std::lock_guard< std::recursive_mutex > lock( g_engineMutex );
   if ( !g_state || !id_out || !name || !*name )
     return -1;
   const QString n = QString::fromUtf8( name );
@@ -902,7 +913,7 @@ int gd_group_create( const char * name, int * id_out )
 
 int gd_group_rename( int id, const char * name )
 {
-  std::lock_guard< std::mutex > lock( g_engineMutex );
+  std::lock_guard< std::recursive_mutex > lock( g_engineMutex );
   if ( !g_state || !name || !*name )
     return -1;
   if ( id == 0 )
@@ -924,7 +935,7 @@ int gd_group_rename( int id, const char * name )
 
 int gd_group_delete( int id )
 {
-  std::lock_guard< std::mutex > lock( g_engineMutex );
+  std::lock_guard< std::recursive_mutex > lock( g_engineMutex );
   if ( !g_state )
     return -1;
   if ( id == 0 )
@@ -945,7 +956,7 @@ int gd_group_delete( int id )
 
 int gd_group_add_dict( int id, int dict_index )
 {
-  std::lock_guard< std::mutex > lock( g_engineMutex );
+  std::lock_guard< std::recursive_mutex > lock( g_engineMutex );
   if ( !g_state )
     return -1;
   if ( id == 0 || dict_index < 0 || dict_index >= static_cast< int >( g_state->dictionaries.size() ) )
@@ -964,7 +975,7 @@ int gd_group_add_dict( int id, int dict_index )
 
 int gd_group_remove_dict( int id, int dict_index )
 {
-  std::lock_guard< std::mutex > lock( g_engineMutex );
+  std::lock_guard< std::recursive_mutex > lock( g_engineMutex );
   if ( !g_state )
     return -1;
   if ( id == 0 || dict_index < 0 )
@@ -984,7 +995,7 @@ int gd_group_remove_dict( int id, int dict_index )
 
 int gd_group_move_dict( int id, int from, int to )
 {
-  std::lock_guard< std::mutex > lock( g_engineMutex );
+  std::lock_guard< std::recursive_mutex > lock( g_engineMutex );
   if ( !g_state )
     return -1;
   if ( id == 0 ) {
@@ -1020,7 +1031,7 @@ int gd_group_move_dict( int id, int from, int to )
 
 int gd_group_active( int * id_out )
 {
-  std::lock_guard< std::mutex > lock( g_engineMutex );
+  std::lock_guard< std::recursive_mutex > lock( g_engineMutex );
   if ( !g_state || !id_out )
     return -1;
   *id_out = static_cast< int >( g_state->activeGroupId );
@@ -1029,7 +1040,7 @@ int gd_group_active( int * id_out )
 
 int gd_group_set_active( int id )
 {
-  std::lock_guard< std::mutex > lock( g_engineMutex );
+  std::lock_guard< std::recursive_mutex > lock( g_engineMutex );
   if ( !g_state )
     return -1;
   if ( id != 0 && !findGroupDef( static_cast< unsigned >( id ) ) )
@@ -1041,7 +1052,7 @@ int gd_group_set_active( int id )
 
 int gd_group_dicts( int id, int * out, int out_capacity )
 {
-  std::lock_guard< std::mutex > lock( g_engineMutex );
+  std::lock_guard< std::recursive_mutex > lock( g_engineMutex );
   if ( !g_state || !out || out_capacity <= 0 )
     return -1;
 
@@ -1078,7 +1089,7 @@ int gd_set_dark_mode( int on )
 {
   if ( !g_state )
     return -1;
-  std::lock_guard< std::mutex > lock( g_engineMutex );
+  std::lock_guard< std::recursive_mutex > lock( g_engineMutex );
 
   g_state->cfg.preferences.darkReaderMode =
     on ? Config::Dark::On : Config::Dark::Off;
@@ -1093,7 +1104,7 @@ int gd_set_dark_mode( int on )
 int gd_fts_index( int dict_index )
 {
   QElapsedTimer wall; wall.start();
-  std::lock_guard< std::mutex > lock( g_engineMutex );
+  std::lock_guard< std::recursive_mutex > lock( g_engineMutex );
   if ( !g_state || dict_index < 0 || dict_index >= static_cast< int >( g_state->dictionaries.size() ) )
     return -1;
 
@@ -1151,7 +1162,7 @@ int gd_fts_progress( int * out_percent )
 
 int gd_fts_index_state( int dict_index, int * out )
 {
-  std::lock_guard< std::mutex > lock( g_engineMutex );
+  std::lock_guard< std::recursive_mutex > lock( g_engineMutex );
   if ( !g_state || !out || dict_index < 0 || dict_index >= static_cast< int >( g_state->dictionaries.size() ) )
     return -1;
 
@@ -1167,7 +1178,7 @@ int gd_fts_search( const char * query, int mode, int group_id, char * out, int o
 {
   if ( !query || !out || out_size <= 0 )
     return -1;
-  std::lock_guard< std::mutex > lock( g_engineMutex );
+  std::lock_guard< std::recursive_mutex > lock( g_engineMutex );
   if ( !g_state )
     return -1;
 
@@ -1264,7 +1275,7 @@ int gd_fts_search( const char * query, int mode, int group_id, char * out, int o
 
 void gd_cleanup()
 {
-  std::lock_guard< std::mutex > lock( g_engineMutex );
+  std::lock_guard< std::recursive_mutex > lock( g_engineMutex );
   delete g_state;
   g_state = nullptr;
 }

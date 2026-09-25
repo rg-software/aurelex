@@ -75,7 +75,13 @@ void ArticleServer::onIncomingConnection() {
         sock->setReadBufferSize(kRequestHeaderCap);
         auto *buf = new QByteArray();
         auto *headersParsed = new bool(false);
-        connect(sock, &QTcpSocket::readyRead, this, [this, sock, buf, headersParsed]() {
+        // Guard the socket for the lifetime of the readyRead handler: handle()
+        // may spin a nested event loop (see the header), during which this
+        // socket can be disconnected and deleted.
+        QPointer<QTcpSocket> sockGuard(sock);
+        connect(sock, &QTcpSocket::readyRead, this, [this, sockGuard, buf, headersParsed]() {
+            QTcpSocket *sock = sockGuard.data();
+            if (!sock) return;
             if (*headersParsed) {
                 // Drain anything past the header block; we don't accept bodies
                 // on the article routes, but keep the socket readable until
@@ -108,7 +114,7 @@ void ArticleServer::onIncomingConnection() {
             }
             const QString method = requestLine.at(0);
             const QString path = requestLine.at(1);
-            handle(sock, method, path, headerBlock);
+            handle(sockGuard, method, path, headerBlock);
         });
         connect(sock, &QTcpSocket::disconnected, sock, [sock, buf, headersParsed]() {
             delete buf;
@@ -134,8 +140,9 @@ ArticleServer::Route ArticleServer::classify(const QString &pathIn) {
     return { Kind::Asset, suffix };
 }
 
-void ArticleServer::handle(QTcpSocket *socket, const QString &method, const QString &pathIn, const QString &rawHeaders) {
+void ArticleServer::handle(const QPointer<QTcpSocket> &socket, const QString &method, const QString &pathIn, const QString &rawHeaders) {
     Q_UNUSED(rawHeaders);
+    if (socket.isNull()) return;
     if (method != QStringLiteral("GET") && method != QStringLiteral("HEAD")) {
         writeBadRequest(socket, QStringLiteral("method %1 not allowed").arg(method));
         socket->disconnectFromHost();
@@ -201,6 +208,11 @@ void ArticleServer::handle(QTcpSocket *socket, const QString &method, const QStr
     std::vector<char> buf(kMaxResourceBytes);
     int (*fn)(const char *, char *, int) = (route.kind == Kind::Bres) ? &gd_get_resource : &gd_get_audio;
     const int sz = fn(engineUrl.toUtf8().constData(), buf.data(), static_cast<int>(buf.size()));
+    // gd_get_* spins a nested event loop while the dictionary resource loads
+    // (see fetchResource in carve/gd_boundary.cc). The peer may have gone away
+    // and the socket's pending deleteLater() may have run inside that loop, so
+    // the guard can be null now even though it was valid on entry.
+    if (socket.isNull()) return;
     if (sz < 0) {
         if (sz == -2) {
             qWarning() << "[article-server] resource not found:" << engineUrl;
@@ -239,8 +251,9 @@ void ArticleServer::handle(QTcpSocket *socket, const QString &method, const QStr
     socket->disconnectFromHost();
 }
 
-void ArticleServer::writeReply(QTcpSocket *socket, int status, const QString &statusText,
+void ArticleServer::writeReply(const QPointer<QTcpSocket> &socket, int status, const QString &statusText,
                                const QString &contentType, const QByteArray &body, qint64 bodyLengthOverride) {
+    if (socket.isNull()) return; // died while the engine ran a nested event loop
     const qint64 len = (bodyLengthOverride < 0) ? body.size() : bodyLengthOverride;
     QByteArray headers = QStringLiteral("HTTP/1.1 %1 %2\r\n"
                                         "Content-Type: %3\r\n"
@@ -257,17 +270,17 @@ void ArticleServer::writeReply(QTcpSocket *socket, int status, const QString &st
     socket->flush();
 }
 
-void ArticleServer::writeNotFound(QTcpSocket *socket) {
+void ArticleServer::writeNotFound(const QPointer<QTcpSocket> &socket) {
     const QByteArray body = "Not Found";
     writeReply(socket, 404, QStringLiteral("Not Found"), QStringLiteral("text/plain"), body);
 }
 
-void ArticleServer::writeBadRequest(QTcpSocket *socket, const QString &reason) {
+void ArticleServer::writeBadRequest(const QPointer<QTcpSocket> &socket, const QString &reason) {
     const QByteArray body = reason.toUtf8();
     writeReply(socket, 400, QStringLiteral("Bad Request"), QStringLiteral("text/plain"), body);
 }
 
-void ArticleServer::writeServerError(QTcpSocket *socket, const QString &reason) {
+void ArticleServer::writeServerError(const QPointer<QTcpSocket> &socket, const QString &reason) {
     const QByteArray body = reason.toUtf8();
     writeReply(socket, 500, QStringLiteral("Internal Server Error"), QStringLiteral("text/plain"), body);
 }

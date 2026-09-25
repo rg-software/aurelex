@@ -61,13 +61,18 @@ private:
     };
     static Route classify(const QString &path);
 
-    void handle(QTcpSocket *socket, const QString &method, const QString &path, const QString &rawHeaders);
+    // The socket is held via QPointer: handle() calls into the engine
+    // (gd_get_resource/gd_get_audio), which spins a nested QEventLoop while the
+    // dictionary's async ResourceRequest finishes. That nested loop can run a
+    // pending deleteLater() for a socket whose peer already disconnected, so a
+    // raw pointer would dangle before we write the response.
+    void handle(const QPointer<QTcpSocket> &socket, const QString &method, const QString &path, const QString &rawHeaders);
 
-    static void writeReply(QTcpSocket *socket, int status, const QString &statusText,
+    static void writeReply(const QPointer<QTcpSocket> &socket, int status, const QString &statusText,
                            const QString &contentType, const QByteArray &body, qint64 bodyLengthOverride = -1);
-    static void writeNotFound(QTcpSocket *socket);
-    static void writeBadRequest(QTcpSocket *socket, const QString &reason);
-    static void writeServerError(QTcpSocket *socket, const QString &reason);
+    static void writeNotFound(const QPointer<QTcpSocket> &socket);
+    static void writeBadRequest(const QPointer<QTcpSocket> &socket, const QString &reason);
+    static void writeServerError(const QPointer<QTcpSocket> &socket, const QString &reason);
 
     QPointer<QTcpServer> m_server;
     quint16 m_port = 0;
