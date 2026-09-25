@@ -50,6 +50,12 @@ class EngineController : public QObject
     Q_PROPERTY(qreal articleZoomMax READ articleZoomMax CONSTANT)
     Q_PROPERTY(qreal articleZoomStep READ articleZoomStep CONSTANT)
     Q_PROPERTY(bool buildingFts READ buildingFts NOTIFY buildingFtsChanged)
+    // True from the moment the controller starts enumerating which dictionaries
+    // still need an FTS index until buildingFts flips true (or the batch ends
+    // with nothing to do). Bridges the gap between a finished scan and the first
+    // progress sample so the Dicts banner shows a placeholder instead of
+    // flickering off during that window.
+    Q_PROPERTY(bool ftsStarting READ ftsStarting NOTIFY ftsStartingChanged)
     // Full-text index batch progress: while buildingFts is true, ftsIndexDone /
     // ftsIndexTotal report "N of M" dictionaries COMPLETED (0/0 when idle).
     // ftsCurrentDictIndex is the currently-indexing dictionary number (1-based).
@@ -200,6 +206,7 @@ public:
     Q_INVOKABLE QString clipboardText();
 
     bool buildingFts() const { return m_buildingFts; }
+    bool ftsStarting() const { return m_ftsStarting; }
     int ftsIndexDone() const { return m_ftsIndexDone; }
     int ftsIndexTotal() const { return m_ftsIndexTotal; }
     qreal ftsIndexFraction() const { return m_ftsIndexFraction; }
@@ -266,6 +273,7 @@ signals:
     void ftsIndexChanged(int dictIndex);
     void ftsSearchReady(const QString &query, const QVariantList &results);
     void buildingFtsChanged();
+    void ftsStartingChanged();
     void stagingActiveChanged();
     void groupDictsReady(int groupId, const QVariantList &dicts);
     // Emitted after a group's membership or order changed (add/remove/move) and
@@ -322,6 +330,7 @@ private:
     void setGroups(const QVariantList &list);
     void setActiveGroupId(int id);
     void setBuildingFts(bool b);
+    void setFtsStarting(bool b);
     void setStagingActive(bool b);
     void setScanningActive(bool b);
     void setFtsIndexProgress(int done, int total, const QString &name);
@@ -396,6 +405,7 @@ private:
     QVariantList m_groups;
     int m_activeGroupId = 0;
     bool m_buildingFts = false;
+    bool m_ftsStarting = false;
     QVariantList m_history;
     QVariantList m_favorites;
     bool m_darkMode = false;

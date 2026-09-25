@@ -1224,7 +1224,7 @@ ColumnLayout {
             // for tens of seconds while dictionaries "quietly" load.
             Rectangle {
                 Layout.fillWidth: true
-                visible: root._stagingActive || engine.scanningActive || engine.buildingFts
+                visible: root._stagingActive || engine.scanningActive || engine.buildingFts || engine.ftsStarting
                 color: Material.color(Material.Purple, Material.Shade50)
                 radius: 4
                 height: processingCol.implicitHeight + 20
@@ -1240,10 +1240,11 @@ ColumnLayout {
                         Layout.fillWidth: true
                         text: root._stagingActive ? qsTr("Preparing dictionaries…")
                             : engine.scanningActive ? qsTr("Scanning dictionaries…")
-                            : qsTr("Indexing (%1 of %2): %3")
+                            : engine.buildingFts ? qsTr("Indexing (%1 of %2): %3")
                               .arg(engine.ftsIndexDone + 1)
                               .arg(engine.ftsIndexTotal)
                               .arg(engine.ftsCurrentDictName)
+                            : qsTr("Preparing full-text index…")
                         font.pixelSize: 13
                         font.bold: true
                         color: Material.color(Material.Purple)
@@ -1279,7 +1280,9 @@ ColumnLayout {
                         visible: !engine.buildingFts
 text: root._stagingActive
                           ? qsTr("Copying dictionary files into app storage. Your dictionaries will appear here when it's done.")
-                          : qsTr("Reading dictionary files…")
+                          : engine.scanningActive
+                            ? qsTr("Reading dictionary files…")
+                            : qsTr("Checking which dictionaries need indexing…")
                         color: root.uiSubFg
                         font.pixelSize: 11
                         wrapMode: Text.Wrap

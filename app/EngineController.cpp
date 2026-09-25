@@ -194,6 +194,12 @@ void EngineController::setActiveGroupId(int id) {
     emit activeGroupChanged();
 }
 
+void EngineController::setFtsStarting(bool b) {
+    if (m_ftsStarting == b) return;
+    m_ftsStarting = b;
+    emit ftsStartingChanged();
+}
+
 void EngineController::setBuildingFts(bool b) {
     if (m_buildingFts == b) return;
     m_buildingFts = b;
@@ -372,6 +378,10 @@ void EngineController::runScan() {
 void EngineController::autoIndexMissing()
 {
     if (!m_ready) return;
+    // Flag the pending enumeration so the Dicts banner shows a "preparing"
+    // placeholder in the window between a finished scan and the first FTS
+    // progress sample (otherwise the banner blinks off and the tab looks idle).
+    setFtsStarting(true);
     // Enumerate missing dictionary IDs OFF the UI thread: gd_dict_count/
     // gd_fts_index_state/gd_dict_id take g_engineMutex, which the running FTS
     // worker holds for the whole duration of a large dictionary build. Doing
@@ -398,6 +408,10 @@ void EngineController::autoIndexMissing()
         w->deleteLater();
         qInfo() << "[aurelex] autoIndexMissing: dictionaries lacking an FTS index ="
                 << missing;
+        // Enumeration done: drop the placeholder. If there is work, the worker
+        // below flips buildingFts true in this same event-loop turn, so the
+        // banner never blinks off between the two states.
+        setFtsStarting(false);
         // Enqueue IDs not already queued; start the single worker if idle.
         // A re-import mid-build appends and the running worker picks them up
         // (design D1).
