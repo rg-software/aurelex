@@ -12,8 +12,10 @@ Aurelex. If you are a user, see the top-level `README.md` instead.
 - `app/` — the Qt app (QML + WebView, Android) that consumes the carve in-process.
 - `openspec/` — planning artifacts (proposals, specs, design, tasks); the design is the source
   of truth for scope.
-- `docs/` — in-repo guidance: `TESTING.md`, `SIGNING.md`, `ROADMAP.md`, `UPSTREAM.md`.
-- `scripts/` — `apply-patches.*`, fixture generators, build helpers.
+- `docs/` — in-repo guidance: `TESTING.md`, `SIGNING.md`, `ROADMAP.md`, `UPSTREAM.md`,
+  `KAIKKI-CONVERSION.md`.
+- `scripts/` — `apply-patches.*`, fixture generators, build helpers, and
+  `kaikki-to-dsl.py` (build DSL dictionaries from kaikki.org Wiktionary extracts).
 
 ## Working contract (read before changing anything)
 
