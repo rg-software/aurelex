@@ -38,6 +38,8 @@ ApplicationWindow {
     // switch) rather than Button.checked so it renders exactly the same accent
     // fill as the other magenta buttons.
     property bool ftsWholeWordsOn: false
+    property int searchGroupId: 0
+    property int ftsGroupId: 0
     // The article WebView is the Search tab's inline pane (articleLoader aliases
     // it); there is no separate full-pane article view — every article opens in
     // the inline Search surface.
@@ -532,10 +534,10 @@ ApplicationWindow {
     function _applyGroupForNav(groupId) {
         if (engine.groupExists(groupId)) {
             engine.setActiveGroup(groupId)
-            searchGroupCombo.currentIndex = root._groupIndexForId(groupId)
+            root.searchGroupId = groupId
         } else {
             engine.setActiveGroup(0)
-            searchGroupCombo.currentIndex = root._groupIndexForId(0)
+            root.searchGroupId = 0
         }
     }
     function _groupIndexForId(groupId) {
@@ -587,10 +589,8 @@ ApplicationWindow {
         // Single v1 mode: Wildcards (FTS::SearchMode=2). By default each term is
         // treated as a prefix (boo -> boo*); the "Match whole words" checkbox
         // switches to exact-term matching. The scope is the group selected in
-        // the FTS tab's dropdown (All by default).
-        let gid = 0
-        if (ftsGroupCombo.currentIndex >= 0 && engine.groups.length > 0)
-            gid = engine.groups[ftsGroupCombo.currentIndex].id
+        // the FTS tab's group button (All by default).
+        const gid = engine.groupExists(root.ftsGroupId) ? root.ftsGroupId : 0
         engine.ftsSearch(ftsInput.text, 2, gid, root.ftsWholeWordsOn)
     }
     // Navigation labels/icons for the bottom TabBar. The visible `label` is
@@ -851,9 +851,9 @@ ColumnLayout {
             spacing: 8
 
             // Search + group scope + clipboard on one line. Search takes ~70% of
-            // the row, the group dropdown ~30%; the clipboard is a small icon
-            // button. With a single group the scope can't change, so the dropdown
-            // is disabled (still visible, showing the current scope).
+            // the row, the group button ~30%; the clipboard is a small icon
+            // button. The group button is always tappable: it shows the current
+            // scope in the app's magenta accent scheme and opens the picker.
             RowLayout {
                 Layout.fillWidth: true
                 spacing: 6
@@ -876,57 +876,29 @@ ColumnLayout {
                     }
                 }
 
-                ComboBox {
-                    id: searchGroupCombo
+                Button {
+                    id: searchGroupButton
                     Layout.fillWidth: true
                     Layout.preferredWidth: 3
-                    enabled: engine.groups.length > 1
-                    model: engine.groups
-                    textRole: "name"
-                    Accessible.name: "Search group scope"
-                    Accessible.role: Accessible.ComboBox
-                    // The article WebView sits ABOVE Qt's own popup surface, so a
-                    // normal ComboBox dropdown would be hidden behind it. Instead
-                    // tapping the control opens a modal group picker (a Dialog that
-                    // first hides the WebView). Selecting there applies the group.
-                    // Keep the widget from opening its own popup by never letting
-                    // it get pressed-under: a transparent MouseArea on top
-                    // intercepts taps and routes them to the picker.
-                    MouseArea {
-                        anchors.fill: parent
-                        enabled: searchGroupCombo.enabled
-                        z: parent.z + 1
-                        onClicked: {
-                            if (engine.groups.length > 1) {
-                                input.focus = false
-                                groupPicker.openAt(searchGroupCombo.currentIndex)
-                            }
-                        }
+                    Layout.minimumWidth: 0
+                    // Permanently `highlighted` so the Material style paints the
+                    // app's standard accent fill (magenta) with white label text,
+                    // like the FTS "Search" button and the "By Pair" toggle.
+                    highlighted: true
+                    padding: 4
+                    font.pixelSize: 14
+                    text: {
+                        const i = root._groupIndexForId(root.searchGroupId)
+                        return i >= 0 && i < engine.groups.length
+                            && engine.groups[i].id === root.searchGroupId
+                            ? engine.groups[i].name
+                            : (engine.groups.length > 0 ? engine.groups[0].name : "")
                     }
-                    // Floating "Group" caption, mirroring the search field's
-                    // floating placeholder: a tiny label sits on the combo's top
-                    // border (left) so the field reads as a labelled control even
-                    // though a ComboBox always has a selected value. It doesn't
-                    // grab pointer events, so taps fall through to the dropdown.
-                    Label {
-                        text: qsTr("Group")
-                        // Match the floated placeholder of the search field
-                        // (Qt floats TextField placeholders at 0.75x its font).
-                        font.pixelSize: Math.round(input.font.pixelSize * 0.75)
-                        color: root.uiSubFg
-                        z: 3
-                        anchors.left: parent.left
-                        anchors.top: parent.top
-                        anchors.leftMargin: 10
-                        anchors.topMargin: -6
-                        background: Rectangle {
-                            color: root.uiBg
-                            anchors.fill: parent
-                            anchors.leftMargin: -3
-                            anchors.rightMargin: -3
-                            anchors.topMargin: 2
-                            anchors.bottomMargin: 3
-                        }
+                    Accessible.name: "Search group scope"
+                    Accessible.role: Accessible.Button
+                    onClicked: {
+                        input.focus = false
+                        groupPicker.openAt(root._groupIndexForId(root.searchGroupId))
                     }
                 }
 
@@ -2395,11 +2367,14 @@ text: root._stagingActive
     Connections {
         target: engine
         // The active group changed (a history/favorite item was opened, a group
-        // picked, or Back/Forward restored one). Keep the Search group combo in
-        // sync so both boxes reflect the item's data. The combo may not contain
-        // the group if it was deleted → _groupIndexForId falls back to All (0).
+        // picked, or Back/Forward restored one). Keep the Search group button in
+        // sync with the item's data.
+        function onGroupsChanged() {
+            if (!engine.groupExists(root.searchGroupId)) root.searchGroupId = 0
+            if (!engine.groupExists(root.ftsGroupId)) root.ftsGroupId = 0
+        }
         function onActiveGroupChanged() {
-            searchGroupCombo.currentIndex = root._groupIndexForId(engine.activeGroupId)
+            root.searchGroupId = engine.activeGroupId
         }
     }
 
@@ -2606,50 +2581,27 @@ text: root._stagingActive
                     onAccepted: { ftsInput.focus = false; root._runFts() }
                 }
 
-                // Group scope for full-text search (mirrors the Search tab's
-                // scope). "All" (index 0) is first and selected by
-                // default; choosing a group searches only that group's dicts.
-                // A transparent MouseArea routes taps to the same modal group
-                // picker the Search tab uses (its native popup would render
-                // oddly here; the dialog is the established pattern).
-                ComboBox {
-                    id: ftsGroupCombo
+                Button {
+                    id: ftsGroupButton
                     Layout.fillWidth: true
                     Layout.preferredWidth: 3
-                    enabled: engine.groups.length > 1
-                    model: engine.groups
-                    textRole: "name"
-                    Accessible.name: "Full-text search group scope"
-                    Accessible.role: Accessible.ComboBox
-                    MouseArea {
-                        anchors.fill: parent
-                        enabled: ftsGroupCombo.enabled
-                        z: parent.z + 1
-                        onClicked: {
-                            if (engine.groups.length > 1) {
-                                ftsInput.focus = false
-                                groupPicker.openAt(ftsGroupCombo.currentIndex, "fts")
-                            }
-                        }
+                    Layout.minimumWidth: 0
+                    // Same permanent accent fill as the Search tab's group button.
+                    highlighted: true
+                    padding: 4
+                    font.pixelSize: 14
+                    text: {
+                        const i = root._groupIndexForId(root.ftsGroupId)
+                        return i >= 0 && i < engine.groups.length
+                            && engine.groups[i].id === root.ftsGroupId
+                            ? engine.groups[i].name
+                            : (engine.groups.length > 0 ? engine.groups[0].name : "")
                     }
-                    // Floating "Group" caption (mirrors the Search tab's combo).
-                    Label {
-                        text: qsTr("Group")
-                        font.pixelSize: Math.round(input.font.pixelSize * 0.75)
-                        color: root.uiSubFg
-                        z: 3
-                        anchors.left: parent.left
-                        anchors.top: parent.top
-                        anchors.leftMargin: 10
-                        anchors.topMargin: -6
-                        background: Rectangle {
-                            color: root.uiBg
-                            anchors.fill: parent
-                            anchors.leftMargin: -3
-                            anchors.rightMargin: -3
-                            anchors.topMargin: 2
-                            anchors.bottomMargin: 3
-                        }
+                    Accessible.name: "Full-text search group scope"
+                    Accessible.role: Accessible.Button
+                    onClicked: {
+                        ftsInput.focus = false
+                        groupPicker.openAt(root._groupIndexForId(root.ftsGroupId), "fts")
                     }
                 }
 
@@ -2734,9 +2686,7 @@ text: root._stagingActive
                         Label { text: modelData.dictName; color: root.uiSubFg; font.pixelSize: 11 }
                     }
                     onClicked: {
-                        let gid = 0
-                        if (ftsGroupCombo.currentIndex >= 0 && engine.groups.length > 0)
-                            gid = engine.groups[ftsGroupCombo.currentIndex].id
+                        const gid = engine.groupExists(root.ftsGroupId) ? root.ftsGroupId : 0
                         root._requestedWord = modelData.headword
                         engine.lookupInGroupWithSwitch(modelData.headword, gid)
                     }
@@ -2752,8 +2702,8 @@ text: root._stagingActive
     // and the suggestion/history overlay is re-applied via onLoadingChanged.
     property bool _pickerOpen: false
     // Which scope the modal picker was opened for: "search" or "fts". Decides
-    // which combo to update on selection and whether the Search WebView needs
-    // the teardown/restore dance (only the Search tab has an inline WebView).
+    // which group button to update on selection and whether the Search WebView
+    // needs the teardown/restore dance (only the Search tab has an inline WebView).
     property string _pickerTarget: "search"
     Dialog {
         id: groupPicker
@@ -2801,11 +2751,13 @@ text: root._stagingActive
             // Scroll to the currently-active group.
             let activeIndex = 0
             if (root._pickerTarget === "fts")
-                activeIndex = ftsGroupCombo.currentIndex
+                activeIndex = root._groupIndexForId(root.ftsGroupId)
             else
-                activeIndex = searchGroupCombo.currentIndex
-            if (activeIndex >= 0 && activeIndex < engine.groups.length)
+                activeIndex = root._groupIndexForId(root.searchGroupId)
+            if (activeIndex >= 0 && activeIndex < engine.groups.length) {
+                groupPickerList.currentIndex = activeIndex
                 groupPickerList.positionViewAtIndex(activeIndex, ListView.Center)
+            }
         }
 
         contentItem: ColumnLayout {
@@ -2833,11 +2785,11 @@ text: root._stagingActive
                         if (g) {
                             groupPickerList.currentIndex = index
                             if (root._pickerTarget === "fts") {
-                                ftsGroupCombo.currentIndex = index
+                                root.ftsGroupId = g.id
                                 // Re-run the FTS for the new scope if a query is present.
                                 if (ftsInput.text.trim().length > 0) root._runFts()
                             } else {
-                                searchGroupCombo.currentIndex = index
+                                root.searchGroupId = g.id
                                 const q = input.displayText.trim()
                                 if (q.length > 0) {
                                     // Switching the group actually triggers a lookup

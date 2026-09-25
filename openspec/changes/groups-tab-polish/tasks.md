@@ -68,9 +68,10 @@
 
 ## 10.5 FTS layout mirrors Search
 
-- [x] 10.5.1 Put the FTS input + group scope combo side by side in one row (like Search)
+- [x] 10.5.1 Put the FTS input + group-scope button side by side in one row (like Search)
 - [x] 10.5.2 Replace the "Whole words" checkbox with a match-word glyph icon button (pressed when on, like Search's clipboard)
 - [x] 10.5.3 High-contrast pressed style: active = magenta background + white glyph (mirrors the Add button; reads in light & dark), inactive = gray glyph
+- [x] 10.5.4 Replace the Search and FTS group selectors with arrowless, always-tappable buttons showing only the current group in the magenta accent scheme, and route taps through the shared modal picker
 
 ## 10.6 Material Symbols font (correct glyphs)
 

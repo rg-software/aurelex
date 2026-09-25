@@ -7,10 +7,9 @@ This file tells agents and contributors how to work in this repository safely. R
 Aurelex is an Android port of [goldendict-ng](https://github.com/xiaoyifang/goldendict-ng).
 It reuses the upstream C++ dictionary engine (rendered via Android WebView) rather than reimplementing
 dictionary formats. The app is a Qt Quick/WebView Android app (`app/`) that consumes
-the carved engine in-process via the `gd_*` C boundary. Main is the shipping branch; the earlier
-Kotlin/Compose UI was removed. Design is tracked with OpenSpec: the main specs live in
-`openspec/specs/` and work-in-progress changes in `openspec/changes/` (see `docs/ROADMAP.md` for the
-milestone tracker).
+the carved engine in-process via the `gd_*` C boundary. Design is tracked with OpenSpec: the main specs
+live in `openspec/specs/` and work-in-progress changes in `openspec/changes/` (see `docs/ROADMAP.md`
+for the milestone tracker).
 
 ## Golden rules
 
@@ -19,7 +18,7 @@ milestone tracker).
    layer outside `engine/`. Long-hand: the goal is that `git diff` between a bump and our tree stays
    tiny, and a CI smoke test catches breakage.
 2. **Do not shim Qt types.** The carve compiles with real Qt 6 (Core/XML/Concurrent) for Android.
-   Do not write `QString`/`QList`/`QXmlStreamReader` reimplementations on std:: — that would make
+   Do not write `QString`/`QList`/`QXmlStreamReader` reimplementations on `std::` — that would make
    every upstream merge expensive. Reconsidering this is a design decision (see design.md D1), not
    something an agent may do to make a build pass. (D1 lives in the archived goldendict-mobile-port
    design under `openspec/changes/archive/`.)
@@ -105,7 +104,7 @@ elements in automated tests:
 | Nav | Favorites tab | `"Favorites"` |
 | Nav | Dark-mode toggle | `"Light mode"` / `"Dark mode"` (dynamic); a plain button that is a SIBLING of the TabBar (not a TabButton) in the last (6th) slot of the bottom dock — never becomes the active tab |
 | Top | Status strip | No interactive content — paints the edge-to-edge window's top chrome in the app background |
-| Search | ComboBox | `"Search group scope"` (taps open the modal `Select group` picker, which has no "Groups" subtitle) |
+| Search | Group button | `"Search group scope"` (shows the current group in the magenta accent scheme; always tappable — taps open the modal `Select group` picker, which has no "Groups" subtitle) |
 | Search | TextField | `"Search dictionaries"` |
 | Search | Clipboard button | `"Clipboard"` |
 | Search | Suggestion dropdown | Rendered as an HTML `<a>` panel (`#gd-sugg`) *inside* the article WebView — QML controls can't stack above Android's native WebView surface. Each entry carries a `data-w` word and dispatches via the QML link poller (`engine.lookup`), so no page navigation happens; the panel collapses when the article loads. UIAutomator sees entries via the WebView's own DOM accessibility subtree (content-desc = the word). No separate Qt node. |
@@ -137,7 +136,7 @@ elements in automated tests:
 | Article | WebView | `"Dictionary article"` (inline in the Search tab; no separate full-pane article surface) |
 | FTS | TextField | `"Full-text search"` |
 | FTS | Whole words toggle | `"Whole words"` (Material Symbols "match word" glyph; magenta-filled when on, gray when off) |
-| FTS | Group combo | `"Full-text search group scope"` (sits inline next to the field, like Search; opens the same modal `Select group` picker) |
+| FTS | Group button | `"Full-text search group scope"` (shows the current group in the magenta accent scheme; always tappable; sits inline next to the field, like Search; opens the same modal `Select group` picker) |
 | FTS | Search button | `"Search"` |
 | FTS | Results list | `"Full-text search results"` |
 | History | Clear all | Rendered as a `data-action="clear-history"` row *inside* the article WebView when the search field is empty |
@@ -149,11 +148,10 @@ elements in automated tests:
 
 ## Git / Commit conventions
 
-- **Remote / MCP**: this repo is hosted on **GitHub** — use the GitHub MCP server (and `gh`) for
-  issues, PRs, and remote operations. Do NOT use the Gitea MCP server with this repository.
+- **Remote**: this repo is hosted on **GitHub** — use the GitHub CLI for
+  issues, PRs, and remote operations.
 - Write conventional, structured commit messages so the release pipeline can group them into
   categories (it parses `feat:`/`fix:` prefixes):
-
 - **Format**: Conventional Commits — use a type prefix such as `feat:`, `fix:`, `docs:`,
   `refactor:`, `chore:`. Use a scoped prefix (e.g. `feat(comics):`, `fix(sidebar):`) when a
   subsystem is affected.
@@ -162,4 +160,3 @@ elements in automated tests:
 - **Length**: keep the first line under 72 characters.
 - **Issue Link**: use `Fixes #<id>` for bug fixes, `Refs #<id>` otherwise. Skip the reference if
   the branch is not issue-based.
-- **When to commit**: never commit unless asked.

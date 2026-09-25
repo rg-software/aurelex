@@ -149,10 +149,15 @@ changes: `_openMembership` clears both member arrays (fresh bindings), and
 `onGroupDictsReady` schedules `forceLayout()` on both lists (`Qt.callLater`),
 guarding that the editor still targets the same group.
 
-### 4.8 FTS layout mirrors Search
-The Full-text search tab now mirrors the Search tab's input row: the FTS field
-and the group-scope combo sit side by side in one RowLayout (7:3 split), and the
-"Whole words" checkbox is replaced by a checkable match-word glyph icon button
+### 4.8 Compact group-scope buttons in Search and FTS
+Both input rows keep the search field and group scope in a 7:3 RowLayout. The
+scope is an arrowless Button showing only the current group's name, painted in
+the app's standard accent scheme (Material accent fill, white label text) so it
+reads as tappable; taps always open the shared modal `Select group` picker, even
+when only the `All` group exists (an `enabled: groups.length > 1` guard left the
+button dead on a fresh install with no custom groups). Search follows the active
+group, while FTS keeps its own scope for the current query. The FTS row also
+replaces the "Whole words" checkbox with a checkable match-word glyph icon button
 (like the Search clipboard button) with `checked` toggling whole-word matching.
 The search button remains below, disabled while the FTS build is running.
 
