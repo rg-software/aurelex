@@ -1,0 +1,7 @@
+schema: spec-driven
+created: 2026-09-26
+# The dictionary-management spec already requires that a member can be dragged
+# up or down and that the list re-orders live as the row crosses row boundaries.
+# This change makes the implementation conform to that contract; no requirement
+# text changes, so no delta spec is emitted.
+skip_specs: true

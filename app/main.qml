@@ -1,4 +1,5 @@
 import QtQuick
+import QtQml.Models
 import QtQuick.Controls
 import QtQuick.Controls.Material
 import QtQuick.Layouts
@@ -1623,7 +1624,6 @@ text: root._stagingActive
 
         property int editingGroup: -1
         property string editingGroupName: ""
-        property var groupMembers: []
         property var groupNonMembers: []
         property int renameGroupId: -1
         property string renameGroupName: ""
@@ -1632,60 +1632,54 @@ text: root._stagingActive
         property string deleteGroupName: ""
         // "Add group" dialog state: the pending name and any inline error.
         property string createGroupNameError: ""
-        // Drag-to-reorder state for the member list. _dragFrom is the member
-        // index the gesture started on; _dragStartY the finger's Y at
-        // press-and-hold; _dragLastTo the last index we moved to (so crossing a
-        // row boundary fires exactly one engine move). Cleared on release.
-        property int _dragFrom: -1
-        property real _dragStartY: 0
-        property int _dragLastTo: -1
-        property bool _dragArmed: false
-        // Mark the row that's being dragged/reordered so the active
-        // line is visible while the finger moves it.
+        // Drag-to-reorder state for the member list. The member list is a
+        // ListModel (not a reassigned JS array) so a move repositions the
+        // delegate in place instead of destroying it — the pressed MouseArea
+        // therefore keeps its grab for the whole gesture, no matter how many
+        // row boundaries it crosses. Reordering is applied to the local model
+        // while dragging; the final order is committed to the engine once, on
+        // release. _dragOrigin is the row index the gesture started on;
+        // _dragIndex the dragged row's current index; _dragStartY the finger's
+        // Y in the member list's coordinate space at press (that frame is fixed
+        // while the row moves under the finger, so the travel does not reset).
+        property int _dragOrigin: -1
         property int _dragIndex: -1
-        // Single-shot watchdog for the reorder gesture. The member MouseArea's
-        // `released` can be lost (the ListView recycles its delegate mid-drag),
-        // so ending the drag must not depend on it: every press/move restarts
-        // this timer, and when it fires (~300 ms of no motion = finger up) the
-        // drag is finalized and the highlight clears.
+        property real _dragStartY: 0
+        property bool _dragArmed: false
+        // Row pitch: delegate height (44) + ListView.spacing (2).
+        readonly property int memberRowPitch: 46
+        // Member rows, in group order (roles: dictName, dictIndex).
+        ListModel { id: memberModel }
 
-        function _dragBegin(index, mouseY) {
-            // Any row can be dragged up or down; _dragMove clamps to the list
-            // bounds and no-ops within the same slot.
-            groupsPane._dragFrom = index
-            groupsPane._dragStartY = mouseY
-            groupsPane._dragLastTo = index
+        function _dragBegin(index, sceneY) {
+            groupsPane._dragOrigin = index
             groupsPane._dragIndex = index
+            groupsPane._dragStartY = sceneY
             groupsPane._dragArmed = true
-            dragWatchdog.restart()
         }
-        function _dragMove(mouseY) {
+        function _dragMove(sceneY) {
             if (!groupsPane._dragArmed) return
-            dragWatchdog.restart()
-            const dy = mouseY - groupsPane._dragStartY
-            // 44 = member row height. Round to the nearest row boundary; each
-            // crossed boundary moves the row one slot (delta-based, so it works
-            // regardless of the list's scroll offset).
-            const to = groupsPane._dragFrom + Math.round(dy / 44)
-            const n = groupsPane.groupMembers.length
-            if (to < 0 || to >= n || to === groupsPane._dragLastTo) return
-            groupsPane._dragLastTo = to
-            engine.groupMoveDict(groupsPane.editingGroup, groupsPane._dragFrom, to)
-            groupsPane._dragFrom = to
+            // Round to the nearest row boundary; each crossed boundary moves the
+            // row one slot. Clamp to the list bounds.
+            const dy = sceneY - groupsPane._dragStartY
+            let to = groupsPane._dragOrigin + Math.round(dy / groupsPane.memberRowPitch)
+            to = Math.max(0, Math.min(memberModel.count - 1, to))
+            if (to === groupsPane._dragIndex) return
+            memberModel.move(groupsPane._dragIndex, to, 1)
             groupsPane._dragIndex = to
         }
+        // Release or cancel: commit the resulting order to the engine in one
+        // move. A single groupMoveDict(origin, finalIndex) reproduces the order
+        // built by the local moves (both are erase+insert of the same item).
         function _dragEnd() {
+            if (!groupsPane._dragArmed) return
+            const from = groupsPane._dragOrigin
+            const to = groupsPane._dragIndex
             groupsPane._dragArmed = false
-            groupsPane._dragFrom = -1
-            groupsPane._dragLastTo = -1
+            groupsPane._dragOrigin = -1
             groupsPane._dragIndex = -1
-            dragWatchdog.stop()
-        }
-        Timer {
-            id: dragWatchdog
-            interval: 400
-            repeat: false
-            onTriggered: groupsPane._dragEnd()
+            if (from !== -1 && to !== -1 && from !== to)
+                engine.groupMoveDict(groupsPane.editingGroup, from, to)
         }
 
         function _openMembership(id, name) {
@@ -1695,7 +1689,7 @@ text: root._stagingActive
             // members from a previous open can linger otherwise, and the
             // membership ColumnLayout shows stale rows until the async
             // onGroupDictsReady replaces them.
-            groupsPane.groupMembers = []
+            memberModel.clear()
             groupsPane.groupNonMembers = []
             engine.groupDicts(id)
         }
@@ -1810,6 +1804,11 @@ text: root._stagingActive
             }
             function onGroupDictsReady(groupId, dicts) {
                 if (groupId !== groupsPane.editingGroup) return
+                // If an engine refresh lands while a drag is in flight (e.g. the
+                // previous gesture's async commit completes just after the next
+                // drag began), ignore it: the local model is authoritative until
+                // the active gesture commits.
+                if (groupsPane._dragArmed) return
                 const m = []
                 const nm = []
                 for (let i = 0; i < dicts.length; i++) {
@@ -1829,7 +1828,9 @@ text: root._stagingActive
                     }
                     m[j + 1] = row
                 }
-                groupsPane.groupMembers = m
+                memberModel.clear()
+                for (let i = 0; i < m.length; ++i)
+                    memberModel.append({ "dictName": m[i].name, "dictIndex": m[i].index })
                 groupsPane.groupNonMembers = nm
                 // The membership editor may be freshly shown (or the same group
                 // reopened): force the two lists to re-layout so dict names are
@@ -2120,7 +2121,7 @@ text: root._stagingActive
                 text: groupsPane.editingGroup === 0
                     // "All" holds every dictionary; only the order is editable.
                     ? qsTr("Article order: drag to set which dictionary's results come first.")
-                    : qsTr("In this group (%1)").arg(groupsPane.groupMembers.length)
+                    : qsTr("In this group (%1)").arg(memberModel.count)
                 color: root.uiSubFg
                 font.pixelSize: 13
                 wrapMode: Text.Wrap
@@ -2134,32 +2135,50 @@ text: root._stagingActive
                 // pane.
                 Layout.fillHeight: groupsPane.editingGroup === 0
                 clip: true
-                model: groupsPane.groupMembers
+                model: memberModel
                 spacing: 2
                 Accessible.name: "Group members"
                 Accessible.role: Accessible.List
                 delegate: ItemDelegate {
                     id: memberRow
-                    property var rowData: modelData
                     width: ListView.view.width
                     height: 44
                     padding: 4
                     // Mark the row that's being dragged/reordered so the active
-                    // line is visible while the finger moves it.
-                    highlighted: memberRow.rowData.memberIndex === groupsPane._dragIndex
-                    Accessible.name: memberRow.rowData.name
+                    // line is visible while the finger moves it. `index` follows
+                    // the row as ListModel.move() relocates it.
+                    highlighted: index === groupsPane._dragIndex
+                    Accessible.name: dictName
                     Accessible.role: Accessible.ListItem
 
-                    contentItem: RowLayout {
-                        Layout.fillWidth: true
-                        spacing: 6
+                    contentItem: Item {
+                        RowLayout {
+                            anchors.fill: parent
+                            spacing: 6
+                            Label {
+                                text: root.icon("drag_handle")
+                                font.family: root.iconFontFamily
+                                font.pixelSize: 20
+                                color: root.uiSubFg
+                            }
+                            Label {
+                                Layout.fillWidth: true
+                                text: dictName
+                                elide: Text.ElideMiddle
+                                verticalAlignment: Text.AlignVCenter
+                            }
+                        }
 
-                        // The whole row is the drag surface: grab anywhere on
-                        // the member and drag up/down to reorder. The row's
-                        // delegate has no tap action, so there's nothing for an
-                        // accidental tap to break; the right-hand Remove button
-                        // sits above this bag and still receives its taps.
+                        // The whole row is the drag surface: grab anywhere on the
+                        // member and drag up/down to reorder. It is a sibling of
+                        // the RowLayout (not a layout child) so it cannot fight
+                        // the layout for width; declaring it last puts it above
+                        // the labels. The row has no tap action, so there's
+                        // nothing for an accidental tap to break; the right-hand
+                        // Remove button sits above this bag and still receives
+                        // its taps.
                         MouseArea {
+                            id: dragArea
                             anchors { top: parent.top; bottom: parent.bottom; left: parent.left; right: parent.right }
                             // Leave the right-most sliver clear so the Remove
                             // button (a sibling overlapping this bag) still gets
@@ -2170,25 +2189,21 @@ text: root._stagingActive
                             preventStealing: true
                             Accessible.name: "Reorder"
                             Accessible.role: Accessible.Button
+                            // QQuickMouseEvent (Qt 6.6) has no scenePosition, so
+                            // map the finger into the ListView's coordinate space:
+                            // that frame is fixed while the row moves under the
+                            // finger, so the travel does not reset.
+                            function _listY(mouse) {
+                                return dragArea.mapToItem(memberList, mouse.x, mouse.y).y
+                            }
                             onPressed: (mouse) => {
-                                groupsPane._dragBegin(memberRow.rowData.memberIndex, mouse.y)
+                                groupsPane._dragBegin(index, dragArea._listY(mouse))
                             }
                             onPositionChanged: (mouse) => {
-                                groupsPane._dragMove(mouse.y)
+                                groupsPane._dragMove(dragArea._listY(mouse))
                             }
                             onReleased: groupsPane._dragEnd()
-                        }
-                        Label {
-                            text: root.icon("drag_handle")
-                            font.family: root.iconFontFamily
-                            font.pixelSize: 20
-                            color: root.uiSubFg
-                        }
-                        Label {
-                            Layout.fillWidth: true
-                            text: memberRow.rowData.name
-                            elide: Text.ElideMiddle
-                            verticalAlignment: Text.AlignVCenter
+                            onCanceled: groupsPane._dragEnd()
                         }
                     }
 
@@ -2207,7 +2222,7 @@ text: root._stagingActive
                             visible: groupsPane.editingGroup !== 0
                             Accessible.name: "Remove from group"
                             Accessible.role: Accessible.Button
-                            onClicked: engine.groupRemoveDict(groupsPane.editingGroup, memberRow.rowData.index)
+                            onClicked: engine.groupRemoveDict(groupsPane.editingGroup, dictIndex)
                         }
                     }
                 }
