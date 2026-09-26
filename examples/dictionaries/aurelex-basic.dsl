@@ -18,3 +18,8 @@ water
 	[m1]the clear liquid that falls as rain and fills rivers[/m]
 	[!trn]aqua[/!trn]
 	[note]Drink more water.[/note]
+sun
+	[m1]the star that gives Earth light and warmth[/m]
+	[m2]the Sun is a star[/m]
+	[*]Extra: its light takes about 8 minutes to reach Earth.[/opt]
+	[ref]light[/ref]

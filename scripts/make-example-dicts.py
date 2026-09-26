@@ -10,6 +10,10 @@ Produces into a target directory (default: examples/dictionaries):
                              "RA" random-access extra field, so the engine's
                              dictzip reader can seek; plain gzip would not load)
 
+The "sun" headword in aurelex-basic carries a `[*]...[/opt]` hidden zone, so
+the generated fixtures always cover the optional-parts expander (see the
+`sample-dictionaries` spec) without hand-editing a dictionary.
+
 Usage: make-example-dicts.py [output-dir]
 """
 import os
@@ -39,6 +43,11 @@ water
 \t[m1]the clear liquid that falls as rain and fills rivers[/m]
 \t[!trn]aqua[/!trn]
 \t[note]Drink more water.[/note]
+sun
+\t[m1]the star that gives Earth light and warmth[/m]
+\t[m2]the Sun is a star[/m]
+\t[*]Extra: its light takes about 8 minutes to reach Earth.[/opt]
+\t[ref]light[/ref]
 """
 
 LINGVO = """\

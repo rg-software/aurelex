@@ -1073,6 +1073,11 @@ QString EngineController::rewriteArticleUrls(const QString &html) const {
     //   iframeResizer / mark               -> desktop iframe + in-page search
     // Keep darkreader.js + the stylesheets, which now load from assets and
     // provide dark mode + proper article CSS.
+    // gd-builtin.js stays stripped even though it also defines
+    // gdExpandOptPart (the DSL optional-parts expander handler): the rest of
+    // that file is the desktop bridge, and its article-collapse paths throw on
+    // Android. The one function we need is re-implemented in
+    // assets/scripts/gd-article-controls.js and injected below.
     const QStringList stripScripts = {
         QStringLiteral("/scripts/jquery-3.6.0.slim.min.js"),
         QStringLiteral("/scripts/gd-custom.js"),
@@ -1148,9 +1153,23 @@ body { padding-top: 8px !important; }
              background: transparent !important; box-shadow: none !important;
              padding: 0 !important;
              margin-bottom: 0.6em !important; }
+/* Touch target for the DSL optional-parts expander. The bundled stylesheet sizes
+   .hidden_expand_opt at 16px (desktop-pointer sized); leave the glyph that size
+   and only grow the tappable box with padding, pulled back by an equal negative
+   margin so the layout does not shift. Injected rather than editing the
+   verbatim upstream stylesheet. */
+img.hidden_expand_opt { padding: 12px; margin: -12px !important; }
 </style>
 )");
     const QString darkInit = m_darkMode ? QStringLiteral("1") : QStringLiteral("0");
+    // gd-article-controls.js defines gdExpandOptPart, the handler the engine's
+    // DSL optional-parts expander binds to. It replaces the stripped
+    // gd-builtin.js for that one function (see the stripScripts list above);
+    // the handler is defined at load time, so this tag must come before any
+    // article body that can be clicked.
+    const QString optCtrl = QStringLiteral(
+        R"(<script src="%1/scripts/gd-article-controls.js"></script>
+)").arg(base);
     const QString darkCtrl = QStringLiteral(
         R"(
 <script src="%1/scripts/darkreader.js"></script>
@@ -1228,9 +1247,9 @@ if(window.__gdZoom!==100)window.gdSetZoom(window.__gdZoom);
 
     const int headEnd = out.indexOf(QStringLiteral("</head>"));
     if (headEnd >= 0)
-        out.insert(headEnd, zoomCtrl + plainCss + darkCtrl);
+        out.insert(headEnd, zoomCtrl + plainCss + optCtrl + darkCtrl);
     else
-        out.append(zoomCtrl + plainCss + darkCtrl);
+        out.append(zoomCtrl + plainCss + optCtrl + darkCtrl);
     return out;
 }
 

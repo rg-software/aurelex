@@ -60,6 +60,7 @@ int main( int argc, char ** argv )
   std::printf( "gd_scan_dicts(again) -> %d new (expect 0)\n", n2 );
   const bool dedupOk = n2 == 0;
   bool dictOk = true; // refined by the removal block below
+  bool optPartsOk = false; // refined by the DSL hidden-zone block below
 
   std::vector< char > sug( 1 << 12 );
   const int sugN = gd_suggest( "smok", sug.data(), static_cast< int >( sug.size() ) );
@@ -110,6 +111,33 @@ int main( int argc, char ** argv )
                  resSz );
     (void)res;
     break;
+  }
+
+  // ---- DSL optional/hidden-zone expander smoke (dsl-optional-parts-toggle) ----
+  // The engine renders `[*]...[/opt]` as a hidden `.dsl_opt` span plus one
+  // `<img class="hidden_expand_opt" onclick="gdExpandOptPart(...)">` per article
+  // that has hidden zones. The app supplies the handler (assets/scripts/
+  // gd-article-controls.js); this pins the engine-side markup that handler
+  // depends on, so an upstream bump that stops emitting it fails CI here
+  // instead of shipping a dead control.
+  {
+    const int dslDzIdx = findDictBySuffix( ".dsl.dz" );
+    std::vector< char > opt( 1 << 20 );
+    const int sz = gd_lookup( "sun", opt.data(), static_cast< int >( opt.size() ) );
+    const std::string optHtml( opt.data(), sz > 0 ? sz : 0 );
+    const bool hasZone  = optHtml.find( "class=\"dsl_opt\"" ) != std::string::npos;
+    const bool hasExpander = optHtml.find( "gdExpandOptPart(" ) != std::string::npos;
+    const bool hasSection  = optHtml.find( "gdarticlebody" ) != std::string::npos;
+    std::printf( "gd_lookup(\"sun\") -> %d bytes [dict %d] OPT_ZONE=%s OPT_EXPANDER=%s\n",
+                 sz, dslDzIdx, hasZone ? "OK" : "FAIL", hasExpander ? "OK" : "FAIL" );
+    // A headword with no hidden zone must not gain an expander (the control is
+    // per-article, not per-dictionary).
+    std::vector< char > plain( 1 << 20 );
+    const int plainSz = gd_lookup( "water", plain.data(), static_cast< int >( plain.size() ) );
+    const std::string plainHtml( plain.data(), plainSz > 0 ? plainSz : 0 );
+    const bool plainClean = plainSz > 0 && plainHtml.find( "gdExpandOptPart(" ) == std::string::npos;
+    std::printf( "OPT_NO_ZONE=%s\n", plainClean ? "OK" : "FAIL" );
+    optPartsOk = hasSection && hasZone && hasExpander && plainClean;
   }
 
   // ---- groups smoke (multi-group-management) ----
@@ -227,5 +255,5 @@ int main( int argc, char ** argv )
   }
 
   gd_cleanup();
-  return ( lookSz > 0 && sugN > 0 && ftsOk && dedupOk && dictOk ) ? 0 : 1;
+  return ( lookSz > 0 && sugN > 0 && ftsOk && dedupOk && dictOk && optPartsOk ) ? 0 : 1;
 }

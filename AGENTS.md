@@ -134,6 +134,7 @@ elements in automated tests:
 | Article | Zoom out button | `"Zoom out"` (disabled at the 75% minimum) |
 | Article | Zoom in button | `"Zoom in"` (disabled at the 250% maximum) |
 | Article | WebView | `"Dictionary article"` (inline in the Search tab; no separate full-pane article surface) |
+| Article | Optional-parts expander | Rendered by the engine as an HTML `<img class="hidden_expand_opt">` *inside* the article WebView, with `alt="[+]"` when the dictionary's `[*]…[/opt]` hidden zone is collapsed and `alt="[-]"` when it is revealed (the `alt` text is the state flag and the icon swaps with it; `assets/scripts/gd-article-controls.js` implements the handler). UIAutomator sees it through the WebView's DOM accessibility subtree as `content-desc = "[+]"` / `"[-]"` — address it by that. Only present for headwords whose entry has a hidden zone. |
 | FTS | TextField | `"Full-text search"` |
 | FTS | Whole words toggle | `"Whole words"` (Material Symbols "match word" glyph; magenta-filled when on, gray when off) |
 | FTS | Group button | `"Full-text search group scope"` (shows the current group in the magenta accent scheme; always tappable; sits inline next to the field, like Search; opens the same modal `Select group` picker) |

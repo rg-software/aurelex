@@ -41,4 +41,8 @@ DSL dictionaries hide content authors marked as optional — the `[*]…[/opt]` 
 - Affected APIs: none. No `gd_*` boundary function is added or changed.
 - Affected dependencies: none. No new engine source, no patch, no upstream bump.
 - Upstream fidelity: `engine/` stays byte-for-byte at the pinned tag.
-- Localization: none. The control is an icon, not text, so no `qsTr` / `strings.xml` catalog entries.
+- Localization: no catalogs are touched. The control is an icon, not text, so no
+  `qsTr` / `strings.xml` / `app/i18n/*.ts` entries are added; the only text it
+  carries is the upstream `[+]` / `[-]` `alt` flag, which doubles as the
+  accessibility label and stays untranslated. `scripts/update-translations.ps1`
+  is therefore not needed for this change.

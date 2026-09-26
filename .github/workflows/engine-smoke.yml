@@ -158,4 +158,11 @@ jobs:
           # Wildcard mode must expand multi-term prefixes (pins patch 0003).
           printf '%s' "$out" | grep -q "FTS_WILD=OK" \
             || { echo "SMOKE FAILED: full-text wildcard assertion"; exit 1; }
+          # DSL optional/hidden-zone markup must survive: the article's expander
+          # markup is what the app's article-controls script binds to, so an
+          # upstream bump that stops emitting it would ship a dead control.
+          printf '%s' "$out" | grep -q "OPT_ZONE=OK OPT_EXPANDER=OK" \
+            || { echo "SMOKE FAILED: DSL optional-parts expander markup missing"; exit 1; }
+          printf '%s' "$out" | grep -q "OPT_NO_ZONE=OK" \
+            || { echo "SMOKE FAILED: expander emitted for an article with no hidden zone"; exit 1; }
           echo "SMOKE OK"
