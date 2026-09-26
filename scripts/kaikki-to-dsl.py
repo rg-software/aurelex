@@ -1,27 +1,33 @@
 #!/usr/bin/env python3
 """Build an importable ABBYY Lingvo DSL dictionary from a pinned kaikki.org
-Wiktionary (wiktextract) snapshot for a chosen language pair.
+Wiktionary (wiktextract) snapshot for one language.
 
 The output is a deterministic dictzip-compressed ``<name>.dsl.dz`` plus a
 sibling ``<name>.dsl.dz.files.zip`` (or ``.files/`` directory) holding the
 referenced pronunciation audio, so it imports through Aurelex's existing
 folder import without any app or engine changes.
 
+This builds **monolingual explanatory dictionaries**: the indexed headwords and
+their definitions are in the same language. Wiktionary's cross-language data is
+not used, because it is too sparse and too loosely aligned to make a reliable
+translation dictionary (see ``docs/KAIKKI-CONVERSION.md``).
+
 Highlights:
   * reproducible: a pinned dump date, cached downloads (with sha256 sidecars),
     no plain ``.dsl`` in the output, byte-identical rebuilds
-  * source language selects the indexed headwords, target language the
-    rendered glosses/translations (source == target is monolingual)
+  * the source language selects the indexed headwords and the article language
   * base forms are the only indexed headwords by default; ``--include-inflections``
     adds a base word's inflected forms as extra headword lines (they then also
     appear in the suggestion list - there is no hidden-alias concept in DSL)
+  * grammatical forms are filtered to the standard paradigm and compactly
+    labelled, driven by a per-language profile
   * bounded audio (``--audio-per-word``, default 3; ``--no-audio`` disables)
   * ``--sample N`` and ``--preview`` for reviewing article shape and formatting
   * provenance (Wiktionary, CC BY-SA 4.0, wiktextract citation, dump date) is
     embedded in the ``#NAME`` metadata and in an about card
 
 Usage:
-  kaikki-to-dsl.py --source-lang en --target-lang ru --dump-date 2026-09-02 \\
+  kaikki-to-dsl.py --source-lang en --dump-date 2026-09-02 \\
       --out-dir dist --sample 200 --preview
 """
 
@@ -75,22 +81,21 @@ OGG_EXTENSIONS = {".ogg", ".oga", ".opus"}
 # ---------------------------------------------------------------------------
 # Per-language profiles
 # ---------------------------------------------------------------------------
-# Every article is shaped by the *source* language's grammar, so anything that
-# is specific to one language lives in a profile rather than in the renderer.
-# Adding a language means adding a row here (and tests assert that), not
-# editing article logic.
+# Anything specific to one language (its form-tag vocabulary, transcription
+# fields, compact labels) lives in a profile rather than in the renderer, so
+# adding a language is a data change. Tests assert the renderer stays generic.
 
 class LangProfile:
-    """How to read one source language's records into a learner's article.
+    """How to read one language's records into an article.
 
     ``form_tags``       - tag vocabulary that is part of the standard paradigm;
                           a form qualifies only if every one of its tags is in
                           here (empty = accept any tagged form).
     ``form_noise_tags`` - tags that mean "raw inflection table", never a form.
-    ``pron_fields``     - ``sounds[]`` keys that carry a transcription, tried
-                          in order; the first non-empty one is shown.
+    ``pron_fields``     - ``sounds[]`` keys that carry a transcription, shown in
+                          this order and each at most once.
     ``short_tags``      - compact labels for the common grammatical tags.
-    ``has_audio``       - whether the source has pronunciation recordings.
+    ``has_audio``       - whether the language has pronunciation recordings.
     ``strip_forms``     - whether article "Forms:" lines are meaningful.
     """
 
@@ -209,6 +214,34 @@ def get_lang_profile(code: str) -> LangProfile:
         file=sys.stderr,
     )
     return LangProfile(code, set(), _EN_NOISE, ("ipa", "enpr"), {})
+
+
+def collect_profile_forms(record: dict, profile: LangProfile, limit: int = 8) -> List[str]:
+    """Standard paradigm forms, compactly labelled and de-duplicated.
+
+    Register/dialect variants and raw inflection tables are dropped, so an
+    article shows ``ran (past)`` and not ``rannest (archaic, 2nd sg.)``.
+    """
+    forms: List[str] = []
+    seen: Set[Tuple[str, Tuple[str, ...]]] = set()
+    for form in record.get("forms") or []:
+        if not isinstance(form, dict):
+            continue
+        text = form.get("form")
+        if not text:
+            continue
+        tags = tuple(str(t) for t in (form.get("tags") or []))
+        if not profile.form_qualifies(tags):
+            continue
+        key = (str(text), tags)
+        if key in seen:
+            continue
+        seen.add(key)
+        label = profile.label_tags(tags)
+        forms.append(f"{text} ({label})" if label else str(text))
+        if len(forms) >= limit:
+            break
+    return forms
 
 
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -521,18 +554,8 @@ def select_headwords(
     return {word for _, word in heap}
 
 
-def collect_forms(record: dict) -> List[str]:
-    """Grammatical forms of the base word, as ``form (tags)`` strings."""
-    forms: List[str] = []
-    for form in record.get("forms") or []:
-        if not isinstance(form, dict):
-            continue
-        text = form.get("form")
-        if not text:
-            continue
-        suffix = _tags_suffix(form.get("tags"))
-        forms.append((str(text) + (" " + suffix.strip() if suffix else "")).strip())
-    return forms
+# How the transcription fields of a profile are labelled in an article.
+_PRON_LABEL = {"ipa": "IPA", "enpr": "enPR"}
 
 
 # ---------------------------------------------------------------------------
@@ -860,60 +883,6 @@ class Report:
 _LEADING_ARTICLE_RE = re.compile(r"^(?:the|a|an)\s+")
 
 
-def _normalize_sense_text(value) -> str:
-    return re.sub(r"[\s.]+$", "", str(value).strip().lower())
-
-
-def _contains_word(haystack: str, needle: str) -> bool:
-    return re.search(r"(?<!\w)" + re.escape(needle) + r"(?!\w)", haystack) is not None
-
-
-def _sense_key_matches_gloss(gloss_part: str, sense_key: str) -> bool:
-    """Whether a translation's ``sense`` key describes one gloss part.
-
-    Translation keys are short paraphrases taken from the translation table
-    ("public house" for "A public house where ..."), so an exact prefix test
-    rejects most of them. Match on either containment direction, after dropping
-    a leading article, while keeping whole-word boundaries for the loose case.
-    """
-    key = _normalize_sense_text(sense_key)
-    if not key:
-        return True  # a keyless translation applies to any sense
-    gloss = _normalize_sense_text(gloss_part)
-    if not gloss:
-        return False
-    if gloss == key:
-        return True
-    bare = _LEADING_ARTICLE_RE.sub("", gloss)
-    if gloss.startswith(key) or bare.startswith(key):
-        return True
-    if key.startswith(gloss) or key.startswith(bare):
-        return True
-    if len(key) >= 3 and _contains_word(gloss, key):
-        return True
-    if len(gloss) >= 3 and _contains_word(key, gloss):
-        return True
-    return False
-
-
-def _sense_translations(record: dict, sense: dict, target_code: str) -> List[str]:
-    gloss_parts = [str(g) for g in (sense.get("glosses") or []) if g]
-    words: List[str] = []
-    for tr in record.get("translations") or []:
-        if not isinstance(tr, dict) or tr.get("code") != target_code:
-            continue
-        sense_key = tr.get("sense") or ""
-        if sense_key and not any(_sense_key_matches_gloss(g, sense_key) for g in gloss_parts):
-            continue
-        word = tr.get("word") or tr.get("roman") or tr.get("alt")
-        if word:
-            words.append(str(word))
-    # De-duplicate preserving order.
-    seen: Set[str] = set()
-    unique = [w for w in words if not (w in seen or seen.add(w))]
-    return unique
-
-
 def _cross_refs(record: dict, known: Set[str], limit: int = 12) -> List[str]:
     """Cross-reference words that are themselves indexed headwords (no dead links)."""
     word = str(record.get("word") or "")
@@ -931,7 +900,12 @@ def _cross_refs(record: dict, known: Set[str], limit: int = 12) -> List[str]:
     return refs
 
 
-def render_record(record: dict, args, audio: AudioPlan, known: Optional[Set[str]] = None) -> str:
+def render_record(
+    record: dict,
+    audio: AudioPlan,
+    profile: LangProfile,
+    known: Optional[Set[str]] = None,
+) -> str:
     """Render one wiktextract record as the body lines of a DSL card."""
     lines: List[str] = []
     pos = record.get("pos") or ""
@@ -947,10 +921,6 @@ def render_record(record: dict, args, audio: AudioPlan, known: Optional[Set[str]
             continue
         n += 1
         body = _tags_suffix(sense.get("tags")) + escape_dsl(" ".join(str(g) for g in glosses))
-        if args.source_lang != args.target_lang:
-            translations = _sense_translations(record, sense, args.target_lang)
-            if translations:
-                body += "  [trn]" + escape_dsl("; ".join(translations)) + "[/trn]"
         lines.append(f"\t[m{n}]{body}[/m]")
         for example in sense.get("examples") or []:
             if isinstance(example, dict):
@@ -960,8 +930,8 @@ def render_record(record: dict, args, audio: AudioPlan, known: Optional[Set[str]
             if text:
                 lines.append(f"\t[ex]{escape_dsl(str(text))}[/ex]")
 
-    forms = collect_forms(record)
-    if forms:
+    forms = collect_profile_forms(record, profile)
+    if forms and not profile.strip_forms:
         lines.append("\t[com]Forms: " + escape_dsl(", ".join(forms)) + "[/com]")
 
     refs = _cross_refs(record, known) if known else []
@@ -969,217 +939,17 @@ def render_record(record: dict, args, audio: AudioPlan, known: Optional[Set[str]
         links = ", ".join("[ref]" + escape_dsl(r) + "[/ref]" for r in refs)
         lines.append("\t[com]See also: " + links + "[/com]")
 
-    sounds = [s for s in (record.get("sounds") or []) if isinstance(s, dict)]
-    ipa = next((str(s["ipa"]) for s in sounds if s.get("ipa")), "")
-    enpr = next((str(s["enpr"]) for s in sounds if s.get("enpr")), "")
     pron_bits: List[str] = []
-    if ipa:
-        pron_bits.append(f"IPA: {escape_dsl(ipa)}")
-    if enpr:
-        pron_bits.append(f"enPR: {escape_dsl(enpr)}")
+    for field in profile.pron_fields:
+        for sound in record.get("sounds") or []:
+            if isinstance(sound, dict) and sound.get(field):
+                label = _PRON_LABEL.get(field, field.upper())
+                pron_bits.append(f"{label}: {escape_dsl(str(sound[field]))}")
+                break
     for name in audio.plan(record):
         pron_bits.append(f"[s]{escape_dsl(name)}[/s]")
     if pron_bits:
         lines.append("\t[com]" + "  ".join(pron_bits) + "[/com]")
-
-    return "\n".join(lines)
-
-
-# ---------------------------------------------------------------------------
-# Translation (-lang) article
-# ---------------------------------------------------------------------------
-# For source != target the article is built for a *target* speaker learning the
-# *source* language: source-language pronunciation, forms and examples are the
-# payload; target-language words are the answer. Source attributes are kept,
-# target attributes (transliteration, grammar) are dropped, because a native
-# speaker reads their own script and knows their own grammar.
-
-_POS_LABEL = {
-    "noun": "сущ.", "verb": "гл.", "adj": "прил.", "adv": "нареч.",
-    "pron": "мест.", "prep": "предл.", "conj": "союз", "num": "числ.",
-    "intj": "межд.", "phrase": "фраза", "particle": "частица",
-    "name": "имя", "abbrev": "сокр.", "contraction": "сокр.",
-}
-
-# Sense keys that are a MediaWiki header, not a sense description.
-_PLACEHOLDER_SENSE_KEYS = {"", "-", "translations", "translation", "see also"}
-
-
-def _translation_groups(records: Sequence[dict], target_code: str) -> List[Tuple[str, List[str]]]:
-    """Ordered ``(sense_key, target_words)`` groups, de-duplicated.
-
-    Groups are formed by the translation's own ``sense`` key (that is how the
-    Wiktionary translation table is authored). Groups whose word lists are
-    identical are merged, because a key and a gloss often describe the same
-    sense and would otherwise render twice.
-    """
-    order: List[str] = []
-    by_key: Dict[str, List[str]] = {}
-    for record in records:
-        for tr in record.get("translations") or []:
-            if not isinstance(tr, dict) or tr.get("code") != target_code:
-                continue
-            word = tr.get("word") or tr.get("alt") or tr.get("roman")
-            if not word:
-                continue
-            key = str(tr.get("sense") or "")
-            entry = str(word)
-            if key not in by_key:
-                by_key[key] = []
-                order.append(key)
-            if entry not in by_key[key]:
-                by_key[key].append(entry)
-
-    merged: List[Tuple[str, List[str]]] = []
-    seen: List[frozenset] = []
-    for key in order:
-        words = by_key[key]
-        signature = frozenset(words)
-        if signature in seen:
-            continue
-        seen.append(signature)
-        merged.append((key, words))
-    return merged
-
-
-def _sense_heading(key: str, glosses: Sequence[str]) -> str:
-    """A readable English heading for a sense group.
-
-    Prefer a gloss that the key describes; otherwise use the key itself unless
-    it is a MediaWiki placeholder (``Translations``), in which case fall back to
-    a gloss or to no heading at all.
-    """
-    key_text = key.strip()
-    usable_key = key_text.lower() not in _PLACEHOLDER_SENSE_KEYS
-    if usable_key:
-        for gloss in glosses:
-            if _sense_key_matches_gloss(gloss, key_text):
-                return gloss[0].upper() + gloss[1:] if gloss else gloss
-        return key_text[0].upper() + key_text[1:]
-    for gloss in glosses:
-        return gloss[0].upper() + gloss[1:] if gloss else gloss
-    return ""
-
-
-def collect_profile_forms(record: dict, profile: LangProfile, limit: int = 8) -> List[str]:
-    """Standard paradigm forms, compactly labelled and de-duplicated.
-
-    Register/dialect variants and raw inflection tables are dropped, so a
-    learner sees ``ran (past)`` and not ``rannest (archaic, 2nd sg.)``.
-    """
-    forms: List[str] = []
-    seen: Set[Tuple[str, Tuple[str, ...]]] = set()
-    for form in record.get("forms") or []:
-        if not isinstance(form, dict):
-            continue
-        text = form.get("form")
-        if not text:
-            continue
-        tags = tuple(str(t) for t in (form.get("tags") or []))
-        if not profile.form_qualifies(tags):
-            continue
-        key = (str(text), tags)
-        if key in seen:
-            continue
-        seen.add(key)
-        label = profile.label_tags(tags)
-        forms.append(f"{text} ({label})" if label else str(text))
-        if len(forms) >= limit:
-            break
-    return forms
-
-
-def _pronunciation(record: dict, profile: LangProfile) -> List[str]:
-    """Transcription (per profile) and audio links for one record."""
-    bits: List[str] = []
-    for sound in record.get("sounds") or []:
-        if not isinstance(sound, dict):
-            continue
-        for field in profile.pron_fields:
-            value = sound.get(field)
-            if value:
-                bits.append(escape_dsl(str(value)))
-                break
-        if bits:
-            break
-    return bits
-
-
-def _examples(record: dict, limit: int = 2, max_len: int = 160) -> List[str]:
-    out: List[str] = []
-    for sense in record.get("senses") or []:
-        if not isinstance(sense, dict):
-            continue
-        for example in sense.get("examples") or []:
-            if not isinstance(example, dict):
-                continue
-            text = str(example.get("text") or "").strip()
-            if not text or len(text) > max_len:
-                continue
-            out.append(text)
-            if len(out) >= limit:
-                return out
-    return out
-
-
-def render_translation_record(
-    record: dict,
-    args,
-    audio: AudioPlan,
-    known: Optional[Set[str]],
-    profile: LangProfile,
-) -> str:
-    """One DSL card for a bilingual (source -> target) dictionary."""
-    groups = _translation_groups([record], args.target_lang)
-    if not groups:
-        return ""
-
-    lines: List[str] = []
-    pos = record.get("pos") or ""
-    glosses = [
-        str(g)
-        for sense in record.get("senses") or []
-        if isinstance(sense, dict)
-        for g in (sense.get("glosses") or [])
-        if g
-    ]
-
-    pron = _pronunciation(record, profile)
-    for name in audio.plan(record):
-        pron.append(f"[s]{escape_dsl(name)}[/s]")
-
-    if pos:
-        label = _POS_LABEL.get(str(pos), str(pos))
-        lines.append(f"\t[p]{escape_dsl(label)}[/p]")
-
-    for index, (key, words) in enumerate(groups, 1):
-        heading = _sense_heading(key, glosses)
-        body = escape_dsl(heading) if heading else ""
-        equivalents = "  ".join(escape_dsl(w) for w in words)
-        if body:
-            lines.append(f"\t[m{index}]{body}[/m]")
-            lines.append(f"\t\t{equivalents}")
-        else:
-            lines.append(f"\t[m{index}]{equivalents}[/m]")
-
-    # Source-language extras: useful for a learner, hidden by default.
-    extras: List[str] = []
-    for example in _examples(record):
-        extras.append(f"\t[ex]{escape_dsl(example)}[/ex]")
-    forms = collect_profile_forms(record, profile)
-    if forms and not profile.strip_forms:
-        extras.append("\t[com]Forms: " + escape_dsl(", ".join(forms)) + "[/com]")
-    if known:
-        refs = _cross_refs(record, known)
-        if refs:
-            links = ", ".join("[ref]" + escape_dsl(r) + "[/ref]" for r in refs)
-            extras.append("\t[com]See also: " + links + "[/com]")
-    if pron:
-        extras.append("\t[com]" + "  ".join(pron) + "[/com]")
-    if extras:
-        lines.append("\t[*]")
-        lines.extend(extras)
-        lines.append("\t[/opt]")
 
     return "\n".join(lines)
 
@@ -1192,7 +962,6 @@ _PREVIEW_TAGS = {
     "p": ("span", {"class": "pos"}),
     "m": ("div", {"class": "sense"}),
     "ex": ("div", {"class": "example"}),
-    "trn": ("span", {"class": "trn"}),
     "com": ("div", {"class": "note"}),
     "b": ("b", {}),
     "i": ("i", {}),
@@ -1201,11 +970,28 @@ _PREVIEW_TAGS = {
 }
 
 def dsl_to_html(text: str) -> str:
-    """A small renderer for the DSL subset this tool emits (for preview only)."""
+    """Render the DSL subset this tool emits as HTML (for preview only).
+
+    Opening and closing tags are tracked together: a closing tag closes the
+    element its opening counterpart produced, so the preview nests exactly as
+    the DSL does instead of leaving every block element open.
+    """
     from html import escape as _h
 
     out: List[str] = []
+    stack: List[str] = []   # HTML element names, outermost first
     i = 0
+
+    def closing_element(name: str) -> str:
+        base = re.match(r"m\d*", name)
+        if base and base.group(0):
+            return "span"
+        if name == "*" or name == "opt":
+            return "div"
+        if name in _PREVIEW_TAGS:
+            return _PREVIEW_TAGS[name][0]
+        return ""
+
     while i < len(text):
         ch = text[i]
         if ch == "\\" and i + 1 < len(text):
@@ -1214,40 +1000,60 @@ def dsl_to_html(text: str) -> str:
             continue
         if ch == "[":
             close = text.find("]", i)
-            slash = text.find("/]", i)
-            if close != -1 and slash == close - 1 and i > 0:
-                # closing tag; the optional-zone close maps to its own element
-                if text[i + 1:slash].strip() == "opt":
-                    out.append("</div>")
-                else:
-                    out.append("</>")
+            if close == -1:
+                out.append(_h(ch))
+                i += 1
+                continue
+            inner = text[i + 1:close]
+            if inner.startswith("/"):
+                # closing tag: close its element if it is the innermost open one
+                name = inner[1:].strip()
+                element = closing_element(name)
+                if element and stack and stack[-1] == element:
+                    stack.pop()
+                    out.append(f"</{element}>")
+                elif element and element in stack:
+                    # unbalanced input: close everything above it too
+                    while stack:
+                        top = stack.pop()
+                        out.append(f"</{top}>")
+                        if top == element:
+                            break
                 i = close + 1
                 continue
-            if close != -1:
-                name = text[i + 1:close]
-                base = re.match(r"m\d*", name)
-                key = base.group(0) if base else name
-                if key.startswith("m"):
-                    out.append('<span class="sense">')
-                elif key == "*":
-                    out.append('<div class="optional"><span class="optlabel">[optional]</span> ')
-                elif key == "s":
-                    inner_end = text.find("[/s]", close + 1)
-                    if inner_end != -1:
-                        out.append('<span class="audio">&#9835; ' + _h(text[close + 1:inner_end]) + "</span>")
-                        i = inner_end + 4
-                        continue
-                elif key in _PREVIEW_TAGS:
-                    tag, attrs = _PREVIEW_TAGS[key]
-                    attr = "".join(f' {k}="{_h(v)}"' for k, v in attrs.items())
-                    out.append(f"<{tag}{attr}>")
-                i = close + 1
-                continue
+            # opening tag
+            base = re.match(r"m\d*", inner)
+            key = base.group(0) if base else inner
+            if key.startswith("m"):
+                out.append('<span class="sense">')
+                stack.append("span")
+            elif key == "*":
+                out.append('<div class="optional"><span class="optlabel">[optional]</span> ')
+                stack.append("div")
+            elif key == "s":
+                # the filename is the tag's own text
+                end = text.find("[/s]", close + 1)
+                if end != -1:
+                    out.append(
+                        '<span class="audio">&#9835; '
+                        + _h(text[close + 1:end]) + "</span>"
+                    )
+                    i = end + 4
+                    continue
+            elif key in _PREVIEW_TAGS:
+                tag, attrs = _PREVIEW_TAGS[key]
+                attr = "".join(f' {k}="{_h(v)}"' for k, v in attrs.items())
+                out.append(f"<{tag}{attr}>")
+                stack.append(tag)
+            i = close + 1
+            continue
         out.append(_h(ch))
         i += 1
-    html = "".join(out)
-    html = html.replace("</>", "")
-    return html
+
+    # close anything the input left open, so no article can swallow the next
+    while stack:
+        out.append(f"</{stack.pop()}>")
+    return "".join(out)
 
 
 def render_preview(name: str, dsl_text: str, dest_html: str) -> None:
@@ -1274,7 +1080,7 @@ def render_preview(name: str, dsl_text: str, dest_html: str) -> None:
         "<style>body{font-family:sans-serif;max-width:60rem;margin:2rem auto;padding:0 1rem}"
         "h2{border-bottom:1px solid #ccc;margin-top:2rem}.pos{font-weight:bold;color:#0a6}"
         ".sense{margin:.2em 0 .2em 1em}.example{color:#555;margin-left:2em;font-style:italic}"
-        ".note{color:#777;font-size:.9em}.trn{color:#06c}.audio{color:#a0a}"
+        ".note{color:#777;font-size:.9em}.audio{color:#a0a}"
         ".optional{border-left:3px solid #cc0;background:#ffd;padding:.4em .6em;margin:.6em 0}"
         ".optlabel{color:#880;font-size:.8em;text-transform:uppercase}</style>",
         f"<h1>{name} — preview</h1>",
@@ -1296,21 +1102,8 @@ def _language_name(record: Optional[dict], code: str) -> str:
     return code.upper()
 
 
-def _find_target_language_name(jsonl_path: str, source_code: str, target_code: str) -> Optional[str]:
-    for _, record in iter_records(jsonl_path):
-        if not record or record.get("lang_code") != source_code:
-            continue
-        for tr in record.get("translations") or []:
-            if isinstance(tr, dict) and tr.get("code") == target_code and tr.get("lang"):
-                return str(tr["lang"])
-    return None
-
-
 def build(args) -> Report:
     report = Report()
-
-    if not args.target_lang:
-        args.target_lang = args.source_lang
 
     if not args.jsonl:
         if not args.dump_date:
@@ -1378,22 +1171,12 @@ def build(args) -> Report:
     )
     selecting.done()
 
-    header_name = args.name or f"kaikki-{args.source_lang}-{args.target_lang}"
+    header_name = args.name or f"kaikki-{args.source_lang}"
 
     out_lines: List[str] = []
     header_lines: List[str] = []
 
-    target_name = args.target_lang
-    if args.target_lang != args.source_lang:
-        target_name = _find_target_language_name(jsonl_path, args.source_lang, args.target_lang) or args.target_lang
-
     profile = get_lang_profile(args.source_lang)
-    translation_mode = args.translation and args.target_lang != args.source_lang
-    if args.translation and not translation_mode:
-        print(
-            "warning: --translation needs a distinct --target-lang; ignoring it",
-            file=sys.stderr,
-        )
 
     current_word: Optional[str] = None
     current_records: List[dict] = []
@@ -1407,17 +1190,11 @@ def build(args) -> Report:
         source_lang_name = _language_name(record, args.source_lang)
         headwords = [clean_headword(current_word)]
         if args.include_inflections:
-            for form in collect_forms(record):
+            for form in collect_profile_forms(record, profile):
                 form_word = re.split(r"\s+\(", form, maxsplit=1)[0].strip()
                 if form_word and form_word != current_word:
                     headwords.append(clean_headword(form_word))
-        if translation_mode:
-            bodies = [
-                render_translation_record(r, args, audio, known, profile)
-                for r in current_records
-            ]
-        else:
-            bodies = [render_record(r, args, audio, known) for r in current_records]
+        bodies = [render_record(r, audio, profile, known) for r in current_records]
         bodies = [b for b in bodies if b]
         if not bodies:
             current_word, current_records = None, []
@@ -1461,14 +1238,12 @@ def build(args) -> Report:
 
     if not source_seen or report.cards == 0:
         raise SystemExit(
-            f"unsupported language pair: no {args.source_lang!r} headwords were found "
-            f"in this snapshot ({args.source_lang}/{args.target_lang})"
+            f"no {args.source_lang!r} headwords were found in this snapshot"
         )
 
-    contents_name = source_lang_name if args.target_lang == args.source_lang else str(target_name)
     header_lines.append(f'#NAME "{header_arg(header_name)}"')
     header_lines.append(f'#INDEX_LANGUAGE "{header_arg(source_lang_name)}"')
-    header_lines.append(f'#CONTENTS_LANGUAGE "{header_arg(contents_name)}"')
+    header_lines.append(f'#CONTENTS_LANGUAGE "{header_arg(source_lang_name)}"')
 
     about = [
         clean_headword("About this dictionary"),
@@ -1476,7 +1251,7 @@ def build(args) -> Report:
         f"\t[com]License: {WIKTIONARY_LICENSE} (attribution required, share-alike)[/com]",
         f"\t[com]Citation: {escape_dsl(WIKTEXTRACT_CITATION)}[/com]",
         f"\t[com]Snapshot dump date: {escape_dsl(args.dump_date or 'unknown')}[/com]",
-        f"\t[com]Language pair: {escape_dsl(args.source_lang)}/{escape_dsl(args.target_lang)}[/com]",
+        f"\t[com]Language: {escape_dsl(source_lang_name)} ({escape_dsl(args.source_lang)})[/com]",
         f"\t[com]Generated by scripts/kaikki-to-dsl.py; this is a derivative work.[/com]",
     ]
 
@@ -1540,10 +1315,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="kaikki-to-dsl.py",
         description="Build an importable DSL dictionary from a pinned kaikki.org "
-        "Wiktionary snapshot for a language pair.",
+        "Wiktionary snapshot for one language.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
             "Notes:\n"
+            "  This builds a monolingual explanatory dictionary: headwords and\n"
+            "  definitions are both in --source-lang.\n\n"
             "  Base forms are the only indexed headwords by default. With\n"
             "  --include-inflections a base word's inflected forms are added as\n"
             "  extra headword lines on its card; in DSL every indexed word also\n"
@@ -1557,16 +1334,10 @@ def build_parser() -> argparse.ArgumentParser:
             "  --no-audio (or --audio-per-word 0) disables audio entirely and\n"
             "  skips downloading the audio archive.\n\n"
             "  The output is <name>.dsl.dz plus <name>.dsl.dz.files.zip (or the\n"
-            "  .files/ directory with --audio-layout dir).\n\n"
-            "  --translation builds a dictionary for a speaker of --target-lang\n"
-            "  learning --source-lang: senses come from the source's translation\n"
-            "  table (grouped by its sense keys), the target words are the answer,\n"
-            "  and source pronunciation, forms and examples are tucked into the\n"
-            "  collapsible optional zone ([*]...[/opt]).\n"
+            "  .files/ directory with --audio-layout dir).\n"
         ),
     )
-    parser.add_argument("--source-lang", required=True, help="ISO code of the indexed headword language (e.g. en)")
-    parser.add_argument("--target-lang", help="ISO code of the gloss/translation language (defaults to source)")
+    parser.add_argument("--source-lang", required=True, help="ISO code of the dictionary's language (e.g. en)")
     parser.add_argument("--dump-date", help="pinned kaikki.org dump date (YYYY-MM-DD); required unless --jsonl")
     parser.add_argument("--jsonl", help="use a local wiktextract JSONL(.gz) instead of downloading")
     parser.add_argument("--audio-tar", help="use a local Wiktionary audio tar instead of downloading")
@@ -1574,16 +1345,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--audio-url", default=AUDIO_TAR_URL, help="override the audio archive URL")
     parser.add_argument("--cache-dir", default=os.path.join(os.path.expanduser("~"), ".cache", "aurelex-kaikki"))
     parser.add_argument("--out-dir", default="dist")
-    parser.add_argument("--name", help="dictionary/output base name (default kaikki-<source>-<target>)")
+    parser.add_argument("--name", help="dictionary/output base name (default kaikki-<source>)")
     parser.add_argument("--include-inflections", action="store_true", help="also index inflected forms (adds them to suggestions)")
-    parser.add_argument(
-        "--translation",
-        action="store_true",
-        help="build a learner's translation dictionary (needs a distinct "
-             "--target-lang): target-language equivalents per sense, with the "
-             "source language's pronunciation, forms and examples hidden in a "
-             "collapsible block",
-    )
     parser.add_argument("--audio-per-word", type=int, default=3, help="max audio files per headword (default 3)")
     parser.add_argument("--no-audio", action="store_true", help="do not bundle audio (and do not download the archive)")
     parser.add_argument("--audio-lang", help="prefer audio whose tags match this language/accent (e.g. US)")
@@ -1593,7 +1356,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="do not fetch audio missing from the archive from Wikimedia (tar only)",
     )
     parser.add_argument("--audio-layout", choices=["zip", "dir"], default="zip", help="how to bundle audio (default zip)")
-    parser.set_defaults(audio_downloader=None, translation=False)
+    parser.set_defaults(audio_downloader=None)
     parser.add_argument("--sample", type=int, help="emit only N headwords")
     parser.add_argument(
         "--sample-mode", choices=["first", "random"], default="first",
@@ -1610,8 +1373,6 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: Optional[Sequence[str]] = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
-    if not args.target_lang:
-        args.target_lang = args.source_lang
     report = build(args)
     print(report.summary(), file=sys.stderr)
     return 0

@@ -20,7 +20,6 @@ TOOL_PATH = os.path.join(SCRIPTS, "kaikki-to-dsl.py")
 FIXTURE = os.path.join(HERE, "fixtures", "sample-en.jsonl")
 EDGE_FIXTURE = os.path.join(HERE, "fixtures", "kaikki-edge.jsonl")
 AUDIO_LIMIT_FIXTURE = os.path.join(HERE, "fixtures", "kaikki-audio-limit.jsonl")
-TRANSLATION_FIXTURE = os.path.join(HERE, "fixtures", "kaikki-translation.jsonl")
 
 
 def load_tool():
@@ -63,7 +62,6 @@ class ConverterTests(unittest.TestCase):
         return TOOL.build_parser().parse_args(
             [
                 "--source-lang", "en",
-                "--target-lang", "ru",
                 "--jsonl", FIXTURE,
                 "--out-dir", out_dir,
                 "--no-audio",
@@ -80,19 +78,18 @@ class ConverterTests(unittest.TestCase):
     def test_default_build_base_forms_only(self):
         with tempfile.TemporaryDirectory() as tmp:
             report = TOOL.build(self.args(tmp, "--sample", "20"))
-            dz = os.path.join(tmp, "kaikki-en-ru.dsl.dz")
+            dz = os.path.join(tmp, "kaikki-en.dsl.dz")
             self.assertTrue(os.path.isfile(dz))
-            self.assertFalse(os.path.isfile(os.path.join(tmp, "kaikki-en-ru.dsl")))
+            self.assertFalse(os.path.isfile(os.path.join(tmp, "kaikki-en.dsl")))
 
             text = read_dz(dz)
-            self.assertIn('#NAME "kaikki-en-ru"', text)
+            self.assertIn('#NAME "kaikki-en"', text)
             self.assertIn('#INDEX_LANGUAGE "English"', text)
-            self.assertIn('#CONTENTS_LANGUAGE "Russian"', text)
+            self.assertIn('#CONTENTS_LANGUAGE "English"', text)
             self.assertIn("[p]verb[/p]", text)
             self.assertIn("[p]noun[/p]", text)
             self.assertIn("[m1]", text)
             self.assertIn("[ex]I run every morning.[/ex]", text)
-            self.assertIn("[trn]бегать; бежать[/trn]", text)
             self.assertIn("Forms: runs", text)
             # cross-references only to indexed headwords (no dead links)
             self.assertIn("[ref]runner[/ref]", text)
@@ -109,7 +106,7 @@ class ConverterTests(unittest.TestCase):
     def test_include_inflections(self):
         with tempfile.TemporaryDirectory() as tmp:
             TOOL.build(self.args(tmp, "--sample", "20", "--include-inflections"))
-            text = read_dz(os.path.join(tmp, "kaikki-en-ru.dsl.dz"))
+            text = read_dz(os.path.join(tmp, "kaikki-en.dsl.dz"))
             self.assertIn("ran", headword_lines(text))
 
     def test_sample_mode_random_is_deterministic(self):
@@ -117,7 +114,7 @@ class ConverterTests(unittest.TestCase):
             def build(out):
                 args = TOOL.build_parser().parse_args(
                     [
-                        "--source-lang", "en", "--target-lang", "ru",
+                        "--source-lang", "en",
                         "--jsonl", FIXTURE, "--out-dir", out,
                         "--sample", "3", "--sample-mode", "random", "--no-audio",
                     ]
@@ -127,8 +124,8 @@ class ConverterTests(unittest.TestCase):
             out1, out2 = os.path.join(tmp, "a"), os.path.join(tmp, "b")
             build(out1)
             build(out2)
-            dz1 = os.path.join(out1, "kaikki-en-ru.dsl.dz")
-            dz2 = os.path.join(out2, "kaikki-en-ru.dsl.dz")
+            dz1 = os.path.join(out1, "kaikki-en.dsl.dz")
+            dz2 = os.path.join(out2, "kaikki-en.dsl.dz")
             with open(dz1, "rb") as f1, open(dz2, "rb") as f2:
                 self.assertEqual(f1.read(), f2.read())
             heads = headword_lines(read_dz(dz1))
@@ -153,9 +150,9 @@ class ConverterTests(unittest.TestCase):
             def build(out):
                 args = TOOL.build_parser().parse_args(
                     [
-                        "--source-lang", "en", "--target-lang", "ru",
+                        "--source-lang", "en",
                         "--jsonl", FIXTURE, "--out-dir", out,
-                        "--sample", "20", "--audio-tar", tar_path,
+                        "--sample", "20", "--audio-tar", tar_path, "--no-audio-download",
                         "--audio-per-word", "1", "--audio-lang", "US",
                     ]
                 )
@@ -167,7 +164,7 @@ class ConverterTests(unittest.TestCase):
             self.assertGreaterEqual(report.audio_found, 1)
             self.assertEqual(report.missing_audio, 0)
 
-            zip1 = os.path.join(out1, "kaikki-en-ru.dsl.dz.files.zip")
+            zip1 = os.path.join(out1, "kaikki-en.dsl.dz.files.zip")
             self.assertTrue(os.path.isfile(zip1))
             import zipfile
             with zipfile.ZipFile(zip1) as zf:
@@ -176,11 +173,11 @@ class ConverterTests(unittest.TestCase):
             self.assertIn("En-us-multi.ogg", names)
             self.assertNotIn("En-uk-run.ogg", names)
 
-            dz1 = os.path.join(out1, "kaikki-en-ru.dsl.dz")
-            dz2 = os.path.join(out2, "kaikki-en-ru.dsl.dz")
+            dz1 = os.path.join(out1, "kaikki-en.dsl.dz")
+            dz2 = os.path.join(out2, "kaikki-en.dsl.dz")
             with open(dz1, "rb") as f1, open(dz2, "rb") as f2:
                 self.assertEqual(f1.read(), f2.read())
-            zip2 = os.path.join(out2, "kaikki-en-ru.dsl.dz.files.zip")
+            zip2 = os.path.join(out2, "kaikki-en.dsl.dz.files.zip")
             with open(zip1, "rb") as f1, open(zip2, "rb") as f2:
                 self.assertEqual(f1.read(), f2.read())
 
@@ -191,14 +188,14 @@ class ConverterTests(unittest.TestCase):
             args = TOOL.build_parser().parse_args(
                 [
                     "--source-lang", "en", "--jsonl", FIXTURE, "--out-dir", tmp,
-                    "--sample", "1", "--audio-tar", tar_path,
+                    "--sample", "1", "--audio-tar", tar_path, "--no-audio-download",
                     "--audio-per-word", "3", "--audio-layout", "dir", "--preview",
                 ]
             )
             TOOL.build(args)
-            self.assertTrue(os.path.isdir(os.path.join(tmp, "kaikki-en-en.dsl.dz.files")))
-            self.assertTrue(os.path.isfile(os.path.join(tmp, "kaikki-en-en.dsl.dz.files", "En-us-run.ogg")))
-            preview = os.path.join(tmp, "kaikki-en-en.preview.html")
+            self.assertTrue(os.path.isdir(os.path.join(tmp, "kaikki-en.dsl.dz.files")))
+            self.assertTrue(os.path.isfile(os.path.join(tmp, "kaikki-en.dsl.dz.files", "En-us-run.ogg")))
+            preview = os.path.join(tmp, "kaikki-en.preview.html")
             self.assertTrue(os.path.isfile(preview))
             with open(preview, encoding="utf-8") as f:
                 self.assertIn("preview", f.read())
@@ -209,8 +206,8 @@ class ConverterTests(unittest.TestCase):
             make_tar(tar_path, ["something-else.ogg"])
             args = TOOL.build_parser().parse_args(
                 [
-                    "--source-lang", "en", "--target-lang", "ru", "--jsonl", FIXTURE,
-                    "--out-dir", tmp, "--sample", "20", "--audio-tar", tar_path,
+                    "--source-lang", "en", "--jsonl", FIXTURE,
+                    "--out-dir", tmp, "--sample", "20", "--audio-tar", tar_path, "--no-audio-download",
                 ]
             )
             report = TOOL.build(args)
@@ -225,7 +222,6 @@ class EdgeCaseTests(unittest.TestCase):
         return TOOL.build_parser().parse_args(
             [
                 "--source-lang", "en",
-                "--target-lang", "ru",
                 "--jsonl", EDGE_FIXTURE,
                 "--out-dir", out_dir,
                 "--no-audio",
@@ -257,34 +253,10 @@ class EdgeCaseTests(unittest.TestCase):
         # a wav original is only present transcoded
         self.assertIn("ll-..._(eng)-x.wav.ogg", TOOL._audio_name_variants("LL-... (eng)-x.wav"))
 
-    def test_translation_sense_key_is_matched_loosely(self):
-        # a short key contained in a longer gloss ("A public house where ...")
-        self.assertTrue(TOOL._sense_key_matches_gloss(
-            "A public house where beverages may be bought.", "public house"))
-        # a key that is a superset of the gloss (wiktionary's "— see also")
-        self.assertTrue(TOOL._sense_key_matches_gloss(
-            "To mention, specify.", "to mention, specify — see also choose, elect"))
-        # a wholly unrelated key is rejected
-        self.assertFalse(TOOL._sense_key_matches_gloss(
-            "A public house where beverages may be bought.", "an unrelated sense key"))
-        # a keyless translation applies to any sense
-        self.assertTrue(TOOL._sense_key_matches_gloss("Anything at all.", ""))
-
-    def test_bilingual_translations_use_real_sense_keys(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            TOOL.build(self.args(tmp, "--sample", "20"))
-            text = read_dz(os.path.join(tmp, "kaikki-en-ru.dsl.dz"))
-            self.assertIn("[trn]паб[/trn]", text)
-            self.assertIn("[trn]сло́во[/trn]", text)
-            self.assertIn("[trn]выбира́ть[/trn]", text)
-            # the German target and the non-matching Russian sense are excluded
-            self.assertNotIn("Kneipe", text)
-            self.assertNotIn("МИМО", text)
-
     def test_ipa_comes_from_a_separate_sound_entry(self):
         with tempfile.TemporaryDirectory() as tmp:
             TOOL.build(self.args(tmp, "--sample", "20"))
-            text = read_dz(os.path.join(tmp, "kaikki-en-ru.dsl.dz"))
+            text = read_dz(os.path.join(tmp, "kaikki-en.dsl.dz"))
             self.assertIn("IPA: /pʌb/", text)
 
     def test_sample_counts_distinct_headwords(self):
@@ -296,7 +268,7 @@ class EdgeCaseTests(unittest.TestCase):
             report = TOOL.build(
                 self.args(tmp, "--sample", str(distinct), "--sample-mode", "random")
             )
-            heads = headword_lines(read_dz(os.path.join(tmp, "kaikki-en-ru.dsl.dz")))
+            heads = headword_lines(read_dz(os.path.join(tmp, "kaikki-en.dsl.dz")))
             self.assertEqual(len(heads), distinct)
             self.assertEqual(len(set(heads)), distinct)
             self.assertEqual(report.cards, distinct)
@@ -304,7 +276,7 @@ class EdgeCaseTests(unittest.TestCase):
     def test_duplicate_records_share_one_card(self):
         with tempfile.TemporaryDirectory() as tmp:
             report = TOOL.build(self.args(tmp, "--sample", "20"))
-            text = read_dz(os.path.join(tmp, "kaikki-en-ru.dsl.dz"))
+            text = read_dz(os.path.join(tmp, "kaikki-en.dsl.dz"))
             self.assertEqual(headword_lines(text).count("run"), 1)
             self.assertGreater(report.kept_records, report.cards)
 
@@ -319,8 +291,8 @@ class EdgeCaseTests(unittest.TestCase):
             ])
             args = TOOL.build_parser().parse_args(
                 [
-                    "--source-lang", "en", "--target-lang", "ru", "--jsonl", EDGE_FIXTURE,
-                    "--out-dir", tmp, "--sample", "20", "--audio-tar", tar_path,
+                    "--source-lang", "en", "--jsonl", EDGE_FIXTURE,
+                    "--out-dir", tmp, "--sample", "20", "--audio-tar", tar_path, "--no-audio-download",
                     "--audio-per-word", "2", "--no-audio-download",
                 ]
             )
@@ -328,7 +300,7 @@ class EdgeCaseTests(unittest.TestCase):
             self.assertEqual(report.audio_found, 4)
             self.assertEqual(report.missing_audio, 0)
             import zipfile
-            zip_path = os.path.join(tmp, "kaikki-en-ru.dsl.dz.files.zip")
+            zip_path = os.path.join(tmp, "kaikki-en.dsl.dz.files.zip")
             with zipfile.ZipFile(zip_path) as zf:
                 names = set(zf.namelist())
             self.assertEqual(names, {
@@ -338,7 +310,7 @@ class EdgeCaseTests(unittest.TestCase):
                 "LL-Q1860_(eng)-Yangolin-bulk_carrier.wav.ogg",
             })
             # every bundled file is referenced under exactly its bundled name
-            text = read_dz(os.path.join(tmp, "kaikki-en-ru.dsl.dz"))
+            text = read_dz(os.path.join(tmp, "kaikki-en.dsl.dz"))
             for name in names:
                 self.assertIn("[s]" + name + "[/s]", text)
 
@@ -352,7 +324,7 @@ class AudioResolutionTests(unittest.TestCase):
         args = TOOL.build_parser().parse_args(
             [
                 "--source-lang", "en", "--jsonl", AUDIO_LIMIT_FIXTURE,
-                "--out-dir", os.path.join(tmp, "out"), "--audio-tar", tar_path,
+                "--out-dir", os.path.join(tmp, "out"), "--audio-tar", tar_path, "--no-audio-download",
                 "--audio-per-word", "3", "--no-audio-download", *extra,
             ]
         )
@@ -364,7 +336,7 @@ class AudioResolutionTests(unittest.TestCase):
                 tmp,
                 ["audios/En-au-limitword.ogg", "audios/En-uk-limitword.ogg"],
             )
-            text = read_dz(os.path.join(tmp, "out", "kaikki-en-en.dsl.dz"))
+            text = read_dz(os.path.join(tmp, "out", "kaikki-en.dsl.dz"))
             self.assertIn("[s]En-au-limitword.ogg[/s]", text)
             self.assertIn("[s]En-uk-limitword.ogg[/s]", text)
             # the two absent recordings are reported, never referenced
@@ -385,7 +357,7 @@ class AudioResolutionTests(unittest.TestCase):
                     "audios/En-us-limitword.ogg",
                 ],
             )
-            text = read_dz(os.path.join(tmp, "out", "kaikki-en-en.dsl.dz"))
+            text = read_dz(os.path.join(tmp, "out", "kaikki-en.dsl.dz"))
             refs = re.findall(r"\[s\](.*?)\[/s\]", text)
             self.assertEqual(len(refs), 3)
             self.assertEqual(
@@ -422,7 +394,7 @@ class AudioResolutionTests(unittest.TestCase):
             self.assertEqual(len(calls), 2)
             self.assertTrue(all("upload.wikimedia.org" in u for u, _ in calls))
             import zipfile
-            with zipfile.ZipFile(os.path.join(tmp, "out", "kaikki-en-en.dsl.dz.files.zip")) as zf:
+            with zipfile.ZipFile(os.path.join(tmp, "out", "kaikki-en.dsl.dz.files.zip")) as zf:
                 names = set(zf.namelist())
             # the limit of three is filled from the tape and the two downloads
             self.assertEqual(names, {
@@ -447,7 +419,7 @@ class AudioResolutionTests(unittest.TestCase):
             args = TOOL.build_parser().parse_args(
                 [
                     "--source-lang", "en", "--jsonl", AUDIO_LIMIT_FIXTURE,
-                    "--out-dir", os.path.join(tmp, "out"), "--audio-tar", tar_path,
+                    "--out-dir", os.path.join(tmp, "out"), "--audio-tar", tar_path, "--no-audio-download",
                     "--audio-per-word", "3",
                 ]
             )
@@ -455,111 +427,8 @@ class AudioResolutionTests(unittest.TestCase):
             report = TOOL.build(args)
             self.assertEqual(report.audio_found, 1)
             self.assertEqual(report.missing_audio, 4)
-            text = read_dz(os.path.join(tmp, "out", "kaikki-en-en.dsl.dz"))
+            text = read_dz(os.path.join(tmp, "out", "kaikki-en.dsl.dz"))
             self.assertEqual(re.findall(r"\[s\](.*?)\[/s\]", text), ["En-au-limitword.ogg"])
-
-
-class TranslationModeTests(unittest.TestCase):
-    """The learner-oriented bilingual article (--translation)."""
-
-    def args(self, out_dir, *extra):
-        return TOOL.build_parser().parse_args(
-            [
-                "--source-lang", "en",
-                "--target-lang", "ru",
-                "--jsonl", TRANSLATION_FIXTURE,
-                "--out-dir", out_dir,
-                "--no-audio",
-                "--translation",
-                *extra,
-            ]
-        )
-
-    def text(self, tmp, *extra):
-        TOOL.build(self.args(tmp, *extra))
-        return read_dz(os.path.join(tmp, "kaikki-en-ru.dsl.dz"))
-
-    def test_equivalents_are_grouped_by_sense_key(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            text = self.text(tmp)
-            self.assertIn("[m1]", text)
-            # the two words sharing one sense key sit together
-            self.assertIn("бегать  бежать", text)
-            # a second key makes a second sense
-            self.assertIn("[m2]", text)
-            self.assertIn("течь", text)
-
-    def test_target_attributes_are_stripped(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            text = self.text(tmp)
-            # transliterations and target grammar are noise for a native reader
-            self.assertNotIn("bégatʹ", text)
-            self.assertNotIn("imperfective", text)
-            self.assertNotIn("rebjónok", text)
-            self.assertNotIn("masculine", text)
-
-    def test_source_pronunciation_and_forms_are_kept(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            text = self.text(tmp)
-            self.assertIn("/ɹʌn/", text)          # source transcription kept
-            self.assertIn("ran (past)", text)     # source form, compactly labelled
-            self.assertIn("runs (pres., 3rd sg.)", text)
-            self.assertIn("running (part., pres.)", text)
-            # register/dialect variants and table machinery are dropped
-            self.assertNotIn("runnest", text)
-            self.assertNotIn("no-table-tags", text)
-            self.assertNotIn("glossary", text)
-            self.assertNotIn("childer", text)
-            self.assertNotIn("childs", text)
-            self.assertIn("children (pl.)", text)
-
-    def test_extras_are_in_a_collapsible_zone(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            text = self.text(tmp)
-            self.assertIn("[*]", text)
-            self.assertIn("[/opt]", text)
-            # the optional zone opens after the senses and closes at the end
-            self.assertLess(text.index("[m1]"), text.index("[*]"))
-            self.assertLess(text.index("[*]"), text.index("[/opt]"))
-
-    def test_placeholder_sense_key_never_becomes_a_heading(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            text = self.text(tmp)
-            # the "translations" artifact key must not render as a heading
-            self.assertNotIn("Translations\n", text)
-            self.assertNotIn(">Translations<", text)
-
-    def test_record_without_target_translations_is_dropped(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            text = self.text(tmp)
-            self.assertNotIn("untranslated", text)
-
-    def test_translation_needs_a_distinct_target(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            args = TOOL.build_parser().parse_args(
-                [
-                    "--source-lang", "en", "--target-lang", "en",
-                    "--jsonl", TRANSLATION_FIXTURE, "--out-dir", tmp,
-                    "--no-audio", "--translation",
-                ]
-            )
-            TOOL.build(args)  # must not raise; falls back to monolingual
-            text = read_dz(os.path.join(tmp, "kaikki-en-en.dsl.dz"))
-            self.assertNotIn("[*]", text)
-
-    def test_monolingual_article_is_unchanged(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            TOOL.build(TOOL.build_parser().parse_args(
-                [
-                    "--source-lang", "en", "--target-lang", "en",
-                    "--jsonl", TRANSLATION_FIXTURE, "--out-dir", tmp,
-                    "--no-audio",
-                ]
-            ))
-            text = read_dz(os.path.join(tmp, "kaikki-en-en.dsl.dz"))
-            self.assertIn("To move swiftly on foot.", text)
-            self.assertNotIn("бегать", text)
-            self.assertNotIn("[*]", text)
 
 
 class LangProfileTests(unittest.TestCase):
@@ -609,6 +478,54 @@ class LangProfileTests(unittest.TestCase):
             TOOL.collect_profile_forms(record, TOOL.get_lang_profile("ja")),
             ["f (past)"],
         )
+
+
+class PreviewRenderTests(unittest.TestCase):
+    """The preview must nest exactly as the DSL does (balanced tags)."""
+
+    def assert_balanced(self, html):
+        for tag in ("div", "span"):
+            opened = len(re.findall(rf"<{tag}\b", html))
+            closed = len(re.findall(rf"</{tag}>", html))
+            self.assertEqual(
+                opened, closed,
+                f"unbalanced <{tag}> in {html!r}: {opened} open, {closed} closed",
+            )
+
+    def test_every_emitted_tag_is_closed(self):
+        text = (
+            "\t[p]сущ.[/p]\n"
+            "\t[m1]A gloss[/m1]\n"
+            "\t\tбар  паб\n"
+            "\t[*]\n"
+            "\t[ex]An example.[/ex]\n"
+            "\t[com]Forms: pubs (pl.)[/com]\n"
+            "\t[/opt]"
+        )
+        self.assert_balanced(TOOL.dsl_to_html(text))
+
+    def test_sibling_blocks_do_not_nest(self):
+        html = TOOL.dsl_to_html("\t[com]one[/com]\n\t[com]two[/com]")
+        self.assert_balanced(html)
+        # two notes, neither inside the other
+        self.assertEqual(html.count("<div"), 2)
+        self.assertEqual(html.count("</div>"), 2)
+        self.assertLess(html.index("</div>"), html.index(">two<"))
+
+    def test_article_bodies_render_independently(self):
+        head = TOOL.dsl_to_html("\t[p]сущ.[/p]")
+        body = TOOL.dsl_to_html("\t[m1]gloss[/m1]")
+        self.assertNotIn("<div", head)
+        self.assertNotIn("<div", body)
+
+    def test_audio_tag_does_not_swallow_following_text(self):
+        html = TOOL.dsl_to_html("[s]x.ogg[/s] after")
+        self.assertIn("x.ogg</span>", html)
+        self.assertIn("after", html)
+
+    def test_unbalanced_input_is_still_closed(self):
+        html = TOOL.dsl_to_html("\t[*]\n\t[com]left open")
+        self.assert_balanced(html)
 
 
 class ProgressTests(unittest.TestCase):
