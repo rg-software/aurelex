@@ -77,6 +77,11 @@ AUDIO_EXTENSIONS = (
 
 OGG_EXTENSIONS = {".ogg", ".oga", ".opus"}
 
+# How far a random sample spreads: keep one headword per this many distinct
+# candidates, so a sample of N covers N * this many words without reading the
+# whole snapshot.
+_SAMPLE_STRIDE_TARGET = 200
+
 
 # ---------------------------------------------------------------------------
 # Per-language profiles
@@ -444,9 +449,10 @@ def _fetch_dump_date(timeout: int = 60) -> Optional[str]:
 class Progress:
     """A coarse, cheap stderr progress indicator.
 
-    ``tick`` is called once per item; it only formats and writes every
-    ``every`` items, so the cost per item is a single comparison. ``done``
-    finishes the line so later messages start on a fresh one.
+    ``tick`` is called once per item and only formats and writes on a batch
+    boundary (or the first item), so the cost per item is a single comparison.
+    ``done`` always reports the final count, so a short run still shows that the
+    stage ran rather than staying silent.
     """
 
     def __init__(self, label: str, every: int = 200000, total: Optional[int] = None) -> None:
@@ -459,7 +465,7 @@ class Progress:
 
     def tick(self, increment: int = 1) -> None:
         self.count += increment
-        if self.count % self.every == 0:
+        if self.count == increment or self.count % self.every == 0:
             self._write()
 
     def _write(self, final: bool = False) -> None:
@@ -476,8 +482,7 @@ class Progress:
         self._shown = True
 
     def done(self) -> None:
-        if self._shown:
-            self._write(final=True)
+        self._write(final=True)
 
 
 # ---------------------------------------------------------------------------
@@ -550,36 +555,87 @@ def select_headwords(
 ) -> Set[str]:
     """The set of headwords that will be indexed (drives cross-reference safety).
 
-    Without ``--sample`` this is every candidate headword. With ``--sample`` it
-    is the emitted subset: the first N *distinct* candidates (``first``) or a
-    deterministic random subset chosen by the smallest sha256 keys, so the same
-    snapshot and options always select the same words. A word that has several
-    records (for example ``run`` as a verb and a noun) is one headword, not
-    several, so duplicates never consume a sample slot.
+    This is the *full-build* selection: every candidate headword. It reads the
+    whole snapshot, so it is only used when no sample is requested.
     """
-    if not sample:
-        return set(iter_candidate_headwords(path, source_code, progress))
-    if sample_mode == "first":
-        selected: Set[str] = set()
-        for word in iter_candidate_headwords(path, source_code, progress):
-            selected.add(word)
-            if len(selected) >= sample:
-                break
-        return selected
-    heap: List[Tuple[int, str]] = []  # max-heap of (-key, word), size <= sample
-    seen: Set[str] = set()
-    for word in iter_candidate_headwords(path, source_code, progress):
-        if word in seen:
+    return set(iter_candidate_headwords(path, source_code, progress))
+
+
+def sample_headwords(
+    path: str,
+    source_code: str,
+    sample: int,
+    sample_mode: str,
+    progress: Optional["Progress"] = None,
+    report: Optional["Report"] = None,
+) -> List[dict]:
+    """Pick a small sample of records in a single bounded pass.
+
+    Returns the source-language records of up to ``sample`` *distinct* lexical,
+    non-inflected headwords, with all the records of each, in file order.
+    Unlike the full build this never reads the whole snapshot, so a sample of a
+    few hundred words finishes in seconds.
+
+    ``first`` takes the first candidates encountered. ``random`` reads a bounded
+    window of ``sample * _SAMPLE_STRIDE_TARGET`` distinct candidates and keeps
+    the ``sample`` with the smallest sha256 keys, which spreads the sample over
+    thousands of headwords without scanning the file. A file smaller than the
+    window simply contributes all the candidates it has. Both modes are
+    deterministic for a given snapshot and options.
+    """
+    window = sample * _SAMPLE_STRIDE_TARGET if sample_mode == "random" else sample
+    heap: List[Tuple[int, str]] = []  # max-heap of (-hash, word), size <= sample
+    chosen: Set[str] = set()
+    records_by_word: Dict[str, List[dict]] = {}
+    order: List[str] = []               # words in first-seen order
+    take_all = sample_mode != "random"
+    distinct_seen = 0
+
+    for _, record in iter_records(path, progress):
+        if record is None:
+            if report is not None:
+                report.skipped_malformed += 1
             continue
+        if record.get("lang_code") != source_code:
+            if report is not None:
+                report.out_of_pair += 1
+            continue
+        if not is_lexical(record) or is_inflected(record):
+            if report is not None:
+                if is_inflected(record):
+                    report.skipped_inflected += 1
+                else:
+                    report.skipped_nonlexical += 1
+            continue
+        word = str(record.get("word"))
+        if word in records_by_word:
+            if word in chosen:
+                records_by_word[word].append(record)
+            continue
+
+        if take_all:
+            if len(chosen) >= sample:
+                break
+            chosen.add(word)
+            order.append(word)
+            records_by_word[word] = [record]
+            continue
+
+        records_by_word[word] = [record]
+        order.append(word)
         key = int.from_bytes(hashlib.sha256(word.encode("utf-8")).digest()[:8], "big")
         if len(heap) < sample:
             heapq.heappush(heap, (-key, word))
-            seen.add(word)
-        elif (key, word) < (-heap[0][0], heap[0][1]):
-            evicted = heapq.heapreplace(heap, (-key, word))
-            seen.discard(evicted[1])
-            seen.add(word)
-    return {word for _, word in heap}
+            chosen.add(word)
+        else:
+            evicted = heapq.heapreplace(heap, (-key, word))[1]
+            chosen.discard(evicted)
+            chosen.add(word)
+        distinct_seen += 1
+        if distinct_seen >= window:
+            break
+
+    return [r for word in order if word in chosen for r in records_by_word[word]]
 
 
 # How the transcription fields of a profile are labelled in an article.
@@ -1241,15 +1297,6 @@ def build(args) -> Report:
     )
     audio.download_dir = download_dir
 
-    # First pass: the set of indexed headwords, so cross-references never point
-    # at words this dictionary does not contain. For a sample this is the
-    # emitted subset (deterministic), keeping refs live in sampled output too.
-    selecting = Progress("selecting headwords")
-    known = select_headwords(
-        jsonl_path, args.source_lang, args.sample, args.sample_mode, selecting
-    )
-    selecting.done()
-
     header_name = args.name or f"kaikki-{args.source_lang}"
 
     out_lines: List[str] = []
@@ -1260,62 +1307,85 @@ def build(args) -> Report:
     current_word: Optional[str] = None
     current_records: List[dict] = []
     source_lang_name = args.source_lang.upper()
+    # Words already emitted. In sample mode this is the only set cross-references
+    # may point at, so a sample never links to a headword it does not contain.
+    known: Set[str] = set()
 
-    def flush() -> None:
-        nonlocal current_word, current_records, source_lang_name
-        if not current_records:
+    def emit(word: str, records: List[dict]) -> None:
+        nonlocal source_lang_name
+        if not records:
             return
-        record = current_records[0]
+        record = records[0]
         source_lang_name = _language_name(record, args.source_lang)
-        headwords = [clean_headword(current_word)]
+        headwords = [clean_headword(word)]
         if args.include_inflections:
             for form in collect_profile_forms(record, profile):
                 form_word = re.split(r"\s+\(", form, maxsplit=1)[0].strip()
-                if form_word and form_word != current_word:
+                if form_word and form_word != word:
                     headwords.append(clean_headword(form_word))
-        bodies = [render_record(r, audio, profile, known) for r in current_records]
+        bodies = [render_record(r, audio, profile, known) for r in records]
         bodies = [b for b in bodies if b]
         if not bodies:
-            current_word, current_records = None, []
             return
         out_lines.append("\n".join(headwords))
         out_lines.extend(bodies)
         report.cards += 1
-        report.kept_records += len(current_records)
+        report.kept_records += len(records)
+        known.add(word)
+
+    def flush() -> None:
+        nonlocal current_word, current_records
+        if not current_records:
+            return
+        emit(str(current_word), current_records)
         current_word, current_records = None, []
 
-    source_seen = False
-    rendering = Progress("rendering")
-    for _, record in iter_records(jsonl_path, rendering):
-        if record is None:
-            report.skipped_malformed += 1
-            continue
-        if record.get("lang_code") != args.source_lang:
-            report.out_of_pair += 1
-            continue
-        source_seen = True
-        if not is_lexical(record):
-            if not is_inflected(record):
-                report.skipped_nonlexical += 1
-            else:
-                report.skipped_inflected += 1
-            continue
-        if is_inflected(record):
-            report.skipped_inflected += 1
-            continue
-        word = str(record.get("word"))
-        if args.sample and word not in known:
-            continue
-        if word != current_word:
-            flush()
-            if args.sample and report.cards >= args.sample:
-                break
-            current_word = word
-        current_records.append(record)
-    flush()
-    rendering.done()
+    if args.sample:
+        # Single bounded pass over the snapshot: the whole-file selection the
+        # full build needs would make a sample take minutes, and a sample only
+        # has to show article shape.
+        sampling = Progress("sampling headwords")
+        sampled = sample_headwords(
+            jsonl_path, args.source_lang, args.sample, args.sample_mode, sampling, report
+        )
+        sampling.done()
+        for record in sampled:
+            word = str(record.get("word"))
+            if word != current_word:
+                flush()
+                current_word = word
+            current_records.append(record)
+        flush()
+    else:
+        # Full build: the indexed-headword set drives cross-reference safety, so
+        # every reference points at a word the dictionary actually contains.
+        selecting = Progress("selecting headwords")
+        known = select_headwords(jsonl_path, args.source_lang, None, args.sample_mode, selecting)
+        selecting.done()
 
-    if not source_seen or report.cards == 0:
+        rendering = Progress("rendering")
+        for _, record in iter_records(jsonl_path, rendering):
+            if record is None:
+                report.skipped_malformed += 1
+                continue
+            if record.get("lang_code") != args.source_lang:
+                report.out_of_pair += 1
+                continue
+            if not is_lexical(record) or is_inflected(record):
+                if is_inflected(record):
+                    report.skipped_inflected += 1
+                else:
+                    report.skipped_nonlexical += 1
+                continue
+            word = str(record.get("word"))
+            if word != current_word:
+                flush()
+                current_word = word
+            current_records.append(record)
+        flush()
+        rendering.done()
+
+    if report.cards == 0:
         raise SystemExit(
             f"no {args.source_lang!r} headwords were found in this snapshot"
         )
@@ -1440,7 +1510,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--sample-mode", choices=["first", "random"], default="first",
         help="how --sample picks headwords: first N in file order, or a "
-        "deterministic random subset across the whole snapshot (default first)",
+        "deterministic spread over thousands of headwords (default first). "
+        "Both read only a bounded part of the snapshot, so a sample is quick",
     )
     parser.add_argument("--preview", action="store_true", help="also write a human-readable HTML preview")
     parser.add_argument("--force-download", action="store_true", help="re-download cached files")

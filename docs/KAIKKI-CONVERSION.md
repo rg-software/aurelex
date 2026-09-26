@@ -33,9 +33,18 @@ python scripts\kaikki-to-dsl.py `
 
 Then open `dist/kaikki-en.preview.html`.
 
-For a sample that spreads across the whole snapshot (more representative of
+For a sample that spreads across thousands of headwords (more representative of
 schema variety) rather than the first N words, add `--sample-mode random`; the
 selection is deterministic, so re-running yields the same sample.
+
+Both sample modes read only a **bounded part** of the snapshot — `random` scans
+a window of `N × 200` distinct headwords and keeps the `N` with the smallest
+hash keys — so a sample of a few hundred words takes seconds rather than the
+minutes a whole-snapshot scan needs. Two consequences: the sample is drawn from
+a window, not from the entire file, and cross-references are limited to words
+already emitted, so a sample may omit a `See also` link that a full build would
+include. Neither matters for reviewing article shape, which is the point of
+`--sample`.
 
 A tiny committed sample (built from the synthetic test fixture, not real data)
 lives in `examples/kaikki-sample/` — open its `kaikki-sample-en.preview.html` to
@@ -79,8 +88,8 @@ phone (same folder) and add that folder in Aurelex.
 | `--audio-lang TAG` | Prefer audio whose tags match this language/accent (e.g. `US`). |
 | `--no-audio-download` | Do not fetch audio that the archive lacks from Wikimedia (archive only). |
 | `--audio-layout {zip,dir}` | Bundle audio as one archive (default) or a loose directory. |
-| `--sample N` | Emit exactly N headwords (a word with several records is one headword); good for reviewing output first. |
-| `--sample-mode {first,random}` | How `--sample` picks headwords: first N in file order, or a reproducible random spread across the snapshot (default `first`). |
+| `--sample N` | Emit exactly N headwords (a word with several records is one headword); reads only a bounded part of the snapshot, so it is quick. |
+| `--sample-mode {first,random}` | How `--sample` picks headwords: first N in file order, or a reproducible spread over thousands of headwords (default `first`). |
 | `--preview` | Also write `<name>.preview.html`. |
 | `--force-download` | Re-download cached files. |
 | `--timeout SECONDS` | Network timeout (default 60). |
@@ -244,6 +253,7 @@ register/dialect variants and table machinery dropped), the optional zone
 holding the extras, profile-driven form labels, audio bundling and name
 normalisation (zip and directory), missing-audio omission and slot refill, the
 Wikimedia download fallback and its cache, the progress indicator, preview tag
-balance, determinism, the sample headword count,
+balance, determinism, the bounded sample selection (both modes, and that a small
+file is not over-strided), the sample headword count,
 and the no-headwords report. No test touches the network: every audio build
 either passes `--no-audio-download` or injects a stub downloader.

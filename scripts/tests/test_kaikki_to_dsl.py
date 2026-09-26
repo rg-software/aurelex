@@ -92,8 +92,9 @@ class ConverterTests(unittest.TestCase):
             self.assertIn("[m1]", text)
             self.assertIn("[ex]I run every morning.[/ex]", text)
             self.assertIn("Forms: runs", text)
-            # cross-references only to indexed headwords (no dead links)
-            self.assertIn("[ref]runner[/ref]", text)
+            # in a sample, cross-references are limited to words already
+            # emitted, so "runner" (which comes after "run") is not linked
+            self.assertNotIn("[ref]runner[/ref]", text)
             self.assertNotIn("[ref]sprint[/ref]", text)
             # base-form policy: the inflected entry "ran" is not a headword
             self.assertNotIn("ran", headword_lines(text))
@@ -673,6 +674,48 @@ class SpoilerTests(unittest.TestCase):
         )
         TOOL.build(args)
         return read_dz(os.path.join(tmp, "kaikki-en.dsl.dz"))
+
+
+class SampleSelectionTests(unittest.TestCase):
+    """--sample reads a bounded part of the snapshot and still yields N words."""
+
+    def test_first_mode_takes_the_first_distinct_words(self):
+        records = TOOL.sample_headwords(FIXTURE, "en", 3, "first")
+        words = []
+        for r in records:
+            w = str(r["word"])
+            if w not in words:
+                words.append(w)
+        self.assertEqual(words, ["run", "runner", "escape"])
+
+    def test_random_mode_fills_the_request(self):
+        records = TOOL.sample_headwords(FIXTURE, "en", 3, "random")
+        words = []
+        for r in records:
+            w = str(r["word"])
+            if w not in words:
+                words.append(w)
+        self.assertEqual(len(words), 3)
+        self.assertEqual(len(set(words)), 3)
+
+    def test_small_file_is_not_over_strided(self):
+        # a fixture with fewer candidates than the random window must still
+        # yield every distinct word it has
+        all_words = set(TOOL.iter_candidate_headwords(FIXTURE, "en"))
+        records = TOOL.sample_headwords(FIXTURE, "en", 99, "random")
+        got = {str(r["word"]) for r in records}
+        self.assertEqual(got, all_words)
+
+    def test_random_selection_is_deterministic(self):
+        a = [str(r["word"]) for r in TOOL.sample_headwords(FIXTURE, "en", 3, "random")]
+        b = [str(r["word"]) for r in TOOL.sample_headwords(FIXTURE, "en", 3, "random")]
+        self.assertEqual(a, b)
+
+    def test_multi_record_words_are_sampled_once(self):
+        records = TOOL.sample_headwords(FIXTURE, "en", 3, "first")
+        run_records = [r for r in records if str(r["word"]) == "run"]
+        # run has a verb and a noun record; both come with the one headword
+        self.assertEqual(len(run_records), 2)
 
 
 class ProgressTests(unittest.TestCase):
