@@ -88,10 +88,11 @@ OGG_EXTENSIONS = {".ogg", ".oga", ".opus"}
 class LangProfile:
     """How to read one language's records into an article.
 
-    ``form_tags``       - tag vocabulary that is part of the standard paradigm;
-                          a form qualifies only if every one of its tags is in
-                          here (empty = accept any tagged form).
-    ``form_noise_tags`` - tags that mean "raw inflection table", never a form.
+    ``form_tags``       - the grammatical tag vocabulary of this language. A
+                          form is labelled from these and, when ``strict_tags``
+                          is set, must consist only of them.
+    ``form_noise_tags`` - tags that mean "raw inflection table" or a low-value
+                          register/dialect variant; such forms are never shown.
     ``pron_fields``     - ``sounds[]`` keys that carry a transcription, shown in
                           this order and each at most once.
     ``short_tags``      - compact labels for the common grammatical tags.
@@ -108,6 +109,7 @@ class LangProfile:
         short_tags: Dict[str, str],
         has_audio: bool = True,
         strip_forms: bool = False,
+        strict_tags: bool = False,
     ) -> None:
         self.code = code
         self.form_tags = form_tags
@@ -116,40 +118,64 @@ class LangProfile:
         self.short_tags = short_tags
         self.has_audio = has_audio
         self.strip_forms = strip_forms
+        self.strict_tags = strict_tags
 
     def form_qualifies(self, tags: Sequence[str]) -> bool:
+        """Whether a form belongs in the article's forms line.
+
+        The default is a blocklist: keep a tagged form unless it carries a
+        register/dialect or table-machinery tag. That keeps ordinary paradigms
+        (``children (plural)``, ``ran (past)``) whose tag sets include
+        bookkeeping tags the profile does not enumerate. ``strict_tags`` flips
+        it to a whitelist for languages whose tag space is noisy enough to
+        need one.
+        """
         tags = [str(t) for t in tags]
-        if any(t in self.form_noise_tags for t in tags):
-            return False
         if not tags:
             return False
-        if not self.form_tags:
-            return True
-        return all(t in self.form_tags for t in tags)
+        if any(t in self.form_noise_tags for t in tags):
+            return False
+        if self.strict_tags:
+            return all(t in self.form_tags for t in tags)
+        return True
 
     def label_tags(self, tags: Sequence[str]) -> str:
         """Compact human label for a tag set.
 
         A person tag already implies its number (``third-person`` + ``singular``
-        is just "3rd sg."), so the number is dropped when a person is present.
+        is just "3rd sg."), so the number is dropped when a person is present,
+        and tags outside the language's vocabulary are dropped as noise.
         """
         tags = [str(t) for t in tags]
         if "third-person" in tags or "first-person" in tags or "second-person" in tags:
             tags = [t for t in tags if t not in ("singular", "plural")]
+        if self.form_tags:
+            tags = [t for t in tags if t in self.form_tags]
         parts = [self.short_tags.get(t, t.replace("-", " ")) for t in tags]
         return ", ".join(parts)
 
 
-# English form tags: the core paradigm only. Register/dialect tags
-# (archaic, obsolete, dialectal, nonstandard, humorous, ...) are deliberately
-# absent, so those forms are dropped rather than shown as equal variants.
+# Register and dialect tags: a learner wants the standard paradigm, not every
+# archaic, dialectal or eye-dialect variant Wiktionary records beside it.
+_REGISTER_TAGS = {
+    "archaic", "obsolete", "dialectal", "nonstandard", "rare", "humorous",
+    "slang", "informal", "colloquial", "vulgar", "offensive", "derogatory",
+    "pronunciation-spelling", "alternative", "misspelling", "Internet",
+    "proscribed", "dated", "poetic", "literary", "regional",
+}
+_TABLE_TAGS = {"table-tags", "inflection-template", "no-table-tags"}
+_FORM_NOISE = _TABLE_TAGS | _REGISTER_TAGS
+
+# English grammatical vocabulary, used to label forms and to strip bookkeeping
+# tags (canonical, etc.) from a label.
 _EN_FORM_TAGS = {
     "plural", "singular", "past", "present", "participle",
     "third-person", "first-person", "second-person",
     "comparative", "superlative", "imperative", "infinitive",
     "positive", "attributive", "predicative", "not-comparable",
+    "definite", "indefinite",
 }
-_EN_NOISE = {"table-tags", "inflection-template", "no-table-tags"}
+_EN_NOISE = _FORM_NOISE
 _EN_SHORT_TAGS = {
     "third-person": "3rd sg.", "first-person": "1st", "second-person": "2nd",
     "singular": "sg.", "plural": "pl.",
@@ -167,7 +193,7 @@ _DE_FORM_TAGS = {
     "present", "past", "participle", "first-person", "second-person",
     "third-person", "imperative",
 }
-_DE_NOISE = {"table-tags", "inflection-template", "no-table-tags"}
+_DE_NOISE = _FORM_NOISE
 _DE_SHORT_TAGS = {
     "singular": "sg.", "plural": "pl.", "nominative": "nom.",
     "genitive": "gen.", "dative": "dat.", "accusative": "acc.",
@@ -177,9 +203,10 @@ _DE_SHORT_TAGS = {
 }
 
 # Japanese has no IPA in this source; readings arrive as forms (`romanization`,
-# `hiragana`, ...) so the pronunciation slot is filled from those instead.
-_JA_FORM_TAGS: Set[str] = set()  # accept any non-noise tagged form
-_JA_NOISE = {"table-tags", "inflection-template", "no-table-tags"}
+# `hiragana`, ...) so the pronunciation slot is filled from those instead. Its
+# tag space is broad, so it stays on the permissive default policy.
+_JA_FORM_TAGS: Set[str] = set()
+_JA_NOISE = _FORM_NOISE
 _JA_SHORT_TAGS = {
     "romanization": "romaji", "hiragana": "hiragana", "katakana": "katakana",
     "kanji": "kanji", "kyūjitai": "kyūjitai", "stem": "stem",
@@ -220,7 +247,8 @@ def collect_profile_forms(record: dict, profile: LangProfile, limit: int = 8) ->
     """Standard paradigm forms, compactly labelled and de-duplicated.
 
     Register/dialect variants and raw inflection tables are dropped, so an
-    article shows ``ran (past)`` and not ``rannest (archaic, 2nd sg.)``.
+    article shows ``ran (past)`` and ``children (pl.)`` but not
+    ``runnest (archaic, 2nd sg.)`` or ``childer (dialectal, pl.)``.
     """
     forms: List[str] = []
     seen: Set[Tuple[str, Tuple[str, ...]]] = set()
@@ -900,44 +928,90 @@ def _cross_refs(record: dict, known: Set[str], limit: int = 12) -> List[str]:
     return refs
 
 
+def _group_senses(
+    senses: Sequence[dict], profile: LangProfile
+) -> List[Tuple[str, List[str]]]:
+    """Group rendered senses by a shared leading gloss fragment.
+
+    Consecutive senses whose first fragment is identical (ignoring the context
+    tags, which differ per sense) become one group: the fragment is rendered
+    once as the group heading and the remaining fragments as its children, each
+    with its own tag prefix. This is how Wiktionary presents a parent gloss with
+    numbered sub-senses, and it keeps a table of near-identical senses such as
+    ``monkey``'s figurative uses from reprinting the parent once per sense.
+
+    Returns ``(heading, children)`` pairs; the heading is "" for a sense whose
+    gloss is a single fragment.
+    """
+    groups: List[Tuple[str, List[str]]] = []
+    for sense in senses:
+        if not isinstance(sense, dict):
+            continue
+        parts = [str(g) for g in (sense.get("glosses") or []) if g]
+        if not parts:
+            continue
+        prefix = _tags_suffix(sense.get("tags"))
+        if len(parts) == 1:
+            groups.append(("", [prefix + parts[0]]))
+            continue
+        parent, children = parts[0], parts[1:]
+        child = prefix + children[0]
+        rest = children[1:]
+        if groups and groups[-1][0] == parent:
+            groups[-1][1].append(child)
+            groups[-1][1].extend(rest)
+        else:
+            groups.append((parent, [child, *rest]))
+    return groups
+
+
 def render_record(
     record: dict,
     audio: AudioPlan,
     profile: LangProfile,
     known: Optional[Set[str]] = None,
 ) -> str:
-    """Render one wiktextract record as the body lines of a DSL card."""
+    """Render one wiktextract record as the body lines of a DSL card.
+
+    Senses occupy the visible article; examples, grammatical forms, cross
+    references and pronunciation go into the DSL optional zone (``[*]…[/opt]``),
+    which the reader expands on demand.
+    """
     lines: List[str] = []
     pos = record.get("pos") or ""
     if pos:
         lines.append(f"\t[p]{escape_dsl(pos)}[/p]")
 
     n = 0
+    for heading, children in _group_senses(record.get("senses") or [], profile):
+        n += 1
+        if heading:
+            lines.append(f"\t[m{n}]{escape_dsl(heading)}[/m]")
+            for child in children:
+                lines.append(f"\t\t[com]{escape_dsl(child)}[/com]")
+        else:
+            lines.append(f"\t[m{n}]{escape_dsl(children[0])}[/m]")
+
+    extras: List[str] = []
     for sense in record.get("senses") or []:
         if not isinstance(sense, dict):
             continue
-        glosses = [g for g in (sense.get("glosses") or []) if g]
-        if not glosses:
-            continue
-        n += 1
-        body = _tags_suffix(sense.get("tags")) + escape_dsl(" ".join(str(g) for g in glosses))
-        lines.append(f"\t[m{n}]{body}[/m]")
         for example in sense.get("examples") or []:
             if isinstance(example, dict):
                 text = example.get("text") or example.get("english") or ""
             else:
                 text = str(example)
             if text:
-                lines.append(f"\t[ex]{escape_dsl(str(text))}[/ex]")
+                extras.append(f"\t[ex]{escape_dsl(str(text))}[/ex]")
 
     forms = collect_profile_forms(record, profile)
     if forms and not profile.strip_forms:
-        lines.append("\t[com]Forms: " + escape_dsl(", ".join(forms)) + "[/com]")
+        extras.append("\t[com]Forms: " + escape_dsl(", ".join(forms)) + "[/com]")
 
     refs = _cross_refs(record, known) if known else []
     if refs:
         links = ", ".join("[ref]" + escape_dsl(r) + "[/ref]" for r in refs)
-        lines.append("\t[com]See also: " + links + "[/com]")
+        extras.append("\t[com]See also: " + links + "[/com]")
 
     pron_bits: List[str] = []
     for field in profile.pron_fields:
@@ -949,7 +1023,12 @@ def render_record(
     for name in audio.plan(record):
         pron_bits.append(f"[s]{escape_dsl(name)}[/s]")
     if pron_bits:
-        lines.append("\t[com]" + "  ".join(pron_bits) + "[/com]")
+        extras.append("\t[com]" + "  ".join(pron_bits) + "[/com]")
+
+    if extras:
+        lines.append("\t[*]")
+        lines.extend(extras)
+        lines.append("\t[/opt]")
 
     return "\n".join(lines)
 

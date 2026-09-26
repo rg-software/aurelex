@@ -7,6 +7,7 @@ Run with:  python -m unittest discover -s scripts/tests
 import gzip
 import importlib.util
 import io
+import json
 import os
 import re
 import sys
@@ -526,6 +527,152 @@ class PreviewRenderTests(unittest.TestCase):
     def test_unbalanced_input_is_still_closed(self):
         html = TOOL.dsl_to_html("\t[*]\n\t[com]left open")
         self.assert_balanced(html)
+
+
+class SenseGroupingTests(unittest.TestCase):
+    """A shared parent gloss is rendered once, with sub-senses beneath it."""
+
+    EN = None
+
+    def setUp(self):
+        self.EN = TOOL.get_lang_profile("en")
+
+    def test_children_share_one_heading(self):
+        senses = [
+            {"glosses": ["A number of places in the US:", "One in Merced County."]},
+            {"glosses": ["A number of places in the US:", "One in Bates County."]},
+            {"glosses": ["A number of places in the US:", "One in Jefferson County."]},
+        ]
+        groups = TOOL._group_senses(senses, self.EN)
+        self.assertEqual(len(groups), 1)
+        heading, children = groups[0]
+        self.assertEqual(heading, "A number of places in the US:")
+        self.assertEqual(children, [
+            "One in Merced County.", "One in Bates County.", "One in Jefferson County.",
+        ])
+
+    def test_single_fragment_sense_has_no_heading(self):
+        groups = TOOL._group_senses([{"glosses": ["A penis."]}], self.EN)
+        self.assertEqual(groups, [("", ["A penis."])])
+
+    def test_non_adjacent_parents_are_separate_groups(self):
+        senses = [
+            {"glosses": ["Parent:", "First child."]},
+            {"glosses": ["Other."]},
+            {"glosses": ["Parent:", "Second child."]},
+        ]
+        groups = TOOL._group_senses(senses, self.EN)
+        self.assertEqual(len(groups), 3)
+
+    def test_context_tags_land_on_the_child_not_the_heading(self):
+        # a lone tag-bearing sense keeps its own tag prefix
+        groups = TOOL._group_senses(
+            [{"glosses": ["The Dutch government."], "tags": ["metonymically"]}],
+            self.EN,
+        )
+        self.assertEqual(groups[0][1][0], "(metonymically) The Dutch government.")
+
+    def test_shared_parent_with_different_tags_merges(self):
+        # monkey's figurative senses share a parent but each carries tags; the
+        # parent must be printed once and the tags kept on the children
+        senses = [
+            {"glosses": ["A human considered to resemble monkeys, including:",
+                         "A naughty person."], "tags": ["figuratively", "informal"]},
+            {"glosses": ["A human considered to resemble monkeys, including:",
+                         "Synonym of idiot."], "tags": ["derogatory", "figuratively"]},
+            {"glosses": ["A human considered to resemble monkeys, including:",
+                         "Synonym of puppet."], "tags": ["derogatory", "slang"]},
+        ]
+        groups = TOOL._group_senses(senses, self.EN)
+        self.assertEqual(len(groups), 1)
+        heading, children = groups[0]
+        self.assertEqual(heading, "A human considered to resemble monkeys, including:")
+        self.assertEqual(children, [
+            "(figuratively, informal) A naughty person.",
+            "(derogatory, figuratively) Synonym of idiot.",
+            "(derogatory, slang) Synonym of puppet.",
+        ])
+
+    def test_rendered_article_shows_the_parent_once(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "senses.jsonl")
+            records = [
+                {"word": "place", "lang": "English", "lang_code": "en", "pos": "name",
+                 "senses": [
+                     {"glosses": ["A number of places in the US:", "One in Merced."]},
+                     {"glosses": ["A number of places in the US:", "One in Bates."]},
+                     {"glosses": ["A number of places in the US:", "One in Jefferson."]},
+                 ]},
+            ]
+            with open(path, "w", encoding="utf-8") as f:
+                for r in records:
+                    f.write(json.dumps(r) + "\n")
+            args = TOOL.build_parser().parse_args(
+                ["--source-lang", "en", "--jsonl", path, "--out-dir", tmp, "--no-audio"]
+            )
+            TOOL.build(args)
+            text = read_dz(os.path.join(tmp, "kaikki-en.dsl.dz"))
+            self.assertEqual(text.count("A number of places in the US:"), 1)
+            self.assertIn("One in Merced.", text)
+            self.assertIn("One in Bates.", text)
+
+
+class FormPolicyTests(unittest.TestCase):
+    """Standard paradigms are kept; register/dialect variants are dropped."""
+
+    def setUp(self):
+        self.EN = TOOL.get_lang_profile("en")
+
+    def test_ordinary_paradigm_is_kept(self):
+        for tags in (["past"], ["plural"], ["present", "singular", "third-person"],
+                     ["comparative"], ["participle", "past"]):
+            self.assertTrue(self.EN.form_qualifies(tags), tags)
+
+    def test_bookkeeping_tags_do_not_disqualify(self):
+        # "canonical" and similar are not grammatical, so they must not drop a form
+        self.assertTrue(self.EN.form_qualifies(["plural", "canonical"]))
+
+    def test_register_and_dialect_variants_are_dropped(self):
+        for tags in (["archaic", "past"], ["nonstandard", "plural"],
+                     ["dialectal", "plural"], ["obsolete"], ["pronunciation-spelling"]):
+            self.assertFalse(self.EN.form_qualifies(tags), tags)
+
+    def test_table_machinery_is_dropped(self):
+        self.assertFalse(self.EN.form_qualifies(["table-tags"]))
+        self.assertFalse(self.EN.form_qualifies(["inflection-template"]))
+        self.assertFalse(self.EN.form_qualifies([]))
+
+    def test_labels_are_compact_and_drop_bookkeeping(self):
+        self.assertEqual(self.EN.label_tags(("past",)), "past")
+        self.assertEqual(self.EN.label_tags(("plural", "canonical")), "pl.")
+        self.assertEqual(
+            self.EN.label_tags(("present", "singular", "third-person")),
+            "pres., 3rd sg.",
+        )
+
+
+class SpoilerTests(unittest.TestCase):
+    """Examples, forms, refs and pronunciation live in the optional zone."""
+
+    def test_extras_are_hidden_and_senses_are_not(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            text = self._build(tmp)
+            self.assertIn("[*]", text)
+            self.assertIn("[/opt]", text)
+            # the sense text is outside the optional zone
+            self.assertLess(text.index("To move swiftly on foot."), text.index("[*]"))
+            for extra in ("Forms:", "See also:", "[ex]", "IPA:"):
+                self.assertGreater(text.index(extra), text.index("[*]"), extra)
+
+    def _build(self, tmp):
+        args = TOOL.build_parser().parse_args(
+            [
+                "--source-lang", "en", "--jsonl", FIXTURE, "--out-dir", tmp,
+                "--no-audio",
+            ]
+        )
+        TOOL.build(args)
+        return read_dz(os.path.join(tmp, "kaikki-en.dsl.dz"))
 
 
 class ProgressTests(unittest.TestCase):

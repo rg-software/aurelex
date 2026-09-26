@@ -100,6 +100,33 @@ list — there is no hidden-alias concept — so enabling this adds inflected fo
 to suggestions as well. Leave it off for clean suggestions; enable it when
 direct lookup of inflected forms matters more.
 
+## Article shape
+
+A card shows the word's parts of speech and its numbered senses; everything
+else — examples, grammatical forms, cross-references and pronunciation — sits in
+the DSL collapsible optional zone (`[*]…[/opt]`), so a lookup shows definitions
+first and the reader expands the rest on demand.
+
+wiktextract splits a Wiktionary definition on `:` into a shared parent phrase
+plus the specific part. Those are rendered as one heading with the sub-senses
+beneath it, which stops a table of near-identical senses from reprinting the
+parent once per sense:
+
+```
+run
+    [p]verb[/p]
+    [m1]To move swiftly.[/m1]
+        [com](intransitive) To move forward quickly upon two feet…[/com]
+        [com](transitive) To cover (a course or a distance) by running.[/com]
+        …
+    [m2](metonymically) …
+```
+
+Each sub-sense keeps its own register/context tag, so `monkey`'s seven
+figurative uses share one heading but remain individually labelled
+`(figuratively, informal)`, `(derogatory)` and so on. A sense whose gloss is a
+single fragment is a plain numbered entry with no children.
+
 ## Forms and pronunciations
 
 The `Forms:` line shows only the **standard paradigm**, compactly labelled:
@@ -109,12 +136,15 @@ Wiktionary records many more forms — archaic inflected tables (`runnest`,
 `childer`) and raw inflection-table machinery — none of which belongs in a
 learner-facing forms line.
 
-What counts as a standard form, and how each tag is abbreviated, is
-**per-language** and lives in the `LANG_PROFILES` table in the script rather
-than in the renderer: adding a language is a data change, not a code change.
-`en`, `de` and `ja` are populated as examples. German forms keep case
-(`dative`, `genitive`), Japanese keeps its own tag vocabulary and has no IPA,
-and any language without a profile falls back to a permissive default and warns.
+The policy is a **blocklist**: a tagged form is kept unless it carries a
+register/dialect tag (`archaic`, `obsolete`, `dialectal`, `nonstandard`,
+`rare`, `slang`, …) or table machinery. Bookkeeping tags Wiktionary adds
+(`canonical`, and the like) therefore do not silently drop an otherwise ordinary
+form. What the tags mean, and how each is abbreviated, is **per-language** and
+lives in the `LANG_PROFILES` table in the script rather than in the renderer:
+adding a language is a data change, not a code change. `en`, `de` and `ja` are
+populated as examples, and any language without a profile falls back to a
+permissive default and warns.
 
 Pronunciation is likewise driven by the profile: each `sounds[]` field that
 carries a transcription (for English, `ipa` then `enpr`) is shown once, as
@@ -208,9 +238,12 @@ looser shapes: audio names that differ in case/underscores/percent-encoding from
 the archive, and words that carry several records), and
 `scripts/tests/fixtures/kaikki-audio-limit.jsonl` (a word whose recordings are
 mostly absent from the archive). They cover the base-form policy, the
-inflections flag, DSL escaping, IPA rendering, profile-driven form filtering and
-labels, audio bundling and name normalisation (zip and directory), missing-audio
-omission and slot refill, the Wikimedia download fallback and its cache, the
-progress indicator, preview tag balance, determinism, the sample headword count,
+inflections flag, DSL escaping, IPA rendering, sense grouping (a shared parent
+rendered once with per-child tags), the form policy (paradigms kept,
+register/dialect variants and table machinery dropped), the optional zone
+holding the extras, profile-driven form labels, audio bundling and name
+normalisation (zip and directory), missing-audio omission and slot refill, the
+Wikimedia download fallback and its cache, the progress indicator, preview tag
+balance, determinism, the sample headword count,
 and the no-headwords report. No test touches the network: every audio build
 either passes `--no-audio-download` or injects a stub downloader.
