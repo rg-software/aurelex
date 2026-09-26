@@ -257,6 +257,11 @@ jobs:
           Write-Host "release AAB: $($aab.FullName) ($([math]::Round($aab.Length/1MB,1)) MB)"
           "APK_PATH=$($apk.FullName)" >> $env:GITHUB_OUTPUT
           "AAB_PATH=$($aab.FullName)" >> $env:GITHUB_OUTPUT
+          # Workspace-relative, forward-slash paths for the Play upload action:
+          # its file matcher runs on Node and cannot resolve an absolute Windows
+          # (backslash) path (it reports "no release file matching <path>").
+          $rel = { param($p) $p.Substring($env:GITHUB_WORKSPACE.Length).TrimStart('\').Replace('\','/') }
+          "AAB_REL=& $rel $aab.FullName" >> $env:GITHUB_OUTPUT
 
       - name: Upload release artifacts
         uses: actions/upload-artifact@v4
@@ -285,6 +290,6 @@ jobs:
         with:
           serviceAccountJsonPlainText: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
           packageName: org.aurelex.pocket.dictionary
-          releaseFiles: ${{ steps.artifacts.outputs.AAB_PATH }}
+          releaseFiles: ${{ steps.artifacts.outputs.AAB_REL }}
           track: internal
           status: completed
