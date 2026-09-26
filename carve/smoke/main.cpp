@@ -128,8 +128,17 @@ int main( int argc, char ** argv )
     const bool hasZone  = optHtml.find( "class=\"dsl_opt\"" ) != std::string::npos;
     const bool hasExpander = optHtml.find( "gdExpandOptPart(" ) != std::string::npos;
     const bool hasSection  = optHtml.find( "gdarticlebody" ) != std::string::npos;
-    std::printf( "gd_lookup(\"sun\") -> %d bytes [dict %d] OPT_ZONE=%s OPT_EXPANDER=%s\n",
-                 sz, dslDzIdx, hasZone ? "OK" : "FAIL", hasExpander ? "OK" : "FAIL" );
+    // The header must NOT carry the always-expand override. When
+    // alwaysExpandOptionalParts is left at its upstream default (true),
+    // makeHtmlHeader injects this block and the optional text renders expanded
+    // with the expander icon hidden — the markup assertions above then pass
+    // while the control is dead on screen (the bug this change fixes).
+    const bool hasOverride =
+        optHtml.find( "Expand optional parts css" ) != std::string::npos;
+    std::printf( "gd_lookup(\"sun\") -> %d bytes [dict %d] OPT_ZONE=%s OPT_EXPANDER=%s "
+                 "OPT_OVERRIDE=%s\n",
+                 sz, dslDzIdx, hasZone ? "OK" : "FAIL", hasExpander ? "OK" : "FAIL",
+                 hasOverride ? "FAIL" : "OK" );
     // A headword with no hidden zone must not gain an expander (the control is
     // per-article, not per-dictionary).
     std::vector< char > plain( 1 << 20 );
@@ -137,7 +146,7 @@ int main( int argc, char ** argv )
     const std::string plainHtml( plain.data(), plainSz > 0 ? plainSz : 0 );
     const bool plainClean = plainSz > 0 && plainHtml.find( "gdExpandOptPart(" ) == std::string::npos;
     std::printf( "OPT_NO_ZONE=%s\n", plainClean ? "OK" : "FAIL" );
-    optPartsOk = hasSection && hasZone && hasExpander && plainClean;
+    optPartsOk = hasSection && hasZone && hasExpander && !hasOverride && plainClean;
   }
 
   // ---- groups smoke (multi-group-management) ----

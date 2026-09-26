@@ -8,6 +8,7 @@
 - [x] 2.1 Add a smoke assertion in `carve/smoke/main.cpp` that a lookup of the hidden-zone headword yields HTML containing `class="dsl_opt"` and `gdExpandOptPart(`, printed in the existing `NAME=OK|FAIL` style
 - [x] 2.2 Add the matching `grep` gate to `.github/workflows/engine-smoke.yml` so a future upstream bump that stops emitting the expander fails CI instead of silently shipping a dead control (design D1/D2 depend on this markup staying put)
 - [x] 2.3 Run the host smoke build locally (`-DAURELEX_BUILD_SMOKE=ON`) and confirm the new assertion passes
+- [x] 2.4 Set `cfg.preferences.alwaysExpandOptionalParts = false` in the boundary (`carve/gd_boundary.cc`, next to `displayStyle`) — the upstream default `true` makes `makeHtmlHeader` inject `.dsl_opt{display:inline}` + `.hidden_expand_opt{display:none}`, which showed the optional text and hid the expander, so the control the article emits was present but dead on screen (design D6). Extend the `carve/smoke/main.cpp` assertion with `OPT_OVERRIDE=FAIL` when that block is present, so the markup-only guard cannot pass this state again
 
 ## 3. Article-side toggle script
 
@@ -25,12 +26,12 @@
 
 ## 5. On-device verification
 
-- [ ] 5.1 With a hidden-zone dictionary imported, confirm the expander renders as a visible icon (not a broken image) at first render, with the zone collapsed
-- [ ] 5.2 Tap it: the hidden content appears in place and the control switches to the collapsed icon
-- [ ] 5.3 Tap again: the content hides again
+- [x] 5.1 With a hidden-zone dictionary imported, confirm the expander renders as a visible icon (not a broken image) at first render, with the zone collapsed
+- [x] 5.2 Tap it: the hidden content appears in place and the control switches to the collapsed icon
+- [x] 5.3 Tap again: the content hides again
 - [ ] 5.4 Confirm a back/forward re-render resets the reveal to collapsed — the behavior pinned by the "Re-rendering the article restores the collapsed state" scenario — and confirm a revealed zone SURVIVES the zoom and dark-mode toggles (those run in-place JS against the live document, not a re-render, per the design's risk note)
 - [ ] 5.5 Tap a link inside revealed content and confirm it performs an in-app lookup (no WebView navigation away, no `preventDefault` conflict with the QML click probe at `app/main.qml:2502`)
-- [ ] 5.6 Confirm a headword whose entry has no hidden zone shows no control and renders unchanged
+- [x] 5.6 Confirm a headword whose entry has no hidden zone shows no control and renders unchanged
 - [ ] 5.7 Check the control stays legible in both light and dark mode under Dark Reader; if it is recolored, add it to the Dark Reader ignore list rather than disabling Dark Reader
 
 ## 6. Documentation

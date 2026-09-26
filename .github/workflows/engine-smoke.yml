@@ -163,6 +163,11 @@ jobs:
           # upstream bump that stops emitting it would ship a dead control.
           printf '%s' "$out" | grep -q "OPT_ZONE=OK OPT_EXPANDER=OK" \
             || { echo "SMOKE FAILED: DSL optional-parts expander markup missing"; exit 1; }
+          # ...and the header must NOT carry engine's always-expand override,
+          # which shows the optional text and hides the expander (the markup
+          # above would still match, so this gate is what catches that state).
+          printf '%s' "$out" | grep -q "OPT_OVERRIDE=OK" \
+            || { echo "SMOKE FAILED: alwaysExpandOptionalParts override present in header"; exit 1; }
           printf '%s' "$out" | grep -q "OPT_NO_ZONE=OK" \
             || { echo "SMOKE FAILED: expander emitted for an article with no hidden zone"; exit 1; }
           echo "SMOKE OK"

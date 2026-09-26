@@ -64,6 +64,12 @@ The bundled `article-style.css:569` sizes the icon at `width: 16px` — desktop-
 
 `app/main.qml:2502-2518` installs a capture-phase click listener that calls `preventDefault()` only for `[data-action]`/`[data-w]` matches and for `/gdau/`+`/gdlookup/` hrefs. The expander is an `<img>` with an inline `onclick`, no `data-*` attribute and no ancestor `<a>`, so the probe records an empty href, prevents nothing, and lets the inline handler run in the bubble phase. Nothing to change there — worth a regression check rather than a code change.
 
+### D6. Turn off the engine's "always expand optional parts" preference
+
+`Config::Preferences::alwaysExpandOptionalParts` defaults to `true` (`engine/src/config.cc:148`) and every `ArticleMaker` call passes it straight through (`engine/src/article_maker.cc:337,357,368`). With it on, `makeHtmlHeader` injects `.dsl_opt { display: inline }` + `.hidden_expand_opt { display: none }` (`engine/src/article_maker.cc:104-113`): the optional text renders expanded and the expander icon is hidden — the control is present in the markup, so a markup-only assertion passes, while on screen it is invisible and unreachable. The boundary sets it to `false` beside the existing `displayStyle` preference (`carve/gd_boundary.cc:357`), so `article-style.css`'s `.dsl_opt { display: none }` wins and the 16px expander stays visible for the injected handler to drive. The smoke assertion guards the override block's absence (`OPT_OVERRIDE`), not just the expander's presence.
+
+*Alternative — strip the injected `<style>` block in `rewriteArticleUrls`.* Rejected: that block is a symptom, and the preference is the actual switch; string-stripping engine output is exactly what the `stripScripts`/dark-mode removals already do for cases with no configuration equivalent. This one has one.
+
 ## Risks / Trade-offs
 
 - **Icon appearance under Dark Reader** → the article runs `DarkReader.enable()` (`app/EngineController.cpp:1188`), which can recolor the swapped-in SVG. Cosmetic at worst; verify the control stays legible in both themes and, if it does not, restrict the Dark Reader ignore list to the control rather than disabling it globally.

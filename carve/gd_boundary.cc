@@ -355,6 +355,15 @@ int gd_init( const char * config_dir, const char * index_dir )
   // (article_maker only emits article-style-darkmode.css for displayStyle
   // "modern"); darkreader.js is emitted for any style when dark mode is on.
   g_state->cfg.preferences.displayStyle = QStringLiteral( "modern" );
+  // DSL `[*]...[/opt]` zones stay collapsed behind the engine's expander
+  // (dsl-optional-parts-toggle). Upstream defaults this to true, and
+  // makeHtmlHeader then injects `.dsl_opt{display:inline}` +
+  // `.hidden_expand_opt{display:none}`, which shows the optional text and hides
+  // the expander icon — the control the article emits is present in the markup
+  // but dead on screen. Keep it false so article-style.css's
+  // `.dsl_opt{display:none}` wins and the 16px expander stays visible;
+  // assets/scripts/gd-article-controls.js supplies the toggle handler.
+  g_state->cfg.preferences.alwaysExpandOptionalParts = false;
   // FTS is re-enabled on Android (full-text-search change): every v1 dict
   // (mdx/dsl/stardict) is full-text searchable by default. Upstream enables
   // this from cfg.preferences.fts in mainwindow.cc; the boundary must do the
