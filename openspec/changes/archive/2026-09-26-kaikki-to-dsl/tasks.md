@@ -58,6 +58,6 @@
 
 - [x] 8.1 Add a small self-contained fixture (a dozen synthetic JSONL records) and a script/test that builds a DSL dictionary and asserts the rendered tags, base-form policy, and flag behaviour
 - [x] 8.2 Run the sample build against a real pinned snapshot and review the preview article shape
-- [ ] 8.3 Verify the produced `.dsl.dz` plus its resource archive (or resource directory) imports and resolves audio through the app's existing folder import (on-device)
+- [x] 8.3 Verify the produced `.dsl.dz` plus its resource archive (or resource directory) imports and resolves audio through the app's existing folder import (on-device)
 - [x] 8.4 Document usage, options, storage expectations, and the CC BY-SA derivative-work note in `docs/`
 - [x] 8.5 Run `openspec validate kaikki-to-dsl` and resolve any findings

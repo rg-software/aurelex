@@ -1,7 +1,7 @@
 ## 1. Release workflow: tag-only publish gate
 
 - [x] 1.1 Extend the tag-derivation step in `.github/workflows/release-qt.yml` so a well-formed `^v([0-9]+)\.([0-9]+)\.([0-9]+)$` tag with every component `< 100` sets a positive publish gate (e.g. `AURELEX_PUBLISH=1`); any other ref leaves it unset.
-- [ ] 1.2 Verify a non-release ref (manual `workflow_dispatch` and a branch push) produces a build with no publish gate and no store publish.
+- [x] 1.2 Verify a non-release ref (manual `workflow_dispatch` and a branch push) produces a build with no publish gate and no store publish.
 
 ## 2. Play publish step
 
@@ -21,5 +21,5 @@
 
 ## 5. Verification
 
-- [ ] 5.1 Dry-run the publish path against a throwaway tag on a fork/test Play listing (or `workflow_dispatch` with the gate forced), confirming the AAB reaches the internal track and the release still carries both artifacts.
-- [ ] 5.2 Confirm the real next `vX.Y.Z` tag publishes automatically with no manual Play Console step.
+- [x] 5.1 Dry-run the publish path against a throwaway tag on a fork/test Play listing (or `workflow_dispatch` with the gate forced), confirming the AAB reaches the internal track and the release still carries both artifacts.
+- [x] 5.2 Confirm the real next `vX.Y.Z` tag publishes automatically with no manual Play Console step.
