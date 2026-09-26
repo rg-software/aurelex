@@ -14,7 +14,10 @@ DSL dictionaries hide content authors marked as optional — the `[*]…[/opt]` 
 <!-- Capabilities being introduced. Use kebab-case for path segments you introduce
      (e.g. user-auth or identity/user-auth) that follow the project's existing
      spec organization. Each creates specs/<capability-path>/spec.md. -->
-(none)
+- `sample-dictionaries`: the generated example DSL dictionaries guarantee
+  coverage of the DSL optional/hidden zone, so the hidden-content toggle is
+  testable against the committed fixtures instead of only against a
+  hand-built dictionary.
 
 ### Modified Capabilities
 <!-- Existing capabilities whose REQUIREMENTS are changing (not just implementation).
@@ -33,6 +36,8 @@ DSL dictionaries hide content authors marked as optional — the `[*]…[/opt]` 
   - `app/android/assets/scripts/` — new article-side script.
   - `app/android/assets/icons/expand_opt.svg` + `collapse_opt.svg` — already bundled; now actually referenced by the article page.
   - `carve/gd_boundary.cc` — unchanged; confirms the engine's default (collapsed, no auto-expand) is what we want.
+  - `scripts/make-example-dicts.py` — the generated fixtures gain a hidden-zone
+    entry, and the committed `.dsl` / `.dsl.dz` files are regenerated.
 - Affected APIs: none. No `gd_*` boundary function is added or changed.
 - Affected dependencies: none. No new engine source, no patch, no upstream bump.
 - Upstream fidelity: `engine/` stays byte-for-byte at the pinned tag.

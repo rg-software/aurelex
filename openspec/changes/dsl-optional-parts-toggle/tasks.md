@@ -1,6 +1,6 @@
 ## 1. Test fixture — a DSL entry with a hidden zone
 
-- [ ] 1.1 Add a headword entry that uses the DSL optional/hidden zone (`[*]…[/opt]`) to `scripts/make-example-dicts.py` so the generated `examples/dictionaries/aurelex-*.dsl` fixtures cover it, and regenerate the committed `.dsl` / `.dsl.dz` files
+- [ ] 1.1 Add a headword entry that uses the DSL optional/hidden zone (`[*]…[/opt]`) to `scripts/make-example-dicts.py` so the generated `examples/dictionaries/aurelex-*.dsl` fixtures cover it, and regenerate the committed `.dsl` / `.dsl.dz` files (satisfies the `sample-dictionaries` "Example dictionaries cover DSL optional content" requirement)
 - [ ] 1.2 Confirm the generated entry is picked up by the existing smoke flow (the `aurelex-basic.dsl.dz` + nested `aurelex-lingvo.dsl` fixtures the `engine smoke` workflow stages) and that the new headword does not disturb the existing `smoke` / `book` assertions
 
 ## 2. Engine-markup regression guard
