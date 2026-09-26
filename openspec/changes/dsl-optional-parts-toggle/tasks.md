@@ -1,13 +1,13 @@
 ## 1. Test fixture — a DSL entry with a hidden zone
 
 - [x] 1.1 Add a headword entry that uses the DSL optional/hidden zone (`[*]…[/opt]`) to `scripts/make-example-dicts.py` so the generated `examples/dictionaries/aurelex-*.dsl` fixtures cover it, and regenerate the committed `.dsl` / `.dsl.dz` files (satisfies the `sample-dictionaries` "Example dictionaries cover DSL optional content" requirement)
-- [ ] 1.2 Confirm the generated entry is picked up by the existing smoke flow (the `aurelex-basic.dsl.dz` + nested `aurelex-lingvo.dsl` fixtures the `engine smoke` workflow stages) and that the new headword does not disturb the existing `smoke` / `book` assertions
+- [x] 1.2 Confirm the generated entry is picked up by the existing smoke flow (the `aurelex-basic.dsl.dz` + nested `aurelex-lingvo.dsl` fixtures the `engine smoke` workflow stages) and that the new headword does not disturb the existing `smoke` / `book` assertions
 
 ## 2. Engine-markup regression guard
 
 - [x] 2.1 Add a smoke assertion in `carve/smoke/main.cpp` that a lookup of the hidden-zone headword yields HTML containing `class="dsl_opt"` and `gdExpandOptPart(`, printed in the existing `NAME=OK|FAIL` style
 - [x] 2.2 Add the matching `grep` gate to `.github/workflows/engine-smoke.yml` so a future upstream bump that stops emitting the expander fails CI instead of silently shipping a dead control (design D1/D2 depend on this markup staying put)
-- [ ] 2.3 Run the host smoke build locally (`-DAURELEX_BUILD_SMOKE=ON`) and confirm the new assertion passes
+- [x] 2.3 Run the host smoke build locally (`-DAURELEX_BUILD_SMOKE=ON`) and confirm the new assertion passes
 
 ## 3. Article-side toggle script
 
