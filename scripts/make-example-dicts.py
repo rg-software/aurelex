@@ -10,7 +10,7 @@ Produces into a target directory (default: examples/dictionaries):
                              "RA" random-access extra field, so the engine's
                              dictzip reader can seek; plain gzip would not load)
 
-The "sun" headword in aurelex-basic carries a `[*]...[/opt]` hidden zone, so
+The "sun" headword in aurelex-basic carries a `[*]...[/*]` hidden zone, so
 the generated fixtures always cover the optional-parts expander (see the
 `sample-dictionaries` spec) without hand-editing a dictionary.
 
@@ -46,7 +46,7 @@ water
 sun
 \t[m1]the star that gives Earth light and warmth[/m]
 \t[m2]the Sun is a star[/m]
-\t[*]Extra: its light takes about 8 minutes to reach Earth.[/opt]
+\t[*]Extra: its light takes about 8 minutes to reach Earth.[/*]
 \t[ref]light[/ref]
 """
 

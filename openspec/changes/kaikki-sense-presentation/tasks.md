@@ -9,7 +9,8 @@
 - [x] 2.1 Add the tag→icon table (countable→`local_drink`, uncountable→`water_drop`, initialism/abbreviation/acronym, obsolete/dated/archaic) and drop those tags from the noise drop set; keep alt-of/alternative/form-of in the structural drop set (no marker for an alternative-form sense)
 - [x] 2.2 Emit a sense's mapped icons inline (`[s]gd_tag_<name>.svg[/s]`), in tag order, de-duplicated by icon; keep at most one abbreviated text tag from the first unmapped, non-noise tag; order the sense as bullet · icons · text tag · gloss
 - [x] 2.3 Prefix each leaf sense with a literal bullet (U+2022); do not bullet a sense that heads sub-senses
-- [x] 2.4 Keep the already-implemented per-sense optional example zone as the layout of record, and confirm it matches the new spec (one example per sense, no empty zone, `See also` as the single card-level zone)
+- [x] 2.4 Keep the per-sense optional example zone as the layout of record (one example per sense, no empty zone, `See also` as the single card-level zone)
+- [x] 2.4a Close every optional zone with the reader-recognised `[/*]` (`[/opt]` matches no opening tag and left later senses inside the zone)
 - [x] 2.5 Link the headword a form-of/alt-of sense names inside its gloss as a `[ref]`, guarded by the known-headword set, so `swop` links `swap`
 - [x] 2.6 Drop the "Initialism of"/"Abbreviation of"/"Acronym of" wording an iconised relation already carries, keeping the rest of the gloss (which is linked)
 - [x] 2.7 Drop the redundant `IPA:` label from the primary transcription; keep the label for a secondary notation (enPR)
@@ -42,6 +43,7 @@
 - [x] 6.6 Unit-test that an iconised relation's wording is dropped (and a non-iconised relation's wording is kept), and that the primary transcription is unlabelled while a secondary notation keeps its label
 - [x] 6.7 Unit-test that a sample excludes another language's record even when its raw line carries a nested source-language marker, and that a one-record card hoists its transcription above the part of speech
 - [x] 6.8 Unit-test that audio rides the transcription line (and stands alone without one), and that a blank line separates only consecutive parts of speech (not before the first or a hoisted transcription)
+- [x] 6.9 Unit-test optional-zone nesting: no sense sits inside a zone, every `[*]` is closed by `[/*]`, and `[/opt]` is never emitted
 
 ## 7. Docs and committed example
 

@@ -220,6 +220,21 @@ card's cross-reference list.
 *Alternative rejected:* keeping the "alternative of" icon (D3) — it restates what
 the gloss already says and adds a second marker where a link is the useful thing.
 
+### D11a. An optional zone closes with [/*], not [/opt]
+
+The DSL reader nests nodes by tag name and silently drops a closing tag with no
+matching opening tag (dsl_details.cc:747-765: `closeTag` scans the open stack
+for the name; no hit and the whole block is skipped, only warning at `:786`).
+`[*]` opens a node named `*`, and the reader's own supported-tag regex
+(`dsl.cc:1332`) is `\[(|/)(p|trn|ex|com|\*|t|br|m[0-9]?)\]` — `opt` is not
+in it and no `opt` opening tag exists, so `[/opt]` closed nothing. Every
+following sense therefore nested inside the `[*]` span and collapsed with it.
+The correct closer is `[/*]` (name `*`, matching the opening tag).
+
+*Why it read as a layout bug:* with a single card-level zone (the previous
+design) the unclosed span simply ran to the end of the card, so the defect was
+invisible. Per-sense zones made it visible: a later sense sat inside an earlier
+sense's zone. This also affected the committed `aurelex-basic` smoke fixture.
 ### D12. A card with one record hoists its transcription too
 
 Transcription hoisting keyed on `len(records) > 1`, so a one-record card placed

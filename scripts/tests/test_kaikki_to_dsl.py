@@ -560,7 +560,7 @@ class PreviewRenderTests(unittest.TestCase):
             "\t[*]\n"
             "\t[ex]An example.[/ex]\n"
             "\t[com]Forms: pubs (pl.)[/com]\n"
-            "\t[/opt]"
+            "\t[/*]"
         )
         self.assert_balanced(TOOL.dsl_to_html(text))
 
@@ -1123,18 +1123,18 @@ class CardLayoutTests(unittest.TestCase):
         text = TOOL.render_card([record], self._Audio(), self.EN, set())
         # one zone per sense with an example, each opened right after its gloss
         self.assertEqual(text.count("[*]"), 2)
-        self.assertEqual(text.count("[/opt]"), 2)
-        self.assertRegex(
+        self.assertEqual(text.count("[/*]"), 2)
+        self.assertIn(
+            "\t[m1]\u2022 To toil.[/m]\n\t[*]\n\t[ex]I work hard.[/ex]\n\t[/*]",
             text,
-            r"\[m1\]\u2022 To toil\.\[/m\]\n\t\[\*\]\n\t\[ex\]I work hard\.\[/ex\]\n\t\[/opt\]",
         )
-        self.assertRegex(
+        self.assertIn(
+            "\t[m1]\u2022 To function.[/m]\n\t[*]\n\t[ex]It does not work.[/ex]\n\t[/*]",
             text,
-            r"\[m1\]\u2022 To function\.\[/m\]\n\t\[\*\]\n\t\[ex\]It does not work\.\[/ex\]\n\t\[/opt\]",
         )
 
     def test_a_sense_without_examples_gets_no_zone(self):
-        # no empty [*]…[/opt] is emitted for a gloss that has nothing to hide
+        # no empty [*]…[/*] is emitted for a gloss that has nothing to hide
         record = {
             "word": "work", "pos": "verb",
             "senses": [{"glosses": ["To toil."]}],
@@ -1168,6 +1168,44 @@ class CardLayoutTests(unittest.TestCase):
         self.assertEqual(text.count("See also:"), 1)
         self.assertIn("[ref]sprint[/ref]", text)
         self.assertIn("[ref]flow[/ref]", text)
+
+    def test_a_later_sense_is_not_inside_an_earlier_zone(self):
+        # the engine nests by tag name; [/*] must actually close [*], or every
+        # following sense ends up inside the hidden span and collapses with it
+        record = {
+            "word": "swop", "pos": "noun",
+            "senses": [
+                {"glosses": ["Alternative spelling of swap."],
+                 "examples": [{"text": "A straight swop."}]},
+                {"glosses": ["A fusion of dance styles."]},
+            ],
+        }
+        text = TOOL.render_card([record], self._Audio(), self.EN, set())
+        lines = [ln.strip() for ln in text.split("\n")]
+        depth = 0
+        for ln in lines:
+            if ln == "[*]":
+                depth += 1
+            elif ln == "[/*]":
+                depth -= 1
+                self.assertGreaterEqual(depth, 0)
+            elif ln.startswith("[m1]"):
+                self.assertEqual(depth, 0, f"sense inside an optional zone: {ln}")
+        self.assertEqual(depth, 0)
+
+    def test_every_optional_zone_is_closed_with_a_known_tag(self):
+        # engine-supported closers are the tag set in dsl.cc's strip regex;
+        # [/opt] is not one and the parser silently ignores it
+        record = {
+            "word": "work", "pos": "verb",
+            "senses": [
+                {"glosses": ["To toil."], "examples": [{"text": "I work hard."}]},
+                {"glosses": ["To function."], "examples": [{"text": "It works."}]},
+            ],
+        }
+        text = TOOL.render_card([record], self._Audio(), self.EN, set())
+        self.assertNotIn("[/opt]", text)
+        self.assertEqual(text.count("[*]"), text.count("[/*]"))
 
 
 class FormPolicyTests(unittest.TestCase):
@@ -1212,7 +1250,7 @@ class SpoilerTests(unittest.TestCase):
             text = self._build(tmp)
             opt = text.index("[*]")
             self.assertIn("[*]", text)
-            self.assertIn("[/opt]", text)
+            self.assertIn("[/*]", text)
             # the sense text is outside the optional zone
             self.assertLess(text.index("To move swiftly on foot."), opt)
             # examples and cross-references stay in the optional zone; "run" has

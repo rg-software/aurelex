@@ -193,6 +193,11 @@ card. A sense SHALL keep at most one qualifying example. A sense with no
 qualifying example SHALL have no optional zone. Examples and cross-references are
 the only content placed in optional zones.
 
+An optional zone SHALL be closed with a tag the DSL reader recognises, and the
+zone SHALL NOT enclose any following sense: the reader nests content by tag name
+and silently ignores a closing tag with no matching opening tag, so a wrong
+closer would leave every later sense inside the zone and collapse it with it.
+
 #### Scenario: An example stays with its sense
 
 - **WHEN** a sense's source record provides a qualifying example
@@ -208,6 +213,18 @@ the only content placed in optional zones.
 
 - **WHEN** a sense has no qualifying example
 - **THEN** no optional zone is rendered for that sense
+
+#### Scenario: A following sense is outside the zone
+
+- **WHEN** a sense with an example is followed by another sense
+- **THEN** the following sense is not inside the first sense's optional zone and
+  is visible when the zones are collapsed
+
+#### Scenario: An optional zone is closed with a recognised tag
+
+- **WHEN** an optional zone is emitted
+- **THEN** it is closed with a tag the reader treats as closing that zone
+
 
 ### Requirement: Example qualification
 

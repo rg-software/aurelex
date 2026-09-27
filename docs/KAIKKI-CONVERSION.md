@@ -123,7 +123,7 @@ transcription, so the common one-audio-per-word case prints it once instead of
 repeating it; when parts of speech differ, each keeps its own under its own
 heading. Audio is never duplicated: each file is printed once, under the first
 part of speech that references it. An example sits in the DSL collapsible
-optional zone (`[*]…[/opt]`) **under the sense it illustrates**, not pooled at
+optional zone (`[*]…[/*]`) **under the sense it illustrates**, not pooled at
 the card, so expanding a gloss reveals the use of the word it defines rather than
 an arbitrary sample. Cross-references stay in a single card-level optional zone
 at the end. A lookup therefore shows definitions first and the reader expands
@@ -138,7 +138,7 @@ run
     [m1]• To move swiftly on foot.[/m]
     [*]
     [ex]I run every morning.[/ex]
-    [/opt]
+    [/*]
     [m1]• To operate or manage.[/m]
 
     [p]noun[/p]
@@ -146,7 +146,7 @@ run
     [m1]• [s]gd_tag_obsolete.svg[/s] (fig.) A period of performing.[/m]
     [*]
     [com]See also: [ref]runner[/ref][/com]
-    [/opt]
+    [/*]
 ```
 
 Every leaf sense begins with a **bullet**, so sibling definitions read as a list;
@@ -155,7 +155,7 @@ and carries no bullet. A blank line separates consecutive parts of speech, so th
 sections read as blocks rather than one list; it goes strictly between them, so
 none precedes the first (nor follows a transcription hoisted above it).
 
-The engine renders every `[*]…[/opt]` as its own hidden `.dsl_opt` span and emits
+The engine renders every `[*]…[/*]` as its own hidden `.dsl_opt` span and emits
 a single `[+]` expander per article, which reveals all of that entry's zones at
 once — so per-sense zones need no engine support, and each still shows its own
 examples when expanded.

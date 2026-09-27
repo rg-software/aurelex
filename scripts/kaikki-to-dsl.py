@@ -1573,7 +1573,7 @@ def render_card(
     verb and a noun). Records that share a part of speech are merged into one
     block, so an interleaved ``noun, verb, noun`` reads ``noun, verb``. The
     visible article is part of speech → forms → senses; examples and
-    cross-references go into the DSL optional zone (``[*]…[/opt]``), which the
+    cross-references go into the DSL optional zone (``[*]…[/*]``), which the
     reader expands on demand.
 
     A single transcription shared across the card is hoisted above the first
@@ -1704,13 +1704,13 @@ def render_card(
                     if examples:
                         lines.append("\t[*]")
                         lines.extend(examples)
-                        lines.append("\t[/opt]")
+                        lines.append("\t[/*]")
 
     if refs_seen:
         links = ", ".join("[ref]" + escape_dsl(r) + "[/ref]" for r in refs_seen)
         lines.append("\t[*]")
         lines.append("\t[com]See also: " + links + "[/com]")
-        lines.append("\t[/opt]")
+        lines.append("\t[/*]")
 
     return "\n".join(lines)
 
