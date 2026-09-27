@@ -67,6 +67,18 @@ WIKTEXTRACT_CITATION = (
     "LREC 2022 (https://kaikki.org)"
 )
 
+# Wikimedia rejects generic user agents under its robot policy
+# (https://meta.wikimedia.org/wiki/User-Agent_policy), so identify the tool and
+# provide a contact URL.
+USER_AGENT = (
+    "Aurelex-Kaikki-DSL/1.0 "
+    "(https://github.com/anomalyco/aurelex; dictionary build tool) "
+    "python-urllib"
+)
+# Minimum gap between requests to a single host, to stay clear of rate limits.
+_DOWNLOAD_SPACING_SECONDS = 1.0
+_DOWNLOAD_RETRIES = 4
+
 # Parts of speech that are not lexical headwords in this converter's sense.
 NON_LEXICAL_POS = {"soft-redirect", "romanization"}
 
@@ -412,19 +424,59 @@ def verify_sidecar(path: str) -> bool:
     return expected == _sha256_file(path)
 
 
+_last_request_time = 0.0
+
+
+def _throttle() -> None:
+    """Sleep so consecutive requests to the same host stay polite."""
+    global _last_request_time
+    gap = time.time() - _last_request_time
+    if gap < _DOWNLOAD_SPACING_SECONDS:
+        time.sleep(_DOWNLOAD_SPACING_SECONDS - gap)
+    _last_request_time = time.time()
+
+
+def _open_with_retries(url: str, timeout: int):
+    """Open ``url``, retrying rate limits and transient server errors.
+
+    Wikimedia answers an over-eager client with 429 (sometimes with a robot-policy
+    message); backing off and retrying turns that into a slow success rather than
+    a missing file.
+    """
+    last: Optional[Exception] = None
+    for attempt in range(_DOWNLOAD_RETRIES):
+        _throttle()
+        request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+        try:
+            return urllib.request.urlopen(request, timeout=timeout)
+        except urllib.error.HTTPError as exc:
+            last = exc
+            if exc.code not in (429, 500, 502, 503, 504):
+                raise
+            delay = _DOWNLOAD_SPACING_SECONDS * (2 ** attempt)
+            print(f"  rate limited ({exc.code}), retrying in {delay:.0f}s ...",
+                  file=sys.stderr)
+            time.sleep(delay)
+        except (urllib.error.URLError, TimeoutError) as exc:
+            last = exc
+            time.sleep(_DOWNLOAD_SPACING_SECONDS * (2 ** attempt))
+    assert last is not None
+    raise last
+
+
 def download_cached(url: str, dest: str, force: bool = False, timeout: int = 60) -> str:
     """Download ``url`` to ``dest`` once, writing a sha256 sidecar.
 
     Reuses an existing, verified file unless ``force`` is set. The write is
-    atomic (a ``.part`` file is renamed into place).
+    atomic (a ``.part`` file is renamed into place), and rate limits are retried
+    with backoff.
     """
     os.makedirs(os.path.dirname(dest), exist_ok=True)
     if not force and verify_sidecar(dest):
         return dest
     part = dest + ".part"
     print(f"downloading {url} ...", file=sys.stderr)
-    request = urllib.request.Request(url, headers={"User-Agent": "aurelex-kaikki-to-dsl/1.0"})
-    with urllib.request.urlopen(request, timeout=timeout) as response, open(part, "wb") as out:
+    with _open_with_retries(url, timeout) as response, open(part, "wb") as out:
         while True:
             block = response.read(1024 * 1024)
             if not block:
@@ -437,10 +489,7 @@ def download_cached(url: str, dest: str, force: bool = False, timeout: int = 60)
 
 
 def _fetch_dump_date(timeout: int = 60) -> Optional[str]:
-    request = urllib.request.Request(
-        RAWDATA_PAGE_URL, headers={"User-Agent": "aurelex-kaikki-to-dsl/1.0"}
-    )
-    with urllib.request.urlopen(request, timeout=timeout) as response:
+    with _open_with_retries(RAWDATA_PAGE_URL, timeout) as response:
         page = response.read().decode("utf-8", "replace")
     match = re.search(r"dump dated (\d{4}-\d{2}-\d{2})", page)
     return match.group(1) if match else None
@@ -497,14 +546,26 @@ def open_text_maybe_gzip(path: str):
     return open(path, "rt", encoding="utf-8", errors="replace")
 
 
-def iter_records(path: str, progress: Optional["Progress"] = None) -> Iterator[Tuple[int, Optional[dict]]]:
-    """Yield ``(line_number, record_or_None)``; ``None`` marks a malformed line."""
+def iter_records(
+    path: str,
+    progress: Optional["Progress"] = None,
+    lang_code: Optional[str] = None,
+) -> Iterator[Tuple[int, Optional[dict]]]:
+    """Yield ``(line_number, record_or_None)``; ``None`` marks a malformed line.
+
+    With ``lang_code`` set, a line whose raw text does not contain that
+    language's marker is skipped before JSON parsing, which is most of a full
+    snapshot and the dominant cost of a scan.
+    """
+    needle = f'"lang_code": "{lang_code}"' if lang_code else None
     with open_text_maybe_gzip(path) as stream:
         for line_no, line in enumerate(stream, 1):
             if progress is not None:
                 progress.tick()
             line = line.strip()
             if not line:
+                continue
+            if needle is not None and needle not in line:
                 continue
             try:
                 record = json.loads(line)
@@ -591,14 +652,10 @@ def sample_headwords(
     take_all = sample_mode != "random"
     distinct_seen = 0
 
-    for _, record in iter_records(path, progress):
+    for _, record in iter_records(path, progress, source_code):
         if record is None:
             if report is not None:
                 report.skipped_malformed += 1
-            continue
-        if record.get("lang_code") != source_code:
-            if report is not None:
-                report.out_of_pair += 1
             continue
         if not is_lexical(record) or is_inflected(record):
             if report is not None:
@@ -851,15 +908,68 @@ class AudioPlan:
         return chosen
 
 
-def available_audio_keys(audio_path: str, progress: Optional[Progress] = None) -> Set[str]:
+def _archive_identity(audio_path: str) -> str:
+    """A cheap fingerprint of the archive, for validating a cached index.
+
+    Records the absolute path plus size, mtime and (when present) the sha256
+    sidecar. Any of these changing means the archive was replaced or
+    re-downloaded, so a cached name index is stale and must be rebuilt. The path
+    is included so two different archives can never share a cache entry.
+    """
+    st = os.stat(audio_path)
+    parts = [
+        "path=" + os.path.abspath(audio_path),
+        f"size={st.st_size}",
+        f"mtime={int(st.st_mtime)}",
+    ]
+    sidecar = audio_path + ".sha256"
+    if os.path.isfile(sidecar):
+        with open(sidecar, "r", encoding="ascii") as f:
+            parts.append("sha256=" + f.read().strip())
+    return "|".join(parts)
+
+
+def available_audio_keys(
+    audio_path: str,
+    progress: Optional[Progress] = None,
+    cache_dir: Optional[str] = None,
+    force: bool = False,
+) -> Set[str]:
     """The set of normalised member names held in the audio archive.
 
     Streaming the archive once up front lets planning know which recordings can
     actually be bundled, so a missing file never becomes a link in the output.
+    Because the archive is large and never changes for a given dump date, the
+    resulting name set is cached beside it and keyed to the archive's identity
+    (size, mtime and sha256 sidecar), so it is rebuilt only when the archive
+    actually changes.
     """
     keys: Set[str] = set()
     if not os.path.isfile(audio_path):
         return keys
+
+    # The index lives beside the archive it describes, so two archives can never
+    # share an entry even when a caller points at a different one.
+    cache_path = (audio_path + ".keys.txt") if cache_dir else None
+    identity = _archive_identity(audio_path)
+    if cache_path and not force and os.path.isfile(cache_path):
+        try:
+            with open(cache_path, "r", encoding="utf-8") as f:
+                header = f.readline().rstrip("\n")
+                if header == identity:
+                    for line in f:
+                        name = line.rstrip("\n")
+                        if name:
+                            keys.add(name)
+                    print(
+                        f"audio index: {len(keys):,} names (cached)",
+                        file=sys.stderr,
+                    )
+                    return keys
+        except OSError:
+            keys = set()
+
+    keys = set()
     mode = "r|gz" if audio_path.endswith(".gz") else "r|"
     with tarfile.open(audio_path, mode) as tar:
         for member in tar:
@@ -867,6 +977,17 @@ def available_audio_keys(audio_path: str, progress: Optional[Progress] = None) -
                 progress.tick()
             if member.isfile():
                 keys.add(_audio_match_key(member.name))
+
+    if cache_path:
+        try:
+            part = cache_path + ".part"
+            with open(part, "w", encoding="utf-8") as f:
+                f.write(identity + "\n")
+                for name in sorted(keys):
+                    f.write(name + "\n")
+            os.replace(part, cache_path)
+        except OSError as exc:
+            print(f"warning: could not cache the audio index: {exc}", file=sys.stderr)
     return keys
 
 
@@ -1275,7 +1396,9 @@ def build(args) -> Report:
                 snapshot.audio_url, snapshot.audio_path, args.force_download, args.timeout
             )
         scan = Progress("scanning audio archive")
-        available = available_audio_keys(audio_path, scan)
+        available = available_audio_keys(
+            audio_path, scan, snapshot.dir, args.force_audio_index
+        )
         scan.done()
         if not available:
             print(
@@ -1504,8 +1627,16 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="do not fetch audio missing from the archive from Wikimedia (tar only)",
     )
-    parser.add_argument("--audio-layout", choices=["zip", "dir"], default="zip", help="how to bundle audio (default zip)")
-    parser.set_defaults(audio_downloader=None)
+    parser.add_argument(
+        "--force-audio-index",
+        action="store_true",
+        help="rebuild the cached audio-archive name index even if it looks current",
+    )
+    parser.add_argument(
+        "--audio-layout", choices=["zip", "dir"], default="zip",
+        help="how to bundle audio (default zip)",
+    )
+    parser.set_defaults(audio_downloader=None, force_audio_index=False)
     parser.add_argument("--sample", type=int, help="emit only N headwords")
     parser.add_argument(
         "--sample-mode", choices=["first", "random"], default="first",

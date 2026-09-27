@@ -13,7 +13,9 @@ import re
 import sys
 import tarfile
 import tempfile
+import time
 import unittest
+import urllib.error
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SCRIPTS = os.path.dirname(HERE)
@@ -101,9 +103,21 @@ class ConverterTests(unittest.TestCase):
             # non-lexical + blank word + German + malformed are not headwords
             self.assertNotIn("foo", headword_lines(text))
             self.assertNotIn("laufen", headword_lines(text))
-            self.assertEqual(report.skipped_malformed, 1)
+            # the malformed fixture line carries no language marker, so the
+            # scan's language prefilter skips it before it is ever parsed; such
+            # lines are therefore not counted as malformed (see the full-build
+            # counter test, which has no prefilter)
             self.assertGreaterEqual(report.skipped_nonlexical, 1)
             self.assertEqual(report.skipped_inflected, 1)
+
+    def test_full_build_counts_malformed_records(self):
+        # without --sample the scan parses every line, so a malformed one is seen
+        with tempfile.TemporaryDirectory() as tmp:
+            args = TOOL.build_parser().parse_args(
+                ["--source-lang", "en", "--jsonl", FIXTURE, "--out-dir", tmp, "--no-audio"]
+            )
+            report = TOOL.build(args)
+            self.assertEqual(report.skipped_malformed, 1)
 
     def test_include_inflections(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -716,6 +730,112 @@ class SampleSelectionTests(unittest.TestCase):
         run_records = [r for r in records if str(r["word"]) == "run"]
         # run has a verb and a noun record; both come with the one headword
         self.assertEqual(len(run_records), 2)
+
+
+class AudioIndexCacheTests(unittest.TestCase):
+    """The audio-archive name index is cached and never served stale."""
+
+    def _archive(self, tmp, names):
+        path = os.path.join(tmp, "audios.tar")
+        make_tar(path, names)
+        return path
+
+    def test_index_is_built_then_reused(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._archive(tmp, ["audios/A.ogg", "audios/B.ogg"])
+            first = TOOL.available_audio_keys(path, cache_dir=tmp)
+            self.assertEqual(first, {"a.ogg", "b.ogg"})
+            self.assertTrue(os.path.isfile(path + ".keys.txt"))
+            # second read must come from the cache and agree
+            second = TOOL.available_audio_keys(path, cache_dir=tmp)
+            self.assertEqual(second, first)
+
+    def test_changed_archive_invalidates_the_cache(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._archive(tmp, ["audios/A.ogg"])
+            self.assertEqual(TOOL.available_audio_keys(path, cache_dir=tmp), {"a.ogg"})
+            # replace the archive with different content
+            time.sleep(1.1)  # ensure a distinct mtime even on coarse clocks
+            make_tar(path, ["audios/A.ogg", "audios/C.ogg"])
+            fresh = TOOL.available_audio_keys(path, cache_dir=tmp)
+            self.assertEqual(fresh, {"a.ogg", "c.ogg"})
+
+    def test_different_archives_do_not_share_a_cache(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            d1 = os.path.join(tmp, "one")
+            d2 = os.path.join(tmp, "two")
+            os.makedirs(d1)
+            os.makedirs(d2)
+            one = self._archive(d1, ["audios/A.ogg"])
+            two = self._archive(d2, ["audios/B.ogg"])
+            self.assertEqual(TOOL.available_audio_keys(one, cache_dir=tmp), {"a.ogg"})
+            self.assertEqual(TOOL.available_audio_keys(two, cache_dir=tmp), {"b.ogg"})
+
+    def test_force_rebuilds(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._archive(tmp, ["audios/A.ogg"])
+            TOOL.available_audio_keys(path, cache_dir=tmp)
+            cache = path + ".keys.txt"
+            with open(cache, "w", encoding="utf-8") as f:
+                f.write("bogus\n")
+            # a corrupt cache header is ignored and the index rebuilt
+            self.assertEqual(TOOL.available_audio_keys(path, cache_dir=tmp), {"a.ogg"})
+            self.assertEqual(TOOL.available_audio_keys(path, cache_dir=tmp, force=True), {"a.ogg"})
+
+
+class DownloadPolicyTests(unittest.TestCase):
+    """Requests identify the tool and back off politely on rate limits."""
+
+    def test_user_agent_identifies_the_tool_and_a_contact(self):
+        self.assertIn("Aurelex", TOOL.USER_AGENT)
+        self.assertIn("http", TOOL.USER_AGENT)
+
+    def test_rate_limit_is_retried_then_succeeds(self):
+        calls = []
+
+        class FakeResponse:
+            def __enter__(self):
+                return self
+            def __exit__(self, *a):
+                return False
+            def read(self, n=-1):
+                return b""
+
+        def fake_urlopen(request, timeout):
+            calls.append(request.get_header("User-agent"))
+            if len(calls) < 3:
+                raise urllib.error.HTTPError(
+                    request.full_url, 429, "Too many requests", {}, None
+                )
+            return FakeResponse()
+
+        original = TOOL.urllib.request.urlopen
+        original_sleep = TOOL.time.sleep
+        TOOL.urllib.request.urlopen = fake_urlopen
+        TOOL.time.sleep = lambda _s: None
+        try:
+            with TOOL._open_with_retries("https://example.invalid/x", 5):
+                pass
+        finally:
+            TOOL.urllib.request.urlopen = original
+            TOOL.time.sleep = original_sleep
+        self.assertEqual(len(calls), 3)
+        self.assertIn("Aurelex", calls[0])
+
+    def test_non_retryable_error_is_raised_immediately(self):
+        def fake_urlopen(request, timeout):
+            raise urllib.error.HTTPError(request.full_url, 404, "Not Found", {}, None)
+
+        original = TOOL.urllib.request.urlopen
+        original_sleep = TOOL.time.sleep
+        TOOL.urllib.request.urlopen = fake_urlopen
+        TOOL.time.sleep = lambda _s: None
+        try:
+            with self.assertRaises(urllib.error.HTTPError):
+                TOOL._open_with_retries("https://example.invalid/x", 5)
+        finally:
+            TOOL.urllib.request.urlopen = original
+            TOOL.time.sleep = original_sleep
 
 
 class ProgressTests(unittest.TestCase):

@@ -63,8 +63,9 @@ cached under `--cache-dir` (default `~/.cache/aurelex-kaikki/<dump-date>/`) with
 `.sha256` sidecars; later runs reuse and verify the cache.
 
 Because a full run reads the snapshot several times, the tool prints a coarse
-progress line to stderr (`selecting headwords`, `scanning audio archive`,
-`rendering`, `bundling audio`) with a running count and elapsed seconds. It costs
+progress line to stderr (`selecting headwords`, `sampling headwords`, `scanning
+audio archive`, `rendering`, `bundling audio`) with a running count and elapsed
+seconds. It costs
 one counter comparison per record, so it does not slow the run down.
 
 Copy `dist/kaikki-en.dsl.dz` and `dist/kaikki-en.dsl.dz.files.zip` to the
@@ -87,6 +88,7 @@ phone (same folder) and add that folder in Aurelex.
 | `--no-audio` | No audio and no audio download. |
 | `--audio-lang TAG` | Prefer audio whose tags match this language/accent (e.g. `US`). |
 | `--no-audio-download` | Do not fetch audio that the archive lacks from Wikimedia (archive only). |
+| `--force-audio-index` | Rebuild the cached audio-archive name index even if it looks current. |
 | `--audio-layout {zip,dir}` | Bundle audio as one archive (default) or a loose directory. |
 | `--sample N` | Emit exactly N headwords (a word with several records is one headword); reads only a bounded part of the snapshot, so it is quick. |
 | `--sample-mode {first,random}` | How `--sample` picks headwords: first N in file order, or a reproducible spread over thousands of headwords (default `first`). |
@@ -207,6 +209,19 @@ any article is rendered, which means:
 Set `--no-audio-download` to skip the Wikimedia fallback and use the archive
 only. Bundling is bounded to `--audio-per-word` (default 3), de-duplicated, and
 prefers the source language/accent (`--audio-lang`).
+
+Downloads identify the tool with a descriptive User-Agent and space out requests
+to Wikimedia; a rate limit (HTTP 429) is retried with backoff rather than being
+treated as a missing file.
+
+### Audio archive index
+
+Resolving audio needs to know which recordings the archive holds, which means
+streaming all ~940k members once (about 100 s on the real archive). That name set
+is cached next to the archive as `<archive>.keys.txt` (~25 MB) and validated
+against the archive's path, size, modification time and `sha256` sidecar, so it
+is rebuilt only when the archive actually changes. The first run with audio pays
+the scan; later runs reuse the index. `--force-audio-index` rebuilds it anyway.
 
 ## Output layout and storage
 
