@@ -3,9 +3,7 @@
 ## Purpose
 
 Provides the core lookup experience on Android: searching headwords, rendering dictionary articles as HTML in a WebView, loading embedded resources, navigating between articles, and playing pronunciation audio.
-
 ## Requirements
-
 ### Requirement: Headword suggestions
 The system SHALL offer headword suggestions as the user types, matching dictionary headwords by prefix and fuzzy (approximate) search.
 Submitting a suggestion or the typed text SHALL trigger a full article lookup.
@@ -65,7 +63,7 @@ Unknown words, lookups scoped to a group with no dictionaries, and articles whos
 - **THEN** switching to another tab and back completes without the app freezing or becoming unresponsive to input
 
 ### Requirement: Embedded dictionary resources
-The system SHALL load resources referenced by an article (for example images and audio stored in mdict `.mdd` archives or referenced from dictionary folders) and display or play them within the article. Resource loading SHALL be robust: resolving the article's resources via the local article server MUST NOT crash the app or deadlock/freeze the UI, including when several resources are requested concurrently, and a request whose client disconnects before the resource is ready SHALL be dropped without error.
+The system SHALL load resources referenced by an article (for example images and audio stored in mdict `.mdd` archives or referenced from dictionary folders) and display or play them within the article. Resource loading SHALL be robust: resolving the article's resources via the local article server MUST NOT crash the app or deadlock/freeze the UI, including when several resources are requested concurrently, and a request whose client disconnects before the resource is ready SHALL be dropped without error. Resolving a resource MUST NOT block the user interface and MUST NOT require the user interface thread to run a nested event loop; resource work SHALL be performed off the user interface thread, and a resource that cannot be produced SHALL be abandoned within a short bounded time rather than after a long fixed wait.
 
 #### Scenario: Image in a dictionary archive renders
 - **WHEN** an article references an image stored in an mdd archive
@@ -82,6 +80,22 @@ The system SHALL load resources referenced by an article (for example images and
 #### Scenario: Resource request abandoned by the client
 - **WHEN** a resource request's client connection closes before the resource is delivered
 - **THEN** the server drops that response without error and the app continues normally
+
+#### Scenario: User input is accepted while a resource is being resolved
+- **WHEN** an article is displayed and one or more of its resources are still being resolved
+- **THEN** the user interface keeps accepting and responding to input, including switching tabs and picking a different group, and does not stop responding
+
+#### Scenario: Unresolvable resource is abandoned within a bounded time
+- **WHEN** a referenced resource cannot be produced by the dictionary engine
+- **THEN** the request is given up within a bounded time rather than never, the article reports the resource as missing, and the user interface does not become unresponsive for an extended period
+
+#### Scenario: Content renderer terminates during a resource request
+- **WHEN** the web content renderer process terminates while a resource request is in flight
+- **THEN** the app does not crash, and the user can continue using it after the article pane is rebuilt
+
+#### Scenario: Navigating away during a resource request leaves no residue
+- **WHEN** the user navigates away from an article while one of its resources is still being resolved
+- **THEN** the abandoned request is cleaned up, and a later article that references the same resource still resolves it
 
 ### Requirement: In-article link navigation
 The system SHALL open links within an article as in-app lookups of the linked word rather than leaving the app, and SHALL keep the user able to navigate back to the previous article. Navigation between articles SHALL be browser-like: a back path through previously opened articles and a forward path through articles the user has backed out of. Each navigation entry SHALL carry the dictionary group the article was produced in; returning or forwarding SHALL restore that group before re-rendering (falling back to "All" if the group no longer exists). A fresh lookup clears the forward path.
@@ -128,3 +142,4 @@ The system SHALL offer article zoom controls (zoom in, zoom out) beside the arti
 #### Scenario: Zoom applies to every article
 - **WHEN** the user looks up a new headword after setting a zoom level
 - **THEN** the new article renders at that same zoom level
+
