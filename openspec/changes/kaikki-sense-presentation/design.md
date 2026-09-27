@@ -229,7 +229,13 @@ for the name; no hit and the whole block is skipped, only warning at `:786`).
 (`dsl.cc:1332`) is `\[(|/)(p|trn|ex|com|\*|t|br|m[0-9]?)\]` — `opt` is not
 in it and no `opt` opening tag exists, so `[/opt]` closed nothing. Every
 following sense therefore nested inside the `[*]` span and collapsed with it.
-The correct closer is `[/*]` (name `*`, matching the opening tag).
+The correct closer is `[/*]` (name `*`, matching the opening tag). This is the
+format's rule, not a reader quirk: ABBYY's own Lingvo manual
+(`documentation.help/ABBYY-Lingvo8/paragraph_form.htm`) writes the zone as
+`[m1][*]@ … [/*][/m]`, and DSL closing tags always repeat the opening tag's name.
+`opt` is not a tag name in the language. So the engine is right and the fix
+belongs in the generator: emitting `[opt]` as the opener, or teaching the C++ an
+`opt` alias, would both be deviations for syntax the format does not have.
 
 *Why it read as a layout bug:* with a single card-level zone (the previous
 design) the unclosed span simply ran to the end of the card, so the defect was
