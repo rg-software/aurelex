@@ -3,7 +3,7 @@
 Wiktionary (wiktextract) snapshot for one language.
 
 The output is a deterministic dictzip-compressed ``<name>.dsl.dz`` plus a
-sibling ``<name>.dsl.dz.files.zip`` (or ``.files/`` directory) holding the
+sibling ``<name>.dsl.files.zip`` (or ``.files/`` directory) holding the
 referenced pronunciation audio, so it imports through Aurelex's existing
 folder import without any app or engine changes.
 
@@ -2058,6 +2058,11 @@ def build(args) -> Report:
 
     os.makedirs(args.out_dir, exist_ok=True)
     dz_path = os.path.join(args.out_dir, header_name + ".dsl.dz")
+    # The resource bundle is named after the dictionary file *without* the
+    # dictzip suffix: the reader looks for "<base>.dsl.files.zip" first
+    # (dsl.cc:1743, where baseName drops ".dsl.dz"), so that is the canonical
+    # name; "<base>.dsl.dz.files.zip" is only its fallback.
+    res_base = os.path.join(args.out_dir, header_name + ".dsl")
     with open(dz_path, "wb") as f:
         f.write(make_dictzip(encode_dsl(dsl_text)))
 
@@ -2097,9 +2102,9 @@ def build(args) -> Report:
                     file=sys.stderr,
                 )
         if args.audio_layout == "zip":
-            write_audio_zip(tmp, dz_path + ".files.zip")
+            write_audio_zip(tmp, res_base + ".files.zip")
         else:
-            dest_dir = dz_path + ".files"
+            dest_dir = res_base + ".files"
             os.makedirs(dest_dir, exist_ok=True)
             for name in sorted(os.listdir(tmp)):
                 src = os.path.join(tmp, name)
@@ -2138,7 +2143,7 @@ def build_parser() -> argparse.ArgumentParser:
             "  as a broken link, and it does not use up a per-word slot.\n"
             "  --no-audio (or --audio-per-word 0) disables audio entirely and\n"
             "  skips downloading the audio archive.\n\n"
-            "  The output is <name>.dsl.dz plus <name>.dsl.dz.files.zip (or the\n"
+            "  The output is <name>.dsl.dz plus <name>.dsl.files.zip (or the\n"
             "  .files/ directory with --audio-layout dir). The archive holds the\n"
             "  sense-marker icons in addition to any bundled audio, so it is\n"
             "  written even with --no-audio.\n"

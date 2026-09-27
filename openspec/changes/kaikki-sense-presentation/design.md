@@ -184,8 +184,10 @@ transparent icons on the dark canvas. That rule ties on specificity with a bare
 
 ### D7. Icons join the dictionary resource bundle
 
-Icons are copied into the same resource output as audio — `<name>.dsl.dz.files.zip`
-by default, or `<name>.dsl.dz.files/` with `--audio-layout dir`. The bundling gate
+Icons are copied into the same resource output as audio —
+`<name>.dsl.files.zip` by default (the reader's own first choice: it strips
+`.dsl.dz` to form the base name, so `<name>.dsl.dz.files.zip` is only a
+fallback), or `<name>.dsl.files/` with `--audio-layout dir`. The bundling gate
 changes from "audio was requested" to "there is anything to bundle", so icons are
 shipped even under `--no-audio`. The bundle stays deterministic: a fixed file set
 with pinned bytes, written in sorted order.

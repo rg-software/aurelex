@@ -5,7 +5,7 @@ Wiktionary snapshot (wiktextract JSONL) into an offline **ABBYY Lingvo DSL**
 **monolingual explanatory dictionary** for one language, packaged so it imports
 into Aurelex through the normal folder import — no app or engine changes.
 
-- Output: `<name>.dsl.dz` (dictzip) plus a sibling `<name>.dsl.dz.files.zip`
+- Output: `<name>.dsl.dz` (dictzip) plus a sibling `<name>.dsl.files.zip`
   (or `.files/` directory) holding the referenced pronunciation audio.
 - The tool runs on a desktop/laptop, not on the phone.
 - DSL is the only supported import format that carries audio; StarDict is
@@ -68,7 +68,7 @@ audio archive`, `rendering`, `bundling audio`) with a running count and elapsed
 seconds. It costs
 one counter comparison per record, so it does not slow the run down.
 
-Copy `dist/kaikki-en.dsl.dz` and `dist/kaikki-en.dsl.dz.files.zip` to the
+Copy `dist/kaikki-en.dsl.dz` and `dist/kaikki-en.dsl.files.zip` to the
 phone (same folder) and add that folder in Aurelex.
 
 ## Options
@@ -321,15 +321,18 @@ the scan; later runs reuse the index. `--force-audio-index` rebuilds it anyway.
 
 ```
 dist/
-  kaikki-en.dsl.dz              # the dictionary (dictzip)
-  kaikki-en.dsl.dz.files.zip    # sense-marker icons + any audio (default)
-  kaikki-en.preview.html        # only with --preview
+  kaikki-en.dsl.dz          # the dictionary (dictzip)
+  kaikki-en.dsl.files.zip   # sense-marker icons + any audio (default)
+  kaikki-en.preview.html    # only with --preview
 ```
 
-The resource bundle always holds the five sense-marker icons (see Article shape),
-so it is written even with `--no-audio`; audio is added to the same archive when
-enabled. With `--audio-layout dir` both go into a `kaikki-en.dsl.dz.files/`
-directory instead.
+The resource bundle always holds the sense-marker icons (see Article shape), so it
+is written even with `--no-audio`; audio is added to the same archive when
+enabled. With `--audio-layout dir` both go into a `kaikki-en.dsl.files/`
+directory instead. The bundle is named after the dictionary **without** the
+dictzip suffix — `<name>.dsl.files.zip`, not `<name>.dsl.dz.files.zip` — because
+that is the name the reader looks for first (it strips `.dsl.dz` to form the base
+name); the `.dsl.dz.files.zip` spelling is only its fallback.
 
 A full English build with audio is multi-GB on disk and thousands of small
 files inside the archive; the phone's import stages the whole folder. Use

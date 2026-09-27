@@ -209,7 +209,7 @@ class ConverterTests(unittest.TestCase):
             self.assertGreaterEqual(report.audio_found, 1)
             self.assertEqual(report.missing_audio, 0)
 
-            zip1 = os.path.join(out1, "kaikki-en.dsl.dz.files.zip")
+            zip1 = os.path.join(out1, "kaikki-en.dsl.files.zip")
             self.assertTrue(os.path.isfile(zip1))
             import zipfile
             with zipfile.ZipFile(zip1) as zf:
@@ -222,7 +222,7 @@ class ConverterTests(unittest.TestCase):
             dz2 = os.path.join(out2, "kaikki-en.dsl.dz")
             with open(dz1, "rb") as f1, open(dz2, "rb") as f2:
                 self.assertEqual(f1.read(), f2.read())
-            zip2 = os.path.join(out2, "kaikki-en.dsl.dz.files.zip")
+            zip2 = os.path.join(out2, "kaikki-en.dsl.files.zip")
             with open(zip1, "rb") as f1, open(zip2, "rb") as f2:
                 self.assertEqual(f1.read(), f2.read())
 
@@ -238,8 +238,8 @@ class ConverterTests(unittest.TestCase):
                 ]
             )
             TOOL.build(args)
-            self.assertTrue(os.path.isdir(os.path.join(tmp, "kaikki-en.dsl.dz.files")))
-            self.assertTrue(os.path.isfile(os.path.join(tmp, "kaikki-en.dsl.dz.files", "En-us-run.ogg")))
+            self.assertTrue(os.path.isdir(os.path.join(tmp, "kaikki-en.dsl.files")))
+            self.assertTrue(os.path.isfile(os.path.join(tmp, "kaikki-en.dsl.files", "En-us-run.ogg")))
             preview = os.path.join(tmp, "kaikki-en.preview.html")
             self.assertTrue(os.path.isfile(preview))
             with open(preview, encoding="utf-8") as f:
@@ -345,7 +345,7 @@ class EdgeCaseTests(unittest.TestCase):
             self.assertEqual(report.audio_found, 4)
             self.assertEqual(report.missing_audio, 0)
             import zipfile
-            zip_path = os.path.join(tmp, "kaikki-en.dsl.dz.files.zip")
+            zip_path = os.path.join(tmp, "kaikki-en.dsl.files.zip")
             with zipfile.ZipFile(zip_path) as zf:
                 names = set(zf.namelist())
             # the archive also carries the sense-marker icons
@@ -450,7 +450,7 @@ class AudioResolutionTests(unittest.TestCase):
             self.assertEqual(len(calls), 2)
             self.assertTrue(all("upload.wikimedia.org" in u for u, _ in calls))
             import zipfile
-            with zipfile.ZipFile(os.path.join(tmp, "out", "kaikki-en.dsl.dz.files.zip")) as zf:
+            with zipfile.ZipFile(os.path.join(tmp, "out", "kaikki-en.dsl.files.zip")) as zf:
                 names = set(zf.namelist())
             # the limit of three is filled from the tape and the two downloads
             self.assertEqual(only_audio(names), {
@@ -613,8 +613,32 @@ class SenseIconBundleTests(unittest.TestCase):
                  "--no-audio"]
             )
             TOOL.build(args)
-            names = zip_names(os.path.join(tmp, "kaikki-en.dsl.dz.files.zip"))
+            names = zip_names(os.path.join(tmp, "kaikki-en.dsl.files.zip"))
             self.assertTrue(set(TOOL._ICON_FILES) <= names)
+
+    def test_resource_bundle_uses_the_canonical_name(self):
+        # the reader looks for "<base>.dsl.files.zip" before
+        # "<base>.dsl.dz.files.zip" (dsl.cc:1743, baseName drops ".dsl.dz"), so
+        # the canonical name is the one to emit for both layouts
+        with tempfile.TemporaryDirectory() as tmp:
+            args = TOOL.build_parser().parse_args(
+                ["--source-lang", "en", "--jsonl", FIXTURE, "--out-dir", tmp,
+                 "--no-audio"]
+            )
+            TOOL.build(args)
+            self.assertTrue(os.path.isfile(os.path.join(tmp, "kaikki-en.dsl.files.zip")))
+            self.assertFalse(
+                os.path.exists(os.path.join(tmp, "kaikki-en.dsl.dz.files.zip"))
+            )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            args = TOOL.build_parser().parse_args(
+                ["--source-lang", "en", "--jsonl", FIXTURE, "--out-dir", tmp,
+                 "--no-audio", "--audio-layout", "dir"]
+            )
+            TOOL.build(args)
+            self.assertTrue(os.path.isdir(os.path.join(tmp, "kaikki-en.dsl.files")))
+            self.assertFalse(os.path.exists(os.path.join(tmp, "kaikki-en.dsl.dz.files")))
 
     def test_bundle_dir_layout_holds_the_icons(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -623,7 +647,7 @@ class SenseIconBundleTests(unittest.TestCase):
                  "--no-audio", "--audio-layout", "dir"]
             )
             TOOL.build(args)
-            dest = os.path.join(tmp, "kaikki-en.dsl.dz.files")
+            dest = os.path.join(tmp, "kaikki-en.dsl.files")
             for name in TOOL._ICON_FILES:
                 self.assertTrue(os.path.isfile(os.path.join(dest, name)), name)
 

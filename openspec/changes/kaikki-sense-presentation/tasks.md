@@ -22,6 +22,7 @@
 
 - [x] 3.1 Verify the parsed record's language in `iter_records` (the raw-text prefilter is a hint that a nested `"lang_code"` can defeat) and tolerate either JSON spacing, so a sample cannot admit another language's records
 - [x] 3.2 Copy the vendored icons into the dictionary resource bundle alongside audio, using the existing zip/dir layout, and keep the bundle byte-identical across rebuilds (sorted entries, pinned bytes)
+- [x] 3.2a Name the resource bundle by the reader's canonical first choice, `<name>.dsl.files.zip` / `<name>.dsl.files/` (the reader strips `.dsl.dz` to form its base name, so `<name>.dsl.dz.files.zip` is only a fallback)
 - [x] 3.3 Change the bundling gate so the resource bundle is written when icons are emitted even under `--no-audio`
 - [x] 3.4 Add the icon legend to the generated about card, mapping each icon to its meaning
 
