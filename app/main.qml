@@ -2155,11 +2155,50 @@ text: root._stagingActive
                         RowLayout {
                             anchors.fill: parent
                             spacing: 6
-                            Label {
-                                text: root.icon("drag_handle")
-                                font.family: root.iconFontFamily
-                                font.pixelSize: 20
-                                color: root.uiSubFg
+                            // Only the left-hand handle is the drag surface. A
+                            // fixed-width slot whose MouseArea fills it, so a
+                            // drag that starts anywhere else on the row falls
+                            // through to the ListView and scrolls it instead of
+                            // arming a reorder.
+                            Item {
+                                id: dragHandle
+                                Layout.preferredWidth: 48
+                                Layout.fillHeight: true
+
+                                Label {
+                                    anchors.centerIn: parent
+                                    text: root.icon("drag_handle")
+                                    font.family: root.iconFontFamily
+                                    font.pixelSize: 20
+                                    color: root.uiSubFg
+                                }
+
+                                MouseArea {
+                                    id: dragArea
+                                    anchors.fill: parent
+                                    // Keep the ListView's flick-scroll from
+                                    // stealing the gesture once a reorder drag
+                                    // starts on the handle.
+                                    preventStealing: true
+                                    Accessible.name: "Reorder"
+                                    Accessible.role: Accessible.Button
+                                    // QQuickMouseEvent (Qt 6.6) has no
+                                    // scenePosition, so map the finger into the
+                                    // ListView's coordinate space: that frame is
+                                    // fixed while the row moves under the finger,
+                                    // so the travel does not reset.
+                                    function _listY(mouse) {
+                                        return dragArea.mapToItem(memberList, mouse.x, mouse.y).y
+                                    }
+                                    onPressed: (mouse) => {
+                                        groupsPane._dragBegin(index, dragArea._listY(mouse))
+                                    }
+                                    onPositionChanged: (mouse) => {
+                                        groupsPane._dragMove(dragArea._listY(mouse))
+                                    }
+                                    onReleased: groupsPane._dragEnd()
+                                    onCanceled: groupsPane._dragEnd()
+                                }
                             }
                             Label {
                                 Layout.fillWidth: true
@@ -2167,43 +2206,6 @@ text: root._stagingActive
                                 elide: Text.ElideMiddle
                                 verticalAlignment: Text.AlignVCenter
                             }
-                        }
-
-                        // The whole row is the drag surface: grab anywhere on the
-                        // member and drag up/down to reorder. It is a sibling of
-                        // the RowLayout (not a layout child) so it cannot fight
-                        // the layout for width; declaring it last puts it above
-                        // the labels. The row has no tap action, so there's
-                        // nothing for an accidental tap to break; the right-hand
-                        // Remove button sits above this bag and still receives
-                        // its taps.
-                        MouseArea {
-                            id: dragArea
-                            anchors { top: parent.top; bottom: parent.bottom; left: parent.left; right: parent.right }
-                            // Leave the right-most sliver clear so the Remove
-                            // button (a sibling overlapping this bag) still gets
-                            // its taps; the whole NAME area stays draggable.
-                            anchors.rightMargin: 90
-                            // Keep the ListView's flick-scroll from stealing the
-                            // gesture once a reorder drag starts.
-                            preventStealing: true
-                            Accessible.name: "Reorder"
-                            Accessible.role: Accessible.Button
-                            // QQuickMouseEvent (Qt 6.6) has no scenePosition, so
-                            // map the finger into the ListView's coordinate space:
-                            // that frame is fixed while the row moves under the
-                            // finger, so the travel does not reset.
-                            function _listY(mouse) {
-                                return dragArea.mapToItem(memberList, mouse.x, mouse.y).y
-                            }
-                            onPressed: (mouse) => {
-                                groupsPane._dragBegin(index, dragArea._listY(mouse))
-                            }
-                            onPositionChanged: (mouse) => {
-                                groupsPane._dragMove(dragArea._listY(mouse))
-                            }
-                            onReleased: groupsPane._dragEnd()
-                            onCanceled: groupsPane._dragEnd()
                         }
                     }
 

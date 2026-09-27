@@ -136,7 +136,7 @@ elements in automated tests:
 | Membership | Back button | `"Back"` |
 | Membership | Rename group | `"Rename group"` (header button in the membership editor) |
 | Membership | Members list | `"Group members"` |
-| Membership | Reorder surface | Drag the member row's name area to reorder; the trailing `Remove from group` sliver is excluded |
+| Membership | Reorder surface | Drag the member row's left-hand handle to reorder; the name area scrolls the list, and the trailing `Remove from group` sliver is excluded |
 | Membership | Remove from group | `"Remove from group"` |
 | Membership | Non-members list | `"Available dictionaries to add"` |
 | Membership | Add to group | `"Add to group"` |

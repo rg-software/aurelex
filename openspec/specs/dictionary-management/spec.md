@@ -153,7 +153,7 @@ show a technical subtitle (such as an internal id).
 - **THEN** subsequent lookups use only that group's dictionaries, in that group's order
 
 #### Scenario: Reorder dictionaries within a group
-- **WHEN** the user drags a group member up or down within the members list (grabbing the row's name area; the trailing Remove control is excluded)
+- **WHEN** the user drags a group member up or down within the members list (grabbing the row's left-hand drag handle; the name area and the trailing Remove control are not drag surfaces, so a drag starting on them scrolls the list instead)
 - **THEN** the combined article for that group respects the new order, the member list re-orders live as the row crosses row boundaries, and the row being dragged stays visually highlighted while the gesture is active
 
 #### Scenario: Reorder affordance is only on group members
