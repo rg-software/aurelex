@@ -151,8 +151,9 @@ run
 
 Every leaf sense begins with a **bullet**, so sibling definitions read as a list;
 a group heading (a sense with sub-senses under it) is a category, not a sense,
-and carries no bullet. Each new part of speech is separated from the previous one
-by a blank line, so the sections read as blocks rather than one list.
+and carries no bullet. A blank line separates consecutive parts of speech, so the
+sections read as blocks rather than one list; it goes strictly between them, so
+none precedes the first (nor follows a transcription hoisted above it).
 
 The engine renders every `[*]…[/opt]` as its own hidden `.dsl_opt` span and emits
 a single `[+]` expander per article, which reveals all of that entry's zones at

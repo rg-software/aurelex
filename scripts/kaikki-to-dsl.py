@@ -1649,12 +1649,16 @@ def render_card(
             pron += "  " + "  ".join(hoisted_audio)
         lines.append("\t[com]" + pron + "[/com]")
 
+    # A blank line separates consecutive parts of speech, so their sections read
+    # as blocks rather than one list. It goes strictly between them: no blank
+    # before the first part of speech, even when a hoisted transcription sits
+    # above it.
+    first_pos_seen = False
     for pos, idxs in blocks:
-        # A blank line before each part of speech past the first, so the sections
-        # read as separate blocks rather than one list.
         if pos:
-            if lines:
+            if first_pos_seen:
                 lines.append("")
+            first_pos_seen = True
             lines.append(f"\t[p]{escape_dsl(pos)}[/p]")
         # forms: first record of the block that carries any
         for i in idxs:

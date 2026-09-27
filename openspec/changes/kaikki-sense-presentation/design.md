@@ -258,6 +258,14 @@ Sections ran together (`[p]verb[/p]` ... `[p]noun[/p]` with no gap), which read 
 one list. A blank line is now emitted before every part of speech except the
 first. The preview renderer already tolerates the empty line.
 
+The separator is emitted between blocks, tracked with a `first_pos_seen` flag
+rather than "is `lines` non-empty": the earlier form put a blank after a hoisted
+transcription and before the first part of speech, where nothing needs
+separating. Note that a blank DSL line becomes an empty `<p></p>` (dsl.cc:759),
+and the app stylesheet zeroes `.dsl_definition p` margin, so on device the gap
+may be invisible rather than a large break — verify which marker gives the
+intended separation.
+
 ## Risks / Trade-offs
 
 | Risk | Mitigation |

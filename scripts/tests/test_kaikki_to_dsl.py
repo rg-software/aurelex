@@ -914,9 +914,29 @@ class CardLayoutTests(unittest.TestCase):
         ]
         text = TOOL.render_card(records, self._Audio(), self.EN, set())
         self.assertIn("\n\n\t[p]verb[/p]", text)
+        # exactly one blank line, and only between the two sections
+        self.assertEqual(
+            sum(1 for ln in text.split("\n") if ln.strip() == ""), 1
+        )
         # the first section is not preceded by a blank line
         self.assertFalse(text.startswith("\n"))
         self.assertTrue(text.startswith("\t[p]noun[/p]"))
+
+    def test_a_hoisted_transcription_is_not_followed_by_a_blank_line(self):
+        # a hoisted transcription sits above the first POS; the separator goes
+        # strictly between parts of speech, so no blank follows the transcription
+        records = [
+            {"word": "w", "pos": "noun", "senses": [{"glosses": ["n."]}],
+             "sounds": [{"ipa": "/w/"}]},
+            {"word": "w", "pos": "verb", "senses": [{"glosses": ["v."]}],
+             "sounds": [{"ipa": "/w/"}]},
+        ]
+        text = TOOL.render_card(records, self._Audio(), self.EN, set())
+        self.assertIn("[com]/w/[/com]\n\t[p]noun[/p]", text)
+        self.assertNotIn("[com]/w/[/com]\n\n", text)
+        self.assertEqual(
+            sum(1 for ln in text.split("\n") if ln.strip() == ""), 1
+        )
 
     def test_audio_without_a_transcription_still_gets_a_line(self):
         record = {

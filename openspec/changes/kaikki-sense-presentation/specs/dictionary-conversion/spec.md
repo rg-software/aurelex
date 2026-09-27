@@ -7,7 +7,7 @@ each with the grammatical forms of the base word and the senses of that part of
 speech. Records that share a part of speech SHALL be merged into one block, so an
 interleaved `noun, verb, noun` reads as one noun block followed by one verb
 block. Each part of speech SHALL be separated from the one before it by a blank
-line, so the sections read as distinct blocks. When the whole card carries a
+line, so the sections read as distinct blocks; no blank line SHALL precede the first part of speech. When the whole card carries a
 single pronunciation transcription, that transcription SHALL be shown once above
 the first part of speech rather than repeated; when parts of speech differ, each
 SHALL keep its own transcription under its own heading. A transcription SHALL be
