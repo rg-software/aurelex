@@ -1691,11 +1691,21 @@ def render_card(
         # the parent without a global sense counter. Each leaf sense is prefixed
         # with a bullet; the sense text is already escaped and may carry inline
         # icon markup, so it is not escaped again here.
+        #
+        # A parent heading (a sense that carries sub-senses) is numbered "1. ",
+        # "2. "…, counted per part of speech, so the top-level sections of a long
+        # article read as an outline. A heading with no children is an ordinary
+        # sense and is left bulleted but unnumbered, so a card that has no groups
+        # (most cards) is unchanged.
+        group_nom = 0
         for i in idxs:
             for heading, entries in _group_senses(
                 records[i].get("senses") or [], profile, known, words[i]
             ):
                 if heading:
+                    if entries:
+                        group_nom += 1
+                        heading = f"{group_nom}. {heading}"
                     lines.append(f"\t[m1]{heading}[/m]")
                 level = 2 if heading else 1
                 for text, raw_examples in entries:

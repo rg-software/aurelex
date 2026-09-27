@@ -68,9 +68,14 @@ first part of speech that references it.
 When a source sense's definition is split into a shared parent phrase and one or
 more specific parts, the parent SHALL be rendered once as a heading at one sense
 level and each specific part as a sub-sense at the next level beneath it. A sense
-whose definition is a single phrase SHALL be rendered as a plainly numbered
-sense with no sub-senses. A heading or sub-sense whose text repeats one already
-rendered on the card SHALL be dropped.
+whose definition is a single phrase SHALL be rendered as its own sense with no
+sub-senses. A heading or sub-sense whose text repeats one already rendered on the
+card SHALL be dropped.
+
+A heading that carries sub-senses SHALL be numbered, in sequence within its part
+of speech, so the top-level sections of a long article read as an outline. The
+sequence SHALL restart for each part of speech. A sense with no sub-senses SHALL
+NOT be numbered.
 
 #### Scenario: Shared parent renders once
 
@@ -82,12 +87,24 @@ rendered on the card SHALL be dropped.
 #### Scenario: Single-phrase sense has no sub-senses
 
 - **WHEN** a sense's definition is a single phrase
-- **THEN** it is rendered as a plainly numbered sense, with no parent heading
+- **THEN** it is rendered as its own sense, with no parent heading
 
 #### Scenario: Repeated text is not repeated
 
 - **WHEN** the source repeats a definition verbatim across senses
 - **THEN** the repeated text is rendered only once on the card
+
+#### Scenario: Group headings are numbered within their part of speech
+
+- **WHEN** a part of speech has two or more sense headings that carry sub-senses
+- **THEN** they are numbered in sequence from one, and the numbering starts again
+  at one for the next part of speech
+
+#### Scenario: A sense without sub-senses is not numbered
+
+- **WHEN** a sense has no sub-senses
+- **THEN** it is shown without a sequence number
+
 
 ### Requirement: Sense tag display
 

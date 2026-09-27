@@ -149,6 +149,22 @@ run
     [/*]
 ```
 
+and a headword whose senses group (the `Employment` / `Effort` / `Product` outline
+of `work`):
+
+```
+work
+    [p]noun[/p]
+    [m1]1. Employment.[/m]
+    [m2]• Labour, occupation, job.[/m]
+    [m2]• The place where one is employed.[/m]
+    [m1]2. Effort.[/m]
+    [m2]• Effort expended on a particular task.[/m]
+    [m1]3. Product; the result of effort.[/m]
+    [m2]• A literary, artistic, or intellectual production.[/m]
+    [m1]• [s]gd_tag_obsolete.svg[/s] A factory; a works.[/m]
+```
+
 Every leaf sense begins with a **bullet**, so sibling definitions read as a list;
 a group heading (a sense with sub-senses under it) is a category, not a sense,
 and carries no bullet. A blank line separates consecutive parts of speech, so the
@@ -166,6 +182,11 @@ is a `[m1]` heading and each specific part a `[m2]` sub-sense, which the engine
 indents one level deeper — so sub-senses read as definitions rather than flat
 comments, and a table of near-identical senses does not reprint the parent. A
 verbatim repeat of a heading or sub-sense is dropped.
+
+A heading that carries sub-senses is **numbered** (`1. `, `2. ` …), counting
+within its part of speech and restarting for the next one, so the top-level
+sections of a long article read as an outline. A sense with no sub-senses is an
+ordinary sense and is not numbered, so a card with no groups is unchanged.
 
 ### Sense tags
 

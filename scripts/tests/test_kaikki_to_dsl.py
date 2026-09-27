@@ -1021,12 +1021,39 @@ class CardLayoutTests(unittest.TestCase):
             ]}],
             self._Audio(), self.EN, set(),
         )
-        self.assertIn("[m1]Employment.[/m]", text)
+        self.assertIn("[m1]1. Employment.[/m]", text)
         self.assertIn("[m2]\u2022 Labour.[/m]", text)
         self.assertIn("[m2]\u2022 The place one works.[/m]", text)
         self.assertNotIn("[com]Labour.", text)
         # the parent heading is a category, not a sense: it carries no bullet
         self.assertNotIn("\u2022 Employment.", text)
+
+    def test_group_headings_are_numbered_per_pos(self):
+        records = [
+            {"word": "w", "pos": "noun", "senses": [
+                {"glosses": ["First.", "a."]},
+                {"glosses": ["Second.", "b."]},
+            ]},
+            {"word": "w", "pos": "verb", "senses": [
+                {"glosses": ["Third.", "c."]},
+            ]},
+        ]
+        text = TOOL.render_card(records, self._Audio(), self.EN, set())
+        self.assertIn("[m1]1. First.[/m]", text)
+        self.assertIn("[m1]2. Second.[/m]", text)
+        # the counter restarts for the next part of speech
+        self.assertIn("[m1]1. Third.[/m]", text)
+        self.assertNotIn("2. Third.", text)
+
+    def test_a_heading_without_children_is_not_numbered(self):
+        # a single-fragment sense is an ordinary sense, not an outline entry
+        record = {
+            "word": "w", "pos": "noun",
+            "senses": [{"glosses": ["A thing."]}, {"glosses": ["Another."]}],
+        }
+        text = TOOL.render_card([record], self._Audio(), self.EN, set())
+        self.assertIn("[m1]\u2022 A thing.[/m]", text)
+        self.assertNotIn("1. A thing.", text)
 
     def test_leaf_senses_are_bulleted(self):
         record = {

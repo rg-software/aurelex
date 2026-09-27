@@ -243,6 +243,21 @@ belongs in the generator: emitting `[opt]` as the opener, or teaching the C++ an
 design) the unclosed span simply ran to the end of the card, so the defect was
 invisible. Per-sense zones made it visible: a later sense sat inside an earlier
 sense's zone. This also affected the committed `aurelex-basic` smoke fixture.
+### D12a. Group headings are numbered per part of speech
+
+A heading that carries sub-senses is prefixed `1. `, `2. ` …, counted within its
+part of speech and restarting for the next one; a sense with no sub-senses is left
+bulleted but unnumbered, so a card with no groups is unchanged. The marker is
+plain text inside the `[mN]` tag — the only place to put it, since the engine
+gives `[mN]` no class hook and we do not patch the reader.
+
+*Why:* `[m1]` is overloaded — it is a heading when the sense has children and an
+ordinary sense when it does not — so the number is exactly the signal that tells
+the two apart, and it makes the top-level sections of a long article scannable
+(the bullet alone is not enough once a card runs to dozens of lines). Numbering
+only group headings keeps it meaningful: on `work` the parents become 1./2./3.
+while the ungrouped senses stay plain bullets.
+
 ### D12. A card with one record hoists its transcription too
 
 Transcription hoisting keyed on `len(records) > 1`, so a one-record card placed
