@@ -34,6 +34,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import base64
 import gzip
 import hashlib
 import heapq
@@ -51,7 +52,7 @@ import urllib.error
 import urllib.request
 import zipfile
 from typing import Dict, Iterator, List, Optional, Sequence, Set, Tuple
-from urllib.parse import unquote
+from urllib.parse import quote, unquote, urlsplit, urlunsplit
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -127,6 +128,8 @@ class LangProfile:
         has_audio: bool = True,
         strip_forms: bool = False,
         strict_tags: bool = False,
+        sense_noise_tags: Optional[Set[str]] = None,
+        sense_short_tags: Optional[Dict[str, str]] = None,
     ) -> None:
         self.code = code
         self.form_tags = form_tags
@@ -136,6 +139,11 @@ class LangProfile:
         self.has_audio = has_audio
         self.strip_forms = strip_forms
         self.strict_tags = strict_tags
+        # Sense tags that mark the unremarkable case (a noun is countable, a
+        # verb transitive) add no information and are dropped; the rest are
+        # abbreviated through ``sense_short_tags``.
+        self.sense_noise_tags = set(sense_noise_tags or ())
+        self.sense_short_tags = dict(sense_short_tags or {})
 
     def form_qualifies(self, tags: Sequence[str]) -> bool:
         """Whether a form belongs in the article's forms line.
@@ -201,6 +209,25 @@ _EN_SHORT_TAGS = {
     "imperative": "imper.", "infinitive": "inf.",
 }
 
+# Sense tags on English glosses that describe the unremarkable case: a verb is
+# transitive unless said otherwise, so printing "(transitive)" on every other
+# sense is pure noise. (Countability is *not* noise — it is shown as an icon, see
+# ``_SENSE_TAG_ICONS``.) The rest are abbreviated to the forms a printed
+# dictionary uses.
+_EN_SENSE_NOISE = {"transitive", "intransitive", "not-comparable"}
+_EN_SENSE_SHORT = {
+    "figuratively": "fig.", "derogatory": "derog.", "informal": "inform.",
+    "colloquial": "colloq.", "slang": "slang", "archaic": "arch.",
+    "obsolete": "obs.", "dialectal": "dial.", "humorous": "hum.",
+    "vulgar": "vulg.", "offensive": "offens.", "rare": "rare",
+    "literary": "lit.", "poetic": "poet.", "dated": "dated",
+    "metonymically": "meton.", "transferred sense": "fig.",
+    "historical": "hist.", "law": "law", "medicine": "med.",
+    "computing": "comput.", "biology": "biol.", "chemistry": "chem.",
+    "mathematics": "math.", "physics": "phys.", "sports": "sports",
+    "informal or colloquial": "inform.",
+}
+
 # German forms are dominated by case/number/gender; a global whitelist would
 # discard the most useful information, hence a dedicated row.
 _DE_FORM_TAGS = {
@@ -233,6 +260,7 @@ _JA_SHORT_TAGS = {
 LANG_PROFILES: Dict[str, LangProfile] = {
     "en": LangProfile(
         "en", _EN_FORM_TAGS, _EN_NOISE, ("ipa", "enpr"), _EN_SHORT_TAGS,
+        sense_noise_tags=_EN_SENSE_NOISE, sense_short_tags=_EN_SENSE_SHORT,
     ),
     "de": LangProfile(
         "de", _DE_FORM_TAGS, _DE_NOISE, ("ipa", "enpr"), _DE_SHORT_TAGS,
@@ -366,10 +394,155 @@ def _flatten(value) -> str:
     return ""
 
 
-def _tags_suffix(tags) -> str:
-    if not tags:
-        return ""
-    return "(" + ", ".join(str(t) for t in tags) + ") "
+# Wiktionary sense tags that describe how the gloss relates to another entry
+# ("alternative/other form of", "synonym of", an ellipsis, a clipping) rather than
+# how the word is used: the gloss itself states the relation, so no marker is
+# added. The related headword is linked instead (see ``_link_form_targets``).
+_STRUCTURAL_SENSE_TAGS = {
+    "alt-of", "alternative", "form-of",
+    "synonym", "synonyms", "ellipsis", "clipping",
+}
+
+
+# Sense tags shown as a small inline icon instead of a parenthetical word. The
+# same icon may stand for several source tags: a drink for countable, a water
+# drop for uncountable, a tag glyph for the initialism family, and a landmark for
+# obsolete/dated/archaic usage. The filenames resolve against the dictionary's
+# own resource bundle (see ``scripts/assets/kaikki-tag-icons/``).
+_SENSE_TAG_ICONS = {
+    "countable": "gd_tag_countable.svg",
+    "uncountable": "gd_tag_uncountable.svg",
+    "initialism": "gd_tag_initialism.svg",
+    "abbreviation": "gd_tag_initialism.svg",
+    "acronym": "gd_tag_initialism.svg",
+    "obsolete": "gd_tag_obsolete.svg",
+    "dated": "gd_tag_obsolete.svg",
+    "archaic": "gd_tag_obsolete.svg",
+}
+
+
+def _icon_ref(name: str) -> str:
+    """A DSL picture reference for one bundled sense-marker icon."""
+    return f"[s]{escape_dsl(name)}[/s]"
+
+
+# The relation a gloss states in words ("Initialism of …", "Abbreviation of …")
+# when that same relation is already shown as an icon.
+_RELATION_PREFIX_RE = re.compile(
+    r"^(?:Initialism|Abbreviation|Acronym) of\s+", re.IGNORECASE
+)
+_ICONISED_RELATION_TAGS = {"initialism", "abbreviation", "acronym"}
+
+
+def _strip_relation_prefix(text: str, tags: Sequence[str]) -> str:
+    """Drop a leading "Initialism of"/"Abbreviation of"/"Acronym of" phrase.
+
+    Those relations are shown as the initialism icon, so the words would say the
+    same thing twice; what remains is the headword the gloss names, which is then
+    linked. A tag outside the icon set (a clipping, an ellipsis) is left as text.
+    """
+    if not _ICONISED_RELATION_TAGS & {str(t) for t in (tags or [])}:
+        return text
+    return _RELATION_PREFIX_RE.sub("", text, count=1)
+
+
+def _link_form_targets(
+    escaped: str, sense: dict, known: Optional[Set[str]], word: str
+) -> str:
+    """Turn the headword a form-of/alt-of sense points at into a ``[ref]`` link.
+
+    A sense such as ``Alternative spelling of swap.`` already names the headword
+    it relates to in its gloss, and ``alt_of``/``form_of`` states it explicitly.
+    That word is linked when the dictionary actually contains it — the same
+    known-headword guard the cross-references use — so ``swop`` reads
+    ``Alternative spelling of [ref]swap[/ref].`` and tapping opens ``swap``.
+
+    ``escaped`` is the gloss already run through :func:`escape_dsl`; the target is
+    a plain word, so escaping leaves it unchanged and it can be wrapped in place.
+    """
+    for entry in list(sense.get("alt_of") or []) + list(sense.get("form_of") or []):
+        if not isinstance(entry, dict):
+            continue
+        target = str(entry.get("word") or "").strip()
+        if not target or target == word:
+            continue
+        if not known or target not in known:
+            continue
+        pattern = re.compile(
+            r"(?<!\w)" + re.escape(escape_dsl(target)) + r"(?!\w)",
+            re.IGNORECASE | re.UNICODE,
+        )
+        escaped = pattern.sub(lambda m: f"[ref]{m.group(0)}[/ref]", escaped, count=1)
+    return escaped
+
+
+# The vendored sense-marker icons, bundled into every produced dictionary and
+# advertised in its about card. See scripts/assets/kaikki-tag-icons/README.md for
+# provenance and license. The list is fixed, so the resource bundle is a
+# deterministic set of files.
+_ICON_ASSET_DIR = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "assets", "kaikki-tag-icons"
+)
+_ICON_FILES = (
+    "gd_tag_countable.svg",
+    "gd_tag_uncountable.svg",
+    "gd_tag_initialism.svg",
+    "gd_tag_obsolete.svg",
+)
+
+# The about-card legend: each bundled icon and the tags it stands for.
+_ICON_LEGEND = (
+    ("gd_tag_countable.svg", "countable"),
+    ("gd_tag_uncountable.svg", "uncountable (a word that is both shows neither)"),
+    ("gd_tag_initialism.svg", "initialism, abbreviation or acronym"),
+    ("gd_tag_obsolete.svg", "obsolete, dated or archaic"),
+)
+
+
+def _icon_data_uri(name: str) -> str:
+    """A data URI for one bundled icon, so the standalone preview shows it."""
+    with open(os.path.join(_ICON_ASSET_DIR, name), "rb") as f:
+        data = f.read()
+    return "data:image/svg+xml;base64," + base64.b64encode(data).decode("ascii")
+
+
+def _audio_ref(name: str) -> str:
+    """A DSL sound reference for one bundled audio filename."""
+    return f"[s]{escape_dsl(name)}[/s]"
+
+
+def _sense_markers(tags: Sequence[str], profile: "LangProfile") -> str:
+    """The inline markers that precede a sense's gloss: icons, then a text tag.
+
+    Common tags are shown as small icons (``_SENSE_TAG_ICONS``), in tag order and
+    de-duplicated by icon; at most one remaining register/context tag follows as
+    abbreviated text. Tags describing the unremarkable case or a relation the
+    gloss already states are dropped. Returns "" when a sense carries none.
+
+    Countability is the one special case: Wiktionary tags most nouns both
+    ``countable`` and ``uncountable`` ("can be either"), so when both are present
+    neither icon is shown — only a lone countability tag is informative.
+    """
+    tags = [str(t) for t in (tags or [])]
+    both_counter = {"countable", "uncountable"} <= set(tags)
+    icons: List[str] = []
+    for tag in tags:
+        if both_counter and tag in ("countable", "uncountable"):
+            continue
+        icon = _SENSE_TAG_ICONS.get(tag)
+        if icon and icon not in icons:
+            icons.append(icon)
+    text = ""
+    for tag in tags:
+        if (
+            tag in _SENSE_TAG_ICONS
+            or tag in _STRUCTURAL_SENSE_TAGS
+            or tag in profile.sense_noise_tags
+        ):
+            continue
+        text = "(" + profile.sense_short_tags.get(tag, tag.replace("-", " ")) + ") "
+        break
+    return "".join(_icon_ref(name) + " " for name in icons) + text
 
 
 # ---------------------------------------------------------------------------
@@ -436,6 +609,23 @@ def _throttle() -> None:
     _last_request_time = time.time()
 
 
+def _ascii_url(url: str) -> str:
+    """Percent-encode a URL's non-ASCII parts so urllib can send it.
+
+    A wiktextract audio URL may carry a raw Unicode title (``zh-xiàn.ogg``),
+    and ``urllib`` writes the request line as ASCII, so sending it unescaped
+    fails with ``'ascii' codec can't encode character``. Quote the path and
+    query while leaving the scheme, host and existing escapes untouched.
+    """
+    try:
+        parts = urlsplit(url)
+    except ValueError:
+        return url
+    path = quote(parts.path, safe="/%:@!$&'()*+,;=~")
+    query = quote(parts.query, safe="=&%:@!$'()*+,;/?~")
+    return urlunsplit((parts.scheme, parts.netloc, path, query, parts.fragment))
+
+
 def _open_with_retries(url: str, timeout: int):
     """Open ``url``, retrying rate limits and transient server errors.
 
@@ -444,6 +634,7 @@ def _open_with_retries(url: str, timeout: int):
     a missing file.
     """
     last: Optional[Exception] = None
+    url = _ascii_url(url)
     for attempt in range(_DOWNLOAD_RETRIES):
         _throttle()
         request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
@@ -555,9 +746,12 @@ def iter_records(
 
     With ``lang_code`` set, a line whose raw text does not contain that
     language's marker is skipped before JSON parsing, which is most of a full
-    snapshot and the dominant cost of a scan.
+    snapshot and the dominant cost of a scan. The prefilter is a substring test,
+    so the parsed record is checked again: a record of another language can carry
+    a nested ``"lang_code": "<x>"`` and slip past the raw-text test.
     """
     needle = f'"lang_code": "{lang_code}"' if lang_code else None
+    compact_needle = f'"lang_code":"{lang_code}"' if lang_code else None
     with open_text_maybe_gzip(path) as stream:
         for line_no, line in enumerate(stream, 1):
             if progress is not None:
@@ -565,7 +759,13 @@ def iter_records(
             line = line.strip()
             if not line:
                 continue
-            if needle is not None and needle not in line:
+            # the prefilter must not reject a real record, so accept either JSON
+            # spacing; the parsed check below is what actually decides
+            if (
+                needle is not None
+                and needle not in line
+                and compact_needle not in line
+            ):
                 continue
             try:
                 record = json.loads(line)
@@ -573,6 +773,8 @@ def iter_records(
                     raise ValueError("not an object")
             except (json.JSONDecodeError, ValueError):
                 yield line_no, None
+                continue
+            if lang_code is not None and record.get("lang_code") != lang_code:
                 continue
             yield line_no, record
 
@@ -695,8 +897,11 @@ def sample_headwords(
     return [r for word in order if word in chosen for r in records_by_word[word]]
 
 
-# How the transcription fields of a profile are labelled in an article.
+# How the transcription fields of a profile are labelled in an article. The
+# line a transcription lands on is always a transcription, so the common IPA
+# value is emitted bare; a second notation (enPR) keeps its name.
 _PRON_LABEL = {"ipa": "IPA", "enpr": "enPR"}
+_UNLABELLED_PRON_FIELDS = {"ipa"}
 
 
 # ---------------------------------------------------------------------------
@@ -1105,41 +1310,385 @@ def _cross_refs(record: dict, known: Set[str], limit: int = 12) -> List[str]:
     return refs
 
 
+# A rendered sense and the raw examples that illustrate it. ``text`` is the
+# gloss line; ``examples`` are the source lines, still unfiltered.
+SenseEntry = Tuple[str, List[str]]
+
+
+def _extract_examples(sense: dict) -> List[str]:
+    """The raw example sentences recorded on one sense."""
+    out: List[str] = []
+    for example in sense.get("examples") or []:
+        if isinstance(example, dict):
+            text = example.get("text") or example.get("english") or ""
+        else:
+            text = str(example)
+        text = str(text).strip()
+        if text:
+            out.append(text)
+    return out
+
+
 def _group_senses(
-    senses: Sequence[dict], profile: LangProfile
-) -> List[Tuple[str, List[str]]]:
+    senses: Sequence[dict],
+    profile: LangProfile,
+    known: Optional[Set[str]] = None,
+    word: str = "",
+) -> List[Tuple[str, List[SenseEntry]]]:
     """Group rendered senses by a shared leading gloss fragment.
 
-    Consecutive senses whose first fragment is identical (ignoring the context
-    tags, which differ per sense) become one group: the fragment is rendered
-    once as the group heading and the remaining fragments as its children, each
-    with its own tag prefix. This is how Wiktionary presents a parent gloss with
-    numbered sub-senses, and it keeps a table of near-identical senses such as
-    ``monkey``'s figurative uses from reprinting the parent once per sense.
+    wiktextract splits a Wiktionary definition on ``:`` into a parent phrase
+    plus the specific part. Senses that share a parent become one group: the
+    parent is rendered once as the heading and each specific part beneath it as
+    a child, so ``monkey``'s seven figurative uses do not reprint the parent
+    seven times. A sense whose gloss is a single fragment is its own group with
+    heading "".
 
-    Returns ``(heading, children)`` pairs; the heading is "" for a sense whose
-    gloss is a single fragment.
+    Groups merge by parent in first-seen order, and a heading or child already
+    emitted is dropped — Wiktionary repeats definitions verbatim across
+    sub-senses, and printing a repeat says nothing new.
+
+    Each entry carries the examples recorded on the sense it came from, so the
+    renderer can keep an example beside the use it illustrates.
+
+    Returns ``(heading, entries)`` pairs.
     """
-    groups: List[Tuple[str, List[str]]] = []
+    groups: Dict[str, List[SenseEntry]] = {}    # heading -> child entries
+    items: List[Tuple[str, str, List[str]]] = []  # (kind, text, examples)
+    seen: Set[str] = set()
+
+    def fresh(text: str) -> bool:
+        key = text.casefold().strip()
+        if not key or key in seen:
+            return False
+        seen.add(key)
+        return True
+
     for sense in senses:
         if not isinstance(sense, dict):
             continue
         parts = [str(g) for g in (sense.get("glosses") or []) if g]
         if not parts:
             continue
-        prefix = _tags_suffix(sense.get("tags"))
+        markers = _sense_markers(sense.get("tags"), profile)
+        examples = _extract_examples(sense)
+
+        def render(part: str) -> str:
+            # drop the relation phrase the icon already conveys, escape the free
+            # text, then link the headword a form-of or alt-of sense names
+            part = _strip_relation_prefix(part, sense.get("tags"))
+            return _link_form_targets(escape_dsl(part), sense, known, word)
+
         if len(parts) == 1:
-            groups.append(("", [prefix + parts[0]]))
+            if fresh(parts[0]):
+                items.append(("plain", markers + render(parts[0]), examples))
             continue
         parent, children = parts[0], parts[1:]
-        child = prefix + children[0]
-        rest = children[1:]
-        if groups and groups[-1][0] == parent:
-            groups[-1][1].append(child)
-            groups[-1][1].extend(rest)
-        else:
-            groups.append((parent, [child, *rest]))
-    return groups
+        if parent not in groups:
+            if not fresh(parent):
+                continue
+            groups[parent] = []
+            items.append(("group", render(parent), []))
+        if children and fresh(children[0]):
+            groups[parent].append((markers + render(children[0]), examples))
+        for child in children[1:]:
+            if fresh(child):
+                groups[parent].append((render(child), []))
+
+    return [
+        (text, groups[text]) if kind == "group" else ("", [(text, ex)])
+        for kind, text, ex in items
+    ]
+
+
+_EXAMPLE_MAX_CHARS = 200
+
+# Two tokens are considered the same word when their first this-many characters
+# match, which pairs a headword with a regular inflection (swop/swopping,
+# run/running) without a stemmer. Kept short so it does not over-match.
+_MIN_STEM = 3
+
+_WORD_RE = re.compile(r"[^\W\d_]+", re.UNICODE)
+
+# At most this many examples survive on one sense; the shortest are kept, which
+# favours a crisp illustrative phrase over a paragraph-long quotation.
+_EXAMPLE_MAX_PER_SENSE = 1
+
+# Wiktionary cross-reference bookkeeping, not usage: the bare "Citations:work."
+# placeholder and the "For quotations using this term, see Citations:work."
+# sentence that wraps it.
+_CITATION_RE = re.compile(r"Citations?:|^see\s+citations?:", re.IGNORECASE)
+
+# Pre-modern spelling and grammar: a long s, the Early Modern -e endings and
+# pronouns of Shakespeare-era quotations, and the Middle English inflections that
+# survive in Chaucer. Modern usage contains none of them, so matching any marks
+# a quote as archaic.
+_ARCHAIC_MARKERS = (
+    "ſ", "haue", "hath", "thou", "thee", "thy", "doth", "sayde", "vnto",
+    "worke", "euery", "wee ", "knowe", "theſe",
+    "wolde", "sholde", "seyde", "kyng", "hyre", "yow ", "dooth",
+    "my hede", "nat ", "wher ",
+)
+
+
+def _example_is_usable(text: str) -> bool:
+    """Whether an example is worth showing a modern learner.
+
+    Archaic quotations (Early Modern and Middle English) and ``Citations:``
+    pointers are unreadable or say nothing, and the source records far more of
+    them than modern usage; they are dropped so the few current examples are not
+    drowned out.
+    """
+    if "ſ" in text:                     # long s: an archaic quote
+        return False
+    if _CITATION_RE.search(text):
+        return False
+    lowered = text.lower()
+    if any(marker in lowered for marker in _ARCHAIC_MARKERS):
+        return False
+    return True
+
+
+def _truncate_example(text: str, limit: int = _EXAMPLE_MAX_CHARS) -> str:
+    """Shorten an over-long example at a word boundary.
+
+    Wiktionary quotes can run to a whole paragraph; a learner wants the phrase
+    that shows the word in use, not the surrounding essay, so an example longer
+    than ``limit`` is cut at the last space that fits and an ellipsis appended.
+    """
+    if len(text) <= limit:
+        return text
+    cut = text[:limit].rsplit(" ", 1)[0].rstrip(" ,;:")
+    return cut + " …"
+
+
+def _example_shows_word(text: str, word: str, forms: Sequence[str] = ()) -> bool:
+    """Whether an example actually uses the headword (or a form of it).
+
+    An example that does not contain the word proves nothing about it, so it is
+    dropped rather than shown. Two matches count:
+
+    * an exact token match against the headword or any listed ``forms[]`` — this
+      catches irregular forms (``ran``, ``children``) that share no stem with
+      the headword, and
+    * a shared stem of at least ``_MIN_STEM`` characters against the headword
+      alone, which pairs it with a regular inflection the ``forms[]`` may not
+      list (``swop``/``swopping``, ``run``/``running``).
+    """
+    tokens = [t.lower() for t in _WORD_RE.findall(text)]
+    if not tokens:
+        return False
+    token_set = set(tokens)
+
+    def strip_label(form: str) -> str:
+        return re.split(r"\s+\(", form, maxsplit=1)[0].strip().lower()
+
+    exact = {strip_label(str(word or ""))}
+    exact.discard("")
+    exact.update(
+        f for f in (strip_label(v) for v in forms) if f
+    )
+    if exact & token_set:
+        return True
+
+    head = str(word or "").strip().lower()
+    if len(head) < _MIN_STEM:
+        return False
+    for candidate in {head, *head.split()}:
+        if len(candidate) < _MIN_STEM:
+            continue
+        n = _MIN_STEM
+        if any(candidate[:n] == token[:n] for token in tokens):
+            return True
+    return False
+
+
+def _sense_examples(
+    raw: Sequence[str], word: str, forms: Sequence[str] = ()
+) -> List[str]:
+    """Optional-zone lines for one sense's examples.
+
+    Only examples that actually contain the headword (or one of the record's
+    forms) are kept, and archaic quotations or "Citations:" placeholders are
+    dropped — neither says anything about how the word is used today. The
+    survivors are ordered shortest-first and capped, because a sense needs one
+    crisp illustration, not every quotation the source happens to record.
+    """
+    usable = [
+        text
+        for text in (str(t).strip() for t in raw)
+        if text and _example_is_usable(text) and _example_shows_word(text, word, forms)
+    ]
+    usable.sort(key=len)
+    return [
+        f"\t[ex]{escape_dsl(_truncate_example(text))}[/ex]"
+        for text in usable[:_EXAMPLE_MAX_PER_SENSE]
+    ]
+
+
+def _record_transcription(record: dict, profile: LangProfile) -> str:
+    """The IPA/enPR transcription of one record, as inline DSL (or "").
+
+    The common IPA value is emitted without a name — the line it lands on is
+    always a transcription — while a less common notation (enPR) keeps its label
+    so the two are distinguishable.
+    """
+    for field in profile.pron_fields:
+        for sound in record.get("sounds") or []:
+            if isinstance(sound, dict) and sound.get(field):
+                value = escape_dsl(str(sound[field]))
+                if field in _UNLABELLED_PRON_FIELDS:
+                    return value
+                return f"{_PRON_LABEL.get(field, field.upper())}: {value}"
+    return ""
+
+
+def _group_by_pos(records: Sequence[dict]) -> List[Tuple[str, List[int]]]:
+    """Group record indices by part of speech, preserving first-seen order.
+
+    A headword's records can arrive interleaved (``noun``, ``verb``, ``noun``),
+    but an article should read one part of speech at a time, so records that
+    share a POS are merged into a single block under one heading.
+    """
+    order: List[str] = []
+    groups: Dict[str, List[int]] = {}
+    for i, record in enumerate(records):
+        pos = str(record.get("pos") or "")
+        if pos not in groups:
+            groups[pos] = []
+            order.append(pos)
+        groups[pos].append(i)
+    return [(pos, groups[pos]) for pos in order]
+
+
+def render_card(
+    records: Sequence[dict],
+    audio: AudioPlan,
+    profile: LangProfile,
+    known: Optional[Set[str]] = None,
+) -> str:
+    """Render a headword's records as one DSL card.
+
+    A card is one headword whose records are its parts of speech (``run`` is a
+    verb and a noun). Records that share a part of speech are merged into one
+    block, so an interleaved ``noun, verb, noun`` reads ``noun, verb``. The
+    visible article is part of speech → forms → senses; examples and
+    cross-references go into the DSL optional zone (``[*]…[/opt]``), which the
+    reader expands on demand.
+
+    A single transcription shared across the card is hoisted above the first
+    part of speech; differing ones stay under their own part of speech. Audio is
+    never hoisted and never repeated: each file prints once, under the first
+    part of speech that references it.
+    """
+    records = [r for r in records if r]
+    if not records:
+        return ""
+
+    # Audio must be planned exactly once per record (planning mutates the
+    # plan's referenced set), so plan for all of them before laying anything
+    # out and share the result between the hoisted and per-POS layouts.
+    transcriptions = [_record_transcription(record, profile) for record in records]
+    record_audio = [list(audio.plan(record)) for record in records]
+
+    blocks = _group_by_pos(records)
+
+    # The transcription is hoisted above the first POS whenever the whole card
+    # has a single one — including a card that is a single record, so the common
+    # word does not place its transcription inconsistently below the part of
+    # speech; audio is never hoisted but is de-duplicated card-wide, so a word
+    # whose parts of speech share one recording prints it once.
+    distinct_tr = {t for t in transcriptions if t}
+    hoist = len(distinct_tr) == 1
+
+    form_lines: List[List[str]] = []
+    words: List[str] = []
+    forms_by_record: List[List[str]] = []
+    for record in records:
+        forms = collect_profile_forms(record, profile)
+        words.append(str(record.get("word") or ""))
+        forms_by_record.append(forms)
+        form_lines.append(
+            []
+            if (not forms or profile.strip_forms)
+            else ["\t[i]" + escape_dsl(", ".join(forms)) + "[/i]"]
+        )
+
+    # Cross-references: one card-level line, de-duplicated and capped, rather
+    # than one "See also" per record.
+    refs_seen: List[str] = []
+    for record in records:
+        if not known:
+            break
+        for ref in _cross_refs(record, known):
+            if ref not in refs_seen:
+                refs_seen.append(ref)
+            if len(refs_seen) >= 8:
+                break
+
+    # Each audio file is emitted once, under the first block that references it.
+    shown_audio: Set[str] = set()
+
+    lines: List[str] = []
+    if hoist:
+        lines.append("\t[com]" + next(iter(distinct_tr)) + "[/com]")
+
+    for pos, idxs in blocks:
+        if pos:
+            lines.append(f"\t[p]{escape_dsl(pos)}[/p]")
+        # forms: first record of the block that carries any
+        for i in idxs:
+            if form_lines[i]:
+                lines.extend(form_lines[i])
+                break
+
+        # pronunciation: the transcription of the block's records (one per
+        # distinct value) with any not-yet-shown audio, unless hoisted
+        if not hoist:
+            seen_tr: Set[str] = set()
+            for i in idxs:
+                tr = transcriptions[i]
+                if tr and tr not in seen_tr:
+                    seen_tr.add(tr)
+                    lines.append("\t[com]" + tr + "[/com]")
+        audio_bits: List[str] = []
+        for i in idxs:
+            for name in record_audio[i]:
+                if name not in shown_audio:
+                    shown_audio.add(name)
+                    audio_bits.append(_audio_ref(name))
+        if audio_bits:
+            lines.append("\t[com]" + "  ".join(audio_bits) + "[/com]")
+
+        # senses: merged across the block's records. Every sense sits at [m1]
+        # (one indentation level under its part of speech); a grouped parent
+        # gloss is [m1] with its sub-senses at [m2], one level deeper. The
+        # engine renders [mN] by indentation, so this nests the children under
+        # the parent without a global sense counter. Each leaf sense is prefixed
+        # with a bullet; the sense text is already escaped and may carry inline
+        # icon markup, so it is not escaped again here.
+        for i in idxs:
+            for heading, entries in _group_senses(
+                records[i].get("senses") or [], profile, known, words[i]
+            ):
+                if heading:
+                    lines.append(f"\t[m1]{heading}[/m]")
+                level = 2 if heading else 1
+                for text, raw_examples in entries:
+                    lines.append(f"\t[m{level}]\u2022 {text}[/m]")
+                    examples = _sense_examples(raw_examples, words[i], forms_by_record[i])
+                    if examples:
+                        lines.append("\t[*]")
+                        lines.extend(examples)
+                        lines.append("\t[/opt]")
+
+    if refs_seen:
+        links = ", ".join("[ref]" + escape_dsl(r) + "[/ref]" for r in refs_seen)
+        lines.append("\t[*]")
+        lines.append("\t[com]See also: " + links + "[/com]")
+        lines.append("\t[/opt]")
+
+    return "\n".join(lines)
 
 
 def render_record(
@@ -1148,66 +1697,8 @@ def render_record(
     profile: LangProfile,
     known: Optional[Set[str]] = None,
 ) -> str:
-    """Render one wiktextract record as the body lines of a DSL card.
-
-    Senses occupy the visible article; examples, grammatical forms, cross
-    references and pronunciation go into the DSL optional zone (``[*]…[/opt]``),
-    which the reader expands on demand.
-    """
-    lines: List[str] = []
-    pos = record.get("pos") or ""
-    if pos:
-        lines.append(f"\t[p]{escape_dsl(pos)}[/p]")
-
-    n = 0
-    for heading, children in _group_senses(record.get("senses") or [], profile):
-        n += 1
-        if heading:
-            lines.append(f"\t[m{n}]{escape_dsl(heading)}[/m]")
-            for child in children:
-                lines.append(f"\t\t[com]{escape_dsl(child)}[/com]")
-        else:
-            lines.append(f"\t[m{n}]{escape_dsl(children[0])}[/m]")
-
-    extras: List[str] = []
-    for sense in record.get("senses") or []:
-        if not isinstance(sense, dict):
-            continue
-        for example in sense.get("examples") or []:
-            if isinstance(example, dict):
-                text = example.get("text") or example.get("english") or ""
-            else:
-                text = str(example)
-            if text:
-                extras.append(f"\t[ex]{escape_dsl(str(text))}[/ex]")
-
-    forms = collect_profile_forms(record, profile)
-    if forms and not profile.strip_forms:
-        extras.append("\t[com]Forms: " + escape_dsl(", ".join(forms)) + "[/com]")
-
-    refs = _cross_refs(record, known) if known else []
-    if refs:
-        links = ", ".join("[ref]" + escape_dsl(r) + "[/ref]" for r in refs)
-        extras.append("\t[com]See also: " + links + "[/com]")
-
-    pron_bits: List[str] = []
-    for field in profile.pron_fields:
-        for sound in record.get("sounds") or []:
-            if isinstance(sound, dict) and sound.get(field):
-                label = _PRON_LABEL.get(field, field.upper())
-                pron_bits.append(f"{label}: {escape_dsl(str(sound[field]))}")
-                break
-    for name in audio.plan(record):
-        pron_bits.append(f"[s]{escape_dsl(name)}[/s]")
-    if pron_bits:
-        extras.append("\t[com]" + "  ".join(pron_bits) + "[/com]")
-
-    if extras:
-        lines.append("\t[*]")
-        lines.extend(extras)
-        lines.append("\t[/opt]")
-
-    return "\n".join(lines)
+    """Render one record as a card (a thin wrapper over :func:`render_card`)."""
+    return render_card([record], audio, profile, known)
 
 
 # ---------------------------------------------------------------------------
@@ -1287,13 +1778,21 @@ def dsl_to_html(text: str) -> str:
                 out.append('<div class="optional"><span class="optlabel">[optional]</span> ')
                 stack.append("div")
             elif key == "s":
-                # the filename is the tag's own text
+                # the filename is the tag's own text; a bundled sense-marker
+                # icon is inlined as a data URI so the standalone preview file
+                # shows it, any other file stays the audio note glyph
                 end = text.find("[/s]", close + 1)
                 if end != -1:
-                    out.append(
-                        '<span class="audio">&#9835; '
-                        + _h(text[close + 1:end]) + "</span>"
-                    )
+                    name = text[close + 1:end]
+                    if name in _ICON_FILES:
+                        out.append(
+                            f'<img class="senseicon" alt="{_h(name)}" '
+                            f'src="{_icon_data_uri(name)}">'
+                        )
+                    else:
+                        out.append(
+                            '<span class="audio">&#9835; ' + _h(name) + "</span>"
+                        )
                     i = end + 4
                     continue
             elif key in _PREVIEW_TAGS:
@@ -1337,6 +1836,7 @@ def render_preview(name: str, dsl_text: str, dest_html: str) -> None:
         "h2{border-bottom:1px solid #ccc;margin-top:2rem}.pos{font-weight:bold;color:#0a6}"
         ".sense{margin:.2em 0 .2em 1em}.example{color:#555;margin-left:2em;font-style:italic}"
         ".note{color:#777;font-size:.9em}.audio{color:#a0a}"
+        ".senseicon{height:1em;vertical-align:-.15em}"
         ".optional{border-left:3px solid #cc0;background:#ffd;padding:.4em .6em;margin:.6em 0}"
         ".optlabel{color:#880;font-size:.8em;text-transform:uppercase}</style>",
         f"<h1>{name} — preview</h1>",
@@ -1446,12 +1946,11 @@ def build(args) -> Report:
                 form_word = re.split(r"\s+\(", form, maxsplit=1)[0].strip()
                 if form_word and form_word != word:
                     headwords.append(clean_headword(form_word))
-        bodies = [render_record(r, audio, profile, known) for r in records]
-        bodies = [b for b in bodies if b]
-        if not bodies:
+        body = render_card(records, audio, profile, known)
+        if not body:
             return
         out_lines.append("\n".join(headwords))
-        out_lines.extend(bodies)
+        out_lines.append(body)
         report.cards += 1
         report.kept_records += len(records)
         known.add(word)
@@ -1524,8 +2023,12 @@ def build(args) -> Report:
         f"\t[com]Citation: {escape_dsl(WIKTEXTRACT_CITATION)}[/com]",
         f"\t[com]Snapshot dump date: {escape_dsl(args.dump_date or 'unknown')}[/com]",
         f"\t[com]Language: {escape_dsl(source_lang_name)} ({escape_dsl(args.source_lang)})[/com]",
-        f"\t[com]Generated by scripts/kaikki-to-dsl.py; this is a derivative work.[/com]",
+        "\t[com]Generated by scripts/kaikki-to-dsl.py; this is a derivative work.[/com]",
+        "\t[com]Sense icons (Material Symbols, Google; Apache-2.0):[/com]",
     ]
+    for icon_name, meaning in _ICON_LEGEND:
+        about.append(f"\t[com]{_icon_ref(icon_name)} {escape_dsl(meaning)}[/com]")
+
 
     dsl_text = "\n".join(header_lines) + "\n\n" + "\n".join(about) + "\n" + "\n".join(out_lines) + "\n"
 
@@ -1539,8 +2042,14 @@ def build(args) -> Report:
         render_preview(header_name, dsl_text, preview_path)
         print(f"wrote {preview_path}", file=sys.stderr)
 
-    if want_audio and audio.referenced:
-        with tempfile.TemporaryDirectory(prefix="kaikki-audio-") as tmp:
+    # Resource bundle: the sense-marker icons (always) plus pronunciation audio
+    # (when enabled), written as one archive by default or a directory on request.
+    # Bundling is unconditional because the about card always references the icon
+    # set, so the icons must resolve even when audio is disabled.
+    with tempfile.TemporaryDirectory(prefix="kaikki-res-") as tmp:
+        for name in _ICON_FILES:
+            shutil.copyfile(os.path.join(_ICON_ASSET_DIR, name), os.path.join(tmp, name))
+        if want_audio and audio.referenced:
             fetched = {
                 name: path
                 for name, path in audio.local.items()
@@ -1563,16 +2072,16 @@ def build(args) -> Report:
                     f"the archive while bundling",
                     file=sys.stderr,
                 )
-            if args.audio_layout == "zip":
-                write_audio_zip(tmp, dz_path + ".files.zip")
-            else:
-                dest_dir = dz_path + ".files"
-                os.makedirs(dest_dir, exist_ok=True)
-                for name in sorted(os.listdir(tmp)):
-                    src = os.path.join(tmp, name)
-                    if os.path.isfile(src):
-                        with open(src, "rb") as fsrc, open(os.path.join(dest_dir, name), "wb") as fdst:
-                            fdst.write(fsrc.read())
+        if args.audio_layout == "zip":
+            write_audio_zip(tmp, dz_path + ".files.zip")
+        else:
+            dest_dir = dz_path + ".files"
+            os.makedirs(dest_dir, exist_ok=True)
+            for name in sorted(os.listdir(tmp)):
+                src = os.path.join(tmp, name)
+                if os.path.isfile(src):
+                    with open(src, "rb") as fsrc, open(os.path.join(dest_dir, name), "wb") as fdst:
+                        fdst.write(fsrc.read())
 
     report.missing_audio = len(audio.missing)
     print(f"wrote {dz_path}", file=sys.stderr)
@@ -1606,7 +2115,9 @@ def build_parser() -> argparse.ArgumentParser:
             "  --no-audio (or --audio-per-word 0) disables audio entirely and\n"
             "  skips downloading the audio archive.\n\n"
             "  The output is <name>.dsl.dz plus <name>.dsl.dz.files.zip (or the\n"
-            "  .files/ directory with --audio-layout dir).\n"
+            "  .files/ directory with --audio-layout dir). The archive holds the\n"
+            "  sense-marker icons in addition to any bundled audio, so it is\n"
+            "  written even with --no-audio.\n"
         ),
     )
     parser.add_argument("--source-lang", required=True, help="ISO code of the dictionary's language (e.g. en)")

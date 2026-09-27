@@ -51,6 +51,34 @@ def headword_lines(text):
     ]
 
 
+def sense_texts(entries):
+    """Just the glosses of a ``_group_senses`` entry list.
+
+    Each entry is a ``(gloss, examples)`` pair; grouping tests that only care
+    about the glosses compare through this so they do not have to spell out the
+    example list every time.
+    """
+    return [text for text, _examples in entries]
+
+
+def sense_examples(entries):
+    """The raw example strings carried by a ``_group_senses`` entry list."""
+    return [examples for _text, examples in entries]
+
+
+def zip_names(path):
+    """The entry names of a resource archive."""
+    import zipfile
+
+    with zipfile.ZipFile(path) as zf:
+        return set(zf.namelist())
+
+
+def only_audio(names):
+    """Drop the sense-marker icons from a set of bundled resource names."""
+    return {n for n in names if not n.startswith("gd_tag_")}
+
+
 def make_tar(path, names):
     with tarfile.open(path, "w") as tar:
         for name in names:
@@ -93,7 +121,8 @@ class ConverterTests(unittest.TestCase):
             self.assertIn("[p]noun[/p]", text)
             self.assertIn("[m1]", text)
             self.assertIn("[ex]I run every morning.[/ex]", text)
-            self.assertIn("Forms: runs", text)
+            self.assertIn("[i]runs (3rd sg.)", text)
+            self.assertNotIn("Forms:", text)
             # in a sample, cross-references are limited to words already
             # emitted, so "runner" (which comes after "run") is not linked
             self.assertNotIn("[ref]runner[/ref]", text)
@@ -273,7 +302,7 @@ class EdgeCaseTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             TOOL.build(self.args(tmp, "--sample", "20"))
             text = read_dz(os.path.join(tmp, "kaikki-en.dsl.dz"))
-            self.assertIn("IPA: /pʌb/", text)
+            self.assertIn("/pʌb/", text)
 
     def test_sample_counts_distinct_headwords(self):
         # "run" carries two records; a sample of N must still be N distinct words
@@ -319,7 +348,9 @@ class EdgeCaseTests(unittest.TestCase):
             zip_path = os.path.join(tmp, "kaikki-en.dsl.dz.files.zip")
             with zipfile.ZipFile(zip_path) as zf:
                 names = set(zf.namelist())
-            self.assertEqual(names, {
+            # the archive also carries the sense-marker icons
+            self.assertTrue(set(TOOL._ICON_FILES) <= names)
+            self.assertEqual(only_audio(names), {
                 "En-us-pub.ogg",
                 "En-au-herbed_up.ogg",
                 "En-au-sello.ogg",
@@ -374,8 +405,17 @@ class AudioResolutionTests(unittest.TestCase):
                 ],
             )
             text = read_dz(os.path.join(tmp, "out", "kaikki-en.dsl.dz"))
-            refs = re.findall(r"\[s\](.*?)\[/s\]", text)
-            self.assertEqual(len(refs), 3)
+            refs = [
+                r for r in re.findall(r"\[s\](.*?)\[/s\]", text)
+                if not r.startswith("gd_tag_")
+            ]
+            # the three planned files are referenced exactly once each, beside
+            # the part of speech they belong to
+            self.assertEqual(refs, [
+                "En-au-limitword.ogg",
+                "En-uk-limitword.ogg",
+                "En-us-limitword.ogg",
+            ])
             self.assertEqual(
                 set(refs),
                 {"En-au-limitword.ogg", "En-uk-limitword.ogg", "En-us-limitword.ogg"},
@@ -413,7 +453,7 @@ class AudioResolutionTests(unittest.TestCase):
             with zipfile.ZipFile(os.path.join(tmp, "out", "kaikki-en.dsl.dz.files.zip")) as zf:
                 names = set(zf.namelist())
             # the limit of three is filled from the tape and the two downloads
-            self.assertEqual(names, {
+            self.assertEqual(only_audio(names), {
                 "En-au-limitword.ogg",
                 "En-uk-limitword.ogg",
                 "En-us-limitword-gone1.ogg",
@@ -444,7 +484,11 @@ class AudioResolutionTests(unittest.TestCase):
             self.assertEqual(report.audio_found, 1)
             self.assertEqual(report.missing_audio, 4)
             text = read_dz(os.path.join(tmp, "out", "kaikki-en.dsl.dz"))
-            self.assertEqual(re.findall(r"\[s\](.*?)\[/s\]", text), ["En-au-limitword.ogg"])
+            audio_refs = [
+                r for r in re.findall(r"\[s\](.*?)\[/s\]", text)
+                if not r.startswith("gd_tag_")
+            ]
+            self.assertEqual(audio_refs, ["En-au-limitword.ogg"])
 
 
 class LangProfileTests(unittest.TestCase):
@@ -539,9 +583,60 @@ class PreviewRenderTests(unittest.TestCase):
         self.assertIn("x.ogg</span>", html)
         self.assertIn("after", html)
 
+    def test_sense_icon_renders_as_an_inline_image(self):
+        html = TOOL.dsl_to_html("[s]gd_tag_countable.svg[/s] a thing")
+        # an <img> with the SVG inlined as a data URI, not the audio glyph
+        self.assertIn('<img class="senseicon"', html)
+        self.assertIn("data:image/svg+xml;base64,", html)
+        self.assertNotIn("&#9835;", html)
+        self.assertIn("a thing", html)
+        self.assert_balanced(html)
+
     def test_unbalanced_input_is_still_closed(self):
         html = TOOL.dsl_to_html("\t[*]\n\t[com]left open")
         self.assert_balanced(html)
+
+
+class SenseIconBundleTests(unittest.TestCase):
+    """The icon set is vendored, bundled with every dictionary, and advertised."""
+
+    def test_icon_files_exist_in_the_repository(self):
+        for name in TOOL._ICON_FILES:
+            self.assertTrue(
+                os.path.isfile(os.path.join(TOOL._ICON_ASSET_DIR, name)), name
+            )
+
+    def test_bundle_holds_the_icons_with_audio_disabled(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            args = TOOL.build_parser().parse_args(
+                ["--source-lang", "en", "--jsonl", FIXTURE, "--out-dir", tmp,
+                 "--no-audio"]
+            )
+            TOOL.build(args)
+            names = zip_names(os.path.join(tmp, "kaikki-en.dsl.dz.files.zip"))
+            self.assertTrue(set(TOOL._ICON_FILES) <= names)
+
+    def test_bundle_dir_layout_holds_the_icons(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            args = TOOL.build_parser().parse_args(
+                ["--source-lang", "en", "--jsonl", FIXTURE, "--out-dir", tmp,
+                 "--no-audio", "--audio-layout", "dir"]
+            )
+            TOOL.build(args)
+            dest = os.path.join(tmp, "kaikki-en.dsl.dz.files")
+            for name in TOOL._ICON_FILES:
+                self.assertTrue(os.path.isfile(os.path.join(dest, name)), name)
+
+    def test_about_card_lists_each_icon_and_its_meaning(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            args = TOOL.build_parser().parse_args(
+                ["--source-lang", "en", "--jsonl", FIXTURE, "--out-dir", tmp,
+                 "--no-audio"]
+            )
+            TOOL.build(args)
+            text = read_dz(os.path.join(tmp, "kaikki-en.dsl.dz"))
+            for name, meaning in TOOL._ICON_LEGEND:
+                self.assertIn(f"[s]{name}[/s] {meaning}", text)
 
 
 class SenseGroupingTests(unittest.TestCase):
@@ -562,34 +657,147 @@ class SenseGroupingTests(unittest.TestCase):
         self.assertEqual(len(groups), 1)
         heading, children = groups[0]
         self.assertEqual(heading, "A number of places in the US:")
-        self.assertEqual(children, [
+        self.assertEqual(sense_texts(children), [
             "One in Merced County.", "One in Bates County.", "One in Jefferson County.",
         ])
 
     def test_single_fragment_sense_has_no_heading(self):
         groups = TOOL._group_senses([{"glosses": ["A penis."]}], self.EN)
-        self.assertEqual(groups, [("", ["A penis."])])
+        self.assertEqual(groups, [("", [("A penis.", [])])])
 
-    def test_non_adjacent_parents_are_separate_groups(self):
+    def test_each_entry_carries_its_own_examples(self):
+        # an example belongs to the sense that illustrates it, so it travels
+        # with that sense's entry rather than pooling at the card
+        senses = [
+            {"glosses": ["Parent:", "First child."],
+             "examples": [{"text": "The first child ran."}]},
+            {"glosses": ["Parent:", "Second child."],
+             "examples": [{"text": "The second child walked."}]},
+        ]
+        groups = TOOL._group_senses(senses, self.EN)
+        self.assertEqual(sense_examples(groups[0][1]), [
+            ["The first child ran."], ["The second child walked."],
+        ])
+
+    def test_non_adjacent_parents_merge_into_one_group(self):
+        # the same parent seen again, even after an unrelated sense, joins its
+        # group rather than starting a second copy of the heading
         senses = [
             {"glosses": ["Parent:", "First child."]},
             {"glosses": ["Other."]},
             {"glosses": ["Parent:", "Second child."]},
         ]
         groups = TOOL._group_senses(senses, self.EN)
-        self.assertEqual(len(groups), 3)
+        self.assertEqual([g[0] for g in groups], ["Parent:", ""])
+        self.assertEqual(sense_texts(groups[0][1]), ["First child.", "Second child."])
+        self.assertEqual(sense_texts(groups[1][1]), ["Other."])
+
+    def test_repeated_glosses_are_deduped(self):
+        # a verbatim repeat of a heading and of a child is printed once
+        senses = [
+            {"glosses": ["A task:", "Physical work."]},
+            {"glosses": ["A task:", "Physical work."]},
+            {"glosses": ["A task:", "Mental work."]},
+        ]
+        groups = TOOL._group_senses(senses, self.EN)
+        self.assertEqual(len(groups), 1)
+        self.assertEqual(sense_texts(groups[0][1]), ["Physical work.", "Mental work."])
 
     def test_context_tags_land_on_the_child_not_the_heading(self):
-        # a lone tag-bearing sense keeps its own tag prefix
+        # a lone tag-bearing sense keeps its own tag prefix (abbreviated)
         groups = TOOL._group_senses(
             [{"glosses": ["The Dutch government."], "tags": ["metonymically"]}],
             self.EN,
         )
-        self.assertEqual(groups[0][1][0], "(metonymically) The Dutch government.")
+        self.assertEqual(groups[0][1][0][0], "(meton.) The Dutch government.")
+
+    def test_noise_and_structural_tags_are_dropped(self):
+        # a verb is transitive unless said otherwise, and a structural tag
+        # repeats what the gloss already says
+        for tags in (["transitive"], ["intransitive"], ["not-comparable"],
+                     ["synonym"], ["synonyms"], ["ellipsis"], ["clipping"]):
+            self.assertEqual(
+                TOOL._sense_markers(tags, self.EN), "", tags,
+            )
+        # a meaningful register tag survives, abbreviated
+        self.assertEqual(TOOL._sense_markers(["figuratively"], self.EN), "(fig.) ")
+
+    def test_iconised_tags_render_as_icons_not_text(self):
+        cases = {
+            "countable": "gd_tag_countable.svg",
+            "uncountable": "gd_tag_uncountable.svg",
+            "initialism": "gd_tag_initialism.svg",
+            "abbreviation": "gd_tag_initialism.svg",
+            "acronym": "gd_tag_initialism.svg",
+            "obsolete": "gd_tag_obsolete.svg",
+            "dated": "gd_tag_obsolete.svg",
+            "archaic": "gd_tag_obsolete.svg",
+        }
+        for tag, icon in cases.items():
+            markers = TOOL._sense_markers([tag], self.EN)
+            self.assertEqual(markers, f"[s]{icon}[/s] ", tag)
+            self.assertNotIn(f"({tag})", markers)
+
+    def test_alternative_form_tags_render_no_marker(self):
+        # the gloss already says "Alternative spelling of ...", and the headword
+        # it names is linked instead of marked
+        for tags in (["alt-of"], ["alternative"], ["form-of"],
+                     ["alt-of", "alternative"]):
+            self.assertEqual(TOOL._sense_markers(tags, self.EN), "", tags)
+
+    def test_countability_icon_only_when_the_sole_case(self):
+        # Wiktionary marks most nouns both countable and uncountable; that is the
+        # unmarked "can be either" case, so neither icon is shown
+        both = TOOL._sense_markers(["countable", "uncountable"], self.EN)
+        self.assertEqual(both, "")
+        self.assertEqual(
+            TOOL._sense_markers(["countable"], self.EN),
+            "[s]gd_tag_countable.svg[/s] ",
+        )
+        self.assertEqual(
+            TOOL._sense_markers(["uncountable"], self.EN),
+            "[s]gd_tag_uncountable.svg[/s] ",
+        )
+
+    def test_an_icon_and_a_register_tag_coexist(self):
+        markers = TOOL._sense_markers(["obsolete", "figuratively"], self.EN)
+        self.assertEqual(markers, "[s]gd_tag_obsolete.svg[/s] (fig.) ")
+
+    def test_the_same_icon_is_not_repeated(self):
+        markers = TOOL._sense_markers(["initialism", "abbreviation"], self.EN)
+        self.assertEqual(markers, "[s]gd_tag_initialism.svg[/s] ")
+
+    def test_form_of_target_is_linked_when_known(self):
+        groups = TOOL._group_senses(
+            [{"glosses": ["Alternative spelling of swap."],
+              "tags": ["alt-of", "alternative"],
+              "alt_of": [{"word": "swap"}]}],
+            self.EN, {"swap"}, "swop",
+        )
+        self.assertEqual(
+            groups[0][1][0][0], "Alternative spelling of [ref]swap[/ref]."
+        )
+
+    def test_form_of_target_is_plain_when_absent(self):
+        groups = TOOL._group_senses(
+            [{"glosses": ["Alternative spelling of swap."],
+              "tags": ["alt-of"],
+              "alt_of": [{"word": "swap"}]}],
+            self.EN, {"other"}, "swop",
+        )
+        self.assertEqual(groups[0][1][0][0], "Alternative spelling of swap.")
+
+    def test_form_of_target_is_not_linked_to_itself(self):
+        groups = TOOL._group_senses(
+            [{"glosses": ["Alternative spelling of swap."],
+              "form_of": [{"word": "swap"}]}],
+            self.EN, {"swap"}, "swap",
+        )
+        self.assertEqual(groups[0][1][0][0], "Alternative spelling of swap.")
 
     def test_shared_parent_with_different_tags_merges(self):
         # monkey's figurative senses share a parent but each carries tags; the
-        # parent must be printed once and the tags kept on the children
+        # parent must be printed once and one tag kept on each child
         senses = [
             {"glosses": ["A human considered to resemble monkeys, including:",
                          "A naughty person."], "tags": ["figuratively", "informal"]},
@@ -602,10 +810,11 @@ class SenseGroupingTests(unittest.TestCase):
         self.assertEqual(len(groups), 1)
         heading, children = groups[0]
         self.assertEqual(heading, "A human considered to resemble monkeys, including:")
-        self.assertEqual(children, [
-            "(figuratively, informal) A naughty person.",
-            "(derogatory, figuratively) Synonym of idiot.",
-            "(derogatory, slang) Synonym of puppet.",
+        # only the first tag of each set is shown, abbreviated; structural tags skipped
+        self.assertEqual(sense_texts(children), [
+            "(fig.) A naughty person.",
+            "(derog.) Synonym of idiot.",
+            "(derog.) Synonym of puppet.",
         ])
 
     def test_rendered_article_shows_the_parent_once(self):
@@ -630,6 +839,292 @@ class SenseGroupingTests(unittest.TestCase):
             self.assertEqual(text.count("A number of places in the US:"), 1)
             self.assertIn("One in Merced.", text)
             self.assertIn("One in Bates.", text)
+
+
+class CardLayoutTests(unittest.TestCase):
+    """A card merges same-POS records, dedupes audio and bounds examples."""
+
+    EN = None
+
+    def setUp(self):
+        self.EN = TOOL.get_lang_profile("en")
+
+    class _Audio:
+        def plan(self, record):
+            return [s["audio"] for s in (record.get("sounds") or []) if "audio" in s]
+
+    def test_same_pos_records_merge_into_one_block(self):
+        records = [
+            {"word": "swop", "pos": "noun",
+             "senses": [{"glosses": ["First noun sense."]}],
+             "forms": [{"form": "swops", "tags": ["plural"]}]},
+            {"word": "swop", "pos": "verb",
+             "senses": [{"glosses": ["Verb sense."]}],
+             "forms": [{"form": "swopped", "tags": ["past"]}]},
+            {"word": "swop", "pos": "noun",
+             "senses": [{"glosses": ["Second noun sense."]}]},
+        ]
+        text = TOOL.render_card(records, self._Audio(), self.EN, set())
+        self.assertEqual(text.count("[p]noun[/p]"), 1)
+        self.assertEqual(text.count("[p]verb[/p]"), 1)
+        # the interleaved noun's senses sit under the single noun heading
+        noun = text.index("[p]noun[/p]")
+        verb = text.index("[p]verb[/p]")
+        self.assertLess(noun, text.index("First noun sense."))
+        self.assertLess(text.index("First noun sense."), verb)
+        self.assertLess(text.index("Second noun sense."), verb)
+        self.assertIn("swops (pl.)", text)
+
+    def test_shared_audio_is_printed_once_card_wide(self):
+        records = [
+            {"word": "ermine", "pos": "noun", "senses": [{"glosses": ["A mustelid."]}],
+             "sounds": [{"ipa": "/e/", "audio": "En-ermine.ogg"}]},
+            {"word": "ermine", "pos": "verb", "senses": [{"glosses": ["To clothe."]}],
+             "sounds": [{"ipa": "/e/", "audio": "En-ermine.ogg"}]},
+        ]
+        text = TOOL.render_card(records, self._Audio(), self.EN, set())
+        self.assertEqual(text.count("[s]En-ermine.ogg[/s]"), 1)
+        # the single shared transcription is hoisted above the first POS
+        self.assertLess(text.index("/e/"), text.index("[p]noun[/p]"))
+
+    def test_differing_pronunciations_stay_under_their_pos(self):
+        records = [
+            {"word": "x", "pos": "noun", "senses": [{"glosses": ["n."]}],
+             "sounds": [{"ipa": "/a/", "audio": "En-x.ogg"}]},
+            {"word": "x", "pos": "verb", "senses": [{"glosses": ["v."]}],
+             "sounds": [{"ipa": "/b/", "audio": "En-x.ogg"}]},
+        ]
+        text = TOOL.render_card(records, self._Audio(), self.EN, set())
+        noun = text.index("[p]noun[/p]")
+        verb = text.index("[p]verb[/p]")
+        self.assertLess(noun, text.index("/a/"))
+        self.assertLess(text.index("/a/"), verb)
+        self.assertLess(verb, text.index("/b/"))
+        # the one audio file is still shown only once
+        self.assertEqual(text.count("[s]En-x.ogg[/s]"), 1)
+
+    def test_long_example_is_truncated_at_a_word_boundary(self):
+        shortened = TOOL._truncate_example("word " * 80, limit=50)
+        self.assertTrue(shortened.endswith(" …"))
+        # cut on a space, so no partial word is left behind
+        self.assertEqual(shortened[:-2], shortened[:-2].rstrip())
+        self.assertTrue(shortened[:-2].endswith("word"))
+        self.assertLess(len(shortened), 80 * len("word "))
+
+    def test_short_example_is_untouched(self):
+        self.assertEqual(TOOL._truncate_example("I run every morning."), "I run every morning.")
+
+    def test_example_must_contain_the_headword(self):
+        # an example that never uses the word is dropped
+        self.assertTrue(TOOL._example_shows_word("I run every morning.", "run"))
+        self.assertTrue(TOOL._example_shows_word("He runs fast.", "run"))   # regular inflection
+        self.assertTrue(TOOL._example_shows_word("They ran home.", "run", ["ran (past)"]))
+        self.assertFalse(TOOL._example_shows_word("An unrelated clause.", "run"))
+        self.assertFalse(TOOL._example_shows_word("They ran home.", "run"))  # no forms given
+
+    def test_examples_without_the_word_are_left_out(self):
+        record = {
+            "word": "run", "pos": "verb",
+            "senses": [{"glosses": ["To move swiftly."], "examples": [
+                {"text": "I run every morning."},
+                {"text": "A wholly unrelated sentence."},
+            ]}],
+        }
+        text = TOOL.render_card([record], self._Audio(), self.EN, set())
+        self.assertEqual(text.count("[ex]"), 1)
+        self.assertIn("[ex]I run every morning.[/ex]", text)
+        self.assertNotIn("unrelated", text)
+
+    def test_sense_tag_policy_is_profile_driven(self):
+        text = TOOL.render_card(
+            [{"word": "w", "pos": "noun", "senses": [
+                {"glosses": ["A thing."], "tags": ["countable"]},
+                {"glosses": ["A notion."], "tags": ["figuratively"]},
+            ]}],
+            self._Audio(), self.EN, set(),
+        )
+        self.assertNotIn("(countable)", text)
+        self.assertIn("(fig.) A notion.", text)
+
+    def test_sub_senses_are_indented_definitions_not_comments(self):
+        text = TOOL.render_card(
+            [{"word": "w", "pos": "noun", "senses": [
+                {"glosses": ["Employment.", "Labour."]},
+                {"glosses": ["Employment.", "The place one works."]},
+            ]}],
+            self._Audio(), self.EN, set(),
+        )
+        self.assertIn("[m1]Employment.[/m]", text)
+        self.assertIn("[m2]\u2022 Labour.[/m]", text)
+        self.assertIn("[m2]\u2022 The place one works.[/m]", text)
+        self.assertNotIn("[com]Labour.", text)
+        # the parent heading is a category, not a sense: it carries no bullet
+        self.assertNotIn("\u2022 Employment.", text)
+
+    def test_leaf_senses_are_bulleted(self):
+        record = {
+            "word": "w", "pos": "noun",
+            "senses": [{"glosses": ["A thing."]}, {"glosses": ["Another."]}],
+        }
+        text = TOOL.render_card([record], self._Audio(), self.EN, set())
+        self.assertIn("[m1]\u2022 A thing.[/m]", text)
+        self.assertIn("[m1]\u2022 Another.[/m]", text)
+
+    def test_a_tagged_sense_renders_its_icon_after_the_bullet(self):
+        record = {
+            "word": "w", "pos": "noun",
+            "senses": [{"glosses": ["A thing."], "tags": ["uncountable"]}],
+        }
+        text = TOOL.render_card([record], self._Audio(), self.EN, set())
+        self.assertIn("[m1]\u2022 [s]gd_tag_uncountable.svg[/s] A thing.[/m]", text)
+
+    def test_a_word_tagged_both_ways_shows_no_countability_icon(self):
+        # the common Wiktionary "can be either" case is the unmarked one
+        record = {
+            "word": "w", "pos": "noun",
+            "senses": [{"glosses": ["A thing."], "tags": ["countable", "uncountable"]}],
+        }
+        text = TOOL.render_card([record], self._Audio(), self.EN, set())
+        self.assertNotIn("gd_tag_countable.svg", text)
+        self.assertNotIn("gd_tag_uncountable.svg", text)
+
+    def test_an_alternative_form_links_its_base_headword(self):
+        record = {
+            "word": "swop", "pos": "noun",
+            "senses": [{"glosses": ["Alternative spelling of swap."],
+                        "tags": ["alt-of", "alternative"],
+                        "alt_of": [{"word": "swap"}]}],
+        }
+        text = TOOL.render_card([record], self._Audio(), self.EN, {"swap"})
+        self.assertIn("\u2022 Alternative spelling of [ref]swap[/ref].", text)
+
+    def test_an_alternative_form_absent_from_the_dictionary_is_plain(self):
+        record = {
+            "word": "swop", "pos": "noun",
+            "senses": [{"glosses": ["Alternative spelling of swap."],
+                        "alt_of": [{"word": "swap"}]}],
+        }
+        text = TOOL.render_card([record], self._Audio(), self.EN, {"unrelated"})
+        self.assertIn("\u2022 Alternative spelling of swap.", text)
+        self.assertNotIn("[ref]swap[/ref]", text)
+
+    def test_initialism_prefix_is_dropped_leaving_the_linked_headword(self):
+        record = {
+            "word": "ROs", "pos": "noun",
+            "senses": [{"glosses": ["Initialism of reverse osmosis."],
+                        "tags": ["initialism", "alt-of"],
+                        "alt_of": [{"word": "reverse osmosis"}]}],
+        }
+        text = TOOL.render_card(
+            [record], self._Audio(), self.EN, {"reverse osmosis"}
+        )
+        self.assertIn(
+            "[s]gd_tag_initialism.svg[/s] [ref]reverse osmosis[/ref].", text
+        )
+        self.assertNotIn("Initialism of", text)
+
+    def test_relation_words_are_kept_for_a_tag_without_an_icon(self):
+        # a clipping has no icon, so its words stay as the gloss
+        groups = TOOL._group_senses(
+            [{"glosses": ["Clipping of refrigerator."], "tags": ["clipping"]}],
+            self.EN,
+        )
+        self.assertEqual(groups[0][1][0][0], "Clipping of refrigerator.")
+
+    def test_transcription_is_not_labelled(self):
+        record = {
+            "word": "w", "pos": "noun", "senses": [{"glosses": ["A thing."]}],
+            "sounds": [{"ipa": "/w/"}],
+        }
+        text = TOOL.render_card([record], self._Audio(), self.EN, set())
+        self.assertIn("[com]/w/[/com]", text)
+        self.assertNotIn("IPA:", text)
+
+    def test_a_single_record_hoists_its_transcription(self):
+        # one record is trivially one transcription, so it goes above the part of
+        # speech like a multi-record card, not under it
+        record = {
+            "word": "w", "pos": "noun", "senses": [{"glosses": ["A thing."]}],
+            "sounds": [{"ipa": "/w/"}],
+        }
+        text = TOOL.render_card([record], self._Audio(), self.EN, set())
+        self.assertLess(text.index("[com]/w/[/com]"), text.index("[p]noun[/p]"))
+
+    def test_a_second_notation_keeps_its_label(self):
+        # enPR is not IPA; it keeps its name so the two are distinguishable
+        record = {
+            "word": "w", "pos": "noun", "senses": [{"glosses": ["A thing."]}],
+            "sounds": [{"enpr": "wit"}],
+        }
+        text = TOOL.render_card([record], self._Audio(), self.EN, set())
+        self.assertIn("[com]enPR: wit[/com]", text)
+
+    def test_repeated_examples_are_capped_per_sense(self):
+        senses = [
+            {"glosses": ["A task."], "examples": [{"text": f"work item {i}"} for i in range(10)]},
+        ]
+        record = {"word": "work", "pos": "noun", "senses": senses}
+        text = TOOL.render_card([record], self._Audio(), self.EN, set())
+        self.assertEqual(text.count("[ex]"), TOOL._EXAMPLE_MAX_PER_SENSE)
+
+    def test_each_sense_gets_its_own_optional_zone(self):
+        # an example illustrates one use, so it sits under that sense rather
+        # than pooling in a single card-level zone
+        record = {
+            "word": "work", "pos": "verb",
+            "senses": [
+                {"glosses": ["To toil."], "examples": [{"text": "I work hard."}]},
+                {"glosses": ["To function."], "examples": [{"text": "It does not work."}]},
+            ],
+        }
+        text = TOOL.render_card([record], self._Audio(), self.EN, set())
+        # one zone per sense with an example, each opened right after its gloss
+        self.assertEqual(text.count("[*]"), 2)
+        self.assertEqual(text.count("[/opt]"), 2)
+        self.assertRegex(
+            text,
+            r"\[m1\]\u2022 To toil\.\[/m\]\n\t\[\*\]\n\t\[ex\]I work hard\.\[/ex\]\n\t\[/opt\]",
+        )
+        self.assertRegex(
+            text,
+            r"\[m1\]\u2022 To function\.\[/m\]\n\t\[\*\]\n\t\[ex\]It does not work\.\[/ex\]\n\t\[/opt\]",
+        )
+
+    def test_a_sense_without_examples_gets_no_zone(self):
+        # no empty [*]…[/opt] is emitted for a gloss that has nothing to hide
+        record = {
+            "word": "work", "pos": "verb",
+            "senses": [{"glosses": ["To toil."]}],
+        }
+        text = TOOL.render_card([record], self._Audio(), self.EN, set())
+        self.assertNotIn("[*]", text)
+
+    def test_archaic_and_citation_examples_are_dropped(self):
+        self.assertFalse(TOOL._example_is_usable("I haue worke in hand."))
+        self.assertFalse(TOOL._example_is_usable("Come on Neriſſa, I haue worke."))
+        self.assertFalse(TOOL._example_is_usable("Citations:work."))
+        self.assertFalse(TOOL._example_is_usable(
+            "For quotations using this term, see Citations:work."))
+        self.assertFalse(TOOL._example_is_usable(
+            "‘I wolde hit were so,’ seyde the Kynge, ‘but I may nat stonde"
+            ", my hede worchys so—’"))
+        self.assertTrue(TOOL._example_is_usable("My work involves travel."))
+        self.assertTrue(TOOL._example_is_usable(
+            "Whether we work or rest, the deadline holds."))
+
+    def test_see_also_is_one_line_per_card(self):
+        records = [
+            {"word": "run", "pos": "verb",
+             "senses": [{"glosses": ["To move."]}],
+             "synonyms": [{"word": "sprint"}, {"word": "trot"}]},
+            {"word": "run", "pos": "noun",
+             "senses": [{"glosses": ["A flow."]}],
+             "synonyms": [{"word": "flow"}]},
+        ]
+        text = TOOL.render_card(records, self._Audio(), self.EN, {"sprint", "trot", "flow"})
+        self.assertEqual(text.count("See also:"), 1)
+        self.assertIn("[ref]sprint[/ref]", text)
+        self.assertIn("[ref]flow[/ref]", text)
 
 
 class FormPolicyTests(unittest.TestCase):
@@ -667,17 +1162,83 @@ class FormPolicyTests(unittest.TestCase):
 
 
 class SpoilerTests(unittest.TestCase):
-    """Examples, forms, refs and pronunciation live in the optional zone."""
+    """Examples, refs and per-POS pronunciation live in the optional zone."""
 
     def test_extras_are_hidden_and_senses_are_not(self):
         with tempfile.TemporaryDirectory() as tmp:
             text = self._build(tmp)
+            opt = text.index("[*]")
             self.assertIn("[*]", text)
             self.assertIn("[/opt]", text)
             # the sense text is outside the optional zone
-            self.assertLess(text.index("To move swiftly on foot."), text.index("[*]"))
-            for extra in ("Forms:", "See also:", "[ex]", "IPA:"):
-                self.assertGreater(text.index(extra), text.index("[*]"), extra)
+            self.assertLess(text.index("To move swiftly on foot."), opt)
+            # examples and cross-references stay in the optional zone; "run" has
+            # no audio, so the only IPA belongs to the verb and is shown inline
+            for extra in ("See also:", "[ex]"):
+                self.assertGreater(text.index(extra, opt), opt, extra)
+
+    def test_forms_are_visible_beneath_their_pos(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            text = self._build(tmp)
+            opt = text.index("[*]")
+            self.assertIn("[i]runs (3rd sg.)", text)
+            # forms are part of the article, not tucked into the optional zone
+            self.assertLess(text.index("[i]runs (3rd sg.)"), opt)
+            self.assertNotIn("Forms:", text)
+
+    def test_pronunciation_is_hoisted_when_every_pos_agrees(self):
+        # "pub" carries one record, so its IPA stays at the top of the card,
+        # above the part of speech and outside the optional zone
+        with tempfile.TemporaryDirectory() as tmp:
+            args = TOOL.build_parser().parse_args(
+                [
+                    "--source-lang", "en", "--jsonl", EDGE_FIXTURE, "--out-dir", tmp,
+                    "--no-audio",
+                ]
+            )
+            TOOL.build(args)
+            text = read_dz(os.path.join(tmp, "kaikki-en.dsl.dz"))
+            ipa = text.index("/p")
+            self.assertLess(ipa, text.index("\t[p]noun[/p]", ipa))
+            self.assertNotIn("[*]", text[ipa:ipa + 40])
+
+    def test_run_hoists_its_single_pronunciation(self):
+        # "run" has an IPA on its verb record only; one distinct transcription
+        # across the card is hoisted above the first POS
+        with tempfile.TemporaryDirectory() as tmp:
+            text = self._build(tmp)
+            ipa = text.index("/ɹʌn/")
+            self.assertLess(ipa, text.index("\t[p]verb[/p]", ipa))
+
+    def test_pronunciation_stays_per_pos_when_records_differ(self):
+        # two records with different IPAs cannot be hoisted, so each stays
+        # under its own part of speech
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "two.jsonl")
+            recs = [
+                {"word": "wind", "lang": "English", "lang_code": "en", "pos": "noun",
+                 "senses": [{"glosses": ["Moving air."]}],
+                 "sounds": [{"ipa": "/wɪnd/"}]},
+                {"word": "wind", "lang": "English", "lang_code": "en", "pos": "verb",
+                 "senses": [{"glosses": ["To turn."]}],
+                 "sounds": [{"ipa": "/waɪnd/"}]},
+            ]
+            with open(path, "w", encoding="utf-8") as f:
+                for r in recs:
+                    f.write(json.dumps(r) + "\n")
+            args = TOOL.build_parser().parse_args(
+                ["--source-lang", "en", "--jsonl", path, "--out-dir", tmp, "--no-audio"]
+            )
+            TOOL.build(args)
+            text = read_dz(os.path.join(tmp, "kaikki-en.dsl.dz"))
+            self.assertIn("/wɪnd/", text)
+            self.assertIn("/waɪnd/", text)
+            # each IPA sits below its own POS, not above the first one
+            noun = text.index("\t[p]noun[/p]")
+            verb = text.index("\t[p]verb[/p]")
+            self.assertLess(noun, text.index("/wɪnd/"))
+            self.assertLess(text.index("/wɪnd/"), verb)
+            self.assertLess(verb, text.index("/waɪnd/"))
 
     def _build(self, tmp):
         args = TOOL.build_parser().parse_args(
@@ -692,6 +1253,35 @@ class SpoilerTests(unittest.TestCase):
 
 class SampleSelectionTests(unittest.TestCase):
     """--sample reads a bounded part of the snapshot and still yields N words."""
+
+    def test_sample_excludes_other_languages_despite_a_nested_marker(self):
+        # a record of another language can carry a nested "lang_code": "en"; the
+        # raw-text prefilter lets it through, so the parsed record must be
+        # checked again (compact JSON also exercises the prefilter tolerance)
+        compact = {"separators": (",", ":")}
+        other = {
+            "word": "seam", "lang": "Old English", "lang_code": "ang", "pos": "noun",
+            "senses": [{"glosses": ["seam"],
+                        "related": [{"word": "sima", "lang_code": "en"}]}],
+        }
+        english = {
+            "word": "seam", "lang": "English", "lang_code": "en", "pos": "noun",
+            "senses": [{"glosses": ["A stitched joint."]}],
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "mixed.jsonl")
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(json.dumps(other, **compact) + "\n")
+                f.write(json.dumps(english, **compact) + "\n")
+            args = TOOL.build_parser().parse_args(
+                ["--source-lang", "en", "--jsonl", path, "--sample", "5",
+                 "--out-dir", tmp, "--no-audio"]
+            )
+            TOOL.build(args)
+            text = read_dz(os.path.join(tmp, "kaikki-en.dsl.dz"))
+            self.assertIn("A stitched joint.", text)
+            self.assertNotIn("Old English", text)
+            self.assertNotIn("\u2022 seam", text)
 
     def test_first_mode_takes_the_first_distinct_words(self):
         records = TOOL.sample_headwords(FIXTURE, "en", 3, "first")
@@ -789,6 +1379,28 @@ class DownloadPolicyTests(unittest.TestCase):
     def test_user_agent_identifies_the_tool_and_a_contact(self):
         self.assertIn("Aurelex", TOOL.USER_AGENT)
         self.assertIn("http", TOOL.USER_AGENT)
+
+    def test_non_ascii_url_is_percent_encoded(self):
+        # wiktextract audio URLs may carry a raw Unicode title (zh-xiàn.ogg);
+        # urllib sends the request line as ASCII, so it must be escaped first
+        ascii_url = TOOL._ascii_url(
+            "https://commons.wikimedia.org/wiki/Special:FilePath/zh-xiàn.ogg"
+        )
+        ascii_url.encode("ascii")
+        self.assertEqual(
+            ascii_url,
+            "https://commons.wikimedia.org/wiki/Special:FilePath/zh-xi%C3%A0n.ogg",
+        )
+
+    def test_ascii_url_leaves_existing_escapes_and_hosts_alone(self):
+        url = (
+            "https://upload.wikimedia.org/wikipedia/commons/transcoded/a/ab/"
+            "LL-Q1860_%28eng%29-Yangolin-bulk_carrier.wav/"
+            "LL-Q1860_%28eng%29-Yangolin-bulk_carrier.wav.ogg"
+        )
+        self.assertEqual(TOOL._ascii_url(url), url)
+        plain = "https://upload.wikimedia.org/wikipedia/commons/a/a1/En-au-x.ogg"
+        self.assertEqual(TOOL._ascii_url(plain), plain)
 
     def test_rate_limit_is_retried_then_succeeds(self):
         calls = []

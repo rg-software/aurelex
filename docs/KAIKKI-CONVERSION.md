@@ -100,9 +100,10 @@ phone (same folder) and add that folder in Aurelex.
 
 Indexed headwords are **base forms only** by default. Entries that are inflected
 forms of another word (a `form_of` sense) are not indexed; instead the base
-word's grammatical forms (from `forms[]`) are rendered as a `Forms:` line inside
-its article. A `See also:` line links synonyms/related words, but only to words
-that are themselves indexed in the output, so links never point at nothing.
+word's grammatical forms (from `forms[]`) are rendered as an italic line directly
+beneath the part of speech they belong to. A `See also:` line links
+synonyms/related words, but only to words that are themselves indexed in the
+output, so links never point at nothing.
 
 `--include-inflections` additionally adds each base word's inflected forms as
 extra headword lines on its card, so looking up `ran` returns the full `run`
@@ -113,34 +114,115 @@ direct lookup of inflected forms matters more.
 
 ## Article shape
 
-A card shows the word's parts of speech and its numbered senses; everything
-else — examples, grammatical forms, cross-references and pronunciation — sits in
-the DSL collapsible optional zone (`[*]…[/opt]`), so a lookup shows definitions
-first and the reader expands the rest on demand.
-
-wiktextract splits a Wiktionary definition on `:` into a shared parent phrase
-plus the specific part. Those are rendered as one heading with the sub-senses
-beneath it, which stops a table of near-identical senses from reprinting the
-parent once per sense:
+A card is one headword; its records are its parts of speech (`run` is a verb and
+a noun). Records that share a part of speech are **merged into one block**, so an
+interleaved `noun, verb, noun` reads `noun, verb` instead of repeating the
+heading. The visible article is part of speech → forms → senses. Pronunciation is
+**hoisted to the top of the card** when the whole card has a single
+transcription, so the common one-audio-per-word case prints it once instead of
+repeating it; when parts of speech differ, each keeps its own under its own
+heading. Audio is never duplicated: each file is printed once, under the first
+part of speech that references it. An example sits in the DSL collapsible
+optional zone (`[*]…[/opt]`) **under the sense it illustrates**, not pooled at
+the card, so expanding a gloss reveals the use of the word it defines rather than
+an arbitrary sample. Cross-references stay in a single card-level optional zone
+at the end. A lookup therefore shows definitions first and the reader expands
+the rest on demand:
 
 ```
 run
+    [com]/ɹʌn/[/com]
     [p]verb[/p]
-    [m1]To move swiftly.[/m1]
-        [com](intransitive) To move forward quickly upon two feet…[/com]
-        [com](transitive) To cover (a course or a distance) by running.[/com]
-        …
-    [m2](metonymically) …
+    [i]runs (3rd sg.), running (part., pres.), ran (past), run (part., past)[/i]
+    [m1]• To move swiftly on foot.[/m]
+    [*]
+    [ex]I run every morning.[/ex]
+    [/opt]
+    [m1]• To operate or manage.[/m]
+    [p]noun[/p]
+    [m1]• A flow, or the act of running.[/m]
+    [m1]• [s]gd_tag_obsolete.svg[/s] (fig.) A period of performing.[/m]
+    [*]
+    [com]See also: [ref]runner[/ref][/com]
+    [/opt]
 ```
 
-Each sub-sense keeps its own register/context tag, so `monkey`'s seven
-figurative uses share one heading but remain individually labelled
-`(figuratively, informal)`, `(derogatory)` and so on. A sense whose gloss is a
-single fragment is a plain numbered entry with no children.
+Every leaf sense begins with a **bullet**, so sibling definitions read as a list
+rather than a paragraph; a group heading (a sense with sub-senses under it) is a
+category, not a sense, and carries no bullet.
+
+The engine renders every `[*]…[/opt]` as its own hidden `.dsl_opt` span and emits
+a single `[+]` expander per article, which reveals all of that entry's zones at
+once — so per-sense zones need no engine support, and each still shows its own
+examples when expanded.
+
+wiktextract splits a Wiktionary definition on `:` into a shared parent phrase
+plus the specific part. Senses that share a parent become one group: the parent
+is a `[m1]` heading and each specific part a `[m2]` sub-sense, which the engine
+indents one level deeper — so sub-senses read as definitions rather than flat
+comments, and a table of near-identical senses does not reprint the parent. A
+verbatim repeat of a heading or sub-sense is dropped.
+
+### Sense tags
+
+Common tags are shown as **small inline icons** instead of parenthetical words, so
+they stop breaking up the gloss text:
+
+| Icon | Tag(s) it stands for |
+| --- | --- |
+| `gd_tag_countable.svg` | countable |
+| `gd_tag_uncountable.svg` | uncountable |
+| `gd_tag_initialism.svg` | initialism, abbreviation, acronym |
+| `gd_tag_obsolete.svg` | obsolete, dated, archaic |
+
+Countability is shown only when it is the marked case: Wiktionary tags most nouns
+**both** countable and uncountable ("can be either"), and that unmarked case shows
+neither icon — only a sense tagged one way or the other shows the icon.
+
+An alternative/other-form sense (`swop` → *Alternative spelling of swap.*) gets no
+icon: the gloss already states the relation, and the headword it names is rendered
+as a **link**, so tapping *swap* opens the `swap` article. The link is only
+emitted when the dictionary actually contains that headword.
+
+An initialism/abbreviation/acronym sense shows the icon and drops the phrase the
+icon already says, leaving the linked headword: `cat` → *[inv icon] catapult.*
+rather than *"Abbreviation of catapult."*. A relation with no icon (a clipping,
+an ellipsis) keeps its words as text.
+
+At most one further register/context tag is kept per sense as abbreviated text
+(`(fig.)`, `(derog.)`, `(regional)`, …). Tags that state an unremarkable case
+(`transitive`, `intransitive`) or a relation the gloss already spells out
+(`synonym`, `ellipsis`, `clipping`) are dropped. A sense can show an icon and a
+text tag together. The icons are `[s]gd_tag_*.svg[/s]` picture references that the
+engine renders as inline images; the files are vendored in
+`scripts/assets/kaikki-tag-icons/` and bundled into **every** produced dictionary
+(see Output layout), so they render with no network access. The app sizes them to
+the surrounding text with a rule scoped to the `gd_tag_` filename, which leaves
+other dictionaries' images untouched. The about card carries a legend mapping each
+icon to its meaning.
+
+A sense keeps at most **one** example, the shortest that qualifies, so the zone
+is a crisp illustrative phrase rather than a wall of quotations. Example
+sentences can run to a whole paragraph in Wiktionary; anything longer than 200
+characters is cut at the last word boundary that fits and given an ellipsis. A
+sense with no surviving example gets no zone at all rather than an empty one.
+
+An example is kept only if it actually contains the headword: an exact token
+match against the headword or one of its listed forms (which catches irregular
+inflections such as `ran`/`children`), or a shared stem of at least three
+characters with the headword (which pairs `swop` with `swopping` without a
+stemmer). An example that never uses the word being defined proves nothing about
+it, so it is dropped. Archaic quotations — Early Modern spellings such as `haue`
+or `worke`, a long s `ſ`, Middle English inflections such as `wolde`/`seyde` — and
+`Citations:…` bookkeeping, both the bare `Citations:work.` placeholder and the
+`For quotations using this term, see Citations:work.` sentence that wraps it, are
+dropped too, since the source records far more of them than modern usage and they
+would otherwise crowd out the few current examples.
 
 ## Forms and pronunciations
 
-The `Forms:` line shows only the **standard paradigm**, compactly labelled:
+The forms line shows only the **standard paradigm**, compactly labelled and set
+in italics directly beneath its part of speech:
 `runs (3rd sg.), running (part., pres.), ran (past), run (part., past)`.
 Wiktionary records many more forms — archaic inflected tables (`runnest`,
 `goest`, `goeth`), dialect and nonstandard variants (`yode`, `goed`,
@@ -158,8 +240,14 @@ populated as examples, and any language without a profile falls back to a
 permissive default and warns.
 
 Pronunciation is likewise driven by the profile: each `sounds[]` field that
-carries a transcription (for English, `ipa` then `enpr`) is shown once, as
-`IPA: /ɹʌn/`, with audio links alongside.
+carries a transcription (for English, `ipa` then `enpr`) is shown once, as a bare
+`/ɹʌn/`, with audio links alongside. The line is always a transcription, so the
+common IPA value is printed without an `IPA:` label; a second notation (`enPR`) is
+labelled, since it is not IPA. Where the whole card shares a single
+transcription it is printed once at the top; where parts of speech differ, each
+is printed under its own part of speech. Each audio file appears exactly once per
+card regardless, so a word whose parts of speech share a recording does not
+repeat it.
 
 ## Why monolingual only
 
@@ -228,9 +316,14 @@ the scan; later runs reuse the index. `--force-audio-index` rebuilds it anyway.
 ```
 dist/
   kaikki-en.dsl.dz              # the dictionary (dictzip)
-  kaikki-en.dsl.dz.files.zip    # referenced audio (default)
+  kaikki-en.dsl.dz.files.zip    # sense-marker icons + any audio (default)
   kaikki-en.preview.html        # only with --preview
 ```
+
+The resource bundle always holds the five sense-marker icons (see Article shape),
+so it is written even with `--no-audio`; audio is added to the same archive when
+enabled. With `--audio-layout dir` both go into a `kaikki-en.dsl.dz.files/`
+directory instead.
 
 A full English build with audio is multi-GB on disk and thousands of small
 files inside the archive; the phone's import stages the whole folder. Use
@@ -238,9 +331,11 @@ files inside the archive; the phone's import stages the whole folder. Use
 
 ## Reproducibility and provenance
 
-- Same snapshot + options ⇒ byte-identical output (dictionary and audio archive).
+- Same snapshot + options ⇒ byte-identical output (dictionary and resource
+  archive; the vendored icons are fixed bytes in a sorted archive).
 - The snapshot dump date is embedded in the `#NAME` metadata block and in an
-  **About this dictionary** card inside the file.
+  **About this dictionary** card inside the file, which also carries the
+  sense-icon legend.
 
 ## Licensing
 
@@ -249,6 +344,10 @@ and is licensed **CC BY-SA 4.0** (share-alike). The tool always embeds the
 attribution, license, and the wiktextract citation in the output. If you
 redistribute a generated dictionary you must keep that attribution and share
 alike. The Aurelex repository itself ships no dictionary data.
+
+The bundled sense-marker icons are **Material Symbols** (Copyright Google LLC),
+licensed under the **Apache License 2.0**; `scripts/assets/kaikki-tag-icons/`
+holds their provenance, and the about card credits them.
 
 ## Tests
 
@@ -262,13 +361,30 @@ looser shapes: audio names that differ in case/underscores/percent-encoding from
 the archive, and words that carry several records), and
 `scripts/tests/fixtures/kaikki-audio-limit.jsonl` (a word whose recordings are
 mostly absent from the archive). They cover the base-form policy, the
-inflections flag, DSL escaping, IPA rendering, sense grouping (a shared parent
-rendered once with per-child tags), the form policy (paradigms kept,
-register/dialect variants and table machinery dropped), the optional zone
-holding the extras, profile-driven form labels, audio bundling and name
+inflections flag, DSL escaping, IPA rendering and pronunciation hoisting, sense
+grouping (a shared parent rendered once with one abbreviated tag per child,
+sub-senses indented as `[m2]` definitions, repeated and noise/structural tags
+dropped), the sense-tag policy (each mapped tag rendered as its icon, the
+countable-only/uncountable-only rule, icons coexisting with a register tag, no
+marker for an alternative-form sense), the sense bullet (leaf senses bulleted, a
+group heading not), the alternative-form link (the related headword linked when
+the dictionary contains it, plain otherwise, never self-linked), the dropping of
+the wording an iconised relation already carries and the unlabelled primary
+transcription, transcription hoisting for a one-record card, the language filter
+(a sample rejecting a record whose raw line carries a nested source-language
+marker), same-POS merging
+and card-wide audio de-duplication, the per-sense
+example cap and headword verification (plus dropping archaic and `Citations:`
+examples), the form policy
+(paradigms kept and shown beneath their part of speech, register/dialect variants
+and table machinery dropped), one optional zone per sense holding that sense's
+own examples, and a separate card-level zone for the cross-references,
+the icon bundle (present in the zip and the directory layout, with audio
+disabled, and advertised in the about card), profile-driven form labels,
+non-ASCII URL encoding for Wikimedia audio downloads, audio bundling and name
 normalisation (zip and directory), missing-audio omission and slot refill, the
 Wikimedia download fallback and its cache, the progress indicator, preview tag
-balance, determinism, the bounded sample selection (both modes, and that a small
-file is not over-strided), the sample headword count,
+balance and icon rendering, determinism, the bounded sample selection (both
+modes, and that a small file is not over-strided), the sample headword count,
 and the no-headwords report. No test touches the network: every audio build
 either passes `--no-audio-download` or injects a stub downloader.
