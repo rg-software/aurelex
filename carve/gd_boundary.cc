@@ -923,6 +923,11 @@ int gd_remove_dict( int dict_index )
   }
 
   rebuildGroups();
+  // Membership changed, so persist it now: without this groups.json keeps the
+  // removed id (and its allOrder entry) until the next scan or group mutation
+  // rewrites the file, leaving the stored group set briefly inconsistent with
+  // what the app shows (fix-dictionary-removal-cleanup, design D5).
+  saveGroupsLocked();
   return 0;
 }
 

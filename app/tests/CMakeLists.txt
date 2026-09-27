@@ -44,3 +44,12 @@ target_include_directories(index_migration_test PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/../../carve"
 )
 target_link_libraries(index_migration_test PRIVATE Qt6::Core)
+
+# Dictionary-removal index cleanup tests (fix-dictionary-removal-cleanup).
+# Links only Qt Core; IndexCleanup.hpp is header-only.
+add_executable(index_cleanup_test IndexCleanupTest.cpp)
+target_include_directories(index_cleanup_test PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/.."
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../carve"
+)
+target_link_libraries(index_cleanup_test PRIVATE Qt6::Core)

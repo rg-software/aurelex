@@ -1,5 +1,6 @@
 #include "EngineController.hpp"
 #include "ArticleServer.hpp"
+#include "IndexCleanup.hpp"
 #include "IndexMigration.hpp"
 
 #include <QtConcurrent>
@@ -756,19 +757,16 @@ void EngineController::deleteDictionaryFiles(const QString &sourceFile,
                                              const QString &dictId,
                                              const QString &stagedRoot,
                                              const QString &appDir) {
-    // Delete the engine's index cache for this dictionary: files/index<id> and
-    // files/index<id>_FTS_x (and any _temp) live directly in the app dir.
+    // Delete the engine's index cache for this dictionary. The engine writes it
+    // as `<indexDir><id>` and `<indexDir><id>_FTS_x`, and the index dir is
+    // `<appDir>/index/` (a prefix - see index_path.hpp), so the entries are
+    // files/index/<id> and files/index/<id>_FTS_x. The helper also removes the
+    // pre-fix `files/index<id>` strays, so a removal is correct even if the
+    // layout migration has not run (fix-dictionary-removal-cleanup).
     if (!dictId.isEmpty() && !appDir.isEmpty()) {
-        QDir dir(appDir);
-        const QStringList matches = dir.entryList(
-            QStringList() << (QStringLiteral("index") + dictId + QLatin1Char('*')));
-        for (const QString &entry : matches) {
-            const QString full = dir.filePath(entry);
-            QFileInfo fi(full);
-            if (fi.isDir()) QDir(full).removeRecursively();
-            else QFile::remove(full);
+        const QStringList removed = IndexCleanup::removeIndexEntries(appDir, dictId);
+        for (const QString &full : removed)
             qInfo() << "[aurelex] removed index entry" << full;
-        }
     }
     // Delete the dictionary's OWN staged source file. This must happen even when
     // the import folder is shared with sibling dictionaries (e.g. one GoldenDict
