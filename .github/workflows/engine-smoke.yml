@@ -153,6 +153,19 @@ jobs:
           # Re-scanning the same folder must not duplicate loaded dictionaries.
           printf '%s' "$out" | grep -q "gd_scan_dicts(again) -> 0" \
             || { echo "SMOKE FAILED: dedup on re-scan"; exit 1; }
+          # A re-scan reloads groups.json; it must NOT append a second copy of
+          # every group (that gave users duplicate same-named groups on every
+          # dictionary import, and the duplicate was undeletable).
+          printf '%s' "$out" | grep -q "GROUP_RESCAN=OK" \
+            || { echo "SMOKE FAILED: groups duplicated on re-scan"; exit 1; }
+          printf '%s' "$out" | grep -q "GROUP_ID_STABLE=OK" \
+            || { echo "SMOKE FAILED: group id/name not stable across a re-scan"; exit 1; }
+          # The reload must REPLACE the in-memory group set from the stored one,
+          # not merge into it. This is the gate that actually pins the append
+          # bug: GROUP_RESCAN alone still passes when the loader keeps the
+          # previous in-memory copy and collapses the repeat.
+          printf '%s' "$out" | grep -q "GROUP_RELOAD_SOURCE=OK" \
+            || { echo "SMOKE FAILED: re-scan did not take the stored group set as the source of truth"; exit 1; }
           # Removing a dictionary drops it (count shrinks, its headword stops
           # resolving) and a re-scan re-adds it.
           printf '%s' "$out" | grep -q "REMOVE_DICT=OK" \

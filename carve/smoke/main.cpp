@@ -12,12 +12,44 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <fstream>
+#include <sstream>
 #include <string>
 #include <vector>
 
 // The resource the "badge" headword of aurelex-basic references. Must match
 // RESOURCE_NAME in scripts/make-example-dicts.py.
 static const char * kFixtureResource = "aurelex-resource.svg";
+
+// Rewrite one group's name directly in <configDir>/groups.json. The boundary
+// exposes no way to edit the stored file behind the API's back, and the groups
+// smoke needs one: a scan must reload the STORED group set, not merge into the
+// in-memory one, and the only way to tell those apart is to change what is
+// stored and check the app follows it. Returns false when the file or the name
+// is not found, which fails the assertion that uses it.
+static bool rewriteGroupName( const char * configDir, const char * from, const char * to )
+{
+  std::ostringstream path;
+  path << configDir << "/groups.json";
+  std::ifstream in( path.str().c_str(), std::ios::binary );
+  if ( !in )
+    return false;
+  std::ostringstream buf;
+  buf << in.rdbuf();
+
+  std::string json = buf.str();
+  const std::string needle = std::string( "\"name\":\"" ) + from + "\"";
+  const std::string::size_type at = json.find( needle );
+  if ( at == std::string::npos )
+    return false;
+  json.replace( at, needle.size(), std::string( "\"name\":\"" ) + to + "\"" );
+
+  std::ofstream out( path.str().c_str(), std::ios::binary | std::ios::trunc );
+  if ( !out )
+    return false;
+  out << json;
+  return out.good();
+}
 
 // Resolve a dictionary index by its primary source file suffix. The scan loads
 // one primary file at a time in filesystem order (see gd_scan_dicts), so
@@ -208,6 +240,7 @@ int main( int argc, char ** argv )
   // CI folder has the StarDict ("smoke") plus a .dsl.dz (no "smoke") and a
   // nested .dsl; locate the primary files by suffix since scan order is not
   // guaranteed.
+  bool groupsOk = true;
   {
     const int dslDzIdx = findDictBySuffix( ".dsl.dz" );
     const int gc = gd_group_count();
@@ -235,6 +268,45 @@ int main( int argc, char ** argv )
       const std::string html2( out.data(), sz2 > 0 ? sz2 : 0 );
       std::printf( "GROUP_ALL=%s\n", html2.find( "gdarticlebody" ) != std::string::npos ? "OK" : "FAIL" );
     }
+
+    // A scan reloads groups.json, which is how importing a dictionary used to
+    // duplicate every group (the user ended up with two groups of the same
+    // name, the second undeletable). Re-scanning must leave the group set
+    // exactly as it was.
+    const int gcBefore = gd_group_count();
+    gd_scan_dicts( dictDir );
+    const int gcAfter = gd_group_count();
+    std::printf( "gd_group_count after re-scan -> %d (was %d)\n", gcAfter, gcBefore );
+    const bool groupRescanOk = gcAfter == gcBefore;
+    std::printf( "GROUP_RESCAN=%s\n", groupRescanOk ? "OK" : "FAIL" );
+
+    // And the group the user made must still be reachable by id after the
+    // reload (a duplicated id would make findGroupDef hit the wrong entry).
+    int infoId = -1, infoCount = -1;
+    char infoName[ 256 ] = { 0 };
+    const int infoRc = gd_group_info( gcAfter - 1, &infoId, infoName, sizeof infoName, &infoCount );
+    std::printf( "gd_group_info(%d) -> rc=%d id=%d name=%s dicts=%d\n",
+                 gcAfter - 1, infoRc, infoId, infoName, infoCount );
+    const bool groupIdOk = infoRc == 0 && infoId == gid && std::strcmp( infoName, "OnlyDSL" ) == 0;
+    std::printf( "GROUP_ID_STABLE=%s\n", groupIdOk ? "OK" : "FAIL" );
+
+    // ...and the reload must REPLACE the in-memory set rather than merge into
+    // it. Editing the stored name and re-scanning must surface the new name: a
+    // loader that appends (and then collapses the repeat) keeps the previous
+    // in-memory copy instead, so this is what pins the actual defect — the count
+    // check above passes even in that state.
+    const bool reloadOk = rewriteGroupName( configDir, "OnlyDSL", "OnlyDSL2" )
+                          && ( gd_scan_dicts( dictDir ), true );
+    int infoId2 = -1, infoCount2 = -1;
+    char infoName2[ 256 ] = { 0 };
+    const int infoRc2 = gd_group_info( gcAfter - 1, &infoId2, infoName2, sizeof infoName2, &infoCount2 );
+    std::printf( "gd_group_info(%d) after stored rename -> rc=%d id=%d name=%s\n",
+                 gcAfter - 1, infoRc2, infoId2, infoName2 );
+    const bool sourceOfTruthOk =
+        reloadOk && infoRc2 == 0 && infoId2 == gid && std::strcmp( infoName2, "OnlyDSL2" ) == 0;
+    std::printf( "GROUP_RELOAD_SOURCE=%s\n", sourceOfTruthOk ? "OK" : "FAIL" );
+
+    groupsOk = gid > 0 && groupRescanOk && groupIdOk && sourceOfTruthOk;
   }
 
   // ---- full-text search smoke (xapian) ----
@@ -372,7 +444,7 @@ int main( int argc, char ** argv )
   }
 
   gd_cleanup();
-  return ( lookSz > 0 && sugN > 0 && ftsOk && dedupOk && dictOk && optPartsOk
+  return ( lookSz > 0 && sugN > 0 && ftsOk && dedupOk && dictOk && optPartsOk && groupsOk
            && resourceThreadOk )
              ? 0
              : 1;

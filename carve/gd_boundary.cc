@@ -292,8 +292,15 @@ void loadGroupsLocked()
   const QJsonObject root = doc.object();
   g_state->activeGroupId = static_cast< unsigned >( root.value( "activeGroupId" ).toInt( 0 ) );
   g_state->nextGroupId   = static_cast< unsigned >( root.value( "nextGroupId" ).toInt( 1 ) );
-  // Reload (not append): loadGroupsLocked may run on every scan.
+  // Reload (not append): gd_scan_dicts calls this on EVERY scan, and every
+  // group mutation writes groups.json immediately, so the file is the source of
+  // truth. Appending instead of clearing duplicated every user group on each
+  // scan: importing a dictionary re-stages the folder and re-scans, so the user
+  // got a second group of the same name after every import — and it could not
+  // be deleted, because gd_group_delete erases only the first id match.
   g_state->allOrder.clear();
+  g_state->groupDefs.clear();
+  bool repaired = false;
   for ( const QJsonValue &v : root.value( "allOrder" ).toArray() )
     g_state->allOrder.push_back( v.toString().toStdString() );
   for ( const QJsonValue &gv : root.value( "groups" ).toArray() ) {
@@ -312,9 +319,29 @@ void loadGroupsLocked()
       }
     }
     if ( def.id == 0 ) continue; // "All" is implicit
+    // Self-heal: a groups.json written while the append bug was live holds the
+    // same id more than once. Keep one group per id and union its membership, so
+    // a device that already accumulated duplicates repairs itself on the next
+    // scan instead of needing its config file hand-edited.
+    auto dup = std::find_if( g_state->groupDefs.begin(), g_state->groupDefs.end(),
+                             [ &def ]( const GroupDef & d ) { return d.id == def.id; } );
+    if ( dup != g_state->groupDefs.end() ) {
+      repaired = true;
+      for ( const unsigned idx : def.dictIndices ) {
+        if ( std::find( dup->dictIndices.begin(), dup->dictIndices.end(), idx )
+             == dup->dictIndices.end() )
+          dup->dictIndices.push_back( idx );
+      }
+      continue;
+    }
     g_state->groupDefs.push_back( std::move( def ) );
   }
-  qInfo( "groups loaded: %d user groups", static_cast< int >( g_state->groupDefs.size() ) );
+  qInfo( "groups loaded: %d user groups%s",
+         static_cast< int >( g_state->groupDefs.size() ),
+         repaired ? " (repaired duplicate ids in groups.json)" : "" );
+  // Make a repair durable instead of re-healing the same file on every scan.
+  if ( repaired )
+    saveGroupsLocked();
 }
 
 void gdLogCall( const char * name, const char * word, qint64 mutexMs, qint64 pumpMs, bool finished )
