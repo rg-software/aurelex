@@ -46,6 +46,13 @@ Status legend: 🟢 planned · 🔵 in progress · ✅ done · ⏸ parked
 - ✅ **Bulk FTS indexing background service** (`bulk-fts-indexing`): the
   foreground `IndexingService` survives app backgrounding; auto-index-missing on
   scan and the removal of the per-dict Index button shipped.
+- 🔵 **Index directory path fix** (`fix-index-directory-path-separator`): the
+  engine writes indexes as `<index_dir><dictId>`, and the app supplied
+  `<appDir>/index` without a trailing separator, so indexes landed *beside* the
+  directory as `files/index<md5>` while `files/index/` stayed empty. The app now
+  builds the path with `QDir` + a separator and the boundary normalizes it; a
+  startup sweep moves existing strays into `files/index/<md5>` so devices do not
+  reindex. On-disk layout change — see the change's Migration Plan.
 
 ## Recently completed
 

@@ -19,6 +19,7 @@
 #include "ftshelpers.hh"
 #include "langcoder.hh"
 #include "goldendict.h"
+#include "index_path.hpp"
 
 #include <QAtomicInt>
 #include <QCoreApplication>
@@ -52,6 +53,17 @@ namespace {
 int g_argc_dummy = 1;
 char g_argv0_dummy[] = "aurelex";
 char * g_argv_dummy[ 2 ] = { g_argv0_dummy, nullptr };
+
+// How long a single engine request may run before the boundary gives up on it
+// and reports a timeout. This used to double as the GUI-freeze budget, because
+// fetchResource() ran its wait on the Qt main thread; it no longer does (see
+// openspec/changes/fix-article-server-gui-reentrancy). It is now purely a
+// worker-occupancy budget: it bounds how long one wedged request can hold the
+// caller's thread, and it is deliberately NOT a responsiveness number, so it
+// should be re-chosen against measured engine times rather than inherited.
+// The value is unchanged from the original inline 15000 pending that
+// measurement; see design.md D3.
+constexpr int kEngineRequestDeadlineMs = 15000;
 
 // Boundary-side group definition (id/name/ordered dict indices). Materialized
 // into Instances::Group (which holds sptr references to the dictionaries).
@@ -327,6 +339,16 @@ int gd_init( const char * config_dir, const char * index_dir )
   if ( g_state )
     return 0;
 
+  // The engine treats index_dir as a prefix: every backend does
+  // `indicesDir + dictId` (index_path.hpp). So index_dir must end in a
+  // separator, and an unusable one must be rejected rather than normalized into
+  // a root-relative path that would scatter indexes at the filesystem root.
+  if ( !index_dir )
+    return -2;
+  const std::string indexDirRaw( index_dir );
+  if ( indexDirRaw.empty() || indexDirRaw.find_first_not_of( "/\\" ) == std::string::npos )
+    return -2;
+
   if ( !qEnvironmentVariableIsSet( "HOME" ) ) {
     qputenv( "HOME", QByteArray( config_dir ) );
   }
@@ -349,7 +371,10 @@ int gd_init( const char * config_dir, const char * index_dir )
   QCoreApplication::setApplicationName( "aurelex" );
 
   g_state = new EngineState;
-  g_state->indexDir = QString::fromUtf8( index_dir );
+  // Normalized: callers may omit the trailing separator (the app did), and the
+  // engine's prefix contract means that silently sends indexes to a sibling
+  // path. The boundary owns the contract, so it is enforced here once.
+  g_state->indexDir = QString::fromStdString( gdNormalizeIndexDir( indexDirRaw ) );
   g_state->groupsConfigDir = QString::fromUtf8( config_dir );
   // "modern" display style enables the dark mode stylesheet variant
   // (article_maker only emits article-style-darkmode.css for displayStyle
@@ -672,35 +697,51 @@ static int fetchResource( const QString & urlString, char * out, int out_size )
   const QUrl url( urlString );
   const string id = url.host().toStdString();
 
-  std::lock_guard< std::recursive_mutex > lock( g_engineMutex );
-
-  Dictionary::Class * found = nullptr;
-  for ( const auto & d : g_state->dictionaries ) {
-    if ( d->getId() == id ) {
-      found = d.get();
-      break;
-    }
-  }
-  if ( !found )
-    return -2;
-
+  // Issue the request under the engine lock: getResource() mutates the
+  // dictionary and reads the loaded-dictionary list. The lock is deliberately
+  // scoped to this block only. Holding it across the wait below would serve no
+  // purpose (waiting mutates nothing) and would block every other gd_* caller —
+  // FTS builds, lookups, suggestions — behind an unrelated slow resource.
+  // See design.md D2 in fix-article-server-gui-reentrancy.
   sptr< Dictionary::DataRequest > req;
-  try {
-    req = found->getResource( Utils::Url::path( url ).mid( 1 ).toUtf8().data() );
-  }
-  catch ( std::exception & e ) {
-    qWarning( "getResource request error (%s) in \"%s\"", e.what(), found->getName().c_str() );
-    return -2;
-  }
-  if ( !req.get() )
-    return -2;
+  {
+    std::lock_guard< std::recursive_mutex > lock( g_engineMutex );
+    if ( !g_state )
+      return -1;
 
+    Dictionary::Class * found = nullptr;
+    for ( const auto & d : g_state->dictionaries ) {
+      if ( d->getId() == id ) {
+        found = d.get();
+        break;
+      }
+    }
+    if ( !found )
+      return -2;
+
+    try {
+      req = found->getResource( Utils::Url::path( url ).mid( 1 ).toUtf8().data() );
+    }
+    catch ( std::exception & e ) {
+      qWarning( "getResource request error (%s) in \"%s\"", e.what(), found->getName().c_str() );
+      return -2;
+    }
+    if ( !req.get() )
+      return -2;
+  }
+
+  // Engine lock released. `req` is a refcounted sptr, so the request object
+  // stays alive for the whole wait regardless of what the engine does, and
+  // nothing below touches g_state.
   QEventLoop loop;
-  QTimer::singleShot( 15000, &loop, &QEventLoop::quit );
+  QTimer::singleShot( kEngineRequestDeadlineMs, &loop, &QEventLoop::quit );
   QObject::connect( req.get(), &Dictionary::Request::finished, &loop, &QEventLoop::quit );
   if ( !req->isFinished() )
     loop.exec();
 
+  // Copy the bytes out under the lock. A finished request owns stable data, so
+  // this only needs to exclude a concurrent engine caller for the memcpy.
+  std::lock_guard< std::recursive_mutex > lock( g_engineMutex );
   if ( !req->isFinished() )
     return -3;
 

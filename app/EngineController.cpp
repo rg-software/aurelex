@@ -1,5 +1,6 @@
 #include "EngineController.hpp"
 #include "ArticleServer.hpp"
+#include "IndexMigration.hpp"
 
 #include <QtConcurrent>
 #include <QStandardPaths>
@@ -584,8 +585,19 @@ void EngineController::initialize(const QString &appDir, const QString &stagedDi
     installDiagLog(appDir);
     QDir().mkpath(appDir);
     QDir().mkpath(stagedDir);
-    const QString indexDir = appDir + "/index";
+    // The engine treats the index dir as a prefix (it appends the dictionary id),
+    // so it must end in a separator — otherwise indexes land beside the directory
+    // as `files/index<md5>` instead of inside it. Build it with QDir so the
+    // separator is correct by construction, independent of the boundary's own
+    // normalization (fix-index-directory-path-separator, design.md D2).
+    const QString indexDir = QDir(appDir).filePath(QStringLiteral("index")) + QDir::separator();
     QDir().mkpath(indexDir);
+    // Move any strays left by the pre-fix path into `index/` before the engine
+    // looks there, so existing devices do not have to reindex
+    // (fix-index-directory-path-separator, design.md Migration Plan Option A).
+    const int migrated = IndexMigration::migrateStrayIndexes(appDir);
+    if (migrated > 0)
+        qInfo() << "[aurelex] migrated" << migrated << "stray index entries into index/";
     QFuture<int> f = QtConcurrent::run([appDir, indexDir]{
         return gd_init(appDir.toLocal8Bit().constData(),
                        indexDir.toLocal8Bit().constData());

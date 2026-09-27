@@ -9,10 +9,19 @@ Produces into a target directory (default: examples/dictionaries):
   <name>.dsl.dz            - dictzip-compressed variant of each (real
                              "RA" random-access extra field, so the engine's
                              dictzip reader can seek; plain gzip would not load)
+  aurelex-basic.dsl.files/ - sibling resource dir for aurelex-basic, holding
+                             aurelex-resource.svg
 
 The "sun" headword in aurelex-basic carries a `[*]...[/*]` hidden zone, so
 the generated fixtures always cover the optional-parts expander (see the
 `sample-dictionaries` spec) without hand-editing a dictionary.
+
+The "badge" headword carries a `[s]...[/s]` resource reference, so the
+fixtures also cover the embedded-resource path (bres:// resolution) that
+fix-article-server-gui-reentrancy exercises. The .dsl.files/ name is the one
+the engine derives for BOTH variants: for aurelex-basic.dsl it is
+resourceDir1/resourceDir2 directly, and for aurelex-basic.dsl.dz the engine
+strips the trailing ".dz" to find it (engine/src/dict/dsl.cc:279-284).
 
 Usage: make-example-dicts.py [output-dir]
 """
@@ -48,6 +57,9 @@ sun
 \t[m2]the Sun is a star[/m]
 \t[*]Extra: its light takes about 8 minutes to reach Earth.[/*]
 \t[ref]light[/ref]
+badge
+\t[m1]embeds a bundled image so the embedded-resource path has a fixture[/m]
+\t[s]aurelex-resource.svg[/s]
 """
 
 LINGVO = """\
@@ -88,6 +100,14 @@ where is the bathroom
 def _encode_dsl(text: str) -> bytes:
     # UTF-8 with BOM; goldendict's DSL reader detects the encoding from it.
     return b"\xef\xbb\xbf" + text.encode("utf-8")
+
+
+# The resource the "badge" headword references. Deliberately tiny and a valid
+# standalone SVG: the smoke test asserts on "<svg" being present, so a corrupt
+# or empty file fails the check rather than passing a size test.
+RESOURCE_NAME = "aurelex-resource.svg"
+RESOURCE_SVG = b"""<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" \
+viewBox="0 0 16 16"><rect width="16" height="16" fill="#c2185b"/></svg>\n"""
 
 
 def _dz_named(content: str) -> str:
@@ -158,6 +178,16 @@ def write_dictionaries(out_dir: str) -> list:
         with open(dz_path, "wb") as f:
             f.write(make_dictzip(_encode_dsl(_dz_named(content))))
         written.append(dz_path)
+
+    # Sibling resource dir for aurelex-basic. Only aurelex-basic references a
+    # resource, so this is the only .files/ tree emitted. CI copies the whole
+    # directory next to the dictionary it copies (see engine-smoke.yml).
+    res_dir = os.path.join(out_dir, "aurelex-basic.dsl.files")
+    os.makedirs(res_dir, exist_ok=True)
+    res_path = os.path.join(res_dir, RESOURCE_NAME)
+    with open(res_path, "wb") as f:
+        f.write(RESOURCE_SVG)
+    written.append(res_path)
     return written
 
 

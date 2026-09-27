@@ -1,0 +1,46 @@
+# Host-side test for app/ArticleServer.cpp (fix-article-server-gui-reentrancy).
+#
+# Deliberately NOT part of app/CMakeLists.txt: that project is Android-only and
+# pulls in the whole carved engine. ArticleServer's only engine dependency is
+# gd_get_resource / gd_get_audio, which ArticleServerTest.cpp stubs, so this test
+# builds against a plain desktop Qt (Core + Network) and writes no engine code.
+#
+# Build (host):
+#   cmake -S app/tests -B build-article-server-test \
+#         -DCMAKE_PREFIX_PATH=C:/Qt/6.6.3/msvc2019_64 -G "Visual Studio 17 2022" -A x64
+#   cmake --build build-article-server-test --config Release
+#   build-article-server-test/Release/article_server_test.exe
+cmake_minimum_required(VERSION 3.18)
+project(aurelex_article_server_test LANGUAGES CXX)
+
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_AUTOMOC ON)
+
+if(ANDROID)
+    message(FATAL_ERROR "article_server_test is a host-only test")
+endif()
+
+find_package(Qt6 REQUIRED COMPONENTS Core Network)
+
+add_executable(article_server_test
+    ArticleServerTest.cpp
+    "${CMAKE_CURRENT_SOURCE_DIR}/../ArticleServer.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../ArticleServer.hpp"
+)
+
+target_include_directories(article_server_test PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/.."
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../carve"
+)
+
+target_link_libraries(article_server_test PRIVATE Qt6::Core Qt6::Network)
+
+# Index-directory separator + migration tests (fix-index-directory-path-separator).
+# Links only Qt Core; the two headers under test are header-only.
+add_executable(index_migration_test IndexMigrationTest.cpp)
+target_include_directories(index_migration_test PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/.."
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../carve"
+)
+target_link_libraries(index_migration_test PRIVATE Qt6::Core)

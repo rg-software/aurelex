@@ -5,7 +5,11 @@
 //
 // - gd_init:      one-time init. config_dir is where engine user data goes
 //                 (HOME override), index_dir is where dictionary indexes are
-//                 cached. Returns 1 on success, 0 if already initialized.
+//                 cached: indexes are written as `index_dir/<dictionary-id>`, so
+//                 the engine treats it as a directory prefix. A missing trailing
+//                 separator is tolerated (the boundary appends one); an empty or
+//                 separator-only index_dir is rejected. Returns 1 on success, 0
+//                 if already initialized, -2 for an unusable index_dir.
 // - gd_scan_dicts: scan `folder` for supported dictionaries (.mdx/.mdd,
 //                 .dsl/.dsl.dz, .ifo), build indexes into index_dir, append to
 //                 the loaded set. Scans recursively (nested subfolders are

@@ -88,7 +88,11 @@ jobs:
         shell: bash
         run: |
           python scripts/make-smoke-stardict.py "$RUNNER_TEMP/dic"
-          mkdir -p "$RUNNER_TEMP/cfg"
+          # The index directory is a sibling-free subdirectory of the config
+          # dir, mirroring the app's files/index/ layout. The engine appends the
+          # dictionary id to it (fix-index-directory-path-separator, design.md
+          # D3); the smoke tool also creates it, this keeps CI explicit.
+          mkdir -p "$RUNNER_TEMP/cfg/index"
 
       - name: Generate DSL + .dsl.dz fixture (compressed DSL path)
         shell: bash
@@ -97,6 +101,11 @@ jobs:
           # Copy the compressed variant into the smoke dict folder so the scan
           # also exercises the dictzip (.dsl.dz) reader.
           cp "$RUNNER_TEMP/dsl/aurelex-basic.dsl.dz" "$RUNNER_TEMP/dic/"
+          # Its sibling resource dir too, so the bres:// resource path has a
+          # fixture to resolve (fix-article-server-gui-reentrancy). The engine
+          # finds aurelex-basic.dsl.files/ by stripping the trailing ".dz" from
+          # the dictionary name (engine/src/dict/dsl.cc:279-284).
+          cp -r "$RUNNER_TEMP/dsl/aurelex-basic.dsl.files" "$RUNNER_TEMP/dic/"
           # Nested-subfolder fixture (recursion): the lingvo (distinct-headword)
           # DSL goes into a subfolder so the scan must recurse to find it.
           mkdir -p "$RUNNER_TEMP/dic/nested"
@@ -170,4 +179,8 @@ jobs:
             || { echo "SMOKE FAILED: alwaysExpandOptionalParts override present in header"; exit 1; }
           printf '%s' "$out" | grep -q "OPT_NO_ZONE=OK" \
             || { echo "SMOKE FAILED: expander emitted for an article with no hidden zone"; exit 1; }
+          # Every dictionary's index must land inside the supplied index dir, not
+          # beside it as `index<md5>` (fix-index-directory-path-separator).
+          printf '%s' "$out" | grep -q "INDEX_PLACEMENT=OK" \
+            || { echo "SMOKE FAILED: dictionary index written outside the index directory"; exit 1; }
           echo "SMOKE OK"

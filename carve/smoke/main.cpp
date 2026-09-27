@@ -3,12 +3,21 @@
 // synthetic StarDict dictionary, printing results. This validates the whole
 // carve + boundary end-to-end without a device.
 #include "goldendict.h"
+#include "index_path.hpp"
+
+#include <QDir>
+#include <QFileInfo>
+#include <QThread>
 
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <string>
 #include <vector>
+
+// The resource the "badge" headword of aurelex-basic references. Must match
+// RESOURCE_NAME in scripts/make-example-dicts.py.
+static const char * kFixtureResource = "aurelex-resource.svg";
 
 // Resolve a dictionary index by its primary source file suffix. The scan loads
 // one primary file at a time in filesystem order (see gd_scan_dicts), so
@@ -41,7 +50,15 @@ int main( int argc, char ** argv )
   const char * dictDir   = argv[ 2 ];
   const char * word      = argc >= 4 ? argv[ 3 ] : "smoke";
 
-  if ( !gd_init( configDir, configDir ) ) {
+  // The engine treats the index dir as a prefix, so the tool builds it the way
+  // the app does: a dedicated `index/` subdirectory under config_dir. See
+  // fix-index-directory-path-separator (design.md D3).
+  const std::string indexDirRaw = std::string( configDir ) + "/index";
+  // The engine concatenates the dict id onto this, but it does not create the
+  // directory; the app does that (EngineController::initialize) and so must we.
+  QDir().mkpath( QString::fromStdString( indexDirRaw ) );
+
+  if ( !gd_init( configDir, indexDirRaw.c_str() ) ) {
     std::fprintf( stderr, "gd_init failed\n" );
     return 1;
   }
@@ -52,6 +69,44 @@ int main( int argc, char ** argv )
     std::fprintf( stderr, "no dictionaries loaded\n" );
     gd_cleanup();
     return 1;
+  }
+
+  // ---- index placement (fix-index-directory-path-separator, design.md D4) ----
+  // The engine writes a dictionary's index at `indexDir + dictId` (see
+  // index_path.hpp). Assert every loaded dictionary's index actually landed
+  // there and is a direct child of the index directory — a mis-supplied index
+  // dir used to send it to the sibling `<indexDir><dictId>` instead, which no
+  // consumer noticed because nothing checked. The normalization mirrors gd_init
+  // so this checks the real formula rather than the raw argv.
+  bool indexPlacementOk = true;
+  {
+    const std::string indexDir = gdNormalizeIndexDir( indexDirRaw );
+    // QFileInfo::absolutePath() drops a trailing separator, and cleanPath does
+    // too, so compare cleaned forms; comparing against the raw normalized string
+    // would "fail" purely on the trailing slash.
+    const QString indexDirAbs = QDir::cleanPath( QString::fromStdString( indexDir ) );
+    for ( int i = 0; i < n; ++i ) {
+      char id[ 128 ] = { 0 };
+      if ( gd_dict_id( i, id, sizeof id ) != 0 )
+        continue;
+      const QString indexPath = QString::fromStdString( indexDir ) + QString::fromUtf8( id );
+      const QFileInfo fi( indexPath );
+      if ( !fi.exists() ) {
+        std::fprintf( stderr, "INDEX_PLACEMENT=FAIL missing index for %s at %s\n",
+                      id, qPrintable( indexPath ) );
+        indexPlacementOk = false;
+        continue;
+      }
+      const QString parentAbs = QDir::cleanPath( fi.absolutePath() );
+      if ( parentAbs != indexDirAbs ) {
+        std::fprintf( stderr, "INDEX_PLACEMENT=FAIL index %s is in %s, expected inside %s\n",
+                      id, qPrintable( parentAbs ), qPrintable( indexDirAbs ) );
+        indexPlacementOk = false;
+        continue;
+      }
+    }
+    std::printf( "INDEX_PLACEMENT=%s (index dir %s, %d dicts)\n",
+                 indexPlacementOk ? "OK" : "FAIL", qPrintable( indexDirAbs ), n );
   }
 
   // Re-scanning the same folder must not duplicate already-loaded dictionaries
@@ -229,6 +284,59 @@ int main( int argc, char ** argv )
     std::printf( "FTS_WILD=%s\n", ftsWildOk ? "OK" : "FAIL" );
   }
 
+  // ---- embedded-resource smoke, on a third thread ----
+  // fix-article-server-gui-reentrancy (design.md D1) moves bres:// resolution
+  // onto a dedicated engine-resource thread. That thread is neither the thread
+  // that constructed the dictionaries (the engine pool, reached via
+  // gd_scan_dicts) nor the Qt main thread. gd_get_resource spins a nested
+  // QEventLoop internally, so the calling thread needs a Qt event dispatcher -
+  // hence QThread rather than std::thread, which would return immediately with
+  // no dispatcher and read as a false pass/fail.
+  //
+  // This is the gate for D1: if a dictionary backend keeps thread-affine state,
+  // a load from a foreign thread fails here (wrong rc, or a payload that is not
+  // the SVG) even though the same load on the constructing thread succeeds.
+  bool resourceThreadOk = false;
+  {
+    const int resIdx = findDictBySuffix( ".dsl.dz" );
+    char dictId[ 128 ] = { 0 };
+    const int idRc = resIdx >= 0 ? gd_dict_id( resIdx, dictId, sizeof dictId ) : -1;
+    std::printf( "gd_dict_id(%d) -> rc=%d id=%s\n", resIdx, idRc, dictId );
+
+    const std::string resUrl =
+        std::string( "bres://" ) + dictId + "/" + kFixtureResource;
+    std::vector< char > resBuf( 64 * 1024 );
+
+    // Control: the same URL on THIS thread. Both failing means the fixture or
+    // the URL is wrong, not the engine's threading - the two cases must be
+    // distinguishable or this check cannot diagnose anything.
+    const int mainRc =
+        gd_get_resource( resUrl.c_str(), resBuf.data(), static_cast< int >( resBuf.size() ) );
+    const std::string mainBody( resBuf.data(), mainRc > 0 ? mainRc : 0 );
+    const bool mainOk = mainRc > 0 && mainBody.find( "<svg" ) != std::string::npos;
+    std::printf( "gd_get_resource(\"%s\") on main thread -> rc=%d (%d bytes)\n",
+                 resUrl.c_str(), mainRc, mainRc > 0 ? mainRc : 0 );
+    std::printf( "RESOURCE_ON_MAIN_THREAD=%s\n", mainOk ? "OK" : "FAIL" );
+
+    int workerRc = -999;
+    int workerSz = 0;
+    QThread * worker = QThread::create( [ & ] {
+      workerRc = gd_get_resource( resUrl.c_str(), resBuf.data(),
+                                  static_cast< int >( resBuf.size() ) );
+      workerSz = workerRc > 0 ? workerRc : 0;
+    } );
+    worker->start();
+    worker->wait();
+    delete worker;
+
+    const std::string workerBody( resBuf.data(), workerSz );
+    resourceThreadOk = mainOk && idRc == 0 && workerRc > 0
+        && workerBody.find( "<svg" ) != std::string::npos;
+    std::printf( "gd_get_resource(\"%s\") on worker thread -> rc=%d (%d bytes)\n",
+                 resUrl.c_str(), workerRc, workerSz );
+    std::printf( "RESOURCE_ON_WORKER_THREAD=%s\n", resourceThreadOk ? "OK" : "FAIL" );
+  }
+
   // ---- dictionary removal smoke (remove-dictionary) ----
   // The DSL (.dsl.dz, found by suffix) has the headword "book"; remove it,
   // confirm the count drops and "book" stops resolving, then re-scan re-adds
@@ -264,5 +372,8 @@ int main( int argc, char ** argv )
   }
 
   gd_cleanup();
-  return ( lookSz > 0 && sugN > 0 && ftsOk && dedupOk && dictOk && optPartsOk ) ? 0 : 1;
+  return ( lookSz > 0 && sugN > 0 && ftsOk && dedupOk && dictOk && optPartsOk
+           && resourceThreadOk )
+             ? 0
+             : 1;
 }
