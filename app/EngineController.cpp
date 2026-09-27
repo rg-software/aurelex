@@ -1075,6 +1075,20 @@ QString EngineController::rewriteArticleUrls(const QString &html) const {
     // rewritten to loopback http — the QML click-probe (main.qml) catches the
     // click on the http URL and dispatches to engine.lookup().
     out.replace(QStringLiteral("gdlookup://localhost/"), base + QStringLiteral("/gdlookup/"));
+    // The kaikki converter's fixed sense-marker icons (scripts/kaikki-to-dsl.py,
+    // scripts/assets/kaikki-tag-icons) are bundled into the APK as
+    // assets/icons/gd_tag_*.svg as well as into each dictionary's resource
+    // bundle. Serve them from the static asset route — the same route that
+    // makes qrc:///icons/playsound.svg paint instantly — instead of the engine's
+    // bres:// resource pipeline, which queues on the two reader slots and unzips
+    // the dictionary before answering, so the icons painted noticeably after the
+    // rest of the article. Only the four known names are rewritten; any other
+    // dictionary's image keeps its bres:// route. Must run before the bare
+    // bres:// replacement below.
+    out.replace(
+        QRegularExpression(QStringLiteral(
+            R"(bres://[^/]+/(gd_tag_(?:countable|uncountable|initialism|obsolete)\.svg))")),
+        base + QStringLiteral("/icons/\\1"));
     out.replace(QStringLiteral("bres://"), base + QStringLiteral("/bres/"));
     out.replace(QStringLiteral("gdau://"), base + QStringLiteral("/gdau/"));
     out.replace(QStringLiteral("qrc:///"), base + QStringLiteral("/"));
@@ -1174,11 +1188,15 @@ img.hidden_expand_opt { padding: 12px; margin: -12px !important; }
 /* Inline sense-marker icons emitted by kaikki-to-dsl dictionaries (see
    scripts/assets/kaikki-tag-icons). Scoped to the gd_tag_ filename so no other
    dictionary's images are affected: text-height, aligned to the text, and with
-   no background box. The transparent background must out-specify the dark-mode
-   .gdarticlebody img{background:white} rule, which ties with a bare
+   no background box. Both width and height are pinned to 1.1em so the box is
+   reserved before the SVG has loaded — an image with only a height takes no
+   horizontal space until its intrinsic size is known, which reflows the gloss
+   when it arrives late. The transparent background must out-specify the
+   dark-mode .gdarticlebody img{background:white} rule, which ties with a bare
    img[src*=...] and is injected later, hence the .gdarticlebody prefix plus
    !important. */
-.gdarticlebody img[src*="gd_tag_"] { height: 1.1em; vertical-align: -0.15em;
+.gdarticlebody img[src*="gd_tag_"] { width: 1.1em; height: 1.1em;
+                                    vertical-align: -0.15em;
                                     background: transparent !important; }
 </style>
 )");

@@ -78,6 +78,18 @@ SHALL/MUST language) — follow the instructions output before writing any artif
 - Before any upstream bump: build the engine, run the CI smoke test, and update specs only if
   observable behavior changed (never massage specs to fit a refactor).
 - Work flows through OpenSpec changes first; implementation does not run ahead of the plan.
+- **Shared article icons live on the app side, not in dictionaries.** Any icon Aurelex itself
+  renders inside the article HTML (sense markers, badges, UI glyphs) MUST be shipped in
+  `app/android/assets/icons/` and referenced through the static asset route — NOT emitted into a
+  dictionary's resource bundle and fetched as `bres://`. The `bres://` path queues on the engine's
+  reader slots and unzips the dictionary before answering, so such icons paint after the rest of
+  the article and reflow it; the asset route answers immediately. The same asset is therefore
+  **shared by every dictionary** (e.g. the kaikki `gd_tag_*.svg` set lives in both
+  `scripts/assets/kaikki-tag-icons/` for the converter's preview output and
+  `app/android/assets/icons/` for the app, with `EngineController::rewriteArticleUrls` mapping the
+  four fixed names to `/icons/`). When adding an icon the engine emits into articles, add the
+  asset to `app/android/assets/icons/` and a bounded rewrite (fixed names, not a wildcard) in
+  `rewriteArticleUrls`; keep `bres://` for genuinely per-dictionary resources (images, audio).
 - **Localization:** English is the source language. If user-visible English text changes in Qt
   sources (`qsTr`/`tr` arguments) or in `app/android/res/values/strings.xml`, the other shipped
   languages (RU, JA) MUST be updated in the same change: run
