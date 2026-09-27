@@ -1159,6 +1159,15 @@ body { padding-top: 8px !important; }
    margin so the layout does not shift. Injected rather than editing the
    verbatim upstream stylesheet. */
 img.hidden_expand_opt { padding: 12px; margin: -12px !important; }
+/* Inline sense-marker icons emitted by kaikki-to-dsl dictionaries (see
+   scripts/assets/kaikki-tag-icons). Scoped to the gd_tag_ filename so no other
+   dictionary's images are affected: text-height, aligned to the text, and with
+   no background box. The transparent background must out-specify the dark-mode
+   .gdarticlebody img{background:white} rule, which ties with a bare
+   img[src*=...] and is injected later, hence the .gdarticlebody prefix plus
+   !important. */
+.gdarticlebody img[src*="gd_tag_"] { height: 1.1em; vertical-align: -0.15em;
+                                    background: transparent !important; }
 </style>
 )");
     const QString darkInit = m_darkMode ? QStringLiteral("1") : QStringLiteral("0");
