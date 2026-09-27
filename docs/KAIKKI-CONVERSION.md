@@ -131,7 +131,8 @@ the rest on demand:
 
 ```
 run
-    [com]/ɹʌn/[/com]
+    [com]/ɹʌn/  [s]En-us-run.ogg[/s][/com]
+
     [p]verb[/p]
     [i]runs (3rd sg.), running (part., pres.), ran (past), run (part., past)[/i]
     [m1]• To move swiftly on foot.[/m]
@@ -139,6 +140,7 @@ run
     [ex]I run every morning.[/ex]
     [/opt]
     [m1]• To operate or manage.[/m]
+
     [p]noun[/p]
     [m1]• A flow, or the act of running.[/m]
     [m1]• [s]gd_tag_obsolete.svg[/s] (fig.) A period of performing.[/m]
@@ -147,9 +149,10 @@ run
     [/opt]
 ```
 
-Every leaf sense begins with a **bullet**, so sibling definitions read as a list
-rather than a paragraph; a group heading (a sense with sub-senses under it) is a
-category, not a sense, and carries no bullet.
+Every leaf sense begins with a **bullet**, so sibling definitions read as a list;
+a group heading (a sense with sub-senses under it) is a category, not a sense,
+and carries no bullet. Each new part of speech is separated from the previous one
+by a blank line, so the sections read as blocks rather than one list.
 
 The engine renders every `[*]…[/opt]` as its own hidden `.dsl_opt` span and emits
 a single `[+]` expander per article, which reveals all of that entry's zones at
@@ -241,11 +244,13 @@ permissive default and warns.
 
 Pronunciation is likewise driven by the profile: each `sounds[]` field that
 carries a transcription (for English, `ipa` then `enpr`) is shown once, as a bare
-`/ɹʌn/`, with audio links alongside. The line is always a transcription, so the
+`/ɹʌn/`, with the word's audio links on the **same line** — the transcription and
+its playback controls together. The line is always a transcription, so the
 common IPA value is printed without an `IPA:` label; a second notation (`enPR`) is
 labelled, since it is not IPA. Where the whole card shares a single
 transcription it is printed once at the top; where parts of speech differ, each
-is printed under its own part of speech. Each audio file appears exactly once per
+is printed under its own part of speech. A recording whose part of speech has no
+transcription still gets its own line. Each audio file appears exactly once per
 card regardless, so a word whose parts of speech share a recording does not
 repeat it.
 

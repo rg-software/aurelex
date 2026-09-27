@@ -1627,14 +1627,34 @@ def render_card(
                 break
 
     # Each audio file is emitted once, under the first block that references it.
+    # Audio rides on the pronunciation line — the transcription and its playback
+    # controls together — so "IPA next to the audio" holds whether the
+    # transcription is hoisted or sits under a part of speech.
     shown_audio: Set[str] = set()
+
+    def audio_bits(idxs: Sequence[int]) -> List[str]:
+        bits: List[str] = []
+        for i in idxs:
+            for name in record_audio[i]:
+                if name not in shown_audio:
+                    shown_audio.add(name)
+                    bits.append(_audio_ref(name))
+        return bits
 
     lines: List[str] = []
     if hoist:
-        lines.append("\t[com]" + next(iter(distinct_tr)) + "[/com]")
+        hoisted_audio = audio_bits(range(len(records)))
+        pron = next(iter(distinct_tr))
+        if hoisted_audio:
+            pron += "  " + "  ".join(hoisted_audio)
+        lines.append("\t[com]" + pron + "[/com]")
 
     for pos, idxs in blocks:
+        # A blank line before each part of speech past the first, so the sections
+        # read as separate blocks rather than one list.
         if pos:
+            if lines:
+                lines.append("")
             lines.append(f"\t[p]{escape_dsl(pos)}[/p]")
         # forms: first record of the block that carries any
         for i in idxs:
@@ -1643,22 +1663,22 @@ def render_card(
                 break
 
         # pronunciation: the transcription of the block's records (one per
-        # distinct value) with any not-yet-shown audio, unless hoisted
+        # distinct value) with any not-yet-shown audio; hoisted when the whole
+        # card shares one transcription. Each distinct transcription takes the
+        # audio of the first record that carries it, so a multi-record block
+        # without a hoist still keeps its audio beside the pronunciation.
         if not hoist:
             seen_tr: Set[str] = set()
             for i in idxs:
                 tr = transcriptions[i]
                 if tr and tr not in seen_tr:
                     seen_tr.add(tr)
-                    lines.append("\t[com]" + tr + "[/com]")
-        audio_bits: List[str] = []
-        for i in idxs:
-            for name in record_audio[i]:
-                if name not in shown_audio:
-                    shown_audio.add(name)
-                    audio_bits.append(_audio_ref(name))
-        if audio_bits:
-            lines.append("\t[com]" + "  ".join(audio_bits) + "[/com]")
+                    bits = audio_bits([i])
+                    pron = tr + ("  " + "  ".join(bits) if bits else "")
+                    lines.append("\t[com]" + pron + "[/com]")
+            block_audio = audio_bits([i for i in idxs if not transcriptions[i]])
+            if block_audio:
+                lines.append("\t[com]" + "  ".join(block_audio) + "[/com]")
 
         # senses: merged across the block's records. Every sense sits at [m1]
         # (one indentation level under its part of speech); a grouped parent

@@ -14,6 +14,8 @@
 - [x] 2.6 Drop the "Initialism of"/"Abbreviation of"/"Acronym of" wording an iconised relation already carries, keeping the rest of the gloss (which is linked)
 - [x] 2.7 Drop the redundant `IPA:` label from the primary transcription; keep the label for a secondary notation (enPR)
 - [x] 2.8 Hoist the transcription above the first part of speech whenever the card has a single distinct transcription, including a one-record card
+- [x] 2.9 Put the audio on the transcription line (a standalone line when a part of speech has audio but no transcription)
+- [x] 2.10 Separate each part of speech with a blank line
 
 ## 3. Converter — language filter and bundling
 
@@ -39,6 +41,7 @@
 - [x] 6.5 Unit-test the form-of/alt-of link: the target is linked when it is a known headword, left plain when it is not or when it is the word itself; and an alternative-form sense renders no marker
 - [x] 6.6 Unit-test that an iconised relation's wording is dropped (and a non-iconised relation's wording is kept), and that the primary transcription is unlabelled while a secondary notation keeps its label
 - [x] 6.7 Unit-test that a sample excludes another language's record even when its raw line carries a nested source-language marker, and that a one-record card hoists its transcription above the part of speech
+- [x] 6.8 Unit-test that audio rides the transcription line (and stands alone without one), and that a new part of speech is preceded by a blank line
 
 ## 7. Docs and committed example
 

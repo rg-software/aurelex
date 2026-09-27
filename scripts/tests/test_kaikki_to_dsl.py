@@ -884,7 +884,9 @@ class CardLayoutTests(unittest.TestCase):
         ]
         text = TOOL.render_card(records, self._Audio(), self.EN, set())
         self.assertEqual(text.count("[s]En-ermine.ogg[/s]"), 1)
-        # the single shared transcription is hoisted above the first POS
+        # the single shared transcription is hoisted above the first POS, with
+        # the audio on the same line as the transcription
+        self.assertIn("[com]/e/  [s]En-ermine.ogg[/s][/com]", text)
         self.assertLess(text.index("/e/"), text.index("[p]noun[/p]"))
 
     def test_differing_pronunciations_stay_under_their_pos(self):
@@ -900,8 +902,29 @@ class CardLayoutTests(unittest.TestCase):
         self.assertLess(noun, text.index("/a/"))
         self.assertLess(text.index("/a/"), verb)
         self.assertLess(verb, text.index("/b/"))
-        # the one audio file is still shown only once
+        # the one audio file is still shown only once, on the first pronunciation
+        # line that references it, beside that transcription
         self.assertEqual(text.count("[s]En-x.ogg[/s]"), 1)
+        self.assertIn("[com]/a/  [s]En-x.ogg[/s][/com]", text)
+
+    def test_a_new_pos_is_separated_by_a_blank_line(self):
+        records = [
+            {"word": "w", "pos": "noun", "senses": [{"glosses": ["n."]}]},
+            {"word": "w", "pos": "verb", "senses": [{"glosses": ["v."]}]},
+        ]
+        text = TOOL.render_card(records, self._Audio(), self.EN, set())
+        self.assertIn("\n\n\t[p]verb[/p]", text)
+        # the first section is not preceded by a blank line
+        self.assertFalse(text.startswith("\n"))
+        self.assertTrue(text.startswith("\t[p]noun[/p]"))
+
+    def test_audio_without_a_transcription_still_gets_a_line(self):
+        record = {
+            "word": "w", "pos": "noun", "senses": [{"glosses": ["A thing."]}],
+            "sounds": [{"audio": "En-w.ogg"}],
+        }
+        text = TOOL.render_card([record], self._Audio(), self.EN, set())
+        self.assertIn("\t[com][s]En-w.ogg[/s][/com]", text)
 
     def test_long_example_is_truncated_at_a_word_boundary(self):
         shortened = TOOL._truncate_example("word " * 80, limit=50)

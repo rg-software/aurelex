@@ -224,7 +224,7 @@ the gloss already says and adds a second marker where a link is the useful thing
 
 Transcription hoisting keyed on `len(records) > 1`, so a one-record card placed
 its transcription *under* the part of speech while a multi-record card with one
-shared transcription placed it *above* — the same word rendered inconsistently by
+shared transcription placed it *above* - the same word rendered inconsistently by
 an implementation detail. Hoisting now keys only on "the card has exactly one
 distinct transcription" (`len(distinct_tr) == 1`), which is already what the spec
 asks for; a card with differing transcriptions still keeps one per part of speech.
@@ -241,6 +241,22 @@ spacing (so it never rejects a real record), and the parsed `record["lang_code"]
 is checked before yielding, so the prefilter can only ever be too loose, not too
 strict. The full-build path already re-checked and was correct; only the sample
 path was affected.
+
+### D14. Audio rides on the transcription line
+
+The transcription line and the audio line were adjacent but separate, so "IPA next
+to the audio" did not read as one group. They are now merged: each distinct
+transcription takes the audio of the first record that carries it
+(`/ɹʌn/  [s]...[/s]  [s]...[/s]`), and a part of speech with audio but no
+transcription keeps a standalone audio line. Card-wide de-duplication is
+unchanged, so each file still prints once. This holds for the hoisted and
+per-POS cases alike, so they read the same.
+
+### D15. A blank line separates each part of speech
+
+Sections ran together (`[p]verb[/p]` ... `[p]noun[/p]` with no gap), which read as
+one list. A blank line is now emitted before every part of speech except the
+first. The preview renderer already tolerates the empty line.
 
 ## Risks / Trade-offs
 
