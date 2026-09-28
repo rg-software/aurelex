@@ -53,3 +53,14 @@ target_include_directories(index_cleanup_test PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/../../carve"
 )
 target_link_libraries(index_cleanup_test PRIVATE Qt6::Core)
+
+# Display-order -> engine-index mapping tests
+# (fix-dictionary-removal-index-mismatch). Links only Qt Core;
+# DictionaryIndex.hpp is header-only.
+add_executable(dictionary_index_test DictionaryIndexTest.cpp)
+target_include_directories(dictionary_index_test PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/.."
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../carve"
+)
+target_link_libraries(dictionary_index_test PRIVATE Qt6::Core)
+

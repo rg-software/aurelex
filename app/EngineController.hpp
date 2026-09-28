@@ -142,10 +142,16 @@ public:
     // dictionariesChanged signal). No-op if the engine isn't ready.
     Q_INVOKABLE void refreshDictionaries();
 
-    // Remove / reorder. Indices match dictionaries()'s list. Both are
-    // synchronous wrappers around the engine C API (fast in practice); we
-    // route them through QtConcurrent anyway so they never block the UI thread.
+    // Remove / reorder. `removeDictionary`/`removeDictionaries` take DISPLAY
+    // positions into dictionaries() (which is sorted by name); the controller
+    // translates them to the engine's indices internally, so callers never need
+    // the engine numbering. Removal is permanent (staged file + index deleted)
+    // and refuses while processing. Both are wrappers around the engine C API,
+    // routed through QtConcurrent so they never block the UI thread.
     Q_INVOKABLE void removeDictionary(int index);
+    Q_INVOKABLE void removeDictionaries(const QVariantList &indices);
+    // `moveDictionary` uses ENGINE indices (it predates the display/engine split
+    // and is currently unused from QML; groups own reordering).
     Q_INVOKABLE void moveDictionary(int from, int to);
 
     // Refresh the groups list + the active group id.

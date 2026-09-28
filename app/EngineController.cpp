@@ -1,5 +1,6 @@
 #include "EngineController.hpp"
 #include "ArticleServer.hpp"
+#include "DictionaryIndex.hpp"
 #include "IndexCleanup.hpp"
 #include "IndexMigration.hpp"
 
@@ -646,6 +647,12 @@ void EngineController::refreshDictionaries() {
                                         file.data(), static_cast<int>(file.size()));
             if (rn != 0) continue;
             QVariantMap m;
+            // The list is sorted by name below, so the displayed position is NOT
+            // the engine's index. Carry the engine index (the coordinate every
+            // gd_* call that takes an index expects) alongside each entry, and
+            // translate display positions back to it before crossing the
+            // boundary (fix-dictionary-removal-index-mismatch).
+            m.insert("engineIndex", i);
             m.insert("name", QString::fromLocal8Bit(name.data()));
             m.insert("source", QString::fromLocal8Bit(file.data()));
             // Language pair + approx size (design D1): human names, empty when
@@ -694,63 +701,98 @@ void EngineController::refreshDictionaries() {
 }
 
 void EngineController::removeDictionary(int index) {
-    if (!m_ready || index < 0 || index >= m_dictionaries.size()) return;
+    removeDictionaries(QVariantList{index});
+}
+
+void EngineController::removeDictionaries(const QVariantList &indices) {
+    if (!m_ready || indices.isEmpty()) return;
     // Refuse removals while the app is processing (staging / scanning / FTS
     // build). Every gd_* call serializes on g_engineMutex, which the scan and
     // the build hold for their whole duration, so a removal issued now would
-    // queue for minutes; and because gd_remove_dict takes an ENGINE INDEX that
-    // shifts after each erase, several queued removals would run against stale
-    // indices and delete the wrong dictionaries. The QML Remove button is
+    // queue for minutes and race a mutating list. The QML Remove button is
     // disabled on the same flag; this guards any other/future caller and an
     // in-flight tap whose flag flipped after the click.
     if (m_processingActive) {
-        qInfo() << "[aurelex] removeDictionary ignored: processing in progress";
+        qInfo() << "[aurelex] removeDictionaries ignored: processing in progress";
         return;
     }
-    // Capture the dictionary id (engine mutex) + its primary source file path
-    // BEFORE gd_remove_dict shifts indices. The id capture runs off-thread so
-    // the UI never blocks behind a long FTS build holding the engine mutex.
-    const QVariantMap removed = m_dictionaries.at(index).toMap();
-    const QString sourceFile = removed.value("source").toString();
-    const QString removedName = removed.value("name").toString();
-    qInfo().noquote() << "[aurelex] removeDictionary requested:"
-                      << removedName << "src=" << sourceFile << "idx=" << index;
+    // The QML side passes DISPLAY positions (indices into dictionaries(), which
+    // is sorted by name). Resolve them to engine indices and capture each
+    // source path on the UI thread BEFORE any gd_remove_dict shifts the engine
+    // list. removalTargets orders the result highest-engine-index-first, so a
+    // SEQUENTIAL removal never shifts a later target (independent
+    // gd_remove_dict tasks could acquire g_engineMutex out of order and delete
+    // the wrong dictionaries).
+    struct Target {
+        int engineIndex;
+        QString source;
+        QString name;
+    };
+    const QVector<DictionaryIndex::RemovalTarget> resolved =
+        DictionaryIndex::removalTargets(m_dictionaries, indices);
+    if (resolved.isEmpty()) return;
+    std::vector<Target> targets;
+    targets.reserve(static_cast<size_t>(resolved.size()));
+    for (const DictionaryIndex::RemovalTarget &t : resolved) {
+        const QVariantMap d = m_dictionaries.at(t.displayIndex).toMap();
+        targets.push_back({t.engineIndex, d.value("source").toString(),
+                           d.value("name").toString()});
+    }
+
+    qInfo().noquote() << "[aurelex] removeDictionaries requested:" << targets.size();
+    for (const Target &t : targets)
+        qInfo().noquote() << "  -" << t.name << "engIdx=" << t.engineIndex
+                          << "src=" << t.source;
+
     const QString stagedRoot = m_stagedDir;
     const QString appDir = m_appDir;
 
-    QFuture<QPair<QString, QPair<int, int>>> f = QtConcurrent::run([index]{
-        char idbuf[128] = {0};
-        QString id;
-        if (gd_dict_id(index, idbuf, static_cast<int>(sizeof(idbuf))) == 0)
-            id = QString::fromLocal8Bit(idbuf);
-        const int rc = gd_remove_dict(index);
-        return QPair<QString, QPair<int, int>>(id, QPair<int, int>(rc, gd_dict_count()));
+    QFuture<QPair<QVariantList, int>> f = QtConcurrent::run([targets]{
+        QVariantList removed;
+        removed.reserve(static_cast<int>(targets.size()));
+        for (const Target &t : targets) {
+            char idbuf[128] = {0};
+            QString id;
+            if (gd_dict_id(t.engineIndex, idbuf, static_cast<int>(sizeof(idbuf))) == 0)
+                id = QString::fromLocal8Bit(idbuf);
+            const int rc = gd_remove_dict(t.engineIndex);
+            QVariantMap m;
+            m.insert("source", t.source);
+            m.insert("name", t.name);
+            m.insert("id", id);
+            m.insert("rc", rc);
+            removed.append(m);
+        }
+        return QPair<QVariantList, int>(removed, gd_dict_count());
     });
-    auto *w = new QFutureWatcher<QPair<QString, QPair<int, int>>>(this);
-    connect(w, &QFutureWatcher<QPair<QString, QPair<int, int>>>::finished, this,
-            [this, w, sourceFile, removedName, stagedRoot, appDir]{
-        const QPair<QString, QPair<int, int>> result = w->result();
-        const QString dictId = result.first;
-        const int rc = result.second.first;
-        const int count = result.second.second;
-        qInfo().noquote() << "[aurelex] removeDictionary result: rc=" << rc
-                          << "name=" << removedName << "id=" << dictId
-                          << "remaining=" << count;
-        if (rc == 0) {
+    auto *w = new QFutureWatcher<QPair<QVariantList, int>>(this);
+    connect(w, &QFutureWatcher<QPair<QVariantList, int>>::finished, this,
+            [this, w, stagedRoot, appDir]{
+        const QPair<QVariantList, int> result = w->result();
+        const int remaining = result.second;
+        for (const QVariant &v : result.first) {
+            const QVariantMap m = v.toMap();
+            const QString dictId = m.value("id").toString();
+            const int rc = m.value("rc").toInt();
+            qInfo().noquote() << "[aurelex] removeDictionary result: rc=" << rc
+                              << "name=" << m.value("name").toString()
+                              << "id=" << dictId << "remaining=" << remaining;
+            if (rc != 0) {
+                setLastError(QStringLiteral("remove_dict failed (rc=%1)").arg(rc));
+                continue;
+            }
             // Permanent delete: remove the app's copy + its index cache.
-            deleteDictionaryFiles(sourceFile, dictId, stagedRoot, appDir);
+            deleteDictionaryFiles(m.value("source").toString(), dictId, stagedRoot, appDir);
             // Also drop the id from the still-running FTS queue so a removed
             // dictionary is never indexed by a worker that already popped it.
             if (!dictId.isEmpty()) {
                 QMutexLocker lock(&m_ftsQueueMutex);
                 m_ftsQueue.removeAll(dictId);
             }
-            refreshDictionaries();
-            refreshGroups();
-            setDictCount(count);
-        } else {
-            setLastError(QStringLiteral("remove_dict failed (rc=%1)").arg(rc));
         }
+        refreshDictionaries();
+        refreshGroups();
+        setDictCount(remaining);
         w->deleteLater();
     });
     w->setFuture(f);

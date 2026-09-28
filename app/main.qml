@@ -1200,11 +1200,13 @@ ColumnLayout {
             }
         }
         function _removeSelected() {
-            // Copy indices high-to-low so removal doesn't shift later ones; then
-            // clear the selection and refresh.
-            const sel = dictsPane.selectedDicts.slice().sort((a,b)=>b-a)
-            for (const idx of sel) engine.removeDictionary(idx)
+            // Hand the whole selection to the controller in one call: it maps
+            // the display positions to engine indices and removes them in one
+            // ordered batch, so multi-selection cannot desync. Clear the
+            // selection now; the list refreshes when the batch completes.
+            const sel = dictsPane.selectedDicts.slice()
             dictsPane.selectedDicts = []
+            engine.removeDictionaries(sel)
         }
         Connections {
             target: engine
