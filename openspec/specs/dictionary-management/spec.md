@@ -267,6 +267,12 @@ app, deleting its staged copy and its built indexes, and SHALL remove it
 consistently from lookups, groups, and full-text search so no stale results
 reference it.
 
+Removal SHALL act on exactly the dictionary or dictionaries the user selected.
+The identity of a removed dictionary MUST NOT depend on its position in the
+displayed list: the list is sorted for presentation, and that order may differ
+from the order the engine loaded the dictionaries in. Removing a multi-selection
+SHALL remove each selected dictionary once, and only those dictionaries.
+
 The dictionary's indexes SHALL be deleted from the app's index directory - the
 directory the engine writes them into, as the dictionary's identifier and its
 `_FTS_*` companions - and no pre-fix index left beside that directory for the
@@ -279,6 +285,17 @@ durable immediately, not only after the next scan.
 - **THEN** that dictionary's entry disappears from the dictionary list, its
   staged files and index are deleted from app storage, and future lookups no
   longer include it
+
+#### Scenario: Removal targets the selected dictionary regardless of list order
+- **WHEN** the user removes a dictionary whose position in the displayed
+  (alphabetically sorted) list does not match the order it was loaded in
+- **THEN** the dictionary the user selected is the one removed, and no other
+  loaded dictionary is unloaded or deleted
+
+#### Scenario: Multi-select removal removes exactly the selection
+- **WHEN** the user removes several selected dictionaries at once
+- **THEN** every selected dictionary is removed and no unselected dictionary is
+  removed, regardless of the order the removals are applied in
 
 #### Scenario: The index inside the index directory is deleted
 - **WHEN** a dictionary with a built index is removed
