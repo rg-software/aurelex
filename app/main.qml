@@ -1141,6 +1141,98 @@ ColumnLayout {
         property bool byPair: false
         // Indices of selected dictionary rows (for Delete selection).
         property var selectedDicts: []
+        // ---------- remote catalog sheet ----------
+        property bool catalogOpen: false
+        // Entry ids the user has ticked for this batch. Reset on open so a
+        // previous selection never silently re-appears in a new batch.
+        property var catalogPicked: []
+        function _openCatalog() {
+            dictsPane.catalogPicked = []
+            dictsPane.catalogOpen = true
+            // Never fetched on startup: only here, when the user asked for it.
+            engine.fetchCatalog()
+        }
+        function _togglePick(id) {
+            const sel = dictsPane.catalogPicked
+            const i = sel.indexOf(id)
+            if (i >= 0) sel.splice(i, 1)
+            else sel.push(id)
+            dictsPane.catalogPicked = sel
+        }
+        function _catalogEntry(id) {
+            const all = engine.catalogEntries
+            for (let i = 0; i < all.length; i++)
+                if (all[i].id === id) return all[i]
+            return null
+        }
+        // Requests for the ticked entries. An installed entry is dropped: the
+        // list shows it as installed, and re-downloading it would only churn.
+        // `files` is deliberately empty -> the whole required set.
+        function _pickedRequests() {
+            const reqs = []
+            for (let i = 0; i < dictsPane.catalogPicked.length; i++) {
+                const e = dictsPane._catalogEntry(dictsPane.catalogPicked[i])
+                // installed -> nothing to do; not installable -> this build
+                // cannot load its required files, so it must never be sent.
+                if (e && !e.installed && e.installable) reqs.push({ id: e.id, files: [] })
+            }
+            return reqs
+        }
+        // Runs the free-space gate, then either starts the batch or asks.
+        // `ok` is "above the hard minimum", `warn` is "below the 2 GiB comfort
+        // tier"; so refuse is checked FIRST, then the warning, and only a batch
+        // with comfortable headroom starts silently.
+        function _startPicked() {
+            const reqs = dictsPane._pickedRequests()
+            if (reqs.length === 0) return
+            const pf = engine.downloadPreflight(reqs)
+            if (!pf.ok) {
+                dictsPane._confirmFree(qsTr("Not enough free space"),
+                    qsTr("%1 is needed but only %2 is free. Free up space and try again.")
+                        .arg(root.fmtSize(pf.needBytes)).arg(root.fmtSize(pf.freeBytes)),
+                    reqs, false)
+            } else if (pf.warn) {
+                // Enough to proceed, but tight: the service re-checks
+                // authoritatively, so a batch that turns out short fails there
+                // with a real reason rather than silently truncating.
+                dictsPane._confirmFree(qsTr("Not much free space"),
+                    qsTr("About %1 is needed but only %2 is free. Downloading may fail if the app also needs room for the index.")
+                        .arg(root.fmtSize(pf.needBytes)).arg(root.fmtSize(pf.freeBytes)),
+                    reqs, true)
+            } else {
+                engine.startCatalogDownload(reqs)
+            }
+        }
+        function _confirmFree(title, body, reqs, proceedAnyway) {
+            freeSpaceDialog.titleText = title
+            freeSpaceDialog.bodyText = body
+            freeSpaceDialog.proceedAnyway = proceedAnyway
+            freeSpaceDialog.requests = reqs
+            freeSpaceDialog.open()
+        }
+        // Optional bundle (usually audio) for an already-installed entry. It
+        // goes through the SAME free-space gate as a new install: the bundle is
+        // often the largest single download in the catalog, so a warning-tier
+        // ask here is just as necessary. `files` names only the optional files,
+        // which is what tells the service to add them to the installed entry
+        // instead of re-creating it.
+        function _startAudio(entry) {
+            const reqs = [{ id: entry.id, files: entry.optionalFileNames }]
+            const pf = engine.downloadPreflight(reqs)
+            if (!pf.ok) {
+                dictsPane._confirmFree(qsTr("Not enough free space"),
+                    qsTr("%1 is needed but only %2 is free. Free up space and try again.")
+                        .arg(root.fmtSize(pf.needBytes)).arg(root.fmtSize(pf.freeBytes)),
+                    reqs, false)
+            } else if (pf.warn) {
+                dictsPane._confirmFree(qsTr("Not much free space"),
+                    qsTr("About %1 is needed but only %2 is free. Downloading may fail if the app also needs room for the index.")
+                        .arg(root.fmtSize(pf.needBytes)).arg(root.fmtSize(pf.freeBytes)),
+                    reqs, true)
+            } else {
+                engine.startCatalogDownload(reqs)
+            }
+        }
         // Flattened model for By-Pair view: entries are either
         // {type:"header", pair:...} or {type:"dict", ...dict}. Rebuilt whenever
         // dictionaries or the toggle change.
@@ -1364,6 +1456,25 @@ text: root._stagingActive
                     Accessible.role: Accessible.Button
                     onClicked: dictsPane.byPair = !dictsPane.byPair
                 }
+                // Remote catalog: the curated download list. Sits next to Add
+                // because it is the other way a dictionary gets here, and is
+                // disabled while the app is processing so a batch cannot be
+                // queued behind an in-flight scan/index.
+                Button {
+                    text: root.icon("cloud_download")
+                    font.family: root.iconFontFamily
+                    font.pixelSize: 18
+                    highlighted: dictsPane.catalogOpen
+                    // Disabled while the app is processing so a batch cannot be
+                    // queued behind an in-flight scan/index. NOT disabled when
+                    // the catalog is unreachable: opening the sheet is how the
+                    // user sees the reason and retries, and a previously-read
+                    // catalog still renders read-only there.
+                    enabled: !engine.processingActive
+                    Accessible.name: "Add from remote"
+                    Accessible.role: Accessible.Button
+                    onClicked: dictsPane._openCatalog()
+                }
             }
 
             Label {
@@ -1371,7 +1482,7 @@ text: root._stagingActive
                 color: root.uiSubFg
                 font.pixelSize: 12
                 wrapMode: Text.Wrap
-                text: qsTr("Tap Add dictionaries to import a folder containing dictionary files (.mdx, .dsl, .dsl.dz, .ifo). The folder is copied into the app once; no system-wide storage access is needed.")
+                text: qsTr("Tap Add to import a folder containing dictionary files (.mdx, .dsl, .dsl.dz, .ifo), or the cloud button to pick from the remote catalog. Either way the files are copied into the app once; no system-wide storage access is needed.")
             }
 
             // Dictionaries that failed to load in the last scan (corrupt or
@@ -1570,6 +1681,426 @@ text: root._stagingActive
                             }
                         }
                     }
+                }
+            }
+        }
+
+        // --- remote catalog sheet ---
+        // Same full-pane Rectangle shape as the onboarding overlay below, for
+        // the same reason: on Android, popup-type overlays can miss taps while
+        // normal scene items receive them reliably. It covers the Dicts pane,
+        // which has no inline WebView, so nothing can puncture the dim.
+        Rectangle {
+            id: catalogOverlay
+            anchors.fill: parent
+            visible: dictsPane.catalogOpen
+            color: Qt.rgba(0, 0, 0, 0.5)
+
+            // A tap outside the card closes the sheet.
+            MouseArea {
+                anchors.fill: parent
+                onClicked: dictsPane.catalogOpen = false
+            }
+
+            Rectangle {
+                anchors { top: parent.top; left: parent.left; right: parent.right; bottom: parent.bottom }
+                anchors.margins: 16
+                color: root.uiCard
+                radius: 12
+                border.color: root.uiBorder
+
+                ColumnLayout {
+                    anchors.fill: parent
+                    anchors.margins: 16
+                    spacing: 10
+
+                    // Header: title, last-updated line, close, refresh.
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 8
+
+                        ColumnLayout {
+                            Layout.fillWidth: true
+                            spacing: 2
+                            Label {
+                                text: qsTr("Dictionary catalog")
+                                font.pixelSize: 18
+                                font.bold: true
+                            }
+                            Label {
+                                Layout.fillWidth: true
+                                text: engine.catalogLoading
+                                    ? qsTr("Checking for updates…")
+                                    : engine.catalogError.length > 0
+                                        ? qsTr("Using the saved catalog — the update check failed.")
+                                        : engine.catalogLastFetched.length > 0
+                                            ? qsTr("Updated %1").arg(engine.catalogLastFetched)
+                                            : qsTr("Not checked yet")
+                                font.pixelSize: 11
+                                color: root.uiSubFg
+                                wrapMode: Text.Wrap
+                                elide: Text.ElideRight
+                            }
+                        }
+
+                        RoundButton {
+                            highlighted: false
+                            enabled: !engine.catalogLoading
+                            Accessible.name: "Refresh catalog"
+                            Accessible.role: Accessible.Button
+                            onClicked: engine.refreshCatalog()
+                            contentItem: Label {
+                                text: root.icon("refresh")
+                                font.family: root.iconFontFamily
+                                font.pixelSize: 18
+                                color: root.uiFg
+                            }
+                        }
+                        RoundButton {
+                            highlighted: false
+                            Accessible.name: "Close catalog"
+                            Accessible.role: Accessible.Button
+                            onClicked: dictsPane.catalogOpen = false
+                            contentItem: Label {
+                                text: root.icon("close")
+                                font.family: root.iconFontFamily
+                                font.pixelSize: 18
+                                color: root.uiFg
+                            }
+                        }
+                    }
+
+                    // Unreachable with no cache at all: the only honest thing to
+                    // show is the reason, since there is no list to show.
+                Label {
+                    Layout.fillWidth: true
+                    visible: !engine.catalogLoading && engine.catalogEntries.length === 0
+                    text: engine.catalogError.length > 0
+                        ? qsTr("The catalog could not be loaded.\n%1").arg(engine.catalogError)
+                        : qsTr("The catalog has no dictionaries yet.")
+                    font.pixelSize: 12
+                    color: Material.color(Material.Red)
+                    wrapMode: Text.Wrap
+                }
+
+                // Offline with a cached copy: the list below still renders, but
+                // per-entry download attempts would have to trust a manifest we
+                // could not re-validate, so say so rather than let a tap fail
+                // with no explanation.
+                Label {
+                    Layout.fillWidth: true
+                    visible: !engine.catalogLoading
+                        && engine.catalogEntries.length > 0
+                        && !engine.catalogReachable
+                    text: qsTr("Showing the last saved catalog. Downloads need a connection to the catalog host.")
+                    font.pixelSize: 11
+                    color: Material.color(Material.Orange, Material.Shade800)
+                    wrapMode: Text.Wrap
+                }
+
+                    // Live download progress + cancel. Deliberately NOT the
+                    // processingActive banner: a download is its own queue, and
+                    // its progress must not borrow the scanning/indexing state.
+                    Rectangle {
+                        Layout.fillWidth: true
+                        visible: engine.downloadActive
+                        color: Material.color(Material.Purple, Material.Shade50)
+                        radius: 4
+                        implicitHeight: catDlCol.implicitHeight + 16
+
+                        ColumnLayout {
+                            id: catDlCol
+                            anchors { left: parent.left; right: parent.right; top: parent.top }
+                            anchors.leftMargin: 10; anchors.rightMargin: 10; anchors.topMargin: 8
+                            spacing: 6
+
+                            RowLayout {
+                                Layout.fillWidth: true
+                                Label {
+                                    Layout.fillWidth: true
+                                    text: engine.downloadFilesTotal > 0
+                                        ? qsTr("Downloading %1 (%2 of %3 files)").arg(
+                                            engine.downloadEntryName)
+                                          .arg(engine.downloadFilesDone)
+                                          .arg(engine.downloadFilesTotal)
+                                        : qsTr("Downloading %1").arg(engine.downloadEntryName)
+                                    font.pixelSize: 13
+                                    font.bold: true
+                                    color: Material.color(Material.Purple)
+                                    elide: Text.ElideMiddle
+                                }
+                                Label {
+                                    visible: engine.downloadSpeed.length > 0
+                                    text: engine.downloadSpeed
+                                    font.pixelSize: 11
+                                    color: root.uiSubFg
+                                }
+                            }
+                            ProgressBar {
+                                Layout.fillWidth: true
+                                from: 0
+                                to: 1
+                                value: engine.downloadFraction
+                                Accessible.role: Accessible.ProgressBar
+                            }
+                            Label {
+                                Layout.fillWidth: true
+                                text: {
+                                    const done = root.fmtSize(engine.downloadBytesDone)
+                                    const total = root.fmtSize(engine.downloadBytesTotal)
+                                    return total.length > 0 ? done + " / " + total : done
+                                }
+                                font.pixelSize: 11
+                                color: root.uiSubFg
+                            }
+                            Button {
+                                Layout.alignment: Qt.AlignRight
+                                text: qsTr("Cancel download")
+                                Accessible.name: "Cancel download"
+                                Accessible.role: Accessible.Button
+                                // Cancellation is a request only: the service
+                                // decides, and reports the real outcome.
+                                onClicked: engine.cancelCatalogDownload()
+                            }
+                        }
+                    }
+
+                    // Terminal outcome of the last batch. Self-clearing on OK so
+                    // it cannot linger over the list on the next visit.
+                    Rectangle {
+                        Layout.fillWidth: true
+                        visible: engine.downloadOutcome.length > 0
+                        color: engine.downloadOutcome === "succeeded"
+                            ? Material.color(Material.Green, Material.Shade50)
+                            : engine.downloadOutcome === "cancelled"
+                                ? Material.color(Material.Grey, Material.Shade100)
+                                : Material.color(Material.Red, Material.Shade50)
+                        radius: 4
+                        implicitHeight: catResCol.implicitHeight + 16
+
+                        ColumnLayout {
+                            id: catResCol
+                            anchors { left: parent.left; right: parent.right; top: parent.top }
+                            anchors.leftMargin: 10; anchors.rightMargin: 10; anchors.topMargin: 8
+                            spacing: 4
+
+                            Label {
+                                Layout.fillWidth: true
+                                text: engine.downloadOutcome === "succeeded"
+                                    ? qsTr("Downloaded. Adding to your dictionaries…")
+                                    : engine.downloadOutcome === "cancelled"
+                                        ? qsTr("Download cancelled.")
+                                        : qsTr("Some downloads failed.")
+                                font.pixelSize: 13
+                                font.bold: true
+                                wrapMode: Text.Wrap
+                            }
+                            // Both lists are shown: a batch that partly worked
+                            // must name what failed AND what landed, so the user
+                            // does not re-download the entries that succeeded.
+                            Repeater {
+                                model: engine.downloadSucceeded
+                                delegate: Label {
+                                    required property string modelData
+                                    Layout.fillWidth: true
+                                    text: qsTr("%1 downloaded").arg(modelData)
+                                    font.pixelSize: 11
+                                    color: Material.color(Material.Green)
+                                    wrapMode: Text.Wrap
+                                }
+                            }
+                            Repeater {
+                                model: engine.downloadFailed
+                                delegate: Label {
+                                    required property string modelData
+                                    Layout.fillWidth: true
+                                    text: qsTr("%1 could not be downloaded").arg(modelData)
+                                    font.pixelSize: 11
+                                    color: Material.color(Material.Red)
+                                    wrapMode: Text.Wrap
+                                }
+                            }
+                            Label {
+                                Layout.fillWidth: true
+                                visible: engine.downloadMessage.length > 0
+                                text: engine.downloadMessage
+                                font.pixelSize: 11
+                                color: root.uiSubFg
+                                wrapMode: Text.Wrap
+                            }
+                            Button {
+                                Layout.alignment: Qt.AlignRight
+                                text: qsTr("OK")
+                                Accessible.name: "Dismiss download result"
+                                Accessible.role: Accessible.Button
+                                onClicked: engine.clearDownloadOutcome()
+                            }
+                        }
+                    }
+
+                    ListView {
+                        id: catalogList
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        clip: true
+                        spacing: 6
+                        model: engine.catalogEntries
+                        Accessible.name: "Remote catalog list"
+                        Accessible.role: Accessible.List
+                        // An entry whose required files are in a format the
+                        // engine cannot load stays listed but cannot be picked.
+                        delegate: ItemDelegate {
+                            id: catRow
+                            required property var modelData
+                            required property int index
+                            width: ListView.view.width
+                            height: catCol.implicitHeight + 16
+                            padding: 8
+                            // Pickable = not installed, supported, and no batch
+                            // running. This is NOT wired to `enabled`: an
+                            // installed entry still hosts the "Add audio" button,
+                            // and disabling the delegate disables its children, so
+                            // the button would be untappable. Dim instead, and
+                            // guard the tap.
+                            readonly property bool selectable: !catRow.modelData.installed
+                                && catRow.modelData.installable && !engine.downloadActive
+                            highlighted: dictsPane.catalogPicked.indexOf(catRow.modelData.id) >= 0
+                            Accessible.name: catRow.modelData.name
+                                + (catRow.modelData.installed ? ", installed" : "")
+                            Accessible.role: Accessible.ListItem
+                            onClicked: if (catRow.selectable) dictsPane._togglePick(catRow.modelData.id)
+
+                            ColumnLayout {
+                                id: catCol
+                                anchors { left: parent.left; right: parent.right; top: parent.top }
+                                anchors.leftMargin: 8; anchors.rightMargin: 8; anchors.topMargin: 8
+                                spacing: 2
+
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    spacing: 8
+                                    Label {
+                                        Layout.fillWidth: true
+                                        text: catRow.modelData.name
+                                        font.pixelSize: 15
+                                        font.bold: true
+                                        elide: Text.ElideMiddle
+                                        opacity: catRow.selectable ? 1.0 : 0.6
+                                    }
+                                    Label {
+                                        text: catRow.modelData.pair
+                                        font.pixelSize: 12
+                                        color: root.uiSubFg
+                                        opacity: catRow.selectable ? 1.0 : 0.6
+                                    }
+                                }
+
+                                Label {
+                                    Layout.fillWidth: true
+                                    text: catRow.modelData.installed
+                                        ? qsTr("Installed")
+                                        : qsTr("%1 to download").arg(root.fmtSize(catRow.modelData.requiredBytes))
+                                    font.pixelSize: 11
+                                    color: catRow.modelData.installed
+                                        ? Material.color(Material.Green)
+                                        : root.uiSubFg
+                                    wrapMode: Text.Wrap
+                                }
+
+                                Label {
+                                    Layout.fillWidth: true
+                                    visible: !catRow.modelData.installable
+                                    text: qsTr("This dictionary's format is not supported by this app version.")
+                                    font.pixelSize: 11
+                                    color: Material.color(Material.Red)
+                                    wrapMode: Text.Wrap
+                                }
+
+                                // Optional bundle (usually audio) for an
+                                // already-installed entry. Downloads into the
+                                // same directory, so the existing copy stays
+                                // put and the rescan picks the audio up.
+                                Button {
+                                    visible: catRow.modelData.installed
+                                        && catRow.modelData.hasOptional
+                                        && !engine.downloadActive
+                                    text: qsTr("Add audio (%1)").arg(root.fmtSize(catRow.modelData.optionalBytes))
+                                    Accessible.name: "Add audio to " + catRow.modelData.name
+                                    Accessible.role: Accessible.Button
+                                    onClicked: dictsPane._startAudio(catRow.modelData)
+                                }
+                            }
+                        }
+                    }
+
+                    // Batch action bar.
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 8
+                        Button {
+                            text: qsTr("Refresh")
+                            enabled: !engine.catalogLoading && !engine.downloadActive
+                            Accessible.name: "Refresh catalog"
+                            Accessible.role: Accessible.Button
+                            onClicked: engine.refreshCatalog()
+                        }
+                        Button {
+                            Layout.fillWidth: true
+                            text: engine.downloadActive
+                                ? qsTr("Downloading…")
+                                : qsTr("Download selected (%1)").arg(dictsPane._pickedRequests().length)
+                            highlighted: true
+                            enabled: !engine.downloadActive
+                                && !engine.processingActive
+                                && dictsPane._pickedRequests().length > 0
+                            Accessible.name: "Download selected"
+                            Accessible.role: Accessible.Button
+                            onClicked: dictsPane._startPicked()
+                        }
+                        Button {
+                            text: qsTr("Close")
+                            Accessible.name: "Close catalog"
+                            Accessible.role: Accessible.Button
+                            onClicked: dictsPane.catalogOpen = false
+                        }
+                    }
+                }
+            }
+        }
+
+        // Free-space gate for a download batch. A Dialog (not an inline
+        // Rectangle) because it is modal over the catalog sheet's own card, and
+        // unlike the Dicts overlays it does not need to dodge a native surface.
+        Dialog {
+            id: freeSpaceDialog
+            anchors.centerIn: Overlay.overlay
+            modal: true
+            property string titleText: ""
+            property string bodyText: ""
+            property bool proceedAnyway: false
+            property var requests: []
+            standardButtons: proceedAnyway ? Dialog.Ok | Dialog.Cancel : Dialog.Cancel
+            onAccepted: {
+                // The warning tier lets the user proceed; the refuse tier has no
+                // OK, so a batch can never start against a known-short volume.
+                if (freeSpaceDialog.proceedAnyway)
+                    engine.startCatalogDownload(freeSpaceDialog.requests)
+                freeSpaceDialog.requests = []
+            }
+            onRejected: freeSpaceDialog.requests = []
+            contentItem: ColumnLayout {
+                spacing: 12
+                Label {
+                    text: freeSpaceDialog.titleText
+                    font.pixelSize: 18
+                    font.bold: true
+                    wrapMode: Text.Wrap
+                }
+                Label {
+                    text: freeSpaceDialog.bodyText
+                    font.pixelSize: 14
+                    color: root.uiFg
+                    wrapMode: Text.Wrap
                 }
             }
         }

@@ -62,6 +62,7 @@ set(ENGINE_SRC "${CMAKE_CURRENT_SOURCE_DIR}/../engine")
 qt_add_executable(aurelex
     main.cpp
     EngineController.cpp
+    RemoteCatalog.cpp
     ArticleServer.cpp
     fonts.qrc
     i18n.qrc
@@ -107,6 +108,26 @@ endif()
 set_target_properties(aurelex PROPERTIES
     QT_ANDROID_PACKAGE_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/android"
 )
+
+# Android OpenSSL. Qt's TLS on Android is the OpenSSL backend, which dlopen()s
+# libcrypto_3.so / libssl_3.so at run time -- and the Qt android kit does NOT
+# ship them. Without these the app has NO working TLS: every
+# QNetworkAccessManager HTTPS request fails with "TLS initialization failed".
+# The WebView is unaffected (Chromium bundles its own TLS), which is why this
+# only surfaced when the remote catalog introduced the first Qt-network HTTPS
+# call. The prebuilt OpenSSL 3 libs are vendored in app/openssl/<abi> (see
+# app/openssl/README.md for provenance and licence); QT_ANDROID_EXTRA_LIBS makes
+# androiddeployqt copy them into the APK's lib/<abi>/.
+set(_aurelex_openssl_dir "${CMAKE_CURRENT_SOURCE_DIR}/openssl/${ANDROID_ABI}")
+if(EXISTS "${_aurelex_openssl_dir}/libcrypto_3.so")
+    set_property(TARGET aurelex APPEND PROPERTY QT_ANDROID_EXTRA_LIBS
+        "${_aurelex_openssl_dir}/libcrypto_3.so"
+        "${_aurelex_openssl_dir}/libssl_3.so"
+    )
+else()
+    message(WARNING "no vendored OpenSSL for ABI ${ANDROID_ABI}; "
+                    "HTTPS will fail at runtime")
+endif()
 # NOTE: qt_add_apk_target is absent from the installed Qt 6.6.3 carve subset
 # (no Qt6AndroidDeployQt cmake package). The APK is packaged manually with
 # androiddeployqt (see README notes).

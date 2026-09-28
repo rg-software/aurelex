@@ -37,6 +37,12 @@ populate the engine submodule first (`git submodule update --init`, or clone
 with `--recursive`), apply the engine patches, then run the one-shot build
 script:
 
+Android TLS needs OpenSSL, which the Qt kit does not ship; the prebuilt libs are
+vendored in `app/openssl/<abi>/` and linked into the APK via
+`QT_ANDROID_EXTRA_LIBS` (see `app/openssl/README.md`). If a build fails to do
+HTTPS at runtime with *TLS initialization failed*, those libs are missing from
+the APK's `lib/<abi>/`.
+
 ```powershell
 pwsh -File .\app\build.ps1 -Configuration Release            # signed release APK
 pwsh -File .\app\build.ps1 -Configuration Release -Bundle    # signed release APK + AAB

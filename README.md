@@ -77,9 +77,19 @@ conversion needed.
 
 ## Privacy
 
-Dictionary files you bring are your own and are never uploaded. Lookups happen entirely on-device.
-Aurelex requests no account, no sign-in, and no network permission other than what the WebView needs
-to render your local dictionaries.
+Dictionary files you bring are your own and are never uploaded. Lookups happen entirely on-device:
+Aurelex has no online lookup, no account, and no sign-in.
+
+The app does make two kinds of outbound request, both initiated by you and both over HTTPS:
+
+- **Article assets** the engine injects into a definition (for example a remote image inside an
+  imported article) are fetched by the WebView, exactly as a browser would.
+- **The dictionary catalog**, an optional curated list of dictionaries you can install from.
+  Opening "Add from remote" fetches one JSON document from the catalog host; choosing an entry
+  downloads its files over HTTPS. Nothing is fetched at app start, and if you never open that
+  screen the app makes no catalog request at all.
+
+Neither request carries any identifier, and no dictionary you have installed is ever uploaded.
 
 ## License
 

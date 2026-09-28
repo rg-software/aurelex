@@ -86,6 +86,17 @@
             android:exported="false"
             android:foregroundServiceType="dataSync" />
 
+        <!-- Remote-catalog download foreground service: streams dictionary
+             archives from the curated HTTPS catalog into app-private storage
+             with a progress notification, so a multi-hundred-MB transfer
+             survives the app being backgrounded. Writes its progress to
+             shared_prefs/download.xml for the C++ poller and stops itself when
+             the batch reaches a terminal outcome. -->
+        <service
+            android:name=".DictionaryDownloadService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+
         <!-- Home-screen search widget -->
         <receiver
             android:name=".AurelexSearchWidget"

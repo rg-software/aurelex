@@ -1,0 +1,67 @@
+{
+  "schemaVersion": 1,
+  "updated": "2026-09-26",
+  "entries": [
+    {
+      "id": "ok-before-the-bad-one",
+      "name": "A well-formed entry that must NOT survive the rejection",
+      "langFrom": "en",
+      "langTo": "fr",
+      "attribution": "Wiktionary contributors, CC BY-SA 4.0",
+      "license": "CC-BY-SA-4.0",
+      "files": [
+        {
+          "role": "dictionary",
+          "required": true,
+          "name": "ok.dsl.dz",
+          "url": "https://aurelex.example/catalog/ok.dsl.dz",
+          "sizeBytes": 1024
+        }
+      ]
+    },
+    {
+      "id": "missing-url",
+      "name": "Entry with a file that has no url",
+      "langFrom": "en",
+      "langTo": "it",
+      "files": [
+        {
+          "role": "dictionary",
+          "required": true,
+          "name": "missing-url.dsl.dz",
+          "sizeBytes": 1024
+        }
+      ]
+    },
+    {
+      "id": "non-numeric-size",
+      "name": "Entry whose file sizeBytes is a string",
+      "langFrom": "en",
+      "langTo": "nl",
+      "files": [
+        {
+          "role": "dictionary",
+          "required": true,
+          "name": "non-numeric-size.dsl.dz",
+          "url": "https://aurelex.example/catalog/non-numeric-size.dsl.dz",
+          "sizeBytes": "1024"
+        }
+      ]
+    },
+    {
+      "id": "unknown-role",
+      "name": "Entry whose file declares a role the app cannot classify",
+      "langFrom": "en",
+      "langTo": "pl",
+      "files": [
+        {
+          "role": "index",
+          "required": true,
+          "name": "unknown-role.mdx",
+          "url": "https://aurelex.example/catalog/unknown-role.mdx",
+          "sizeBytes": 1024
+        }
+      ]
+    }
+  ]
+}

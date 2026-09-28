@@ -53,6 +53,14 @@ Status legend: 🟢 planned · 🔵 in progress · ✅ done · ⏸ parked
   builds the path with `QDir` + a separator and the boundary normalizes it; a
   startup sweep moves existing strays into `files/index/<md5>` so devices do not
   reindex. On-disk layout change — see the change's Migration Plan.
+- 🔵 **Remote dictionary catalog** (`remote-dictionary-catalog`): install a
+  dictionary from a curated, HTTPS-hosted JSON catalog with no sideloading —
+  foreground download service, byte-level progress/cancel, atomic staging, and
+  the existing scan → auto-index chain reused unchanged. Manifest format and
+  hosting: `docs/REMOTE-CATALOG.md`. The auto-index step it hands off to still
+  holds the engine mutex for the whole build, so a large freshly-downloaded
+  dictionary blocks lookups until indexed — the same limitation tracked under
+  "Off-thread FTS indexing" below.
 
 ## Recently completed
 

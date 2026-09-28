@@ -291,9 +291,20 @@ offline, with download attempts failing individually.
 
 `network_security_config.xml` stays untouched. The compiled-in URL is HTTPS, and
 `Qt6::Network` plus the `INTERNET` permission are already present, so no
-dependency and no manifest permission change is needed. Accepting a
-user-supplied URL later would force a decision about LAN cleartext; deferring
-the user-supplied URL is what keeps that decision out of this change.
+manifest permission change is needed. Accepting a user-supplied URL later would
+force a decision about LAN cleartext; deferring the user-supplied URL is what
+keeps that decision out of this change.
+
+**Correction found on-device (2026-09-28):** "present" was necessary but not
+sufficient. On Android, Qt's TLS is the OpenSSL backend, which `dlopen()`s
+`libcrypto_3.so` / `libssl_3.so` at runtime — and the Qt 6.6.3 Android kit does
+not ship them. Before the catalog the app had no Qt-network HTTPS call, so this
+went unnoticed (the WebView has its own TLS). The first catalog fetch failed with
+`QSslSocket::connectToHostEncrypted: TLS initialization failed`. The fix is to
+bundle OpenSSL: prebuilt OpenSSL 3 libs for each ABI are vendored in
+`app/openssl/<abi>/` and added to `QT_ANDROID_EXTRA_LIBS` in `app/CMakeLists.txt`
+(see `app/openssl/README.md`). Without this, every `QNetworkAccessManager`
+request over HTTPS fails, so the whole feature is dead on device.
 
 ### 13. Settings key
 

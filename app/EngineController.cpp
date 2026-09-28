@@ -19,9 +19,17 @@
 #include <QJsonObject>
 #include <QJsonValue>
 #include <QRegularExpression>
+#include <QStorageInfo>
+#include <QTimer>
+#include <QUrl>
 #include <QXmlStreamReader>
 #include <QGuiApplication>
+#include <QLocale>
 #include <QThread>
+#include <QNetworkAccessManager>
+#include <QNetworkReply>
+#include <QPointer>
+#include <QNetworkRequest>
 #include <cmath>
 #include <algorithm>
 #if defined(Q_OS_ANDROID)
@@ -188,6 +196,11 @@ void EngineController::setLastError(const QString &e) {
 void EngineController::setDictionaries(const QVariantList &list) {
     m_dictionaries = list;
     qInfo() << "[aurelex] setDictionaries count=" << list.size();
+    // The catalog's "installed" badges are derived from the loaded dictionary
+    // paths, so they must be recomputed on every change — otherwise a freshly
+    // scanned download would keep showing as not installed until the next
+    // catalog fetch.
+    refreshCatalogEntries();
     emit dictionariesChanged();
 }
 
@@ -568,6 +581,18 @@ void EngineController::ensureFtsWorker()
         if (empty) {
             setFtsIndexProgress(0, 0, QString());
             setBuildingFts(false);
+            if (m_stagedRescanPending) {
+                // A download landed in files/staged/ while this batch was still
+                // indexing, so the tree we just indexed no longer covers it.
+                // Re-arm BEFORE the hand-off: consuming the flag here would
+                // leave a batch that finished mid-chain with no rescan, and
+                // never clearing processingActive is what keeps the Dicts
+                // banner from blinking off between the two scans.
+                m_stagedRescanPending = false;
+                qInfo() << "[aurelex] download landed during indexing; rescanning staged tree";
+                runScan();
+                return;
+            }
             // Batch genuinely done: end the continuous processing chain so the
             // Dicts banner clears. No phase hand-off follows, so this is the
             // single place the whole staging -> scan -> index lifecycle ends.
@@ -575,8 +600,10 @@ void EngineController::ensureFtsWorker()
             // Indexing + scanning finished: at this point the staged tree is
             // consistent, so purge any leftover temporary staging dirs (partial
             // copies from a killed/interrupted stage). See the "clear stale
-            // staging leftovers" intent — this is a safe cleanup moment.
-            purgeStagingTmp();
+            // staging leftovers" intent — this is a safe cleanup moment. Scratch
+            // dirs a live download still owns are excluded (optional audio
+            // downloads run while the dicts are otherwise idle).
+            purgeStagingTmp(liveDownloadHashes());
         } else {
             ensureFtsWorker();
         }
@@ -686,6 +713,10 @@ void EngineController::refreshDictionaries() {
     connect(w, &QFutureWatcher<QVariantList>::finished, this, [this, w]{
         const QVariantList list = w->result();
         setDictionaries(list);
+        // Keep the catalog's installed badges honest: a download that just got
+        // scanned in (or a removal) changes which entries are installed, and the
+        // badge is derived from the loaded sources.
+        refreshCatalogEntries();
         // Diagnostics: the full set of loaded dictionaries (id/name/source), so
         // the log shows exactly what is available after a scan / import.
         qInfo() << "[aurelex] dictionaries available:" << list.size();
@@ -798,6 +829,78 @@ void EngineController::removeDictionaries(const QVariantList &indices) {
     w->setFuture(f);
 }
 
+void EngineController::reloadDictionariesForResources(const QStringList &entryIds) {
+    if (entryIds.isEmpty() || !m_ready) return;
+    // Map each entry to the basenames its dictionary files have, then find the
+    // loaded dictionaries whose source basename matches. A dictionary is
+    // identified by its primary source file (m_dictionaries[].source), which is
+    // the same value installed-detection matches on, so the two agree.
+    QStringList wanted;
+    for (const QString &id : entryIds) {
+        const RemoteCatalog::Entry *e = findCatalogEntry(id);
+        if (!e) continue;
+        for (const RemoteCatalog::File &f : e->dictionaryFiles())
+            wanted.append(f.name);
+    }
+    if (wanted.isEmpty()) return;
+    QStringList targets;
+    for (const QVariant &v : m_dictionaries) {
+        const QVariantMap d = v.toMap();
+        if (wanted.contains(QFileInfo(d.value("source").toString()).fileName()))
+            targets.append(d.value("name").toString());
+    }
+    if (targets.isEmpty()) {
+        // Nothing loaded under those names (the audio arrived before the
+        // dictionary itself): a plain rescan is enough.
+        return;
+    }
+    qInfo().noquote() << "[aurelex] reloading for new resources:" << targets;
+
+    // Collect the engine indices to unload on the UI thread, then do the
+    // engine work off it: every gd_* call takes g_engineMutex, which a running
+    // FTS build holds for its whole duration, and this must never block the UI.
+    // High-to-low so each gd_remove_dict's index shift cannot invalidate a
+    // later target.
+    QVector<int> indices;
+    for (int i = m_dictionaries.size() - 1; i >= 0; --i) {
+        const QVariantMap d = m_dictionaries.at(i).toMap();
+        if (wanted.contains(QFileInfo(d.value("source").toString()).fileName()))
+            indices.append(i);
+    }
+    if (indices.isEmpty()) return;
+
+    // Claim the continuous-processing indicator for the WHOLE unload, not just
+    // the rescan that follows. The indices above were collected against the
+    // current m_dictionaries ordering; a deletion landing now would shift them
+    // and gd_remove_dict would unload the WRONG dictionary. runScan() does not
+    // lower processingActive either, so nothing flickers in between.
+    m_processingActive = true;
+    emit processingActiveChanged();
+
+    QFuture<int> f = QtConcurrent::run([indices]{
+        for (int idx : indices) {
+            const int rc = gd_remove_dict(idx);
+            qInfo() << "[aurelex] resource-reload gd_remove_dict idx=" << idx << "rc=" << rc;
+        }
+        return gd_dict_count();
+    });
+    auto *w = new QFutureWatcher<int>(this);
+    connect(w, &QFutureWatcher<int>::finished, this, [this, w]{
+        const int count = w->result();
+        w->deleteLater();
+        qInfo() << "[aurelex] resource-reload unloaded; dictionaries now" << count;
+        // Deliberately NOT deleting files or the index: the dictionary itself
+        // is still installed and must keep its FTS index (task 8.2), its list
+        // position and its group membership (8.3). Only the in-memory handle
+        // was dropped, so the rescan re-adds the SAME dictionary (same content
+        // hash -> same engine id -> same index files, same order, same groups)
+        // and the new resources take effect. autoIndexMissing then finds its
+        // index already built and skips it.
+        runScan();
+    });
+    w->setFuture(f);
+}
+
 void EngineController::deleteDictionaryFiles(const QString &sourceFile,
                                              const QString &dictId,
                                              const QString &stagedRoot,
@@ -849,16 +952,23 @@ void EngineController::deleteDictionaryFiles(const QString &sourceFile,
     }
 }
 
-void EngineController::purgeStagingTmp() {
+void EngineController::purgeStagingTmp(const QStringList &keepHashes) {
     // Remove leftover temporary staging dirs (files/staging-tmp/*). These only
     // ever hold in-progress copies; once scanning + indexing have finished they
-    // are guaranteed stale, so deleting them keeps app storage clean.
+    // are stale, so deleting them keeps app storage clean. `keepHashes` are the
+    // scratch dirs a live download still owns (a partial copy mid-flight) —
+    // deleting one under a running transfer would corrupt it.
     const QString tmpRoot = m_stagedDir + QStringLiteral("/../staging-tmp");
     QDir dir(tmpRoot);
     if (!dir.exists()) return;
-    qInfo() << "[aurelex] purging stale staging-tmp";
-    for (const QString &entry : dir.entryList(QDir::Dirs | QDir::NoDotAndDotDot))
+    qInfo() << "[aurelex] purging stale staging-tmp, keeping" << keepHashes.size() << "live";
+    for (const QString &entry : dir.entryList(QDir::Dirs | QDir::NoDotAndDotDot)) {
+        if (keepHashes.contains(entry)) {
+            qInfo() << "[aurelex] staging-tmp kept (live download)" << entry;
+            continue;
+        }
         QDir(dir.filePath(entry)).removeRecursively();
+    }
 }
 
 QString EngineController::stagedAncestor(const QString &file, const QString &stagedRoot) {
@@ -2046,6 +2156,585 @@ void EngineController::removeStagingFile()
     f.remove();
 }
 
+// ---------- Remote catalog fetch (QNetworkAccessManager) ----------
+
+void EngineController::fetchCatalog()
+{
+    if (m_remoteCatalogUrl.isEmpty()) return;
+    if (!m_manifestValid) {
+        // Nothing cached yet: there is no catalog to show, so say so instead of
+        // rendering an empty list the user cannot tell from "no entries".
+        m_catalogEntries.clear();
+    } else if (m_manifestFetched.isValid()
+               && m_manifestFetched.msecsTo(QDateTime::currentDateTime()) < kCatalogRereprobeMs) {
+        // Recently fetched: hand back the cache without spending a request on a
+        // CDN-cached document. An INVALID timestamp (age unknown, e.g. right
+        // after refreshCatalog()) must NOT take this branch -- that is exactly
+        // when a real re-probe is wanted, and treating "unknown" as "fresh"
+        // made refreshCatalog() a no-op that never issued a request.
+        refreshCatalogEntries();
+        emit catalogChanged();
+        return;
+    }
+    // A cached copy we can already show: keep the entries visible and mark the
+    // catalog as "stale" rather than blanking the list mid-refresh.
+    m_catalogReachable = false;
+    m_catalogLoading = true;
+    m_catalogError.clear();
+    emit catalogChanged();
+    if (m_catalogFetchInFlight) return;
+    m_catalogFetchInFlight = true;
+
+    if (!m_net) {
+        m_net = new QNetworkAccessManager(this);
+    }
+    QNetworkRequest req{QUrl(m_remoteCatalogUrl)};
+    // The catalog is a static document, so a conditional request is the polite
+    // thing and keeps the transfer to a 304 when nothing changed.
+    req.setAttribute(QNetworkRequest::RedirectPolicyAttribute,
+                     QNetworkRequest::NoLessSafeRedirectPolicy);
+    req.setHeader(QNetworkRequest::UserAgentHeader, QByteArrayLiteral("Aurelex"));
+    if (m_manifestValid && m_manifestFetched.isValid()) {
+        // A raw header, not a QVariant attribute: If-Modified-Since is an HTTP
+        // date, and the parser's own timestamp is local time, so format it.
+        req.setRawHeader("If-Modified-Since",
+                         m_manifestFetched.toUTC().toString(Qt::RFC2822Date).toLatin1());
+    }
+
+    qInfo() << "[aurelex] fetching remote catalog:" << m_remoteCatalogUrl;
+    QNetworkReply *reply = m_net->get(req);
+    connect(reply, &QNetworkReply::finished, this, [this, reply]{
+        reply->deleteLater();
+        m_catalogFetchInFlight = false;
+        m_catalogLoading = false;
+        // A 304 is a SUCCESS: our cached copy is still current.
+        const int status = reply->attribute(
+            QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        if (status == 304 && m_manifestValid) {
+            m_catalogReachable = true;
+            m_catalogError.clear();
+            m_manifestFetched = QDateTime::currentDateTime();
+            cacheManifest();
+            refreshCatalogEntries();
+            emit catalogChanged();
+            return;
+        }
+        if (reply->error() != QNetworkReply::NoError || status < 200 || status >= 300) {
+            // Unreachable. Report it and LEAVE THE LAST GOOD MANIFEST IN PLACE:
+            // a previously-read catalog still renders (read-only) and only
+            // download attempts fail.
+            m_catalogReachable = false;
+            m_catalogError = reply->error() != QNetworkReply::NoError
+                    ? reply->errorString()
+                    : QStringLiteral("HTTP %1").arg(status);
+            qWarning() << "[aurelex] remote catalog unreachable:" << m_catalogError;
+            refreshCatalogEntries();
+            emit catalogChanged();
+            return;
+        }
+        const QByteArray body = reply->readAll();
+        // A small catalog is a maintenance mistake, not a data set.
+        if (body.size() > kCatalogMaxBytes) {
+            m_catalogReachable = false;
+            m_catalogError = QStringLiteral("catalog document is unexpectedly large");
+            qWarning() << "[aurelex] remote catalog too large:" << body.size() << "bytes";
+            emit catalogChanged();
+            return;
+        }
+        RemoteCatalog::Manifest m;
+        QString err;
+        if (!RemoteCatalog::parseManifest(body, &m, &err)) {
+            // Reject the document rather than showing part of it; the previous
+            // good manifest stays as the fallback.
+            m_catalogReachable = false;
+            m_catalogError = err;
+            qWarning() << "[aurelex] remote catalog rejected:" << err;
+            emit catalogChanged();
+            return;
+        }
+        m_manifest = m;
+        m_manifestRaw = QString::fromUtf8(body);
+        m_manifestValid = true;
+        m_manifestFetched = QDateTime::currentDateTime();
+        m_catalogReachable = true;
+        m_catalogError.clear();
+        cacheManifest();
+        refreshCatalogEntries();
+        emit catalogChanged();
+        qInfo() << "[aurelex] remote catalog ok:" << m.entries.size() << "entries";
+    });
+    // A dead link must not leave the catalog spinner up forever. The reply is
+    // captured through a QPointer: the finished handler above deleteLater()s it,
+    // so a raw capture would dereference freed memory when this fires 15s later
+    // (SIGSEGV on the UI thread) on every fetch whose reply finished first.
+    QPointer<QNetworkReply> replyGuard(reply);
+    QTimer::singleShot(kCatalogFetchTimeoutMs, this, [replyGuard]{
+        if (replyGuard && replyGuard->isRunning()) replyGuard->abort();
+    });
+}
+
+void EngineController::refreshCatalog()
+{
+    // An explicit refresh always re-probes, and drops the "fresh enough" gate.
+    m_manifestFetched = QDateTime();
+    fetchCatalog();
+}
+
+QStringList EngineController::dictionarySources() const
+{
+    QStringList sources;
+    for (const QVariant &v : m_dictionaries)
+        sources.append(v.toMap().value(QStringLiteral("source")).toString());
+    return sources;
+}
+
+void EngineController::refreshCatalogEntries()
+{
+    QVariantList out;
+    if (m_manifestValid) {
+        // Installed-detection is derived from the CURRENT dictionary list, so
+        // recompute it whenever the list changes rather than caching a badge
+        // that a later scan would make a lie.
+        const QStringList sources = dictionarySources();
+
+        for (const RemoteCatalog::Entry &e : m_manifest.entries) {
+            QVariantMap m;
+            m.insert(QStringLiteral("id"), e.id);
+            m.insert(QStringLiteral("name"), e.name);
+            m.insert(QStringLiteral("langFrom"), e.langFrom);
+            m.insert(QStringLiteral("langTo"), e.langTo);
+            m.insert(QStringLiteral("pair"), e.langFrom + QLatin1Char('/') + e.langTo);
+            m.insert(QStringLiteral("attribution"), e.attribution);
+            m.insert(QStringLiteral("license"), e.license);
+            m.insert(QStringLiteral("totalBytes"), e.totalBytes);
+            m.insert(QStringLiteral("requiredBytes"), e.requiredBytes);
+            const QVector<RemoteCatalog::File> optional = e.optionalFiles();
+            qint64 optionalBytes = 0;
+            QVariantList files;
+            for (const RemoteCatalog::File &f : e.files) {
+                if (!f.required) optionalBytes += f.sizeBytes;
+                QVariantMap fm;
+                fm.insert(QStringLiteral("name"), f.name);
+                fm.insert(QStringLiteral("sizeBytes"), f.sizeBytes);
+                fm.insert(QStringLiteral("required"), f.required);
+                fm.insert(QStringLiteral("role"), f.role);
+                files.append(fm);
+            }
+            m.insert(QStringLiteral("optionalBytes"), optionalBytes);
+            m.insert(QStringLiteral("hasOptional"), !optional.isEmpty());
+            // Names of the optional files, so the optional-audio request can
+            // name them without QML re-deriving the manifest's structure.
+            QStringList optionalNames;
+            for (const RemoteCatalog::File &f : optional)
+                optionalNames.append(f.name);
+            m.insert(QStringLiteral("optionalFileNames"), optionalNames);
+            m.insert(QStringLiteral("installed"), RemoteCatalog::isInstalled(e, sources));
+            m.insert(QStringLiteral("files"), files);
+            m.insert(QStringLiteral("installable"), e.installable);
+            m.insert(QStringLiteral("unsupportedReason"), e.unsupportedReason);
+            out.append(m);
+        }
+    }
+    m_catalogEntries = out;
+    m_catalogUpdated = m_manifestValid ? m_manifest.updated : QString();
+    m_catalogLastFetched = m_manifestFetched.isValid()
+            ? QLocale::system().toString(m_manifestFetched, QLocale::ShortFormat)
+            : QString();
+}
+
+// ---------- Downloads ----------
+
+// One SharedPreferences XML read. Mirrors peekStagingActive /
+// peekPendingIndexingDone: the service writes the file, this poller consumes
+// it, and the marker is cleared on a terminal outcome.
+void EngineController::syncDownloadState()
+{
+    if (m_appDir.isEmpty()) return;
+    const QString path = m_appDir + QStringLiteral("/../shared_prefs/download.xml");
+    QFile f(path);
+    if (!f.open(QIODevice::ReadOnly)) {
+        // No marker: nothing running. Only a change is worth signalling.
+        if (m_downloadActive || !m_downloadOutcome.isEmpty()) {
+            m_downloadActive = false;
+            m_downloadEntryName.clear();
+            m_downloadSpeed.clear();
+            m_downloadScratchHashes.clear();
+            emit downloadChanged();
+        }
+        return;
+    }
+    const QString xml = QString::fromUtf8(f.readAll());
+    f.close();
+
+    bool active = false, canceled = false;
+    int filesDone = 0, filesTotal = 0;
+    qint64 bytesDone = 0, bytesTotal = 0;
+    QString entry, speed, outcome, message, hashes;
+    QStringList succeeded, failed;
+    QXmlStreamReader xr(xml);
+    while (!xr.atEnd()) {
+        if (xr.readNext() != QXmlStreamReader::StartElement) continue;
+        const QString name = xr.name().toString();
+        const auto attr = [&xr](const char *key) {
+            return xr.attributes().value(QLatin1String(key)).toString();
+        };
+        if (name == QLatin1String("boolean")) {
+            const QString k = xr.attributes().value(QStringLiteral("name")).toString();
+            const bool v = xr.attributes().value(QStringLiteral("value")) == QLatin1String("true");
+            if (k == QLatin1String("downloadActive")) active = v;
+            else if (k == QLatin1String("downloadCanceled")) canceled = v;
+        } else if (name == QLatin1String("int")) {
+            const QString k = xr.attributes().value(QStringLiteral("name")).toString();
+            const int v = xr.attributes().value(QStringLiteral("value")).toInt();
+            if (k == QLatin1String("filesDone")) filesDone = v;
+            else if (k == QLatin1String("filesTotal")) filesTotal = v;
+        } else if (name == QLatin1String("long")) {
+            const QString k = xr.attributes().value(QStringLiteral("name")).toString();
+            const qint64 v = xr.attributes().value(QStringLiteral("value")).toLongLong();
+            if (k == QLatin1String("bytesDone")) bytesDone = v;
+            else if (k == QLatin1String("bytesTotal")) bytesTotal = v;
+        } else if (name == QLatin1String("string")) {
+            const QString k = xr.attributes().value(QStringLiteral("name")).toString();
+            // SharedPreferences writes a <string> value as the element's TEXT
+            // content, NOT a `value` attribute (only boolean/int/long/float use
+            // attributes). Reading `value` here silently produced empty strings,
+            // so entryName/succeeded/failed/scratchHashes were always blank and a
+            // finished batch never produced an outcome or a rescan.
+            const QString v = xr.readElementText();
+            if (k == QLatin1String("entryName")) entry = v;
+            else if (k == QLatin1String("speed")) speed = v;
+            else if (k == QLatin1String("message")) message = v;
+            else if (k == QLatin1String("scratchHashes")) hashes = v;
+            // Pipe-separated so one key carries a whole batch's leftovers.
+            else if (k == QLatin1String("succeeded")) succeeded = v.split(QLatin1Char('|'), Qt::SkipEmptyParts);
+            else if (k == QLatin1String("failed")) failed = v.split(QLatin1Char('|'), Qt::SkipEmptyParts);
+        }
+    }
+
+    // The service writes the terminal outcome and drops `active` in the same
+    // commit, so derive it rather than trusting a separate flag.
+    QString newOutcome;
+    if (!active) {
+        if (canceled) newOutcome = QStringLiteral("cancelled");
+        else if (!failed.isEmpty()) newOutcome = QStringLiteral("failed");
+        else if (!succeeded.isEmpty()) newOutcome = QStringLiteral("succeeded");
+    }
+
+    const bool changed =
+            active != m_downloadActive
+            || entry != m_downloadEntryName
+            || filesDone != m_downloadFilesDone
+            || filesTotal != m_downloadFilesTotal
+            || bytesDone != m_downloadBytesDone
+            || bytesTotal != m_downloadBytesTotal
+            || speed != m_downloadSpeed
+            || newOutcome != m_downloadOutcome
+            || message != m_downloadMessage
+            || hashes != m_downloadScratchHashes
+            || succeeded != m_downloadSucceeded
+            || failed != m_downloadFailed;
+    if (!changed) return;
+
+    m_downloadActive = active;
+    m_downloadEntryName = entry;
+    m_downloadFilesDone = filesDone;
+    m_downloadFilesTotal = filesTotal;
+    m_downloadBytesDone = bytesDone;
+    m_downloadBytesTotal = bytesTotal;
+    m_downloadSpeed = speed;
+    m_downloadMessage = message;
+    m_downloadScratchHashes = hashes;
+    m_downloadSucceeded = succeeded;
+    m_downloadFailed = failed;
+    m_downloadOutcome = newOutcome;
+    // sizeBytes is hand-maintained, so a slightly wrong total must not push the
+    // bar past full: clamp, and hold at 0 when there is nothing to measure.
+    m_downloadFraction = (bytesTotal > 0)
+            ? qBound(0.0, qreal(bytesDone) / qreal(bytesTotal), 1.0)
+            : 0.0;
+
+    // "Something landed in files/staged" is the trigger for engine work, NOT the
+    // outcome string: a batch where one entry failed and another succeeded is
+    // reported as "failed", yet the successful entry is on disk and invisible to
+    // the engine until a scan runs. Gating on the outcome string would strand it.
+    const bool published = !m_downloadSucceeded.isEmpty();
+    const bool terminal = !newOutcome.isEmpty();
+    const bool idle = m_ready && !m_processingActive;
+
+    bool plainRescan = false;
+    if (terminal) {
+        // Terminal outcome: consume the marker (the service's cue is its
+        // absence, and a leftover would re-show this result forever).
+        removeDownloadFile();
+        if (published) {
+            // m_audioReloadIds non-empty means this batch was "add audio" for a
+            // dictionary the engine already holds: a plain rescan cannot make
+            // the new resources take effect, so that path unloads + re-adds.
+            if (m_audioReloadIds.isEmpty() && idle) {
+                plainRescan = true;
+            } else {
+                // Everything else waits for a moment when the engine is ready and
+                // no tail is live. Arming the flags (instead of starting a second
+                // scan alongside a running one) keeps a single chain, and the
+                // tail never lowers processingActive between the two scans
+                // (no-blink). The poller below re-checks every tick, so a batch
+                // landing mid-chain is not lost.
+                m_stagedRescanPending = true;
+            }
+        } else {
+            // Cancelled, or nothing succeeded: the optional-resource ids belong to
+            // a batch that never published. Dropping them stops a later, unrelated
+            // success from unloading dictionaries "for" a batch that changed
+            // nothing.
+            m_audioReloadIds.clear();
+        }
+    }
+    emit downloadChanged();
+    // Terminal + published + idle, and the engine must actually RE-LOAD, not
+    // rescan. Both conditions are required: firing this while the transfer is
+    // still running would reload the dictionary a few seconds before its new
+    // resources arrive.
+    if (terminal && published && !m_audioReloadIds.isEmpty() && idle) {
+        // Consume the ids BEFORE the call: reloadDictionariesForResources ends in
+        // runScan(), and a second marker-driven scan landing in between must not
+        // schedule a duplicate reload.
+        const QStringList ids = m_audioReloadIds;
+        m_audioReloadIds.clear();
+        m_stagedRescanPending = false;
+        reloadDictionariesForResources(ids);
+    } else if (plainRescan) {
+        runScan();
+    }
+}
+
+void EngineController::removeDownloadFile()
+{
+    if (m_appDir.isEmpty()) return;
+    QFile f(m_appDir + QStringLiteral("/../shared_prefs/download.xml"));
+    f.remove();
+}
+
+QStringList EngineController::liveDownloadHashes() const
+{
+    return m_downloadScratchHashes.split(QLatin1Char('|'), Qt::SkipEmptyParts);
+}
+
+QVariantMap EngineController::downloadPreflight(const QVariantList &requests) const
+{
+    qint64 need = 0;
+    QStringList names;
+    for (const QVariant &v : requests) {
+        const QVariantMap r = v.toMap();
+        const QString id = r.value(QStringLiteral("id")).toString();
+        const RemoteCatalog::Entry *e = findCatalogEntry(id);
+        if (!e) continue;
+        // Preflight the bundle that is about to be written: the files named in
+        // the request, or the whole required set for a plain install.
+        need += sumRequestedBytes(*e, r);
+        names.append(e->name);
+    }
+    QVariantMap out;
+    out.insert(QStringLiteral("names"), names);
+    out.insert(QStringLiteral("needBytes"), need);
+    if (need <= 0) {
+        // Nothing resolvable: let the caller report it rather than guessing.
+        out.insert(QStringLiteral("ok"), false);
+        out.insert(QStringLiteral("warn"), false);
+        return out;
+    }
+    const qint64 free = freeBytesForDownloads();
+    out.insert(QStringLiteral("freeBytes"), free);
+    out.insert(QStringLiteral("ok"), free >= need + RemoteCatalog::kMinHeadroomBytes);
+    out.insert(QStringLiteral("warn"),
+               free < need + RemoteCatalog::kWarnHeadroomBytes);
+    if (free < need + RemoteCatalog::kMinHeadroomBytes)
+        out.insert(QStringLiteral("missingBytes"), need + RemoteCatalog::kMinHeadroomBytes - free);
+    return out;
+}
+
+qint64 EngineController::sumRequestedBytes(const RemoteCatalog::Entry &e,
+                                           const QVariantMap &request) const
+{
+    const QVariantList wanted = request.value(QStringLiteral("files")).toList();
+    if (wanted.isEmpty()) return e.requiredBytes;
+    qint64 sum = 0;
+    for (const QVariant &w : wanted) {
+        const QString name = w.toString();
+        for (const RemoteCatalog::File &f : e.files)
+            if (f.name == name)
+                sum += f.sizeBytes;
+    }
+    return sum;
+}
+
+qint64 EngineController::freeBytesForDownloads() const
+{
+    // Downloads land in getFilesDir(), so the preflight must measure THAT
+    // volume, not the first QStorageInfo root (which may be the SD card).
+    const QStorageInfo storage(QDir(m_appDir).absolutePath());
+    if (!storage.isValid()) return 0;
+    return storage.bytesAvailable();
+}
+
+const RemoteCatalog::Entry *EngineController::findCatalogEntry(const QString &id) const
+{
+    for (const RemoteCatalog::Entry &e : m_manifest.entries)
+        if (e.id == id)
+            return &e;
+    return nullptr;
+}
+
+void EngineController::startCatalogDownload(const QVariantList &requests)
+{
+    if (requests.isEmpty()) return;
+    if (!m_catalogReachable) {
+        // The catalog is the authority on what exists and where it comes from;
+        // a download started from a stale read-only list is refused rather than
+        // attempted against a manifest we cannot vouch for.
+        m_downloadOutcome = QStringLiteral("failed");
+        m_downloadMessage = tr("The dictionary catalog is unavailable.");
+        emit downloadChanged();
+        return;
+    }
+    // Build the transfer request from the CURRENTLY PARSED manifest, so the
+    // service never sees a URL or size the parser did not approve.
+    QJsonArray requestsOut;
+    QStringList pendingAudioIds;
+    qint64 need = 0;
+    for (const QVariant &v : requests) {
+        const QVariantMap r = v.toMap();
+        const RemoteCatalog::Entry *e = findCatalogEntry(r.value(QStringLiteral("id")).toString());
+        // Skip an entry this build cannot install: the UI already disables it,
+        // but a download of its unsupported required files would land a
+        // dictionary the engine can never load.
+        if (!e || !e->installable) continue;
+        const QVariantList wanted = r.value(QStringLiteral("files")).toList();
+        QJsonArray filesOut;
+        QVector<RemoteCatalog::File> chosen;
+        for (const RemoteCatalog::File &f : e->files) {
+            if (wanted.isEmpty() ? f.required : wanted.contains(f.name))
+                chosen.append(f);
+        }
+        for (const RemoteCatalog::File &f : chosen) {
+            QJsonObject fo;
+            fo.insert(QStringLiteral("name"), f.name);
+            fo.insert(QStringLiteral("url"), f.url);
+            fo.insert(QStringLiteral("sizeBytes"), f.sizeBytes);
+            fo.insert(QStringLiteral("sha256"), f.sha256);
+            fo.insert(QStringLiteral("required"), f.required);
+            filesOut.append(fo);
+        }
+        if (filesOut.isEmpty()) continue;
+        QJsonObject ro;
+        ro.insert(QStringLiteral("id"), e->id);
+        ro.insert(QStringLiteral("name"), e->name);
+        ro.insert(QStringLiteral("contentHash"), RemoteCatalog::contentHash(*e));
+        ro.insert(QStringLiteral("files"), filesOut);
+        requestsOut.append(ro);
+        need += sumRequestedBytes(*e, r);
+        // "Add audio" on an ALREADY-INSTALLED entry: nothing new to load, only
+        // new resources next to the existing dictionary. A plain rescan cannot
+        // do that -- the engine already holds the dictionary open, so the
+        // resources never take effect. Remember the id so the success path
+        // unloads the dictionary and rescans it (see audioReloadIds).
+        //
+        // The ids are collected here but only COMMITTED once the batch is known
+        // to be startable: a refusal below must not leave a pending reload for a
+        // transfer that never ran.
+        bool allOptional = !chosen.isEmpty();
+        for (const RemoteCatalog::File &f : chosen)
+            if (f.required) allOptional = false;
+        if (allOptional && RemoteCatalog::isInstalled(*e, dictionarySources())) {
+            if (!pendingAudioIds.contains(e->id))
+                pendingAudioIds.append(e->id);
+        }
+    }
+    if (requestsOut.isEmpty()) return;
+    if (need > 0) {
+        // The service re-checks before the first byte; this only stops an
+        // obviously-doomed batch from starting (the dialog already asked).
+        const qint64 free = freeBytesForDownloads();
+        if (free < need + RemoteCatalog::kMinHeadroomBytes) {
+            m_downloadOutcome = QStringLiteral("failed");
+            m_downloadMessage = tr("Not enough free space.");
+            emit downloadChanged();
+            return;
+        }
+    }
+    m_audioReloadIds = pendingAudioIds;
+    QJsonObject payload;
+    payload.insert(QStringLiteral("requests"), requestsOut);
+    // The whole catalog's id→contentHash index, so the service can tell an
+    // orphaned scratch dir whose entry is STILL in the catalog (resume it) from
+    // one for a dictionary that has been withdrawn (purge it) — including
+    // entries that are not part of this batch.
+    QJsonObject index;
+    for (const RemoteCatalog::Entry &e : m_manifest.entries)
+        index.insert(e.id, RemoteCatalog::contentHash(e));
+    payload.insert(QStringLiteral("catalogIndex"), index);
+    const QByteArray json = QJsonDocument(payload).toJson(QJsonDocument::Compact);
+    // Starting a batch clears the previous terminal outcome so a new run does
+    // not read as the old one finishing.
+    m_downloadOutcome.clear();
+    m_downloadMessage.clear();
+    m_downloadSucceeded.clear();
+    m_downloadFailed.clear();
+    emit downloadChanged();
+#if defined(Q_OS_ANDROID)
+    // The Java side resolves its own Context through QtNative.activity(), the
+    // same way startIndexing()/stopIndexing() do, so there is no Context to
+    // marshal across the boundary here.
+    //
+    // The payload MUST go as a real jstring: the variadic callStaticMethod does
+    // not convert a const char* to a jobject, and passing one aborts the process
+    // with "jobject is an invalid JNI transition frame reference". Same
+    // fromString(...).object<jstring>() pattern as openUrl() below.
+    const QJniObject javaPayload = QJniObject::fromString(QString::fromUtf8(json));
+    const bool started = QJniObject::callStaticMethod<jboolean>(
+        "org/aurelex/pocket/dictionary/AurelexActivity",
+        "startDictionaryDownload",
+        "(Ljava/lang/String;)Z",
+        javaPayload.object<jstring>());
+    if (!started) {
+        // A refused start (no service, bad payload, a batch already running)
+        // writes no marker, so nothing would ever end the download. Say so
+        // instead of leaving a bar that spins forever.
+        m_audioReloadIds.clear();
+        m_downloadOutcome = QStringLiteral("failed");
+        m_downloadMessage = tr("The download could not be started.");
+        emit downloadChanged();
+    }
+#else
+    qInfo() << "[aurelex] startCatalogDownload: the download service is Android-only";
+#endif
+}
+
+void EngineController::cancelCatalogDownload()
+{
+#if defined(Q_OS_ANDROID)
+    QJniObject::callStaticMethod<void>(
+        "org/aurelex/pocket/dictionary/AurelexActivity",
+        "cancelDictionaryDownload",
+        "()V");
+    // No local flag is set here: the service is the authority on whether a
+    // transfer is in flight, and it reports the outcome through the marker.
+    // Crucially we do NOT touch processingActive — a cancel of the download
+    // queue must never clear the scanning/indexing chain's indication.
+#else
+    qInfo() << "[aurelex] cancelCatalogDownload: the download service is Android-only";
+#endif
+}
+
+void EngineController::clearDownloadOutcome()
+{
+    if (m_downloadOutcome.isEmpty()) return;
+    m_downloadOutcome.clear();
+    m_downloadMessage.clear();
+    m_downloadSucceeded.clear();
+    m_downloadFailed.clear();
+    emit downloadChanged();
+}
+
 void EngineController::setOnboarded(bool v)
 {
     if (m_onboarded == v) return;
@@ -2071,12 +2760,49 @@ void EngineController::loadSettings()
     // Article reflow zoom: default 100 when absent; snap/clamp the persisted
     // value so a hand-edited settings.json can't push it out of range.
     setArticleZoom(obj.value("articleZoom").toDouble(100.0));
+    // Remote catalog URL: compiled-in default when the key is absent. There is
+    // deliberately no migration — an app built before this key existed simply
+    // takes the default, and the saveSettings() below writes it back on the
+    // first run after the upgrade. HTTPS only: a persisted non-HTTPS value is
+    // ignored, because the app has no cleartext exception for the catalog
+    // (network_security_config.xml is deliberately unchanged).
+    m_remoteCatalogUrl = obj.value(QStringLiteral("remoteCatalogUrl")).toString();
+    if (!m_remoteCatalogUrl.startsWith(QLatin1String("https://"), Qt::CaseInsensitive))
+        m_remoteCatalogUrl = QLatin1String(kDefaultRemoteCatalogUrl);
+    // Last-good catalog manifest, so a previously-read catalog still renders
+    // (read-only) while offline. A cached copy that no longer parses is
+    // dropped rather than shown half-populated.
+    const QJsonValue cached = obj.value(QStringLiteral("remoteCatalogManifest"));
+    if (cached.isString()) {
+        const QByteArray raw = cached.toString().toUtf8();
+        RemoteCatalog::Manifest m;
+        QString err;
+        if (RemoteCatalog::parseManifest(raw, &m, &err)) {
+            m_manifest = m;
+            m_manifestRaw = QString::fromUtf8(raw);
+            m_manifestValid = true;
+        } else {
+            qWarning() << "[aurelex] cached remote catalog no longer parses; dropping it:" << err;
+        }
+        m_manifestFetched = QDateTime::fromString(
+            obj.value(QStringLiteral("remoteCatalogFetchedAt")).toString(), Qt::ISODate);
+    }
+    // Reachability is part of the cached catalog (design D11): a manifest we
+    // fetched successfully must stay usable across a restart. Without this, a
+    // restart resets reachability to false, so the cached list renders
+    // read-only and every download is refused until an explicit re-probe even
+    // though nothing has changed. A real outage still clears it on the next
+    // failed probe, and individual download attempts fail with their own
+    // reason regardless.
+    m_catalogReachable = m_manifestValid
+            && obj.value(QStringLiteral("remoteCatalogReachable")).toBool(false);
     // One-off import model: a persisted "sources" array (from older builds) is
     // intentionally ignored — the app-private staged copies remain on disk and
     // are the single source of dictionaries; they re-scan on startup.
     saveSettings();
     applyEffectiveDark();
     emit onboardedChanged();
+    refreshCatalogEntries();
 }
 
 void EngineController::saveSettings()
@@ -2087,7 +2813,24 @@ void EngineController::saveSettings()
     obj.insert("userDarkOverride", m_userDarkOverride);
     obj.insert("onboarded", m_onboarded);
     obj.insert("articleZoom", m_articleZoom);
+    obj.insert("remoteCatalogUrl", m_remoteCatalogUrl);
+    // Only ever a manifest that PARSED: a rejected document must not become the
+    // cache, or a bad fetch would poison every later offline read. The exact
+    // bytes are stored (not a re-serialization), so the offline copy is the
+    // same document the parser approved.
+    if (m_manifestValid) {
+        obj.insert("remoteCatalogManifest", m_manifestRaw);
+        obj.insert("remoteCatalogFetchedAt", m_manifestFetched.toString(Qt::ISODate));
+        obj.insert("remoteCatalogReachable", m_catalogReachable);
+    }
     f.write(QJsonDocument(obj).toJson(QJsonDocument::Compact));
+}
+
+void EngineController::cacheManifest()
+{
+    // Called only after a successful parse; saveSettings() re-emits the parsed
+    // manifest (and its fetch time) into settings.json.
+    saveSettings();
 }
 
 void EngineController::recordHistory(const QString &word)
@@ -2296,6 +3039,29 @@ void EngineController::pollPendingLookup()
     // worker's watcher owns buildingFts/reset, so this doesn't touch them.
     if (peekPendingIndexingDone()) {
         removePendingIndexingFile();
+    }
+
+    // Remote-catalog download progress: the Android DictionaryDownloadService
+    // writes shared_prefs/download.xml as it copies. Read it here so progress /
+    // cancel / outcomes render without the service reaching into QML, and so a
+    // finished batch arms the rescan the tail owes (see syncDownloadState).
+    syncDownloadState();
+
+    // A batch that finished while the engine was still initializing (or while a
+    // tail was live) owes its reload; run it now that the engine is ready and
+    // idle. Kept in the poller, not in syncDownloadState, because "ready and
+    // idle" can become true many ticks after the outcome was reported.
+    if (m_stagedRescanPending && m_ready && !m_processingActive) {
+        m_stagedRescanPending = false;
+        if (!m_audioReloadIds.isEmpty()) {
+            const QStringList ids = m_audioReloadIds;
+            m_audioReloadIds.clear();
+            qInfo().noquote() << "[aurelex] reloading for new resources (deferred):" << ids;
+            reloadDictionariesForResources(ids);
+        } else {
+            qInfo() << "[aurelex] running the rescan a finished download owed";
+            runScan();
+        }
     }
 
     // A concrete word (share / PROCESS_TEXT / deep link) takes priority over

@@ -1,0 +1,75 @@
+{
+  "schemaVersion": 1,
+  "updated": "2026-09-26",
+  "entries": [
+    {
+      "id": "kaikki-en-ru",
+      "name": "Wiktionary (English → Russian)",
+      "langFrom": "en",
+      "langTo": "ru",
+      "attribution": "Wiktionary contributors, CC BY-SA 4.0",
+      "license": "CC-BY-SA-4.0",
+      "files": [
+        {
+          "role": "dictionary",
+          "required": true,
+          "name": "kaikki-en-ru.dsl.dz",
+          "url": "https://aurelex.example/catalog/kaikki-en-ru.dsl.dz",
+          "sizeBytes": 486539264,
+          "sha256": "0000000000000000000000000000000000000000000000000000000000000001"
+        },
+        {
+          "role": "resources",
+          "required": false,
+          "name": "kaikki-en-ru.dsl.dz.files.zip",
+          "url": "https://aurelex.example/catalog/kaikki-en-ru.dsl.dz.files.zip",
+          "sizeBytes": 9663676416,
+          "sha256": "0000000000000000000000000000000000000000000000000000000000000002"
+        }
+      ]
+    },
+    {
+      "id": "enwiktionary-mdict-en-de",
+      "name": "Wiktionary (English → German, mdict)",
+      "langFrom": "en",
+      "langTo": "de",
+      "attribution": "Wiktionary contributors, CC BY-SA 4.0",
+      "license": "CC-BY-SA-4.0",
+      "files": [
+        {
+          "role": "dictionary",
+          "required": true,
+          "name": "enwiktionary-en-de.mdx",
+          "url": "https://aurelex.example/catalog/enwiktionary-en-de.mdx",
+          "sizeBytes": 3221225472,
+          "sha256": "0000000000000000000000000000000000000000000000000000000000000003"
+        },
+        {
+          "role": "dictionary",
+          "required": true,
+          "name": "enwiktionary-en-de.mdd",
+          "url": "https://aurelex.example/catalog/enwiktionary-en-de.mdd",
+          "sizeBytes": 1073741824,
+          "sha256": "0000000000000000000000000000000000000000000000000000000000000004"
+        }
+      ]
+    },
+    {
+      "id": "collins-legacy-en-es",
+      "name": "Legacy English–Spanish (no checksum supplied)",
+      "langFrom": "en",
+      "langTo": "es",
+      "attribution": "Public domain",
+      "license": "PD",
+      "files": [
+        {
+          "role": "dictionary",
+          "required": true,
+          "name": "collins-legacy-en-es.dsl",
+          "url": "https://aurelex.example/catalog/collins-legacy-en-es.dsl",
+          "sizeBytes": 52428800
+        }
+      ]
+    }
+  ]
+}

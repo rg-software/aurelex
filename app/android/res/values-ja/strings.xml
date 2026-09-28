@@ -10,5 +10,8 @@
     <string name="notification_staging">辞書を準備しています…</string>
     <string name="notification_indexing_done">辞書のインデックス作成中…</string>
     <string name="notification_indexing_progress" formatted="false">インデックス作成（%1$d/%2$d）：%3$s</string>
+    <string name="notification_channel_dict_download">辞書のダウンロード</string>
+    <string name="notification_downloading">辞書をダウンロードしています…</string>
+    <string name="notification_downloading_progress" formatted="false">ダウンロード（%1$d/%2$d）：%3$s</string>
     <string name="import_no_supported">新しい辞書は追加されませんでした（追加済み、または対応するファイルが見つかりません）。</string>
 </resources>

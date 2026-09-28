@@ -3,6 +3,7 @@
 #include <QObject>
 #include <QString>
 #include <QStringList>
+#include <QDateTime>
 #include <QVariantList>
 #include <QVariantMap>
 #include <QFuture>
@@ -16,7 +17,10 @@
 
 #include <atomic>
 
+#include "RemoteCatalog.hpp"
+
 class ArticleServer;
+class QNetworkAccessManager;
 
 extern "C" {
 #include "goldendict.h"
@@ -90,6 +94,61 @@ class EngineController : public QObject
     // Dicts tab surfaces it so the user knows a dictionary is missing and that
     // re-adding the folder re-copies it. Empty when everything loaded.
     Q_PROPERTY(QVariantList scanFailures READ scanFailures NOTIFY scanFailuresChanged)
+
+    // ---------- Remote dictionary catalog (remote-dictionary-catalog) ----------
+    // The catalog is ONE hand-maintained JSON document fetched over HTTPS from
+    // remoteCatalogUrl (see loadSettings). It is never fetched at startup: the
+    // probe runs when the user asks for it, so a surface most sessions never
+    // open adds no network latency to launch.
+    Q_PROPERTY(bool catalogLoading READ catalogLoading NOTIFY catalogChanged)
+    // True when the last fetch SUCCEEDED. False means "we could not reach the
+    // catalog right now" — which may still have a readable last-known copy
+    // (catalogEntries stays populated; catalogLastFetched says how old).
+    Q_PROPERTY(bool catalogReachable READ catalogReachable NOTIFY catalogChanged)
+    // The last-good manifest's entries, decorated for QML: {id, name,
+    // langFrom, langTo, pair, attribution, license, totalBytes, requiredBytes,
+    // optionalBytes, hasOptional, installed, installable, unsupportedReason,
+    // files:[{name, sizeBytes, required, role}]}. Rendered read-only when
+    // unreachable; installed/download flags are recomputed on every
+    // dictionariesChanged so a fresh scan is reflected immediately.
+    Q_PROPERTY(QVariantList catalogEntries READ catalogEntries NOTIFY catalogChanged)
+    Q_PROPERTY(QString catalogError READ catalogError NOTIFY catalogChanged)
+    // The manifest's own "updated" field, and when WE last fetched it.
+    Q_PROPERTY(QString catalogUpdated READ catalogUpdated NOTIFY catalogChanged)
+    Q_PROPERTY(QString catalogLastFetched READ catalogLastFetched NOTIFY catalogChanged)
+    Q_PROPERTY(QString remoteCatalogUrl READ remoteCatalogUrl CONSTANT)
+
+    // ---------- Download progress (read from shared_prefs/download.xml) ----------
+    // Deliberately SEPARATE from the staging/scanning/indexing properties
+    // above: a download is a second, independent queue (design D1), so its
+    // progress never raises processingActive and its cancel never lowers it.
+    // The UI keeps the two surfaces visually distinct so they cannot read as
+    // one chain.
+    Q_PROPERTY(bool downloadActive READ downloadActive NOTIFY downloadChanged)
+    // Display name of the entry currently transferring.
+    Q_PROPERTY(QString downloadEntryName READ downloadEntryName NOTIFY downloadChanged)
+    Q_PROPERTY(int downloadFilesDone READ downloadFilesDone NOTIFY downloadChanged)
+    Q_PROPERTY(int downloadFilesTotal READ downloadFilesTotal NOTIFY downloadChanged)
+    Q_PROPERTY(qint64 downloadBytesDone READ downloadBytesDone NOTIFY downloadChanged)
+    Q_PROPERTY(qint64 downloadBytesTotal READ downloadBytesTotal NOTIFY downloadChanged)
+    // Whole-batch byte fraction (0..1). Kept non-negative and capped at 1 so a
+    // hand-maintained sizeBytes that is slightly wrong cannot overshoot the bar.
+    Q_PROPERTY(qreal downloadFraction READ downloadFraction NOTIFY downloadChanged)
+    // Human-readable transfer rate, formatted by the service.
+    Q_PROPERTY(QString downloadSpeed READ downloadSpeed NOTIFY downloadChanged)
+    // "" while running or before the first batch; otherwise "succeeded",
+    // "cancelled" or "failed". Cancelled is NOT a failure: the user asked for
+    // it, and the UI must not present it as an error.
+    Q_PROPERTY(QString downloadOutcome READ downloadOutcome NOTIFY downloadChanged)
+    Q_PROPERTY(QStringList downloadSucceeded READ downloadSucceeded NOTIFY downloadChanged)
+    Q_PROPERTY(QStringList downloadFailed READ downloadFailed NOTIFY downloadChanged)
+    // One-line reason for the terminal outcome (e.g. the entry that failed
+    // verification, or "the catalog is unreachable"). Empty when succeeded.
+    Q_PROPERTY(QString downloadMessage READ downloadMessage NOTIFY downloadChanged)
+    // Staging scratch dirs (files/staging-tmp/<contentHash>) a live download
+    // owns, '|'-separated. purgeStagingTmp skips these so the tail's cleanup
+    // can never delete a transfer in flight.
+    Q_PROPERTY(QString downloadScratchHashes READ downloadScratchHashes NOTIFY downloadChanged)
 public:
     explicit EngineController(QObject *parent = nullptr);
     ~EngineController() override;
@@ -231,6 +290,29 @@ public:
     bool scanningActive() const { return m_scanningActive; }
     bool processingActive() const { return m_processingActive; }
 
+    // Remote catalog accessors.
+    bool catalogLoading() const { return m_catalogLoading; }
+    bool catalogReachable() const { return m_catalogReachable; }
+    QVariantList catalogEntries() const { return m_catalogEntries; }
+    QString catalogError() const { return m_catalogError; }
+    QString catalogUpdated() const { return m_catalogUpdated; }
+    QString catalogLastFetched() const { return m_catalogLastFetched; }
+    QString remoteCatalogUrl() const { return m_remoteCatalogUrl; }
+
+    bool downloadActive() const { return m_downloadActive; }
+    QString downloadEntryName() const { return m_downloadEntryName; }
+    int downloadFilesDone() const { return m_downloadFilesDone; }
+    int downloadFilesTotal() const { return m_downloadFilesTotal; }
+    qint64 downloadBytesDone() const { return m_downloadBytesDone; }
+    qint64 downloadBytesTotal() const { return m_downloadBytesTotal; }
+    qreal downloadFraction() const { return m_downloadFraction; }
+    QString downloadSpeed() const { return m_downloadSpeed; }
+    QString downloadOutcome() const { return m_downloadOutcome; }
+    QStringList downloadSucceeded() const { return m_downloadSucceeded; }
+    QStringList downloadFailed() const { return m_downloadFailed; }
+    QString downloadMessage() const { return m_downloadMessage; }
+    QString downloadScratchHashes() const { return m_downloadScratchHashes; }
+
     // Lookup a word. `articleLoaded(word, html)` on success, or
     // `articleNotFound(word)` when the engine returned a "no match" article.
     Q_INVOKABLE void lookup(const QString &word);
@@ -269,6 +351,38 @@ public:
     // folder picker via the Java shell; the picked folder is stage-copied into
     // app-private storage and then scanned + indexed (a one-off import).
     Q_INVOKABLE void addDictionaryFolder();
+
+    // ---------- Remote catalog API (QML-facing) ----------
+    // Fetch the manifest now. Never called automatically at startup; the
+    // Dictionaries pane calls it when the user asks for the catalog and on an
+    // explicit refresh. On failure catalogReachable goes false, the last-good
+    // manifest (if any) is left in place, and catalogError explains why.
+    Q_INVOKABLE void fetchCatalog();
+    // Drop the cached manifest + its timestamp and fetch again. Offered as the
+    // user-visible "refresh" so re-probing is deliberate, not on every visit.
+    Q_INVOKABLE void refreshCatalog();
+
+    // Free-space preflight for a batch, run BEFORE the service starts so the
+    // user gets a dialog rather than a silent refusal. Returns
+    // {ok, warn, needBytes, freeBytes, missingBytes}: ok=false means refuse
+    // (below bundle + kMinHeadroomBytes), warn=true means ask (below bundle +
+    // kWarnHeadroomBytes). The service re-checks authoritatively before the
+    // first byte; this is the UX, not the guarantee.
+    Q_INVOKABLE QVariantMap downloadPreflight(const QVariantList &requests) const;
+
+    // Start a batch. `requests` is a list of {id, files?}: `files` names the
+    // files to fetch for that entry, defaulting to all of its REQUIRED files.
+    // A normal install passes the entry ids alone; "Add audio" passes an
+    // already-installed entry's id plus the optional file names. Files land in
+    // files/staged/<contentHash> exactly like a folder import, so the existing
+    // scan -> auto-index -> refresh chain picks them up unchanged.
+    Q_INVOKABLE void startCatalogDownload(const QVariantList &requests);
+    // Abort the WHOLE batch: stop the transfer, delete the partial files, and
+    // report "cancelled". It never touches processingActive, so a scan or index
+    // build already running keeps its indication and finishes on its own.
+    Q_INVOKABLE void cancelCatalogDownload();
+    // Clear a terminal outcome once the UI has shown it.
+    Q_INVOKABLE void clearDownloadOutcome();
 
     // System-window inset heights (physical px) read from the Android activity:
     // the Qt window runs edge-to-edge, so QML offsets its top/bottom chrome
@@ -323,10 +437,14 @@ signals:
     // gd_fts_progress.
     void ftsIndexBatchProgress(int currentCount, int total, const QString &name);
     void scanningActiveChanged();
+    // Emitted whenever any remote-catalog or download property changes. One
+    // signal for the whole surface: the UI re-reads the handful of properties
+    // together, and a download updates them several times a second.
+    void catalogChanged();
+    void downloadChanged();
 
 private:
-    void runScan();
-    void autoIndexMissing();
+    void runScan();    void autoIndexMissing();
     // Start the single FTS worker if it isn't already draining the queue.
     void ensureFtsWorker();
     // Permanently delete an imported dictionary's staged copy (when not shared)
@@ -336,7 +454,9 @@ private:
                                const QString &stagedRoot, const QString &appDir);
     // Remove leftover temporary staging dirs (files/staging-tmp/*) once a
     // scan+index batch has finished and the staged tree is consistent.
-    void purgeStagingTmp();
+    // `keepHashes` are content-hash scratch dirs a live download owns; they are
+    // never purged (see downloadScratchHashes).
+    void purgeStagingTmp(const QStringList &keepHashes = QStringList());
     // The staged/<sourceId> directory that owns `file` (a direct child of the
     // staged root), or empty.
     static QString stagedAncestor(const QString &file, const QString &stagedRoot);
@@ -384,6 +504,48 @@ private:
     // clears it when the copy completes (or fails).
     bool peekStagingActive() const;
     void removeStagingFile();
+
+    // ---- remote catalog internals ----
+    // Rebuild m_catalogEntries from the cached manifest + the CURRENT dictionary
+    // list, so installed badges are always consistent with what is loaded. Called
+    // on dictionariesChanged and after a fetch.
+    void refreshCatalogEntries();
+    // Persist the last-good manifest + its fetch timestamp so a previously-read
+    // catalog still renders (read-only) while offline. Called only after a
+    // successful parse: a failed fetch must leave both untouched.
+    void cacheManifest();
+    // Consume shared_prefs/download.xml into the download properties, and on a
+    // terminal outcome clear the marker + arm the tail's rescan. Called from the
+    // same 500 ms poller as the staging/indexing markers.
+    void syncDownloadState();
+    void removeDownloadFile();
+    // Basenames of the currently loaded dictionaries' source paths — the input
+    // installed-detection matches against.
+    QStringList dictionarySources() const;
+    // Catalog entry ids whose optional bundle (audio/resources) this session
+    // downloaded for an ALREADY-loaded dictionary. On success those need
+    // unload + rescan rather than a plain rescan, so it is remembered across the
+    // download -> tail hand-off. Cleared once the reload has run.
+    QStringList m_audioReloadIds;
+    // Unload every loaded dictionary whose source matches one of the named
+    // catalog entries, then rescan so the new resources are picked up. Off the
+    // UI thread: gd_remove_dict/gd_scan_dicts serialize on g_engineMutex, which
+    // a running FTS build holds for its whole duration.
+    void reloadDictionariesForResources(const QStringList &entryIds);
+    // The staging scratch dirs (files/staging-tmp/<contentHash>) a live download
+    // owns, so purgeStagingTmp never deletes a transfer in flight.
+    QStringList liveDownloadHashes() const;
+    // Bytes a request will write: the files it names, or the entry's whole
+    // required set for a plain install.
+    qint64 sumRequestedBytes(const RemoteCatalog::Entry &e, const QVariantMap &request) const;
+    // Free space on the volume the downloads actually land on (the app's files
+    // dir), not the first QStorageInfo root, which may be a different volume.
+    qint64 freeBytesForDownloads() const;
+    const RemoteCatalog::Entry *findCatalogEntry(const QString &id) const;
+    // A rescan the tail owes because a download landed new files. Re-armed
+    // across the hand-off so a batch that finishes mid-chain is not missed, and
+    // the no-blink rule holds (processingActive never dips between them).
+    bool m_stagedRescanPending = false;
 
     // Android system dark-mode (Qt 6.6 QPA doesn't expose it); sampled via JNI
     // on the poller tick. Recomputes and applies the effective dark mode.
@@ -482,4 +644,59 @@ private:
     void prefetchArticle(const QString &word);
     QHash<QString, QString> m_articleCache;
     QStringList m_articleCacheOrder;
+
+    // ---------- Remote catalog state ----------
+    // The compiled-in default. GitHub Pages rather than raw.githubusercontent:
+    // the URL is decoupled from a branch/tag name, so renaming or deleting a
+    // branch cannot break every installed app, and it is served from a CDN with
+    // real HTTP semantics (strong ETag/Last-Modified) instead of raw content's
+    // abuse throttling. Not user-editable in this change; that is a later,
+    // additive settings change (and it is what keeps the LAN-cleartext question
+    // out of this one).
+    static constexpr char kDefaultRemoteCatalogUrl[] =
+        "https://rg-software.github.io/aurelex/catalog/catalog.json";
+    // Fetch budget. The document is a few hundred KB at most; a slow link must
+    // not leave the catalog spinner up indefinitely.
+    static constexpr int kCatalogFetchTimeoutMs = 15000;
+    // A catalog bigger than this is a maintenance mistake, not a data set.
+    static constexpr int kCatalogMaxBytes = 4 * 1024 * 1024;
+    // Re-probing on every Dictionaries-pane visit would be wasteful against a
+    // CDN-cached document, so the cached copy is reused until it is this old and
+    // the user asks for the catalog.
+    static constexpr int kCatalogRereprobeMs = 6 * 60 * 60 * 1000;
+
+    QString m_remoteCatalogUrl;
+    // Last-good manifest, cached in settings.json so it survives a restart and
+    // renders while offline. m_manifestValid guards against a missing/!parsed
+    // cache (there is no manifest to speak of until the first successful fetch).
+    RemoteCatalog::Manifest m_manifest;
+    bool m_manifestValid = false;
+    // The exact bytes of the last-good manifest, so the offline cache is the
+    // document the parser approved rather than a re-serialization of it.
+    QString m_manifestRaw;
+    QDateTime m_manifestFetched;
+    bool m_catalogLoading = false;
+    bool m_catalogReachable = false;
+    QString m_catalogError;
+    QString m_catalogUpdated;
+    QString m_catalogLastFetched;
+    QVariantList m_catalogEntries;
+    QNetworkAccessManager *m_net = nullptr;
+    // A fetch already in flight, so a refresh tap does not stack replies.
+    bool m_catalogFetchInFlight = false;
+
+    // ---------- Download state (mirrors shared_prefs/download.xml) ----------
+    bool m_downloadActive = false;
+    QString m_downloadEntryName;
+    int m_downloadFilesDone = 0;
+    int m_downloadFilesTotal = 0;
+    qint64 m_downloadBytesDone = 0;
+    qint64 m_downloadBytesTotal = 0;
+    qreal m_downloadFraction = 0.0;
+    QString m_downloadSpeed;
+    QString m_downloadOutcome;
+    QStringList m_downloadSucceeded;
+    QStringList m_downloadFailed;
+    QString m_downloadMessage;
+    QString m_downloadScratchHashes;
 };

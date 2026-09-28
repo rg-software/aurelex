@@ -36,6 +36,9 @@ for the milestone tracker).
 - `carve/` — the `gd_*` C boundary (`goldendict.h`, `gd_boundary.cc`) + selected engine sources
   compiled once as an object library, shared by the Qt app and the CI smoke tool.
 - `app/` — the Qt app (QML + WebView, Android) that consumes the carve in-process.
+  `app/openssl/<abi>/` vendors the prebuilt OpenSSL 3 libs Qt's Android TLS needs
+  (the Qt kit does not ship them), wired in via `QT_ANDROID_EXTRA_LIBS`. See
+  `app/openssl/README.md` and design D12 of the remote-catalog change.
 - `openspec/` — OpenSpec planning artifacts (the design is the source of truth for scope).
 
 ## Scope constraints
@@ -126,6 +129,17 @@ elements in automated tests:
 | Dicts | Flat list | `"Dictionaries list"` |
 | Dicts | Grouped list | `"Dictionaries list by pair"` |
 | Dicts | Pair header | Tapping a pair (section) header selects/unselects all dictionaries in that pair (shows a check when fully selected) |
+| Catalog | Add from remote | `"Add from remote"` (cloud glyph button in the Dicts toolbar; opens the catalog sheet in place over the pane — no new tab or dock slot; disabled while `processingActive`) |
+| Catalog | Sheet title | Static label `"Dictionary catalog"`; the informative line under it is not interactive |
+| Catalog | Refresh | `"Refresh catalog"` (header icon and the sheet's bottom `Refresh` button) |
+| Catalog | Close | `"Close catalog"` (header X and the sheet's bottom `Close` button) |
+| Catalog | Entry list | `"Remote catalog list"` (entries are `Accessible.ListItem` named `<entry name>`, plus `, installed` when installed; an entry whose required format this build cannot load is shown but disabled) |
+| Catalog | Add audio | `"Add audio to <entry name>"` (per installed entry with an optional bundle; shown only while no download is running) |
+| Catalog | Free-space dialog | A modal `Dialog`; the OK/Cancel are the standard Material buttons (no custom `Accessible.name`) |
+| Catalog | Download progress | The batch progress surface (a `ProgressBar` with `Accessible.role: ProgressBar`); kept visually distinct from the scanning/indexing banner |
+| Catalog | Cancel download | `"Cancel download"` (requests cancellation; the service reports the real outcome) |
+| Catalog | Download result | `"Dismiss download result"` (OK button on the terminal outcome card) |
+| Catalog | Download selected | `"Download selected"` (bottom-bar primary action; label shows the picked count) |
 | Groups | Add button | `"Add group"` (opens the name dialog; on OK the group is created and its membership editor opens) — a visible button, not an icon-only control |
 | Groups | Add-group dialog | `"Add group"` (`"New group name"` field inside; OK/Cancel) |
 | Groups | ListView | `"Groups list"` |

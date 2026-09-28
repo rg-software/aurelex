@@ -64,3 +64,13 @@ target_include_directories(dictionary_index_test PRIVATE
 )
 target_link_libraries(dictionary_index_test PRIVATE Qt6::Core)
 
+# Remote-catalog manifest parser tests (remote-dictionary-catalog). Links only
+# Qt Core: RemoteCatalog is the parser + installed-detection + preflight
+# constants, with no network and no engine, so the checked-in fixtures under
+# fixtures/ are the contract.
+add_executable(catalog_test CatalogTest.cpp "${CMAKE_CURRENT_SOURCE_DIR}/../RemoteCatalog.cpp")
+target_include_directories(catalog_test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/..")
+target_compile_definitions(catalog_test PRIVATE
+    "REMOTE_CATALOG_FIXTURE_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/fixtures\""
+)
+target_link_libraries(catalog_test PRIVATE Qt6::Core)

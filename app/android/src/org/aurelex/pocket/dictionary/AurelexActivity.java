@@ -724,6 +724,41 @@ public class AurelexActivity extends QtActivity {
         }
     }
 
+    /**
+     * Starts a remote-catalog download batch. Called from
+     * EngineController::startCatalogDownload with a JSON payload built from the
+     * PARSED manifest (so no URL or size reaches the service unvetted), and from
+     * the optional-audio follow-up for an already-installed entry.
+     *
+     * Resolves its own Context via QtNative.activity(), like startIndexing().
+     */
+    public static boolean startDictionaryDownload(String payloadJson) {
+        try {
+            final android.app.Activity a = QtNative.activity();
+            if (a == null) {
+                android.util.Log.w(TAG, "startDictionaryDownload: no activity");
+                return false;
+            }
+            return DictionaryDownloadService.start(a.getApplicationContext(), payloadJson);
+        } catch (Exception e) {
+            android.util.Log.w(TAG, "startDictionaryDownload failed: " + e);
+            return false;
+        }
+    }
+
+    /**
+     * Cancels the running download batch. The service reports the outcome
+     * ("cancelled") through the download marker rather than clearing it here, so
+     * a cancel that arrives after the batch finished cannot erase a real result.
+     */
+    public static void cancelDictionaryDownload() {
+        try {
+            DictionaryDownloadService.cancel();
+        } catch (Exception e) {
+            android.util.Log.w(TAG, "cancelDictionaryDownload failed: " + e);
+        }
+    }
+
     private static boolean isSupportedDictionaryName(String name) {
         final String lower = name.toLowerCase(java.util.Locale.ROOT);
         return lower.endsWith(".mdx") || lower.endsWith(".mdd")
