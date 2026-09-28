@@ -6,6 +6,7 @@
 #include "index_path.hpp"
 
 #include <QDir>
+#include <QFile>
 #include <QFileInfo>
 #include <QThread>
 
@@ -409,6 +410,66 @@ int main( int argc, char ** argv )
     std::printf( "RESOURCE_ON_WORKER_THREAD=%s\n", resourceThreadOk ? "OK" : "FAIL" );
   }
 
+  // ---- re-import of a changed dictionary that keeps its id ----
+  // A re-import replaces a source file in place. The dictionary id is an MD5 of
+  // the source PATHS, so it does not change, and the scan must detect the change
+  // and reload — not discard the freshly built object while the backend has
+  // already rewritten the index underneath the live one, which left that
+  // dictionary's searches failing ("Error reading from the file") and wedged
+  // gd_suggest for its whole timeout (the on-device 2026-09-28 report).
+  // Appending a newline changes the file's size + mtime without breaking the DSL.
+  bool reimportOk = false;
+  {
+    const int dslIdx = findDictBySuffix( ".dsl" ); // the nested, uncompressed fixture
+    char nameBuf[ 256 ]  = { 0 };
+    char fileBuf[ 1024 ] = { 0 };
+    const int infoRc = dslIdx >= 0
+      ? gd_dict_info( dslIdx, nameBuf, static_cast< int >( sizeof nameBuf ),
+                      fileBuf, static_cast< int >( sizeof fileBuf ) )
+      : -1;
+    std::printf( "re-import fixture dict %d: %s (%s)\n", dslIdx, nameBuf, fileBuf );
+
+    bool appended = false;
+    if ( infoRc == 0 ) {
+      QFile f( QString::fromLocal8Bit( fileBuf ) );
+      appended = f.open( QIODevice::Append );
+      if ( appended ) {
+        // A real new entry, not just a newline: the whole point of a re-import is
+        // that the new data takes effect. Before the fix the scan deduped the
+        // changed file by id, so the old object kept the old content and this
+        // headword was never found.
+        f.write( "\nreatest\n\t[m1]re-import test entry[/m]\n" );
+        f.close();
+      }
+    }
+
+    const int countBefore = gd_dict_count();
+    const int reloaded    = appended ? gd_scan_dicts( dictDir ) : 0;
+    const int countAfter  = gd_dict_count();
+    std::printf( "gd_scan_dicts(after source change) -> %d new (count %d -> %d)\n",
+                 reloaded, countBefore, countAfter );
+    const bool reloadOk = appended && reloaded == 1 && countAfter == countBefore;
+    std::printf( "REIMPORT_RELOAD=%s\n", reloadOk ? "OK" : "FAIL" );
+
+    // The new content must resolve, and the reloaded dictionary must still
+    // search: the defect also left the live object reading an index that had been
+    // rewritten underneath it.
+    std::vector< char > out( 1 << 20 );
+    const int sz = gd_lookup( "reatest", out.data(), static_cast< int >( out.size() ) );
+    const bool found =
+      sz > 0 && std::string( out.data(), sz ).find( "gdarticlebody" ) != std::string::npos;
+    std::printf( "REIMPORT_CONTENT=%s\n", found ? "OK" : "FAIL" );
+
+    // Prefix search is what the Search field uses ("no dropdown" on device).
+    std::vector< char > sug2( 1 << 12 );
+    const int sug2N = gd_suggest( "reat", sug2.data(), static_cast< int >( sug2.size() ) );
+    const std::string sug2Str( sug2.data(), sug2N > 0 ? std::strlen( sug2.data() ) : 0 );
+    const bool sugFound = sug2N > 0 && sug2Str.find( "reatest" ) != std::string::npos;
+    std::printf( "REIMPORT_SUGGEST=%s\n", sugFound ? "OK" : "FAIL" );
+
+    reimportOk = reloadOk && found && sugFound;
+  }
+
   // ---- dictionary removal smoke (remove-dictionary) ----
   // The DSL (.dsl.dz, found by suffix) has the headword "book"; remove it,
   // confirm the count drops and "book" stops resolving, then re-scan re-adds
@@ -445,7 +506,7 @@ int main( int argc, char ** argv )
 
   gd_cleanup();
   return ( lookSz > 0 && sugN > 0 && ftsOk && dedupOk && dictOk && optPartsOk && groupsOk
-           && resourceThreadOk )
+           && resourceThreadOk && reimportOk )
              ? 0
              : 1;
 }

@@ -34,12 +34,14 @@
 #include <QUrl>
 #include <QStringList>
 #include <QFile>
+#include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonParseError>
 #include <cstring>
 #include <exception>
+#include <map>
 #include <mutex>
 #include <string>
 #include <vector>
@@ -107,6 +109,22 @@ struct EngineState
   // App-private config dir (from gd_init) — groups.json is persisted here.
   QString groupsConfigDir;
 
+  // Per loaded dictionary (by id): the size + mtime of each of its source files
+  // as they were when the dictionary was loaded. A re-import replaces a source
+  // file in place, and the dictionary id (an MD5 of the source paths) does not
+  // change, so a scan cannot tell "already loaded" from "replaced" by id alone.
+  // These stamps are that missing signal: gd_scan_dicts drops an entry whose
+  // files no longer match, so the replaced dictionary is reloaded instead of
+  // being deduped away while the backend has rewritten its index underneath the
+  // live object (see gd_scan_dicts). In-memory only: a fresh process has no
+  // loaded dictionaries, and its first scan loads everything.
+  struct SourceStamp
+  {
+    qint64 size    = -1;
+    qint64 mtimeMs = -1;
+  };
+  std::map< std::string, std::vector< SourceStamp > > sourceStamps;
+
   // Dictionary currently being full-text indexed, kept alive by a shared ref
   // so a progress reader (UI poller) can sample getIndexingFtsProgress() even
   // while gd_fts_index is mid-build. Guarded by g_ftsProgressMutex (never by
@@ -159,6 +177,41 @@ vector< string > collectFiles( const QString & dirPath, const QStringList & filt
     out.push_back( QDir::toNativeSeparators( it.next() ).toStdString() );
   }
   return out;
+}
+
+// The size + mtime of each of a dictionary's source files, taken when it is
+// loaded so a later scan can tell that the file was replaced (a re-import of an
+// updated version, which keeps the same path and therefore the same id).
+vector< EngineState::SourceStamp > stampSourceFiles( Dictionary::Class & d )
+{
+  vector< EngineState::SourceStamp > stamps;
+  for ( const auto & f : d.getDictionaryFilenames() ) {
+    const QFileInfo fi( QString::fromStdString( f ) );
+    const bool exists = fi.exists();
+    stamps.push_back( { exists ? fi.size() : -1, exists ? fi.lastModified().toMSecsSinceEpoch() : -1 } );
+  }
+  return stamps;
+}
+
+// True when a loaded dictionary's source files no longer match the stamps taken
+// when it was loaded: a file was replaced or removed. A dictionary with no
+// stamps is treated as changed.
+bool dictionarySourceChanged( Dictionary::Class & d )
+{
+  const auto it = g_state->sourceStamps.find( d.getId() );
+  if ( it == g_state->sourceStamps.end() )
+    return true;
+  const vector< string > & files                    = d.getDictionaryFilenames();
+  const vector< EngineState::SourceStamp > & stamps = it->second;
+  if ( files.size() != stamps.size() )
+    return true;
+  for ( size_t i = 0; i < files.size(); ++i ) {
+    const QFileInfo fi( QString::fromStdString( files[ i ] ) );
+    if ( !fi.exists() || fi.size() != stamps[ i ].size
+         || fi.lastModified().toMSecsSinceEpoch() != stamps[ i ].mtimeMs )
+      return true;
+  }
+  return false;
 }
 
 // Materialize EngineState::groupDefs + dictionaries into EngineState::groups
@@ -454,11 +507,35 @@ int gd_scan_dicts( const char * folder )
   ProgressSink sink;
   const string idxPath = indexDir.toStdString();
 
+  // Reload any dictionary whose source files changed since it was loaded. A
+  // re-import replaces a source file in place and the id (an MD5 of the paths)
+  // does not change, so without this the dedup below would discard the freshly
+  // built object and keep the stale one — while the backend had already rewritten
+  // the index underneath it (needToRebuildIndex saw the new file), leaving that
+  // dictionary's searches failing with "Error reading from the file" until the
+  // app restarted. Dropping the changed entry here lets the scan rebuild it
+  // cleanly and makes the updated content take effect.
+  {
+    vector< sptr< Dictionary::Class > > kept;
+    kept.reserve( g_state->dictionaries.size() );
+    for ( auto & d : g_state->dictionaries ) {
+      if ( dictionarySourceChanged( *d ) ) {
+        qInfo( "gd_scan_dicts: source changed, reloading %s", d->getId().c_str() );
+        g_state->sourceStamps.erase( d->getId() );
+        continue;
+      }
+      kept.push_back( std::move( d ) );
+    }
+    g_state->dictionaries.swap( kept );
+  }
+
   const size_t before = g_state->dictionaries.size();
 
   // Dedup: a dictionary id is an MD5 over its (sorted) source file paths, and
   // the UI re-stages + re-scans the same folder on every add, so skip anything
-  // whose id is already loaded rather than appending a duplicate.
+  // whose id is already loaded rather than appending a duplicate. The block
+  // above has already dropped any loaded entry whose files changed, so a
+  // re-import still reloads here.
   QSet< QString > loadedIds;
   loadedIds.reserve( static_cast< int >( g_state->dictionaries.size() ) );
   for ( const auto & d : g_state->dictionaries )
@@ -504,6 +581,9 @@ int gd_scan_dicts( const char * folder )
         continue;
       loadedIds.insert( id );
       d->setFTSParameters( g_state->cfg.preferences.fts );
+      // Remember the source file state so a later scan detects an in-place
+      // replacement (same id, new content) and reloads instead of deduping.
+      g_state->sourceStamps[ d->getId() ] = stampSourceFiles( *d );
       g_state->dictionaries.push_back( std::move( d ) );
     }
   };

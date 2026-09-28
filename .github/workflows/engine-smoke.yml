@@ -166,6 +166,17 @@ jobs:
           # previous in-memory copy and collapses the repeat.
           printf '%s' "$out" | grep -q "GROUP_RELOAD_SOURCE=OK" \
             || { echo "SMOKE FAILED: re-scan did not take the stored group set as the source of truth"; exit 1; }
+          # Re-importing an updated dictionary (same path -> same id) must reload
+          # it in-session: the scan reports it, the new content resolves, and
+          # prefix search still works. Without the reload the scan deduped the new
+          # object away while the backend had rewritten the index under the live
+          # one, wedging gd_suggest for its full timeout on device.
+          printf '%s' "$out" | grep -q "REIMPORT_RELOAD=OK" \
+            || { echo "SMOKE FAILED: changed dictionary not reloaded on re-scan"; exit 1; }
+          printf '%s' "$out" | grep -q "REIMPORT_CONTENT=OK" \
+            || { echo "SMOKE FAILED: re-imported content did not take effect"; exit 1; }
+          printf '%s' "$out" | grep -q "REIMPORT_SUGGEST=OK" \
+            || { echo "SMOKE FAILED: prefix search broken after re-import"; exit 1; }
           # Removing a dictionary drops it (count shrinks, its headword stops
           # resolving) and a re-scan re-adds it.
           printf '%s' "$out" | grep -q "REMOVE_DICT=OK" \
