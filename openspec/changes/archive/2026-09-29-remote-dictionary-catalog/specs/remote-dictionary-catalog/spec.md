@@ -12,18 +12,19 @@ The system SHALL provide a single curated catalog of installable dictionaries
 published as one static document at a location compiled into the app, and SHALL
 reach it over HTTPS only. The system SHALL NOT require the user to configure,
 supply, or authenticate to a catalog location, and SHALL NOT perform discovery
-or scraping of any other source. The system SHALL disable the remote-add action
-while the catalog cannot be reached, and SHALL continue to offer folder import
-regardless.
+or scraping of any other source. The system SHALL keep the remote-add action
+available regardless of reachability, and SHALL report a catalog that cannot be
+reached with a stated reason inside the catalog view rather than disabling the
+action. Folder import SHALL continue to be offered and unaffected.
 
 #### Scenario: Catalog is reachable
 - **WHEN** the user opens the Dictionaries pane and the catalog can be fetched
 - **THEN** the remote-add action is enabled and the catalog's entries can be listed
 
 #### Scenario: Catalog cannot be reached
-- **WHEN** the user opens the Dictionaries pane and the catalog cannot be fetched
-- **THEN** the remote-add action is disabled with a stated reason, and the
-  folder-import action remains available and unaffected
+- **WHEN** the user opens the remote catalog and it cannot be fetched
+- **THEN** the catalog states why it could not be loaded and offers nothing to
+  download, while the folder-import action remains available and unaffected
 
 #### Scenario: Catalog was previously read and is now unreachable
 - **WHEN** the catalog cannot be fetched but a previously fetched catalog is known
@@ -38,19 +39,19 @@ regardless.
 ### Requirement: Browsing the catalog
 The system SHALL present the catalog as a list of entries shown in place over the
 Dictionaries pane, without adding a navigation destination. Each entry SHALL show
-its display name, its source/target language pair, and its total download size
-including any optional files, and SHALL indicate whether the entry is already
-installed. The system SHALL NOT offer entry version comparison, update checks,
+its display name, its source/target language pair, and the size of what will be
+downloaded for it, and SHALL indicate whether the entry is already installed. The system SHALL NOT offer entry version comparison, update checks,
 or any other catalog-side lifecycle action.
 
 #### Scenario: Entries are listed
 - **WHEN** the user opens the remote catalog
-- **THEN** each entry is listed with its name, language pair, and total download size
+- **THEN** each entry is listed with its name, language pair, and download size
 
 #### Scenario: Already-installed entry is marked
 - **WHEN** a catalog entry's dictionary files are already present in the app's
   dictionary set
-- **THEN** the entry is shown as installed and is not offered for download again
+- **THEN** the entry is shown as installed and a fresh install is not offered
+  for it (only its optional resources can still be added)
 
 #### Scenario: Catalog is a read-only list
 - **WHEN** the user views an installed catalog entry
@@ -63,11 +64,11 @@ or any other catalog-side lifecycle action.
 ### Requirement: Selecting and downloading dictionaries
 The system SHALL let the user select one or more catalog entries and download
 them as a single batch, and SHALL report the batch's progress as a fraction
-along with the current entry, the transferred and total size, and the transfer
-speed. The system SHALL keep the transfer running when the app is in the
-background, and SHALL NOT require any storage permission to download. A
-completed download SHALL place the entry's files in the app's private dictionary
-storage and make the dictionary available in the main list.
+along with the entry currently being transferred. The system SHALL keep the
+transfer running when the app is in the background, and SHALL NOT require any
+storage permission to download. A completed download SHALL place the entry's
+files in the app's private dictionary storage and make the dictionary available
+in the main list.
 
 #### Scenario: Downloading a single entry
 - **WHEN** the user selects one catalog entry and starts the download
@@ -76,13 +77,13 @@ storage and make the dictionary available in the main list.
 
 #### Scenario: Downloading a batch
 - **WHEN** the user selects several catalog entries and starts the download
-- **THEN** every selected entry is downloaded in turn, and each becomes
-  available in the main list as it completes
+- **THEN** every selected entry is downloaded in turn, and they become available
+  in the main list once the batch completes and is scanned and indexed
 
 #### Scenario: Progress is reported while downloading
 - **WHEN** a download is in progress
-- **THEN** the app shows a progress fraction, the current entry, the transferred
-  and total size, and the transfer speed, and keeps that indication current
+- **THEN** the app shows a progress fraction and the entry currently being
+  transferred, and keeps that indication current
 
 #### Scenario: Download continues while backgrounded
 - **WHEN** the user leaves the app while a download is in progress
@@ -106,9 +107,11 @@ storage and make the dictionary available in the main list.
 
 ### Requirement: Cancelling a download
 The system SHALL let the user cancel a download in progress, and that cancel
-SHALL stop the whole batch. The system SHALL discard what was received, SHALL
-report the batch as cancelled rather than failed, and SHALL NOT leave a partial
-dictionary that the app would later try to load. Cancelling a download SHALL NOT
+SHALL stop the whole batch. The system SHALL report the batch as cancelled
+rather than failed, and SHALL NOT leave a partially written dictionary that the
+app would later try to load. Bytes already received MAY be kept in the
+transfer's private scratch space so a later retry can resume them; they never
+become a loadable dictionary. Cancelling a download SHALL NOT
 stop or alter any dictionary scanning or index building that is already in
 progress, and SHALL NOT clear or interrupt any processing indication belonging to
 that work.
@@ -117,10 +120,11 @@ that work.
 - **WHEN** the user cancels while a batch of entries is downloading
 - **THEN** the entire batch stops and no further entries are downloaded
 
-#### Scenario: Cancelled files are discarded
+#### Scenario: Cancelled files are not installed
 - **WHEN** a download is cancelled
-- **THEN** the partially received files are deleted, and no dictionary from that
-  batch is added to the main list or reported as a load failure
+- **THEN** no dictionary from that batch is added to the main list or reported
+  as a load failure; any partially received bytes remain only in private scratch
+  space, never as a dictionary
 
 #### Scenario: Cancelled is distinct from failed
 - **WHEN** the user cancels a download
@@ -168,14 +172,20 @@ SHALL name the affected entry.
 
 ### Requirement: Optional audio resources
 The system SHALL treat a catalog entry's pronunciation-audio resources as
-optional, and SHALL NOT download them unless the user asks for them. The system
-SHALL let the user add the audio resources to an entry that is already
-installed, and SHALL make those resources take effect for the installed
-dictionary without the user having to reinstall it or restart the app. Adding
-audio SHALL NOT require the dictionary's full-text index to be rebuilt.
+optional but selected by default: selecting an entry for download SHALL include
+its audio, and the user SHALL be able to turn an entry's audio off before
+downloading it. The system SHALL let the user add the audio resources to an
+entry that is already installed, and SHALL make those resources take effect for
+the installed dictionary without the user having to reinstall it or restart the
+app. Adding audio SHALL NOT require the dictionary's full-text index to be
+rebuilt.
 
-#### Scenario: Audio is not downloaded by default
-- **WHEN** the user downloads a catalog entry that has optional audio resources
+#### Scenario: Audio is included with the entry
+- **WHEN** the user selects a catalog entry that has optional audio resources
+- **THEN** the entry's audio is selected too and is downloaded with it
+
+#### Scenario: User turns the audio off
+- **WHEN** the user turns off an entry's audio before downloading
 - **THEN** only the entry's required files are downloaded, and the audio is not
 
 #### Scenario: User asks for the audio

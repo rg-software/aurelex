@@ -7,9 +7,7 @@ Framework (SAF) folder picker: selecting an allowed folder, stage-copying its
 supported dictionary files into app-private storage via the grant, and scanning
 the copies — without any persistent "sources" list, Rescan, or system-wide
 storage access.
-
 ## Requirements
-
 ### Requirement: Folder-scoped source selection
 The system SHALL let the user add a dictionary source by picking a folder through
 the Android Storage Access Framework folder picker, SHALL limit access to the
@@ -33,6 +31,13 @@ The system SHALL NOT require or request system-wide storage access for import,
 and SHALL limit access to the picked folder (and its subfolders) only. Each pick
 is a one-off import: there is no persistent source list, no Rescan action, and
 deleting an imported dictionary permanently deletes the app's copy of it.
+Installing a dictionary from the curated remote catalog is likewise a one-off
+import of a copy into app-private storage: the catalog is a discovery surface
+that lists dictionaries available to install, not a registered source of the
+user's, so the app SHALL NOT offer a Rescan for it, SHALL NOT take or retain any
+storage grant for it, and SHALL NOT track or re-verify an installed dictionary
+against the catalog. The app MAY cache the last catalog document and re-probe it
+as a discovery surface; that does not make the catalog a dictionary source.
 
 #### Scenario: Pick a folder and import it
 - **WHEN** the user taps Add dictionaries and selects a folder
@@ -65,3 +70,15 @@ deleting an imported dictionary permanently deletes the app's copy of it.
 - **WHEN** the user closes and reopens the app after importing folders
 - **THEN** the imported dictionaries still load from app-private storage without
   re-picking the original folders
+
+#### Scenario: Catalog is not a registered source
+- **WHEN** the user installs a dictionary from the remote catalog
+- **THEN** the app offers no Rescan for it and takes no storage grant for it,
+  and the installed copy is simply a dictionary the app owns until it is removed
+
+#### Scenario: Removing a catalog-installed dictionary
+- **WHEN** the user removes a dictionary that was installed from the remote
+  catalog
+- **THEN** the app permanently deletes its copy, exactly as it does for a
+  folder-imported dictionary
+

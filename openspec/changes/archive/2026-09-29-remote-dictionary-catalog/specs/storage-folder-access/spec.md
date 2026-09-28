@@ -11,9 +11,10 @@ deleting an imported dictionary permanently deletes the app's copy of it.
 Installing a dictionary from the curated remote catalog is likewise a one-off
 import of a copy into app-private storage: the catalog is a discovery surface
 that lists dictionaries available to install, not a registered source of the
-user's, so the app SHALL NOT persist a catalog location, SHALL NOT re-fetch or
-re-verify catalog contents on the user's behalf, SHALL NOT offer a Rescan for it,
-and SHALL NOT take or retain any storage grant for it.
+user's, so the app SHALL NOT offer a Rescan for it, SHALL NOT take or retain any
+storage grant for it, and SHALL NOT track or re-verify an installed dictionary
+against the catalog. The app MAY cache the last catalog document and re-probe it
+as a discovery surface; that does not make the catalog a dictionary source.
 
 #### Scenario: Pick a folder and import it
 - **WHEN** the user taps Add dictionaries and selects a folder
@@ -49,9 +50,8 @@ and SHALL NOT take or retain any storage grant for it.
 
 #### Scenario: Catalog is not a registered source
 - **WHEN** the user installs a dictionary from the remote catalog
-- **THEN** the app records no catalog location as a source, offers no Rescan for
-  it, and takes no storage grant for it; the installed copy is simply a
-  dictionary the app owns until it is removed
+- **THEN** the app offers no Rescan for it and takes no storage grant for it,
+  and the installed copy is simply a dictionary the app owns until it is removed
 
 #### Scenario: Removing a catalog-installed dictionary
 - **WHEN** the user removes a dictionary that was installed from the remote
