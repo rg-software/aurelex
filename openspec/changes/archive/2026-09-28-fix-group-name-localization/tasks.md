@@ -41,11 +41,11 @@
 
 ## 5. Verification
 
-- [ ] 5.1 In an English build, confirm all six surfaces show `All` and the Groups list, picker, and both scope buttons are unchanged from before the change
-- [ ] 5.2 On a Russian-locale device, confirm the Groups list, the picker, both scope buttons, and a history row all read `Все` — no surface left showing `All`
-- [ ] 5.3 On a Japanese-locale device, confirm the built-in group reads the Japanese string, and that a user-created group still shows the name the user typed, untranslated
+- [ ] 5.1 In an English build, confirm all six surfaces show `All` and the Groups list, picker, and both scope buttons are unchanged from before the change **Deferred** at archive time (2026-09-28) - English-build verification is tracked with the separate En/Ja builds goal.
+- [ ] 5.2 On a Russian-locale device, confirm the Groups list, the picker, both scope buttons, and a history row all read `Все` — no surface left showing `All` **Partly verified** at archive time (2026-09-28) - on a ru-RU device the Groups row, the Search scope button and history rows read "Все" (row content-desc stayed "All"); the picker and FTS button were not opened separately, though both share the same _groupLabel path.
+- [ ] 5.3 On a Japanese-locale device, confirm the built-in group reads the Japanese string, and that a user-created group still shows the name the user typed, untranslated **Deferred** at archive time (2026-09-28) - Japanese-build verification is tracked with the separate En/Ja builds goal.
 - [x] 5.4 In an English build, confirm the built-in group row and picker row still expose `content-desc` `All`, so the `docs/TESTING.md` rows 11 and 13 addressing works unchanged
-- [ ] 5.5 Record a lookup in a group, delete that group, and confirm the history row's label becomes the built-in group's name immediately and the word is still there
-- [ ] 5.6 Tap that re-pointed row and confirm the lookup runs in the group the row now names, and that a headword present only in a dictionary outside the deleted group now resolves
+- [ ] 5.5 Record a lookup in a group, delete that group, and confirm the history row's label becomes the built-in group's name immediately and the word is still there **Verified via seed** at archive time (2026-09-28) - the load-time re-point was confirmed on device with a seeded dangling group id (log + persisted files); the delete-button trigger was not exercised separately.
+- [ ] 5.6 Tap that re-pointed row and confirm the lookup runs in the group the row now names, and that a headword present only in a dictionary outside the deleted group now resolves **Not verified** at archive time (2026-09-28) - the re-point repair was confirmed on device, but a tap-through with a headword outside the deleted group was not run.
 - [x] 5.7 Restart the app and confirm the re-pointed entries survive (the rewrite was persisted) and the pass logs zero further rewrites
 - [x] 5.8 Confirm `carve/`, `patches/`, and the CI smoke test are untouched — this change is app-side only

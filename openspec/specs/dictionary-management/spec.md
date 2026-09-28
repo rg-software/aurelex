@@ -119,8 +119,16 @@ whole chain finishes (or fails).
 
 ### Requirement: Dictionary groups
 The system SHALL let the user organize loaded dictionaries into multiple named groups, each an ordered subset, and SHALL let the user select which group is active for lookups. An implicit "All" group containing every loaded dictionary is always available. Managing groups, their membership, their order, and the active group is part of this capability. Groups SHALL persist across app restarts (membership stored by stable dictionary identifier and re-resolved after dictionaries load).
+The name of the implicit "All" group is not stored by the app; it is derived from
+that group's stable identifier and presented in the active language, so every
+surface that names a group shows the same string for it. User-created groups keep
+the name the user gave them.
 
 Loading or re-scanning dictionaries SHALL NOT change the set of groups: the stored group set is the source of truth and a scan SHALL be idempotent for it, so importing a dictionary never adds, renames, or drops a group. Each group SHALL remain uniquely identifiable by its stored identifier across scans, and a stored group set that already contains the same identifier more than once SHALL be repaired to one group per identifier (keeping the union of their members) rather than being shown as duplicate rows.
+A recorded lookup or favorite that refers to a group identifier which no longer
+exists SHALL be re-pointed to the implicit "All" group, and the rewrite SHALL be
+persisted, so the stored entry never claims a scope that is not there. The word
+itself SHALL be kept.
 
 The groups list SHALL present each group as a row tap: tapping a group row opens
 its membership editor directly. A non-"All" group's editor supports add, remove,
@@ -158,6 +166,23 @@ show a technical subtitle (such as an internal id).
 #### Scenario: Repeated scans leave the group set unchanged
 - **WHEN** dictionaries are scanned more than once in a session (for example the user imports several dictionaries in a row)
 - **THEN** the number of groups, their names, their membership, and their order are identical after every scan
+#### Scenario: The built-in group is named in the active language
+- **WHEN** the groups list, a group picker, a search scope control, a history row, a favorites row, or the membership editor header names the implicit "All" group
+- **THEN** that name is the active language's word for it, not an English literal
+
+#### Scenario: A user-created group keeps its own name
+- **WHEN** the user has created a group with a name they typed
+- **THEN** that group is presented under the name the user gave it, in every surface
+
+#### Scenario: A lookup recorded against a deleted group is re-pointed
+- **GIVEN** a lookup or favorite was recorded in a group that has since been deleted
+- **WHEN** the app loads or the group is deleted
+- **THEN** that entry is attributed to the implicit "All" group, the word is kept, and the change is persisted
+
+#### Scenario: A re-pointed entry looks up in the group it names
+- **GIVEN** a history row was re-pointed to the implicit "All" group
+- **WHEN** the user taps that row
+- **THEN** the lookup runs in the group the row now names
 
 #### Scenario: Group identity is stable across scans
 - **WHEN** dictionaries are scanned again after a group was created
