@@ -646,15 +646,14 @@ private:
     QStringList m_articleCacheOrder;
 
     // ---------- Remote catalog state ----------
-    // The compiled-in default. GitHub Pages rather than raw.githubusercontent:
-    // the URL is decoupled from a branch/tag name, so renaming or deleting a
-    // branch cannot break every installed app, and it is served from a CDN with
-    // real HTTP semantics (strong ETag/Last-Modified) instead of raw content's
-    // abuse throttling. Not user-editable in this change; that is a later,
-    // additive settings change (and it is what keeps the LAN-cleartext question
-    // out of this one).
+    // The compiled-in default. TEMPORARY: the maintainer's self-hosted Seafile
+    // share, used to exercise the real download path on device. Replace with the
+    // final hosted catalog URL before release (the target is GitHub Pages, chosen
+    // so the URL is decoupled from a branch/tag and served from a CDN). Not
+    // user-editable in this change; that is a later, additive settings change
+    // (and it is what keeps the LAN-cleartext question out of this one).
     static constexpr char kDefaultRemoteCatalogUrl[] =
-        "https://rg-software.github.io/aurelex/catalog/catalog.json";
+        "https://seafile.rt247a.ddns.me/f/26478702ed5b41fd82f1/?dl=1";
     // Fetch budget. The document is a few hundred KB at most; a slow link must
     // not leave the catalog spinner up indefinitely.
     static constexpr int kCatalogFetchTimeoutMs = 15000;

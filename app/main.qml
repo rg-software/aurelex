@@ -152,7 +152,12 @@ ApplicationWindow {
             "bookmark": 0xe866,
             "dark_mode": 0xe51c,
             "zoom_in": 0xe8ff,
-            "zoom_out": 0xe900
+            "zoom_out": 0xe900,
+            "cloud_download": 0xe2c0,
+            "refresh": 0xe5d5,
+            "sync": 0xe627,
+            "music_note": 0xe405,
+            "music_off": 0xe440
         }
         return map[name] !== undefined ? String.fromCharCode(map[name]) : "\uFFFD"
     }
@@ -1141,23 +1146,51 @@ ColumnLayout {
         property bool byPair: false
         // Indices of selected dictionary rows (for Delete selection).
         property var selectedDicts: []
-        // ---------- remote catalog sheet ----------
+        // ---------- remote catalog pane ----------
         property bool catalogOpen: false
-        // Entry ids the user has ticked for this batch. Reset on open so a
-        // previous selection never silently re-appears in a new batch.
-        property var catalogPicked: []
+        // Entry ids ticked for the next batch, and the subset whose audio the
+        // user turned OFF. Audio is opted OUT: selecting an entry selects its
+        // bundle too, and the music toggle only ever removes it.
+        property var catalogSelected: []
+        property var catalogAudioOff: []
         function _openCatalog() {
-            dictsPane.catalogPicked = []
+            dictsPane.catalogSelected = []
+            dictsPane.catalogAudioOff = []
             dictsPane.catalogOpen = true
-            // Never fetched on startup: only here, when the user asked for it.
-            engine.fetchCatalog()
+            // Re-probe on every open so the pane shows the latest catalog; the
+            // cached copy still renders immediately while the fetch is in flight.
+            engine.refreshCatalog()
         }
-        function _togglePick(id) {
-            const sel = dictsPane.catalogPicked
+        function _catalogIsSelected(id) {
+            return dictsPane.catalogSelected.indexOf(id) >= 0
+        }
+        // Name tap: installed entries are not selectable (only their audio
+        // toggle is); selecting clears any audio opt-out, deselecting forgets it.
+        function _toggleCatalogSelect(id) {
+            const e = dictsPane._catalogEntry(id)
+            if (!e || e.installed || !e.installable) return
+            const sel = dictsPane.catalogSelected
             const i = sel.indexOf(id)
             if (i >= 0) sel.splice(i, 1)
             else sel.push(id)
-            dictsPane.catalogPicked = sel
+            dictsPane.catalogSelected = sel
+            dictsPane.catalogAudioOff = dictsPane.catalogAudioOff.filter(function(x){ return x !== id })
+        }
+        // Music tap. Installed entry: add the missing bundle now. Selected
+        // entry: toggle the opt-out. Otherwise nothing (select the row first).
+        function _toggleCatalogAudio(id) {
+            const e = dictsPane._catalogEntry(id)
+            if (!e || !e.hasOptional || e.resourcesPresent) return
+            if (e.installed) {
+                dictsPane._startRequests([{ id: e.id, audio: true }])
+                return
+            }
+            if (!dictsPane._catalogIsSelected(id)) return
+            const off = dictsPane.catalogAudioOff
+            const i = off.indexOf(id)
+            if (i >= 0) off.splice(i, 1)
+            else off.push(id)
+            dictsPane.catalogAudioOff = off
         }
         function _catalogEntry(id) {
             const all = engine.catalogEntries
@@ -1165,16 +1198,20 @@ ColumnLayout {
                 if (all[i].id === id) return all[i]
             return null
         }
-        // Requests for the ticked entries. An installed entry is dropped: the
-        // list shows it as installed, and re-downloading it would only churn.
-        // `files` is deliberately empty -> the whole required set.
+        // Requests for the selected entries. `audio` is on unless the user
+        // opted that entry out, so a fresh install carries required (+ optional)
+        // and an installed entry carries just its missing bundle.
         function _pickedRequests() {
             const reqs = []
-            for (let i = 0; i < dictsPane.catalogPicked.length; i++) {
-                const e = dictsPane._catalogEntry(dictsPane.catalogPicked[i])
-                // installed -> nothing to do; not installable -> this build
-                // cannot load its required files, so it must never be sent.
-                if (e && !e.installed && e.installable) reqs.push({ id: e.id, files: [] })
+            for (let i = 0; i < dictsPane.catalogSelected.length; i++) {
+                const e = dictsPane._catalogEntry(dictsPane.catalogSelected[i])
+                if (!e || !e.installable) continue
+                const audio = e.hasOptional
+                    && dictsPane.catalogAudioOff.indexOf(e.id) < 0
+                // An installed entry whose bundle is present (or declined) has
+                // nothing to fetch; skip it rather than reporting a space error.
+                if (e.installed && (!audio || e.resourcesPresent)) continue
+                reqs.push({ id: e.id, audio: audio })
             }
             return reqs
         }
@@ -1182,10 +1219,11 @@ ColumnLayout {
         // `ok` is "above the hard minimum", `warn` is "below the 2 GiB comfort
         // tier"; so refuse is checked FIRST, then the warning, and only a batch
         // with comfortable headroom starts silently.
-        function _startPicked() {
-            const reqs = dictsPane._pickedRequests()
+        function _startRequests(reqs) {
             if (reqs.length === 0) return
             const pf = engine.downloadPreflight(reqs)
+            // Nothing resolvable: nothing to fetch, so no dialog at all.
+            if (pf.nothing) return
             if (!pf.ok) {
                 dictsPane._confirmFree(qsTr("Not enough free space"),
                     qsTr("%1 is needed but only %2 is free. Free up space and try again.")
@@ -1203,6 +1241,9 @@ ColumnLayout {
                 engine.startCatalogDownload(reqs)
             }
         }
+        function _startPicked() {
+            dictsPane._startRequests(dictsPane._pickedRequests())
+        }
         function _confirmFree(title, body, reqs, proceedAnyway) {
             freeSpaceDialog.titleText = title
             freeSpaceDialog.bodyText = body
@@ -1210,28 +1251,15 @@ ColumnLayout {
             freeSpaceDialog.requests = reqs
             freeSpaceDialog.open()
         }
-        // Optional bundle (usually audio) for an already-installed entry. It
-        // goes through the SAME free-space gate as a new install: the bundle is
-        // often the largest single download in the catalog, so a warning-tier
-        // ask here is just as necessary. `files` names only the optional files,
-        // which is what tells the service to add them to the installed entry
-        // instead of re-creating it.
-        function _startAudio(entry) {
-            const reqs = [{ id: entry.id, files: entry.optionalFileNames }]
-            const pf = engine.downloadPreflight(reqs)
-            if (!pf.ok) {
-                dictsPane._confirmFree(qsTr("Not enough free space"),
-                    qsTr("%1 is needed but only %2 is free. Free up space and try again.")
-                        .arg(root.fmtSize(pf.needBytes)).arg(root.fmtSize(pf.freeBytes)),
-                    reqs, false)
-            } else if (pf.warn) {
-                dictsPane._confirmFree(qsTr("Not much free space"),
-                    qsTr("About %1 is needed but only %2 is free. Downloading may fail if the app also needs room for the index.")
-                        .arg(root.fmtSize(pf.needBytes)).arg(root.fmtSize(pf.freeBytes)),
-                    reqs, true)
-            } else {
-                engine.startCatalogDownload(reqs)
-            }
+        // A landed batch is deselected once the rescan marks it installed, so
+        // the next batch starts clean without the user unticking anything.
+        function _pruneSelection() {
+            const keep = dictsPane.catalogSelected.filter(function(id){
+                const e = dictsPane._catalogEntry(id)
+                return e && !e.installed
+            })
+            if (keep.length !== dictsPane.catalogSelected.length)
+                dictsPane.catalogSelected = keep
         }
         // Flattened model for By-Pair view: entries are either
         // {type:"header", pair:...} or {type:"dict", ...dict}. Rebuilt whenever
@@ -1405,28 +1433,33 @@ text: root._stagingActive
                 // "Add" (folder-scoped SAF picker). Qt 6.6 RoundButton stands in
                 // for the Material 3 FloatingActionButton; the folder-open icon
                 // signals importing from local storage.
-                RoundButton {
+                Button {
+                    text: root.symbolIcon("folder_open")
+                    font.family: root.symbolFontFamily
+                    font.pixelSize: 18
                     highlighted: true
                     Accessible.name: "Add"
                     Accessible.role: Accessible.Button
                     onClicked: engine.addDictionaryFolder()
-                    contentItem: RowLayout {
-                        spacing: 6
-                        Label {
-                            text: root.symbolIcon("folder_open")
-                            font.family: root.symbolFontFamily
-                            font.pixelSize: 18
-                            color: Material.primaryHighlightedTextColor
-                            Layout.alignment: Qt.AlignVCenter
-                        }
-                        Label {
-                            text: qsTr("Add")
-                            font.pixelSize: 14
-                            font.bold: true
-                            color: Material.primaryHighlightedTextColor
-                            Layout.alignment: Qt.AlignVCenter
-                        }
-                    }
+                }
+                // Remote catalog: the curated download list. Sits next to Add
+                // because it is the other way a dictionary gets here, and is
+                // disabled while the app is processing so a batch cannot be
+                // queued behind an in-flight scan/index. NOT disabled when the
+                // catalog is unreachable: opening the pane is how the user sees
+                // the reason and retries, and a previously-read catalog still
+                // renders read-only there.
+                Button {
+                    text: root.icon("cloud_download")
+                    font.family: root.iconFontFamily
+                    font.pixelSize: 18
+                    // A primary action, not a toggle: keep it in the accent so it
+                    // never reads as a disabled grey button.
+                    highlighted: true
+                    enabled: !engine.processingActive
+                    Accessible.name: "Add from remote"
+                    Accessible.role: Accessible.Button
+                    onClicked: dictsPane._openCatalog()
                 }
                 // Delete selection: sits right next to Add, styled like the
                 // By Pair toggle — gray while nothing is selected, magenta
@@ -1437,7 +1470,9 @@ text: root._stagingActive
                 // removal tapped then would queue for minutes and — on repeated
                 // taps — run against stale indices after the list shifts.
                 Button {
-                    text: qsTr("Remove")
+                    text: root.icon("delete")
+                    font.family: root.iconFontFamily
+                    font.pixelSize: 18
                     highlighted: dictsPane.selectedDicts.length > 0
                         && !engine.processingActive
                     enabled: dictsPane.selectedDicts.length > 0
@@ -1455,25 +1490,6 @@ text: root._stagingActive
                     Accessible.name: "By Pair"
                     Accessible.role: Accessible.Button
                     onClicked: dictsPane.byPair = !dictsPane.byPair
-                }
-                // Remote catalog: the curated download list. Sits next to Add
-                // because it is the other way a dictionary gets here, and is
-                // disabled while the app is processing so a batch cannot be
-                // queued behind an in-flight scan/index.
-                Button {
-                    text: root.icon("cloud_download")
-                    font.family: root.iconFontFamily
-                    font.pixelSize: 18
-                    highlighted: dictsPane.catalogOpen
-                    // Disabled while the app is processing so a batch cannot be
-                    // queued behind an in-flight scan/index. NOT disabled when
-                    // the catalog is unreachable: opening the sheet is how the
-                    // user sees the reason and retries, and a previously-read
-                    // catalog still renders read-only there.
-                    enabled: !engine.processingActive
-                    Accessible.name: "Add from remote"
-                    Accessible.role: Accessible.Button
-                    onClicked: dictsPane._openCatalog()
                 }
             }
 
@@ -1685,90 +1701,92 @@ text: root._stagingActive
             }
         }
 
-        // --- remote catalog sheet ---
-        // Same full-pane Rectangle shape as the onboarding overlay below, for
-        // the same reason: on Android, popup-type overlays can miss taps while
-        // normal scene items receive them reliably. It covers the Dicts pane,
-        // which has no inline WebView, so nothing can puncture the dim.
+        // --- remote catalog pane ---
+        // A full-size pane over the Dicts list (not a modal sheet): a back arrow
+        // returns to the dictionary list, matching the group membership editor,
+        // and the bottom dock stays reachable. The pane's surface is opaque.
         Rectangle {
             id: catalogOverlay
             anchors.fill: parent
             visible: dictsPane.catalogOpen
-            color: Qt.rgba(0, 0, 0, 0.5)
+            color: root.uiBg
 
-            // A tap outside the card closes the sheet.
-            MouseArea {
-                anchors.fill: parent
-                onClicked: dictsPane.catalogOpen = false
+            // A landed batch is deselected once the rescan marks it installed.
+            Connections {
+                target: engine
+                function onCatalogChanged() { dictsPane._pruneSelection() }
+                // A finished/failed/cancelled batch shows a one-line note; clear
+                // it after a few seconds so it cannot linger over the list.
+                function onDownloadChanged() {
+                    if (engine.downloadActive) return
+                    if (engine.downloadOutcome.length > 0) outcomeClearTimer.restart()
+                }
+            }
+            Timer {
+                id: outcomeClearTimer
+                interval: 4000
+                onTriggered: engine.clearDownloadOutcome()
             }
 
-            Rectangle {
-                anchors { top: parent.top; left: parent.left; right: parent.right; bottom: parent.bottom }
-                anchors.margins: 16
-                color: root.uiCard
-                radius: 12
-                border.color: root.uiBorder
+            ColumnLayout {
+                anchors.fill: parent
+                anchors.margins: 12
+                spacing: 8
 
-                ColumnLayout {
-                    anchors.fill: parent
-                    anchors.margins: 16
-                    spacing: 10
+                // Header: back, title + status, sync, master download/cancel.
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 8
 
-                    // Header: title, last-updated line, close, refresh.
-                    RowLayout {
+                    ToolButton {
+                        text: root.icon("arrow_back")
+                        font.family: root.iconFontFamily
+                        font.pixelSize: 22
+                        Accessible.name: "Back"
+                        Accessible.role: Accessible.Button
+                        onClicked: dictsPane.catalogOpen = false
+                    }
+                    ColumnLayout {
                         Layout.fillWidth: true
-                        spacing: 8
-
-                        ColumnLayout {
+                        spacing: 2
+                        Label {
+                            text: qsTr("Dictionary catalog")
+                            font.pixelSize: 18
+                            font.bold: true
+                        }
+                        Label {
                             Layout.fillWidth: true
-                            spacing: 2
-                            Label {
-                                text: qsTr("Dictionary catalog")
-                                font.pixelSize: 18
-                                font.bold: true
-                            }
-                            Label {
-                                Layout.fillWidth: true
-                                text: engine.catalogLoading
-                                    ? qsTr("Checking for updates…")
-                                    : engine.catalogError.length > 0
-                                        ? qsTr("Using the saved catalog — the update check failed.")
-                                        : engine.catalogLastFetched.length > 0
-                                            ? qsTr("Updated %1").arg(engine.catalogLastFetched)
-                                            : qsTr("Not checked yet")
-                                font.pixelSize: 11
-                                color: root.uiSubFg
-                                wrapMode: Text.Wrap
-                                elide: Text.ElideRight
-                            }
-                        }
-
-                        RoundButton {
-                            highlighted: false
-                            enabled: !engine.catalogLoading
-                            Accessible.name: "Refresh catalog"
-                            Accessible.role: Accessible.Button
-                            onClicked: engine.refreshCatalog()
-                            contentItem: Label {
-                                text: root.icon("refresh")
-                                font.family: root.iconFontFamily
-                                font.pixelSize: 18
-                                color: root.uiFg
-                            }
-                        }
-                        RoundButton {
-                            highlighted: false
-                            Accessible.name: "Close catalog"
-                            Accessible.role: Accessible.Button
-                            onClicked: dictsPane.catalogOpen = false
-                            contentItem: Label {
-                                text: root.icon("close")
-                                font.family: root.iconFontFamily
-                                font.pixelSize: 18
-                                color: root.uiFg
-                            }
+                            text: engine.catalogLoading
+                                ? qsTr("Checking for updates…")
+                                : engine.catalogError.length > 0
+                                    ? qsTr("Using the saved catalog — the update check failed.")
+                                    : engine.catalogLastFetched.length > 0
+                                        ? qsTr("Updated %1").arg(engine.catalogLastFetched)
+                                        : qsTr("Not checked yet")
+                            font.pixelSize: 11
+                            color: root.uiSubFg
+                            wrapMode: Text.Wrap
+                            elide: Text.ElideRight
                         }
                     }
+                    // Master download; becomes cancel while a batch runs. The
+                    // catalog re-probes on open, so there is no separate sync
+                    // button.
+                    Button {
+                        text: engine.downloadActive ? root.icon("close") : root.icon("cloud_download")
+                        font.family: root.iconFontFamily
+                        font.pixelSize: 18
+                        highlighted: engine.downloadActive
+                            || (dictsPane.catalogSelected.length > 0 && !engine.processingActive)
+                        enabled: engine.downloadActive
+                            || (dictsPane.catalogSelected.length > 0 && !engine.processingActive)
+                        Accessible.name: engine.downloadActive ? "Cancel download" : "Download selected"
+                        Accessible.role: Accessible.Button
+                        onClicked: engine.downloadActive
+                            ? engine.cancelCatalogDownload()
+                            : dictsPane._startPicked()
+                    }
+                }
 
                     // Unreachable with no cache at all: the only honest thing to
                     // show is the reason, since there is no list to show.
@@ -1798,143 +1816,58 @@ text: root._stagingActive
                     wrapMode: Text.Wrap
                 }
 
-                    // Live download progress + cancel. Deliberately NOT the
-                    // processingActive banner: a download is its own queue, and
-                    // its progress must not borrow the scanning/indexing state.
-                    Rectangle {
+                    // Progress only: a bar while a batch runs, plus a plain
+                    // one-line note if it failed or was cancelled. No banners
+                    // and no dismiss button — a completed entry turns grey in
+                    // the list (installed), which IS the success signal.
+                    ColumnLayout {
                         Layout.fillWidth: true
+                        spacing: 4
                         visible: engine.downloadActive
-                        color: Material.color(Material.Purple, Material.Shade50)
-                        radius: 4
-                        implicitHeight: catDlCol.implicitHeight + 16
+                            || (engine.downloadOutcome.length > 0
+                                && engine.downloadOutcome !== "succeeded")
 
-                        ColumnLayout {
-                            id: catDlCol
-                            anchors { left: parent.left; right: parent.right; top: parent.top }
-                            anchors.leftMargin: 10; anchors.rightMargin: 10; anchors.topMargin: 8
-                            spacing: 6
-
-                            RowLayout {
-                                Layout.fillWidth: true
-                                Label {
-                                    Layout.fillWidth: true
-                                    text: engine.downloadFilesTotal > 0
-                                        ? qsTr("Downloading %1 (%2 of %3 files)").arg(
-                                            engine.downloadEntryName)
-                                          .arg(engine.downloadFilesDone)
-                                          .arg(engine.downloadFilesTotal)
-                                        : qsTr("Downloading %1").arg(engine.downloadEntryName)
-                                    font.pixelSize: 13
-                                    font.bold: true
-                                    color: Material.color(Material.Purple)
-                                    elide: Text.ElideMiddle
-                                }
-                                Label {
-                                    visible: engine.downloadSpeed.length > 0
-                                    text: engine.downloadSpeed
-                                    font.pixelSize: 11
-                                    color: root.uiSubFg
-                                }
-                            }
-                            ProgressBar {
-                                Layout.fillWidth: true
-                                from: 0
-                                to: 1
-                                value: engine.downloadFraction
-                                Accessible.role: Accessible.ProgressBar
-                            }
-                            Label {
-                                Layout.fillWidth: true
-                                text: {
-                                    const done = root.fmtSize(engine.downloadBytesDone)
-                                    const total = root.fmtSize(engine.downloadBytesTotal)
-                                    return total.length > 0 ? done + " / " + total : done
-                                }
-                                font.pixelSize: 11
-                                color: root.uiSubFg
-                            }
-                            Button {
-                                Layout.alignment: Qt.AlignRight
-                                text: qsTr("Cancel download")
-                                Accessible.name: "Cancel download"
-                                Accessible.role: Accessible.Button
-                                // Cancellation is a request only: the service
-                                // decides, and reports the real outcome.
-                                onClicked: engine.cancelCatalogDownload()
-                            }
+                        ProgressBar {
+                            Layout.fillWidth: true
+                            visible: engine.downloadActive
+                            from: 0
+                            to: 1
+                            value: engine.downloadFraction
+                            Accessible.role: Accessible.ProgressBar
                         }
-                    }
-
-                    // Terminal outcome of the last batch. Self-clearing on OK so
-                    // it cannot linger over the list on the next visit.
-                    Rectangle {
-                        Layout.fillWidth: true
-                        visible: engine.downloadOutcome.length > 0
-                        color: engine.downloadOutcome === "succeeded"
-                            ? Material.color(Material.Green, Material.Shade50)
-                            : engine.downloadOutcome === "cancelled"
-                                ? Material.color(Material.Grey, Material.Shade100)
-                                : Material.color(Material.Red, Material.Shade50)
-                        radius: 4
-                        implicitHeight: catResCol.implicitHeight + 16
-
-                        ColumnLayout {
-                            id: catResCol
-                            anchors { left: parent.left; right: parent.right; top: parent.top }
-                            anchors.leftMargin: 10; anchors.rightMargin: 10; anchors.topMargin: 8
-                            spacing: 4
-
-                            Label {
-                                Layout.fillWidth: true
-                                text: engine.downloadOutcome === "succeeded"
-                                    ? qsTr("Downloaded. Adding to your dictionaries…")
-                                    : engine.downloadOutcome === "cancelled"
-                                        ? qsTr("Download cancelled.")
-                                        : qsTr("Some downloads failed.")
-                                font.pixelSize: 13
-                                font.bold: true
-                                wrapMode: Text.Wrap
-                            }
-                            // Both lists are shown: a batch that partly worked
-                            // must name what failed AND what landed, so the user
-                            // does not re-download the entries that succeeded.
-                            Repeater {
-                                model: engine.downloadSucceeded
-                                delegate: Label {
-                                    required property string modelData
-                                    Layout.fillWidth: true
-                                    text: qsTr("%1 downloaded").arg(modelData)
-                                    font.pixelSize: 11
-                                    color: Material.color(Material.Green)
-                                    wrapMode: Text.Wrap
-                                }
-                            }
-                            Repeater {
-                                model: engine.downloadFailed
-                                delegate: Label {
-                                    required property string modelData
-                                    Layout.fillWidth: true
-                                    text: qsTr("%1 could not be downloaded").arg(modelData)
-                                    font.pixelSize: 11
-                                    color: Material.color(Material.Red)
-                                    wrapMode: Text.Wrap
-                                }
-                            }
-                            Label {
-                                Layout.fillWidth: true
-                                visible: engine.downloadMessage.length > 0
-                                text: engine.downloadMessage
-                                font.pixelSize: 11
-                                color: root.uiSubFg
-                                wrapMode: Text.Wrap
-                            }
-                            Button {
-                                Layout.alignment: Qt.AlignRight
-                                text: qsTr("OK")
-                                Accessible.name: "Dismiss download result"
-                                Accessible.role: Accessible.Button
-                                onClicked: engine.clearDownloadOutcome()
-                            }
+                        Label {
+                            Layout.fillWidth: true
+                            visible: engine.downloadActive
+                            text: engine.downloadFilesTotal > 0
+                                ? qsTr("Downloading %1 (%2 of %3 files)").arg(
+                                    engine.downloadEntryName)
+                                  .arg(engine.downloadFilesDone)
+                                  .arg(engine.downloadFilesTotal)
+                                : qsTr("Downloading %1").arg(engine.downloadEntryName)
+                            font.pixelSize: 12
+                            color: root.uiSubFg
+                            elide: Text.ElideMiddle
+                        }
+                        Label {
+                            Layout.fillWidth: true
+                            visible: !engine.downloadActive
+                            text: engine.downloadOutcome === "cancelled"
+                                ? qsTr("Download cancelled.")
+                                : engine.downloadMessage.length > 0
+                                    ? engine.downloadMessage
+                                    : qsTr("Some downloads failed.")
+                            font.pixelSize: 12
+                            color: Material.color(Material.Red)
+                            wrapMode: Text.Wrap
+                        }
+                        Label {
+                            Layout.fillWidth: true
+                            visible: !engine.downloadActive
+                                && engine.downloadFailed.length > 0
+                            text: engine.downloadFailed.join(", ")
+                            font.pixelSize: 11
+                            color: root.uiSubFg
+                            wrapMode: Text.Wrap
                         }
                     }
 
@@ -1947,130 +1880,99 @@ text: root._stagingActive
                         model: engine.catalogEntries
                         Accessible.name: "Remote catalog list"
                         Accessible.role: Accessible.List
-                        // An entry whose required files are in a format the
-                        // engine cannot load stays listed but cannot be picked.
+                        // A row is a name block plus a music toggle on the
+                        // right. Tapping the name selects the entry (and its
+                        // audio); tapping the note opts the audio back out.
                         delegate: ItemDelegate {
                             id: catRow
                             required property var modelData
                             required property int index
                             width: ListView.view.width
-                            height: catCol.implicitHeight + 16
+                            height: 76
                             padding: 8
-                            // Pickable = not installed, supported, and no batch
-                            // running. This is NOT wired to `enabled`: an
-                            // installed entry still hosts the "Add audio" button,
-                            // and disabling the delegate disables its children, so
-                            // the button would be untappable. Dim instead, and
-                            // guard the tap.
                             readonly property bool selectable: !catRow.modelData.installed
                                 && catRow.modelData.installable && !engine.downloadActive
-                            highlighted: dictsPane.catalogPicked.indexOf(catRow.modelData.id) >= 0
+                            readonly property bool selected: dictsPane._catalogIsSelected(catRow.modelData.id)
+                            readonly property bool audioOn: catRow.selected
+                                && dictsPane.catalogAudioOff.indexOf(catRow.modelData.id) < 0
+                            highlighted: catRow.selected
                             Accessible.name: catRow.modelData.name
                                 + (catRow.modelData.installed ? ", installed" : "")
                             Accessible.role: Accessible.ListItem
-                            onClicked: if (catRow.selectable) dictsPane._togglePick(catRow.modelData.id)
+                            onClicked: dictsPane._toggleCatalogSelect(catRow.modelData.id)
 
-                            ColumnLayout {
-                                id: catCol
-                                anchors { left: parent.left; right: parent.right; top: parent.top }
-                                anchors.leftMargin: 8; anchors.rightMargin: 8; anchors.topMargin: 8
-                                spacing: 2
+                            contentItem: RowLayout {
+                                spacing: 8
 
-                                RowLayout {
+                                ColumnLayout {
                                     Layout.fillWidth: true
-                                    spacing: 8
+                                    spacing: 2
                                     Label {
                                         Layout.fillWidth: true
                                         text: catRow.modelData.name
                                         font.pixelSize: 15
                                         font.bold: true
                                         elide: Text.ElideMiddle
-                                        opacity: catRow.selectable ? 1.0 : 0.6
+                                        // Installed (downloaded) rows grey out.
+                                        opacity: catRow.modelData.installed ? 0.45
+                                            : (catRow.selectable ? 1.0 : 0.6)
                                     }
                                     Label {
-                                        text: catRow.modelData.pair
-                                        font.pixelSize: 12
+                                        Layout.fillWidth: true
+                                        text: catRow.modelData.installed
+                                            ? qsTr("Installed")
+                                            : qsTr("%1 to download").arg(root.fmtSize(catRow.modelData.requiredBytes))
+                                        font.pixelSize: 11
                                         color: root.uiSubFg
-                                        opacity: catRow.selectable ? 1.0 : 0.6
+                                        wrapMode: Text.Wrap
+                                    }
+                                    Label {
+                                        Layout.fillWidth: true
+                                        visible: !catRow.modelData.installable
+                                        text: qsTr("This dictionary's format is not supported by this app version.")
+                                        font.pixelSize: 11
+                                        color: Material.color(Material.Red)
+                                        wrapMode: Text.Wrap
                                     }
                                 }
 
-                                Label {
-                                    Layout.fillWidth: true
-                                    text: catRow.modelData.installed
-                                        ? qsTr("Installed")
-                                        : qsTr("%1 to download").arg(root.fmtSize(catRow.modelData.requiredBytes))
-                                    font.pixelSize: 11
-                                    color: catRow.modelData.installed
-                                        ? Material.color(Material.Green)
-                                        : root.uiSubFg
-                                    wrapMode: Text.Wrap
-                                }
-
-                                Label {
-                                    Layout.fillWidth: true
-                                    visible: !catRow.modelData.installable
-                                    text: qsTr("This dictionary's format is not supported by this app version.")
-                                    font.pixelSize: 11
-                                    color: Material.color(Material.Red)
-                                    wrapMode: Text.Wrap
-                                }
-
-                                // Optional bundle (usually audio) for an
-                                // already-installed entry. Downloads into the
-                                // same directory, so the existing copy stays
-                                // put and the rescan picks the audio up.
+                                // Music toggle. A note means the entry has an
+                                // optional bundle; `music_off` means it has none.
+                                // Enabled only when it can do something: the row
+                                // is selected (opt the audio out), or the entry
+                                // is installed and still missing its bundle (add
+                                // it now). Audio is opted OUT, so selecting a row
+                                // turns the note on.
                                 Button {
-                                    visible: catRow.modelData.installed
-                                        && catRow.modelData.hasOptional
-                                        && !engine.downloadActive
-                                    text: qsTr("Add audio (%1)").arg(root.fmtSize(catRow.modelData.optionalBytes))
-                                    Accessible.name: "Add audio to " + catRow.modelData.name
+                                    id: audioButton
+                                    readonly property bool actionable: catRow.modelData.hasOptional
+                                        && (catRow.selected
+                                            || (catRow.modelData.installed && !catRow.modelData.resourcesPresent))
+                                    text: catRow.modelData.hasOptional
+                                        ? root.icon("music_note")
+                                        : root.icon("music_off")
+                                    font.family: root.iconFontFamily
+                                    font.pixelSize: 18
+                                    enabled: audioButton.actionable && !engine.downloadActive
+                                    highlighted: (catRow.selected && catRow.audioOn)
+                                        || (catRow.modelData.installed && catRow.modelData.hasOptional
+                                            && !catRow.modelData.resourcesPresent)
+                                    Accessible.name: catRow.modelData.hasOptional
+                                        ? "Audio for " + catRow.modelData.name
+                                        : "No audio for " + catRow.modelData.name
                                     Accessible.role: Accessible.Button
-                                    onClicked: dictsPane._startAudio(catRow.modelData)
+                                    onClicked: dictsPane._toggleCatalogAudio(catRow.modelData.id)
                                 }
                             }
                         }
                     }
 
-                    // Batch action bar.
-                    RowLayout {
-                        Layout.fillWidth: true
-                        spacing: 8
-                        Button {
-                            text: qsTr("Refresh")
-                            enabled: !engine.catalogLoading && !engine.downloadActive
-                            Accessible.name: "Refresh catalog"
-                            Accessible.role: Accessible.Button
-                            onClicked: engine.refreshCatalog()
-                        }
-                        Button {
-                            Layout.fillWidth: true
-                            text: engine.downloadActive
-                                ? qsTr("Downloading…")
-                                : qsTr("Download selected (%1)").arg(dictsPane._pickedRequests().length)
-                            highlighted: true
-                            enabled: !engine.downloadActive
-                                && !engine.processingActive
-                                && dictsPane._pickedRequests().length > 0
-                            Accessible.name: "Download selected"
-                            Accessible.role: Accessible.Button
-                            onClicked: dictsPane._startPicked()
-                        }
-                        Button {
-                            text: qsTr("Close")
-                            Accessible.name: "Close catalog"
-                            Accessible.role: Accessible.Button
-                            onClicked: dictsPane.catalogOpen = false
-                        }
-                    }
-                }
             }
         }
 
         // Free-space gate for a download batch. A Dialog (not an inline
-        // Rectangle) because it is modal over the catalog sheet's own card, and
-        // unlike the Dicts overlays it does not need to dodge a native surface.
+        // Rectangle) because it is modal over the catalog pane, and unlike the
+        // Dicts overlays it does not need to dodge a native surface.
         Dialog {
             id: freeSpaceDialog
             anchors.centerIn: Overlay.overlay

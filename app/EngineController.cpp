@@ -2329,6 +2329,22 @@ void EngineController::refreshCatalogEntries()
                 optionalNames.append(f.name);
             m.insert(QStringLiteral("optionalFileNames"), optionalNames);
             m.insert(QStringLiteral("installed"), RemoteCatalog::isInstalled(e, sources));
+            // Whether every optional file is already staged next to the
+            // dictionary, so the UI can show audio as present instead of
+            // offering the same bundle again. Optional files land in the same
+            // content-hash directory as the dictionary.
+            bool resourcesPresent = !optional.isEmpty();
+            if (resourcesPresent && !m_stagedDir.isEmpty()) {
+                const QString dir = m_stagedDir + QLatin1Char('/')
+                                    + RemoteCatalog::contentHash(e);
+                for (const RemoteCatalog::File &f : optional) {
+                    if (!QFileInfo::exists(dir + QLatin1Char('/') + f.name)) {
+                        resourcesPresent = false;
+                        break;
+                    }
+                }
+            }
+            m.insert(QStringLiteral("resourcesPresent"), resourcesPresent);
             m.insert(QStringLiteral("files"), files);
             m.insert(QStringLiteral("installable"), e.installable);
             m.insert(QStringLiteral("unsupportedReason"), e.unsupportedReason);
@@ -2340,6 +2356,11 @@ void EngineController::refreshCatalogEntries()
     m_catalogLastFetched = m_manifestFetched.isValid()
             ? QLocale::system().toString(m_manifestFetched, QLocale::ShortFormat)
             : QString();
+    // Emit HERE, rather than only from the fetch reply handlers: the scan /
+    // index path (refreshDictionaries) also calls this to re-derive the
+    // installed badges, and without the notify the open pane kept stale rows
+    // (and a stale selection) until it was reopened.
+    emit catalogChanged();
 }
 
 // ---------- Downloads ----------
@@ -2528,22 +2549,23 @@ QVariantMap EngineController::downloadPreflight(const QVariantList &requests) co
         const QString id = r.value(QStringLiteral("id")).toString();
         const RemoteCatalog::Entry *e = findCatalogEntry(id);
         if (!e) continue;
-        // Preflight the bundle that is about to be written: the files named in
-        // the request, or the whole required set for a plain install.
         need += sumRequestedBytes(*e, r);
         names.append(e->name);
     }
+    const qint64 free = freeBytesForDownloads();
     QVariantMap out;
     out.insert(QStringLiteral("names"), names);
     out.insert(QStringLiteral("needBytes"), need);
+    // Always present, so the caller's message never renders an empty %2.
+    out.insert(QStringLiteral("freeBytes"), free);
+    out.insert(QStringLiteral("nothing"), need <= 0);
     if (need <= 0) {
-        // Nothing resolvable: let the caller report it rather than guessing.
+        // Nothing resolvable (an installed entry with audio off, or an unknown
+        // id): this is "nothing to download", NOT a free-space problem.
         out.insert(QStringLiteral("ok"), false);
         out.insert(QStringLiteral("warn"), false);
         return out;
     }
-    const qint64 free = freeBytesForDownloads();
-    out.insert(QStringLiteral("freeBytes"), free);
     out.insert(QStringLiteral("ok"), free >= need + RemoteCatalog::kMinHeadroomBytes);
     out.insert(QStringLiteral("warn"),
                free < need + RemoteCatalog::kWarnHeadroomBytes);
@@ -2555,15 +2577,32 @@ QVariantMap EngineController::downloadPreflight(const QVariantList &requests) co
 qint64 EngineController::sumRequestedBytes(const RemoteCatalog::Entry &e,
                                            const QVariantMap &request) const
 {
+    // An explicit file list wins (legacy callers); otherwise the `audio` flag
+    // decides: a fresh install gets required (+ optional when audio is on), an
+    // already-installed entry gets only the optional bundle.
     const QVariantList wanted = request.value(QStringLiteral("files")).toList();
-    if (wanted.isEmpty()) return e.requiredBytes;
-    qint64 sum = 0;
-    for (const QVariant &w : wanted) {
-        const QString name = w.toString();
-        for (const RemoteCatalog::File &f : e.files)
-            if (f.name == name)
-                sum += f.sizeBytes;
+    if (!wanted.isEmpty()) {
+        qint64 sum = 0;
+        for (const QVariant &w : wanted) {
+            const QString name = w.toString();
+            for (const RemoteCatalog::File &f : e.files)
+                if (f.name == name)
+                    sum += f.sizeBytes;
+        }
+        return sum;
     }
+    const bool audio = request.value(QStringLiteral("audio")).toBool();
+    if (RemoteCatalog::isInstalled(e, dictionarySources())) {
+        qint64 sum = 0;
+        if (audio)
+            for (const RemoteCatalog::File &f : e.optionalFiles())
+                sum += f.sizeBytes;
+        return sum;
+    }
+    qint64 sum = 0;
+    for (const RemoteCatalog::File &f : e.files)
+        if (f.required || (audio && !f.required))
+            sum += f.sizeBytes;
     return sum;
 }
 
@@ -2608,13 +2647,28 @@ void EngineController::startCatalogDownload(const QVariantList &requests)
         // but a download of its unsupported required files would land a
         // dictionary the engine can never load.
         if (!e || !e->installable) continue;
+        const bool wantAudio = r.value(QStringLiteral("audio")).toBool();
+        const bool installed = RemoteCatalog::isInstalled(*e, dictionarySources());
         const QVariantList wanted = r.value(QStringLiteral("files")).toList();
         QJsonArray filesOut;
         QVector<RemoteCatalog::File> chosen;
-        for (const RemoteCatalog::File &f : e->files) {
-            if (wanted.isEmpty() ? f.required : wanted.contains(f.name))
-                chosen.append(f);
+        if (!wanted.isEmpty()) {
+            // Legacy explicit selector.
+            for (const RemoteCatalog::File &f : e->files)
+                if (wanted.contains(f.name))
+                    chosen.append(f);
+        } else if (installed) {
+            // Already loaded: only a missing optional bundle can be added, and
+            // only when the user asked for audio. Nothing to re-download.
+            if (wantAudio)
+                chosen = e->optionalFiles();
+        } else {
+            // Fresh install: required always, resources only when audio is on.
+            for (const RemoteCatalog::File &f : e->files)
+                if (f.required || (wantAudio && !f.required))
+                    chosen.append(f);
         }
+        if (chosen.isEmpty()) continue;
         for (const RemoteCatalog::File &f : chosen) {
             QJsonObject fo;
             fo.insert(QStringLiteral("name"), f.name);
@@ -2631,7 +2685,7 @@ void EngineController::startCatalogDownload(const QVariantList &requests)
         ro.insert(QStringLiteral("contentHash"), RemoteCatalog::contentHash(*e));
         ro.insert(QStringLiteral("files"), filesOut);
         requestsOut.append(ro);
-        need += sumRequestedBytes(*e, r);
+        for (const RemoteCatalog::File &f : chosen) need += f.sizeBytes;
         // "Add audio" on an ALREADY-INSTALLED entry: nothing new to load, only
         // new resources next to the existing dictionary. A plain rescan cannot
         // do that -- the engine already holds the dictionary open, so the
@@ -2644,7 +2698,7 @@ void EngineController::startCatalogDownload(const QVariantList &requests)
         bool allOptional = !chosen.isEmpty();
         for (const RemoteCatalog::File &f : chosen)
             if (f.required) allOptional = false;
-        if (allOptional && RemoteCatalog::isInstalled(*e, dictionarySources())) {
+        if (allOptional && installed) {
             if (!pendingAudioIds.contains(e->id))
                 pendingAudioIds.append(e->id);
         }

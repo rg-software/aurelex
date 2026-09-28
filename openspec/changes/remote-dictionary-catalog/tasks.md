@@ -155,3 +155,36 @@ Bugs found by device testing and fixed in this change:
    memory on the UI thread (`fetchCatalog()::…` ← `QTimerInfoList::activateTimers`).
    Fixed by capturing a `QPointer<QNetworkReply>`. Surfaced only because the
    test session outlived the 15 s timer; earlier rounds rebuilt/restarted first.
+
+## Follow-up UI rework (implemented 2026-09-28)
+
+Interaction agreed with the maintainer and shipped:
+
+- **Dicts toolbar:** the catalog entry point is icon-only (`cloud_download`,
+  highlighted accent) next to `Add`; `Add` and `Remove` lost their text
+  captions; `Remove` is the existing `delete` (trash) glyph.
+- **Catalog surface:** a full-page pane (like the group-membership editor), not
+  a modal sheet — top-left `arrow_back`, title + status line, and a master
+  download button that becomes cancel (X) while a batch runs. No Close/Refresh
+  buttons; opening the pane re-probes the catalog itself.
+- **Per-entry audio (opt-out):** the row has a music toggle. Selecting a name
+  selects the entry and its audio; the note opts the audio back out. Installed
+  rows are not selectable except for the note, which adds a missing bundle.
+  `music_note`/`music_off` and the `audio` request flag + `resourcesPresent`
+  model field back this.
+- **Progress:** no banners/buttons — just a `ProgressBar` and a one-line note;
+  a completed entry greys out as installed, and the selection clears when the
+  rescan marks it installed.
+- **Icon font:** `cloud_download`, `sync`, `music_note`, `music_off` and
+  `refresh` are all present in the bundled **classic** `MaterialIcons-Regular`
+  font (verified), so no subset regeneration was needed — the carve script is
+  only for Symbols-only glyphs like `match_word`.
+- **Catalog URL:** `kDefaultRemoteCatalogUrl` is pointed at the maintainer's
+  Seafile share for real-condition testing; replace with the final hosted URL
+  before release.
+
+Two bugs surfaced by this rework and fixed: `refreshCatalogEntries()` never
+emitted `catalogChanged()`, so the scan path left stale installed badges /
+selection until the pane was reopened; and `downloadPreflight` returned early
+with no `freeBytes` when the computed need was zero, rendering an empty-placeholder
+"not enough space" dialog (now a `nothing` flag, no dialog).

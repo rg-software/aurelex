@@ -123,23 +123,21 @@ elements in automated tests:
 | Search | TextField | `"Search dictionaries"` |
 | Search | Clipboard button | `"Clipboard"` |
 | Search | Suggestion dropdown | Rendered as an HTML `<a>` panel (`#gd-sugg`) *inside* the article WebView — QML controls can't stack above Android's native WebView surface. Each entry carries a `data-w` word and dispatches via the QML link poller (`engine.lookup`), so no page navigation happens; the panel collapses when the article loads. UIAutomator sees entries via the WebView's own DOM accessibility subtree (content-desc = the word). No separate Qt node. |
-| Dicts | Add dict button | `"Add"` (was `"Add dictionaries"`; imports a dictionary folder) |
+| Dicts | Add dict button | `"Add"` (icon-only folder-open glyph; imports a dictionary folder) |
 | Dicts | By Pair toggle | `"By Pair"` (translate glyph icon; highlighted when on) |
-| Dicts | Delete button | `"Remove"` (deletes the current multi-selection; the only dict deletion path; gray when nothing selected, magenta when a selection exists) |
+| Dicts | Delete button | `"Remove"` (icon-only trash glyph; deletes the current multi-selection; the only dict deletion path; gray when nothing selected, magenta when a selection exists) |
 | Dicts | Flat list | `"Dictionaries list"` |
 | Dicts | Grouped list | `"Dictionaries list by pair"` |
 | Dicts | Pair header | Tapping a pair (section) header selects/unselects all dictionaries in that pair (shows a check when fully selected) |
-| Catalog | Add from remote | `"Add from remote"` (cloud glyph button in the Dicts toolbar; opens the catalog sheet in place over the pane — no new tab or dock slot; disabled while `processingActive`) |
-| Catalog | Sheet title | Static label `"Dictionary catalog"`; the informative line under it is not interactive |
-| Catalog | Refresh | `"Refresh catalog"` (header icon and the sheet's bottom `Refresh` button) |
-| Catalog | Close | `"Close catalog"` (header X and the sheet's bottom `Close` button) |
-| Catalog | Entry list | `"Remote catalog list"` (entries are `Accessible.ListItem` named `<entry name>`, plus `, installed` when installed; an entry whose required format this build cannot load is shown but disabled) |
-| Catalog | Add audio | `"Add audio to <entry name>"` (per installed entry with an optional bundle; shown only while no download is running) |
+| Catalog | Add from remote | `"Add from remote"` (cloud glyph button in the Dicts toolbar, next to Add; opens the full-page catalog pane — no new tab or dock slot; always active except while `processingActive`, so an unreachable catalog is reported by the pane, not by disabling the button) |
+| Catalog | Pane title | Static label `"Dictionary catalog"`; the status line under it is not interactive |
+| Catalog | Back | `"Back"` (header arrow; returns to the dictionary list) |
+| Catalog | Re-probe | No button: opening the pane re-probes the catalog automatically |
+| Catalog | Entry list | `"Remote catalog list"` (entries are `Accessible.ListItem` named `<entry name>`, plus `, installed` when installed; an entry whose required format this build cannot load is shown but not selectable) |
+| Catalog | Audio toggle | `"Audio for <entry name>"` / `"No audio for <entry name>"` (per-row music-note / music-off glyph; audio is opted out per entry, enabled only when the row is selected or an installed entry is still missing its bundle) |
 | Catalog | Free-space dialog | A modal `Dialog`; the OK/Cancel are the standard Material buttons (no custom `Accessible.name`) |
-| Catalog | Download progress | The batch progress surface (a `ProgressBar` with `Accessible.role: ProgressBar`); kept visually distinct from the scanning/indexing banner |
-| Catalog | Cancel download | `"Cancel download"` (requests cancellation; the service reports the real outcome) |
-| Catalog | Download result | `"Dismiss download result"` (OK button on the terminal outcome card) |
-| Catalog | Download selected | `"Download selected"` (bottom-bar primary action; label shows the picked count) |
+| Catalog | Download progress | A `ProgressBar` with `Accessible.role: ProgressBar`, plus a non-interactive line; no banner/buttons |
+| Catalog | Download / cancel | `"Download selected"` (header icon; downloads the selected entries) and `"Cancel download"` (same button becomes an X while a batch runs) |
 | Groups | Add button | `"Add group"` (opens the name dialog; on OK the group is created and its membership editor opens) — a visible button, not an icon-only control |
 | Groups | Add-group dialog | `"Add group"` (`"New group name"` field inside; OK/Cancel) |
 | Groups | ListView | `"Groups list"` |
