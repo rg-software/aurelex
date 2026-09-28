@@ -124,8 +124,13 @@ def make_dictzip(data: bytes, chunk_length: int = 16384) -> bytes:
       - gzip header with FEXTRA set
       - 'RA' subfield: version=1, chunkLength, chunkCount, then the compressed
         size of each chunk (the engine's dictzip reader uses these to seek)
-      - one continuous deflate stream; each chunk is terminated with a sync
-        flush so the reader can inflate chunk-by-chunk (inflate+Z_PARTIAL_FLUSH)
+      - one continuous deflate stream; each chunk is terminated with a FULL
+        flush. A full flush resets the deflate history, so any chunk can be
+        inflated in isolation - which is what random access does. A *sync* flush
+        only flushes pending output and keeps the history, so a later chunk's
+        back-references reach into an earlier chunk and a reader that inflates one
+        chunk alone fails with "invalid distance too far back" (the engine does
+        exactly that, so >1-chunk files were unreadable past the first chunk).
       - gzip trailer: crc32 + ISIZE of the uncompressed data
     """
     chunks = []
@@ -134,12 +139,12 @@ def make_dictzip(data: bytes, chunk_length: int = 16384) -> bytes:
     while off < len(data):
         block = data[off:off + chunk_length]
         compressed = co.compress(block)
-        compressed += co.flush(zlib.Z_SYNC_FLUSH)
+        compressed += co.flush(zlib.Z_FULL_FLUSH)
         chunks.append(compressed)
         off += chunk_length
     # The final chunk: pad to full block? No - the reader's count is derived
     # from avail_out, so a short final chunk is fine. Finish the stream.
-    compressed = co.flush()  # Z_FINISH, typically empty after sync flushes
+    compressed = co.flush()  # Z_FINISH, typically empty after full flushes
     if compressed:
         chunks.append(compressed)
 

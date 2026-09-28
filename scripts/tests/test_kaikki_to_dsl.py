@@ -10,12 +10,14 @@ import io
 import json
 import os
 import re
+import struct
 import sys
 import tarfile
 import tempfile
 import time
 import unittest
 import urllib.error
+import zlib
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SCRIPTS = os.path.dirname(HERE)
@@ -1613,6 +1615,56 @@ class ProgressTests(unittest.TestCase):
             sys.stderr = original
         out = stream.getvalue()
         self.assertIn("work: 3/3", out)
+
+
+def dictzip_chunks(blob):
+    """(chunk_length, chunk_count, [compressed chunk bytes]) from a dictzip .dz."""
+    if blob[:2] != b"\x1f\x8b":
+        raise ValueError("not gzip")
+    if not blob[3] & 0x04:
+        raise ValueError("FEXTRA not set")
+    xlen = struct.unpack("<H", blob[10:12])[0]
+    extra = blob[12:12 + xlen]
+    if extra[:2] != b"RA":
+        raise ValueError("no RA subfield")
+    _ver, chlen, chcnt = struct.unpack("<HHH", extra[4:10])
+    sizes = struct.unpack("<%dH" % chcnt, extra[10:10 + 2 * chcnt])
+    off = 12 + xlen
+    chunks = []
+    for size in sizes:
+        chunks.append(blob[off:off + size])
+        off += size
+    return chlen, chcnt, chunks
+
+
+class DictzipTests(unittest.TestCase):
+    """The dictzip writer must emit independently inflatable chunks.
+
+    The engine random-accesses a .dsl.dz: it seeks to a chunk and inflates just
+    that chunk. That works only when every chunk was terminated with a FULL flush,
+    which resets the deflate history. A sync flush keeps the history, so a later
+    chunk's back-references reach into an earlier chunk and inflating it alone
+    fails with "invalid distance too far back" - exactly what a reported
+    multi-chunk dictionary did on device.
+    """
+
+    def test_every_chunk_inflates_independently(self):
+        payload = (b"the quick brown fox jumps over the lazy dog. " * 2000) + bytes(range(256)) * 300
+        chlen, chcnt, chunks = dictzip_chunks(TOOL.make_dictzip(payload))
+        self.assertEqual(chlen, 16384)
+        self.assertGreater(chcnt, 2)
+        total = 0
+        for i, chunk in enumerate(chunks):
+            # Cold-start inflate. With a sync flush this raises for i > 0.
+            raw = zlib.decompressobj(-zlib.MAX_WBITS).decompress(chunk)
+            if i < chcnt - 1:
+                self.assertGreater(len(raw), 0, f"chunk {i} inflated to nothing")
+            total += len(raw)
+        self.assertEqual(total, len(payload))
+
+    def test_stream_round_trips(self):
+        payload = (b"abcdefgh" * 9000) + b"tail"
+        self.assertEqual(gzip.decompress(TOOL.make_dictzip(payload)), payload)
 
 
 if __name__ == "__main__":
