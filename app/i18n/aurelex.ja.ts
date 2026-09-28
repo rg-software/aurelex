@@ -2,14 +2,6 @@
 <!DOCTYPE TS>
 <TS version="2.1" language="ja_JP">
 <context>
-    <name>EngineController</name>
-    <message>
-        <location filename="../EngineController.cpp" line="1690"/>
-        <source>All</source>
-        <translation>すべて</translation>
-    </message>
-</context>
-<context>
     <name>main</name>
     <message>
         <location filename="../main.qml" line="189"/>
@@ -40,6 +32,11 @@
         <location filename="../main.qml" line="388"/>
         <source>Clear all</source>
         <translation>すべて消去</translation>
+    </message>
+    <message>
+        <location filename="../main.qml" line="555"/>
+        <source>All</source>
+        <translation>すべて</translation>
     </message>
     <message>
         <location filename="../main.qml" line="600"/>

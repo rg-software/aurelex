@@ -370,7 +370,7 @@ ApplicationWindow {
                     const hwObj = words[h]
                     const hw = typeof hwObj === "string" ? hwObj : hwObj.word
                     const hg = (typeof hwObj === "string") ? 0 : (hwObj.group || 0)
-                    const hgName = root._escHtml(engine.groupName(hg))
+                    const hgName = root._escHtml(root._groupLabel(hg))
                     html += '<div style="display:flex;align-items:center;border-bottom:1px solid ' + sep + ';">'
                         + '<a id="gd-sugg-link" href="javascript:;" data-action="open-history" data-w="' + root._escHtml(hw)
                         + '" data-group="' + hg
@@ -546,6 +546,24 @@ ApplicationWindow {
             if (engine.groups[i].id === groupId) return i
         }
         return 0
+    }
+    // Display name of the built-in group, in the active language. The engine
+    // boundary returns this group as a hardcoded C literal ("All") because the
+    // carve loads no translation catalog, so the app names it from its own
+    // catalog instead of passing the engine's string through. This is the only
+    // qsTr("All") call site; _groupLabel is the only reader.
+    readonly property string _allGroupLabel: qsTr("All")
+    // The single source of a group's display label, keyed by its stable id (D1).
+    // Every surface that names a group goes through here, so one group reads the
+    // same everywhere. A user group keeps the name the user typed (never
+    // translated); an id with no matching group is labelled as the built-in
+    // group, which is where a tap on such a row actually looks up.
+    function _groupLabel(groupId) {
+        if (groupId === 0) return root._allGroupLabel
+        for (var i = 0; i < engine.groups.length; ++i) {
+            if (engine.groups[i].id === groupId) return engine.groups[i].name
+        }
+        return root._allGroupLabel
     }
     // Is `word` a favorite in the given group (favorites are {word, group})?
     function _isFavorite(word, group) {
@@ -889,11 +907,11 @@ ColumnLayout {
                     padding: 4
                     font.pixelSize: 14
                     text: {
+                        if (engine.groups.length === 0) return ""
                         const i = root._groupIndexForId(root.searchGroupId)
-                        return i >= 0 && i < engine.groups.length
+                        const matches = i >= 0 && i < engine.groups.length
                             && engine.groups[i].id === root.searchGroupId
-                            ? engine.groups[i].name
-                            : (engine.groups.length > 0 ? engine.groups[0].name : "")
+                        return root._groupLabel(matches ? root.searchGroupId : 0)
                     }
                     Accessible.name: "Search group scope"
                     Accessible.role: Accessible.Button
@@ -1886,8 +1904,11 @@ text: root._stagingActive
                     // Tapping the group name opens the membership editor; the
                     // trash asks for confirmation before deleting. Rename lives
                     // inside the editor (no pencil on the row).
+                    // Visible label is localized; Accessible.name above stays the
+                    // invariant English name so UIAutomator addressing is unchanged
+                    // across locales (design D2).
                     contentItem: Label {
-                        text: qsTr("%1 (%2)").arg(groupRow.groupData.name).arg(groupRow.groupData.dictCount)
+                        text: qsTr("%1 (%2)").arg(root._groupLabel(groupRow.groupData.id)).arg(groupRow.groupData.dictCount)
                         font.pixelSize: 16
                         font.bold: true
                         elide: Text.ElideMiddle
@@ -2098,8 +2119,10 @@ text: root._stagingActive
                 Label {
                     Layout.fillWidth: true
                     // Just the group name — it's inside the group's editor, so
-                    // a "Group: " prefix would be redundant.
-                    text: groupsPane.editingGroupName
+                    // a "Group: " prefix would be redundant. Resolved by id, not
+                    // read from the stored name, so the built-in group reads in
+                    // the active language here too.
+                    text: root._groupLabel(groupsPane.editingGroup)
                     font.pixelSize: 16
                     font.bold: true
                     elide: Text.ElideMiddle
@@ -2355,7 +2378,7 @@ text: root._stagingActive
                         }
                         Label {
                             Layout.fillWidth: true
-                            text: engine.groupName(favRow.group)
+                            text: root._groupLabel(favRow.group)
                             elide: Text.ElideMiddle
                             leftPadding: 16
                             font.pixelSize: 11
@@ -2629,11 +2652,11 @@ text: root._stagingActive
                     padding: 4
                     font.pixelSize: 14
                     text: {
+                        if (engine.groups.length === 0) return ""
                         const i = root._groupIndexForId(root.ftsGroupId)
-                        return i >= 0 && i < engine.groups.length
+                        const matches = i >= 0 && i < engine.groups.length
                             && engine.groups[i].id === root.ftsGroupId
-                            ? engine.groups[i].name
-                            : (engine.groups.length > 0 ? engine.groups[0].name : "")
+                        return root._groupLabel(matches ? root.ftsGroupId : 0)
                     }
                     Accessible.name: "Full-text search group scope"
                     Accessible.role: Accessible.Button
@@ -2813,7 +2836,7 @@ text: root._stagingActive
                 delegate: ItemDelegate {
                     width: groupPickerList.width
                     height: 56
-                    text: modelData.name
+                    text: root._groupLabel(modelData.id)
                     highlighted: groupPickerList.currentIndex === index
                     font.pixelSize: 16
                     Accessible.name: modelData.name

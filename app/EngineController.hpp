@@ -109,7 +109,9 @@ public:
     Q_INVOKABLE QStringList favoritesWords() const;
     // Does a group with this id exist (used for group-restore fallback to All)?
     Q_INVOKABLE bool groupExists(int groupId) const;
-    // Human-readable name of a group id (falls back to "All").
+    // Human-readable name of a group id (falls back to the invariant "All").
+    // Not a label source: the UI resolves every visible group name by id via the
+    // QML _groupLabel helper, so the built-in group is localized there.
     Q_INVOKABLE QString groupName(int groupId) const;
     bool darkMode() const { return m_darkMode; }
     bool systemDark() const { return m_systemDark; }
@@ -354,6 +356,13 @@ private:
     void saveHistory();
     void loadFavorites();
     void saveFavorites();
+    // Re-point every history/favorites entry whose group id is absent from
+    // m_groups to the built-in group (0), keeping the word, and persist both
+    // files. No-op while m_groups is empty, so a transient empty list mid-reload
+    // cannot re-point every entry. `deletedGroupId` additionally treats that one
+    // id as gone, so deleteGroup can repair synchronously instead of waiting for
+    // the async refreshGroups round trip. Returns the number of entries rewritten.
+    int repointStaleGroupEntries(int deletedGroupId = -1);
     void loadSettings();
     void saveSettings();
     void pollPendingLookup();

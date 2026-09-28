@@ -195,6 +195,9 @@ void EngineController::setGroups(const QVariantList &list) {
     // Group membership edits change which dictionaries a lookup sees.
     clearArticleCache();
     qInfo() << "[aurelex] setGroups count=" << list.size();
+    // m_groups is known-good here, so this is the first point at which a
+    // dangling history/favorites entry can be recognised as dangling.
+    repointStaleGroupEntries();
     emit groupsChanged();
 }
 
@@ -937,11 +940,19 @@ void EngineController::deleteGroup(int groupId) {
         return gd_group_delete(groupId);
     });
     auto *w = new QFutureWatcher<int>(this);
-    connect(w, &QFutureWatcher<int>::finished, this, [this, w]{
+    connect(w, &QFutureWatcher<int>::finished, this, [this, w, groupId]{
         const int rc = w->result();
         qInfo() << "[aurelex] deleteGroup done rc=" << rc;
-        if (rc == 0) refreshGroups();
-        else setLastError(QStringLiteral("group_delete failed (rc=%1)").arg(rc));
+        if (rc == 0) {
+            // Repair history/favorites entries that pointed at the group just
+            // deleted, so the panel is truthful now rather than after a restart.
+            // The id is passed explicitly: m_groups does not lose it until
+            // refreshGroups resolves asynchronously.
+            repointStaleGroupEntries(groupId);
+            refreshGroups();
+        } else {
+            setLastError(QStringLiteral("group_delete failed (rc=%1)").arg(rc));
+        }
         w->deleteLater();
     });
     w->setFuture(f);
@@ -1739,6 +1750,64 @@ void EngineController::saveFavorites()
     f.write(QJsonDocument(arr).toJson(QJsonDocument::Compact));
 }
 
+// Re-point a history/favorites entry whose group no longer exists to the
+// built-in group. Nothing else prunes these lists, so an entry recorded in a
+// group that was later deleted keeps a dangling id forever: its row claims a
+// scope that is not there, and a tap silently looks up in group 0. The word is
+// always kept — group 0 is a superset of the group that was deleted, so a
+// re-pointed tap returns at least what the original tap would have.
+//
+// Only runs where m_groups is known-good (setGroups, deleteGroup's success
+// path). m_groups is populated asynchronously by the scan, and history loads
+// before it, so an empty list here means "not loaded yet", not "no groups
+// exist" — re-pointing then would re-point every entry.
+//
+// `deletedGroupId` lets deleteGroup repair without waiting for refreshGroups:
+// m_groups still lists the group it just deleted, so the m_groups check alone
+// would not see it as gone.
+int EngineController::repointStaleGroupEntries(int deletedGroupId)
+{
+    if (m_groups.isEmpty()) return 0;
+
+    const auto isStale = [this, deletedGroupId](int g) {
+        if (g == 0) return false;  // the built-in group always exists
+        if (g == deletedGroupId) return true;
+        return !groupExists(g);
+    };
+
+    int rewritten = 0;
+    QVariantList history, favorites;
+    history.reserve(m_history.size());
+    favorites.reserve(m_favorites.size());
+
+    for (const QVariant &entry : m_history) {
+        QVariantMap m = entry.toMap();
+        if (isStale(m.value("group").toInt())) {
+            m.insert("group", 0);
+            ++rewritten;
+        }
+        history.append(m);
+    }
+    for (const QVariant &entry : m_favorites) {
+        QVariantMap m = entry.toMap();
+        if (isStale(m.value("group").toInt())) {
+            m.insert("group", 0);
+            ++rewritten;
+        }
+        favorites.append(m);
+    }
+
+    if (rewritten == 0) return 0;  // idempotent: no writes on a second run
+
+    setHistory(history);
+    setFavorites(favorites);
+    saveHistory();
+    saveFavorites();
+    qInfo() << "[aurelex] repointStaleGroupEntries rewrote" << rewritten
+            << "history/favorites entries to the built-in group";
+    return rewritten;
+}
+
 void EngineController::setHistory(const QVariantList &list)
 {
     if (m_history == list) return;
@@ -1784,8 +1853,11 @@ QString EngineController::groupName(int groupId) const
         if (m.value("id").toInt() == groupId)
             return m.value("name").toString();
     }
-    // Unknown/deleted group id → treat as "All".
-    return tr("All");
+    // Unknown/deleted group id → treat as "All". Deliberately the invariant
+    // literal, not tr("All"): every visible group name resolves by id on the QML
+    // side (_groupLabel), so this fallback is not a label source and must not
+    // become a second, divergent naming path.
+    return QStringLiteral("All");
 }
 
 void EngineController::setUserDarkOverride(bool on)
