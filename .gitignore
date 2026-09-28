@@ -42,6 +42,9 @@ aqtinstall.log
 __pycache__/
 *.pyc
 
+# Converter output (regenerate with scripts/kaikki-to-dsl.py)
+dist/
+
 # Scratch / personal design notes (not part of the shipped docs)
 docs/DESIGN-v2.md
 

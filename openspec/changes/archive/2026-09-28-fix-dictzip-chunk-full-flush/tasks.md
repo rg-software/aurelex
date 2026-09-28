@@ -23,4 +23,4 @@
 - [ ] 4.2 Regenerate `examples/kaikki-sample/*.dsl.dz` - deferred for the same reason.
 - [x] 4.3 Repackage the reported `.dsl.dz` (decompress + rewrite) and confirm every chunk inflates independently
 - [x] 4.4 Install the repaired file on the device and confirm the Search dropdown and the article for `swop` render with no DICTZIP error
-- [ ] 4.5 Confirm a fresh `kaikki-to-dsl.py` run produces a readable multi-chunk dictionary end to end
+- [ ] 4.5 Confirm a fresh `kaikki-to-dsl.py` run produces a readable multi-chunk dictionary end to end **Not verified on device** at archive time (2026-09-28) - the code and the host-side coverage are in; this manual pass is still outstanding.

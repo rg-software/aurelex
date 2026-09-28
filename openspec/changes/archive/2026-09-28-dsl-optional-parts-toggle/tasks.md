@@ -29,10 +29,10 @@
 - [x] 5.1 With a hidden-zone dictionary imported, confirm the expander renders as a visible icon (not a broken image) at first render, with the zone collapsed
 - [x] 5.2 Tap it: the hidden content appears in place and the control switches to the collapsed icon
 - [x] 5.3 Tap again: the content hides again
-- [ ] 5.4 Confirm a back/forward re-render resets the reveal to collapsed — the behavior pinned by the "Re-rendering the article restores the collapsed state" scenario — and confirm a revealed zone SURVIVES the zoom and dark-mode toggles (those run in-place JS against the live document, not a re-render, per the design's risk note)
-- [ ] 5.5 Tap a link inside revealed content and confirm it performs an in-app lookup (no WebView navigation away, no `preventDefault` conflict with the QML click probe at `app/main.qml:2502`)
+- [ ] 5.4 Confirm a back/forward re-render resets the reveal to collapsed — the behavior pinned by the "Re-rendering the article restores the collapsed state" scenario — and confirm a revealed zone SURVIVES the zoom and dark-mode toggles (those run in-place JS against the live document, not a re-render, per the design's risk note) **Not verified on device** at archive time (2026-09-28) - the code and the host-side coverage are in; this manual pass is still outstanding.
+- [ ] 5.5 Tap a link inside revealed content and confirm it performs an in-app lookup (no WebView navigation away, no `preventDefault` conflict with the QML click probe at `app/main.qml:2502`) **Not verified on device** at archive time (2026-09-28) - the code and the host-side coverage are in; this manual pass is still outstanding.
 - [x] 5.6 Confirm a headword whose entry has no hidden zone shows no control and renders unchanged
-- [ ] 5.7 Check the control stays legible in both light and dark mode under Dark Reader; if it is recolored, add it to the Dark Reader ignore list rather than disabling Dark Reader
+- [ ] 5.7 Check the control stays legible in both light and dark mode under Dark Reader; if it is recolored, add it to the Dark Reader ignore list rather than disabling Dark Reader **Not verified on device** at archive time (2026-09-28) - the code and the host-side coverage are in; this manual pass is still outstanding.
 
 ## 6. Documentation
 

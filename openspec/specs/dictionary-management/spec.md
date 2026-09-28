@@ -120,6 +120,8 @@ whole chain finishes (or fails).
 ### Requirement: Dictionary groups
 The system SHALL let the user organize loaded dictionaries into multiple named groups, each an ordered subset, and SHALL let the user select which group is active for lookups. An implicit "All" group containing every loaded dictionary is always available. Managing groups, their membership, their order, and the active group is part of this capability. Groups SHALL persist across app restarts (membership stored by stable dictionary identifier and re-resolved after dictionaries load).
 
+Loading or re-scanning dictionaries SHALL NOT change the set of groups: the stored group set is the source of truth and a scan SHALL be idempotent for it, so importing a dictionary never adds, renames, or drops a group. Each group SHALL remain uniquely identifiable by its stored identifier across scans, and a stored group set that already contains the same identifier more than once SHALL be repaired to one group per identifier (keeping the union of their members) rather than being shown as duplicate rows.
+
 The groups list SHALL present each group as a row tap: tapping a group row opens
 its membership editor directly. A non-"All" group's editor supports add, remove,
 and reorder; the "All" group opens the same editor in reorder-only mode (no
@@ -148,6 +150,24 @@ show a technical subtitle (such as an internal id).
 - **WHEN** the user restarts the app after creating groups
 - **THEN** the same named groups, membership, order, and active selection are restored
 
+#### Scenario: Importing a dictionary does not duplicate groups
+- **GIVEN** a dictionary that belongs to a group, and a newer build of that same dictionary
+- **WHEN** the user imports the newer build and it is indexed
+- **THEN** the groups list shows exactly the same groups as before, with no second row for the group the dictionary belongs to
+
+#### Scenario: Repeated scans leave the group set unchanged
+- **WHEN** dictionaries are scanned more than once in a session (for example the user imports several dictionaries in a row)
+- **THEN** the number of groups, their names, their membership, and their order are identical after every scan
+
+#### Scenario: Group identity is stable across scans
+- **WHEN** dictionaries are scanned again after a group was created
+- **THEN** that group still resolves to the same identifier, so selecting it, editing its membership, renaming it, and deleting it all act on the one group the user created
+
+#### Scenario: A stored group set with a repeated identifier is repaired
+- **GIVEN** a stored group set in which one group's identifier appears more than once
+- **WHEN** the app next loads dictionaries
+- **THEN** the groups list shows that group once, containing the members of every entry that shared the identifier, and the stored group set no longer contains the repeat
+
 #### Scenario: Select the active group
 - **WHEN** the user picks a group as active
 - **THEN** subsequent lookups use only that group's dictionaries, in that group's order
@@ -174,8 +194,7 @@ show a technical subtitle (such as an internal id).
 
 #### Scenario: Open the membership editor from the group row
 - **WHEN** the user taps a group's row in the groups list
-- **THEN** the membership editor for that group opens (for non-"All" groups:
-  add/remove dictionaries and reorder; for "All": reorder only)
+- **THEN** the membership editor for that group opens (for non-"All" groups: add/remove dictionaries and reorder; for "All": reorder only)
 
 #### Scenario: Rename a group from within the membership editor
 - **WHEN** the user opens a group's membership editor, taps its rename action, and confirms a new non-empty name
@@ -203,18 +222,15 @@ show a technical subtitle (such as an internal id).
 
 #### Scenario: The All group is reorder-only
 - **WHEN** the user opens the "All" group
-- **THEN** its editor has no add, remove, rename, or delete controls, and dragging
-  its rows changes the search article order
+- **THEN** its editor has no add, remove, rename, or delete controls, and dragging its rows changes the search article order
 
 #### Scenario: Group row opens its membership editor
 - **WHEN** the user taps a group's row in the groups list
-- **THEN** the membership editor for that group opens (for non-"All" groups:
-  add/remove dictionaries and reorder; for "All": reorder only)
+- **THEN** the membership editor for that group opens (for non-"All" groups: add/remove dictionaries and reorder; for "All": reorder only)
 
 #### Scenario: The "All" group opens in reorder-only mode
 - **WHEN** the user taps the "All" group row
-- **THEN** the editor opens showing every dictionary in article order, with no
-  add/remove/rename controls; dragging a row changes the search article order
+- **THEN** the editor opens showing every dictionary in article order, with no add/remove/rename controls; dragging a row changes the search article order
 
 #### Scenario: Delete needs confirmation
 - **WHEN** the user taps the trash control on a non-"All" group row
@@ -226,15 +242,44 @@ app, deleting its staged copy and its built indexes, and SHALL remove it
 consistently from lookups, groups, and full-text search so no stale results
 reference it.
 
+The dictionary's indexes SHALL be deleted from the app's index directory - the
+directory the engine writes them into, as the dictionary's identifier and its
+`_FTS_*` companions - and no pre-fix index left beside that directory for the
+same identifier SHALL survive the removal. Removing one dictionary SHALL leave
+every other dictionary's indexes untouched. The effect on groups SHALL be
+durable immediately, not only after the next scan.
+
 #### Scenario: Remove an individual dictionary
 - **WHEN** the user removes one loaded dictionary
 - **THEN** that dictionary's entry disappears from the dictionary list, its
   staged files and index are deleted from app storage, and future lookups no
   longer include it
 
+#### Scenario: The index inside the index directory is deleted
+- **WHEN** a dictionary with a built index is removed
+- **THEN** the identifier's index entry and its full-text index directory inside
+  the app's index directory are both deleted, so the removal frees the space the
+  index occupied
+
+#### Scenario: A pre-fix index beside the index directory is also deleted
+- **WHEN** a dictionary is removed on a device whose index still sits beside the
+  index directory in the pre-fix layout
+- **THEN** that entry and its full-text companion are deleted too, so the removal
+  is correct regardless of whether the layout migration has run
+
+#### Scenario: Other dictionaries keep their indexes
+- **WHEN** one of several loaded dictionaries is removed
+- **THEN** every other dictionary's index and full-text index remain in place and
+  those dictionaries keep working
+
 #### Scenario: Removal is reflected in groups
 - **WHEN** a removed dictionary was a member of the active group or any group
 - **THEN** the group's membership no longer lists it, without error
+
+#### Scenario: Removal's effect on groups survives a restart
+- **WHEN** the user removes a dictionary that belonged to a group and then
+  restarts the app without any further scan or group edit
+- **THEN** the group still does not list the removed dictionary
 
 #### Scenario: Removal is reflected in full-text search
 - **WHEN** a removed dictionary had a full-text index
@@ -250,7 +295,7 @@ reference it.
 - **WHEN** the user imports the same folder again after removing a dictionary
   from it
 - **THEN** the dictionary is imported again as a fresh entry (removal is not
-  blocked)
+  blocked), and its index is built anew rather than inherited from the removal
 
 ### Requirement: Folder additions are serialized, never dropped
 The system SHALL accept dictionary folder additions requested while a previous
@@ -344,3 +389,25 @@ in that pair as a whole, as a shortcut for building a selection to remove.
 - **THEN** every dictionary in that pair becomes selected (the header shows a
   check); tapping again clears the pair's selection
 
+### Requirement: Re-importing an updated dictionary reloads it in the session
+When a dictionary's source files are replaced on disk - the ordinary case of importing a newer build of a dictionary already loaded, which keeps the same source path and therefore the same dictionary identity - the system SHALL detect the change on the next scan and reload that dictionary, so the updated content takes effect without restarting the app. The reloaded dictionary SHALL be fully searchable (article lookup and prefix search) immediately after the reload, and a scan SHALL NOT leave a loaded dictionary reading an index that was written for a different version of its content.
+
+Dictionaries whose source files have not changed SHALL NOT be reloaded: a scan over unchanged dictionaries leaves them, and their index state, untouched.
+
+#### Scenario: Re-importing an updated dictionary makes the new data live
+- **GIVEN** a dictionary is loaded and searchable, and the user imports a newer build of the same dictionary (same folder and file name)
+- **WHEN** the import's scan completes
+- **THEN** the dictionary reflects the new content in the running session, so a headword that exists only in the new build resolves without restarting the app
+
+#### Scenario: Search still works after a re-import
+- **WHEN** a dictionary is reloaded because its source changed
+- **THEN** article lookup and prefix search on that dictionary return results, and neither stalls waiting on an unreadable index
+
+#### Scenario: A scan does not rewrite an index under a loaded dictionary
+- **WHEN** the scanner processes a dictionary whose source file changed
+- **THEN** the index it rebuilds belongs to the dictionary instance that remains loaded, so no loaded dictionary is left reading an index written for different content
+
+#### Scenario: Unchanged dictionaries are not reloaded
+- **GIVEN** a set of loaded dictionaries whose source files are unchanged
+- **WHEN** a scan runs
+- **THEN** no dictionary is reloaded and their index state is preserved

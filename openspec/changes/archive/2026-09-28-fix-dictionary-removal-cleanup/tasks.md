@@ -29,7 +29,7 @@
 
 ## 6. On-device verification
 
-- [ ] 6.1 Remove a dictionary and confirm its `files/index/<id>` and `files/index/<id>_FTS_x` are gone, while the other dictionaries' indexes remain
-- [ ] 6.2 Re-import a removed dictionary and confirm the lookup renders from a freshly built index (not a stale one), and the FTS tab finds a term from the new content
-- [ ] 6.3 Confirm `groups.json` no longer lists the removed dictionary immediately after a removal
-- [ ] 6.4 Capture logcat (tag `aurelex`) on the next "search field does nothing" reproduction and record whether `suggest firing` is followed by a long `suggest ready` / `gd_suggest ... mutex=NNNms` while `fts progress` is advancing (design D4) - this decides a follow-up change, not this one
+- [ ] 6.1 Remove a dictionary and confirm its `files/index/<id>` and `files/index/<id>_FTS_x` are gone, while the other dictionaries' indexes remain **Not verified on device** at archive time (2026-09-28) - the code and the host-side coverage are in; this manual pass is still outstanding.
+- [ ] 6.2 Re-import a removed dictionary and confirm the lookup renders from a freshly built index (not a stale one), and the FTS tab finds a term from the new content **Not verified on device** at archive time (2026-09-28) - the code and the host-side coverage are in; this manual pass is still outstanding.
+- [ ] 6.3 Confirm `groups.json` no longer lists the removed dictionary immediately after a removal **Not verified on device** at archive time (2026-09-28) - the code and the host-side coverage are in; this manual pass is still outstanding.
+- [ ] 6.4 Capture logcat (tag `aurelex`) on the next "search field does nothing" reproduction and record whether `suggest firing` is followed by a long `suggest ready` / `gd_suggest ... mutex=NNNms` while `fts progress` is advancing (design D4) - this decides a follow-up change, not this one **Not verified on device** at archive time (2026-09-28) - the code and the host-side coverage are in; this manual pass is still outstanding.

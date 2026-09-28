@@ -23,6 +23,6 @@
 
 ## 4. On-device verification
 
-- [ ] 4.1 Search a word in a group, then re-import an updated build of that dictionary (same folder/name), let import + indexing finish, and confirm typing still shows a dropdown
-- [ ] 4.2 Confirm the updated data is live without a restart (a headword only in the new build resolves)
-- [ ] 4.3 Confirm the app does not die after the re-import (no `gd_suggest ... finished=0` in logcat, no foreground-service timeout)
+- [ ] 4.1 Search a word in a group, then re-import an updated build of that dictionary (same folder/name), let import + indexing finish, and confirm typing still shows a dropdown **Not verified on device** at archive time (2026-09-28) - the code and the host-side coverage are in; this manual pass is still outstanding.
+- [ ] 4.2 Confirm the updated data is live without a restart (a headword only in the new build resolves) **Not verified on device** at archive time (2026-09-28) - the code and the host-side coverage are in; this manual pass is still outstanding.
+- [ ] 4.3 Confirm the app does not die after the re-import (no `gd_suggest ... finished=0` in logcat, no foreground-service timeout) **Not verified on device** at archive time (2026-09-28) - the code and the host-side coverage are in; this manual pass is still outstanding.

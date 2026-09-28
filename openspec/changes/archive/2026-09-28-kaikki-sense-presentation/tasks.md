@@ -56,5 +56,5 @@
 ## 8. Verification
 
 - [x] 8.1 Run the full converter test suite (`python -m unittest discover -s scripts/tests`) and a real-data spot check (e.g. `work`) to confirm icons and bullets read correctly
-- [ ] 8.2 On device: sense icons render inline in light and dark mode with no background box, and the resource bundle resolves them with no network
-- [ ] 8.3 On device: an article from a dictionary that emits no sense icons has its images rendered unchanged
+- [ ] 8.2 On device: sense icons render inline in light and dark mode with no background box, and the resource bundle resolves them with no network **Not verified on device** at archive time (2026-09-28) - the code and the host-side coverage are in; this manual pass is still outstanding.
+- [ ] 8.3 On device: an article from a dictionary that emits no sense icons has its images rendered unchanged **Not verified on device** at archive time (2026-09-28) - the code and the host-side coverage are in; this manual pass is still outstanding.

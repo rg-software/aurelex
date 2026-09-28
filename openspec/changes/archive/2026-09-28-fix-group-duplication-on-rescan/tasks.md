@@ -28,5 +28,5 @@
 
 ## 5. On-device verification
 
-- [ ] 5.1 With a dictionary in a group, import a newer build of the same dictionary, let it index, and confirm the Groups list still shows one row for that group
-- [ ] 5.2 On a device that already accumulated duplicates, launch the app and confirm the duplicates collapse to one group with the union of their members, and that the stored group set is clean afterwards (next scan logs no repair)
+- [ ] 5.1 With a dictionary in a group, import a newer build of the same dictionary, let it index, and confirm the Groups list still shows one row for that group **Not verified on device** at archive time (2026-09-28) - the code and the host-side coverage are in; this manual pass is still outstanding.
+- [ ] 5.2 On a device that already accumulated duplicates, launch the app and confirm the duplicates collapse to one group with the union of their members, and that the stored group set is clean afterwards (next scan logs no repair) **Not verified on device** at archive time (2026-09-28) - the code and the host-side coverage are in; this manual pass is still outstanding.
