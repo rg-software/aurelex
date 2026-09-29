@@ -356,6 +356,19 @@ def encode_dsl(text: str) -> bytes:
     return b"\xef\xbb\xbf" + text.encode("utf-8")
 
 
+def read_dictzip(path: str) -> str:
+    """Read a ``.dsl.dz`` back to text.
+
+    A dictzip is a gzip stream with an extra header, so a full read is just a
+    gzip decompress; the inverse of ``make_dictzip(encode_dsl(...))``.
+    """
+    with open(path, "rb") as f:
+        raw = gzip.decompress(f.read())
+    if raw.startswith(b"\xef\xbb\xbf"):
+        raw = raw[3:]
+    return raw.decode("utf-8")
+
+
 # ---------------------------------------------------------------------------
 # DSL text tooling
 # ---------------------------------------------------------------------------
@@ -522,6 +535,56 @@ def _icon_data_uri(name: str) -> str:
 def _audio_ref(name: str) -> str:
     """A DSL sound reference for one bundled audio filename."""
     return f"[s]{escape_dsl(name)}[/s]"
+
+
+#: A sound link, whose captured group is the DSL-escaped recording name.
+_AUDIO_REF_RE = re.compile(r"\[s\](.*?)\[/s\]")
+
+
+def _unescape_dsl(text: str) -> str:
+    """Reverse the escaping :func:`escape_dsl` applies to a sound-link name."""
+    out: List[str] = []
+    i = 0
+    while i < len(text):
+        ch = text[i]
+        if ch == "\\" and i + 1 < len(text) and text[i + 1] in "\\[]<>":
+            out.append(text[i + 1])
+            i += 2
+        else:
+            out.append(ch)
+            i += 1
+    return "".join(out)
+
+
+def collect_audio_refs(text: str) -> List[str]:
+    """The recordings a rendered dictionary references, in first-seen order.
+
+    The dictionary is the source of truth for what to bundle: a sound link
+    exists only because the build chose that recording, so reading the links
+    recovers the exact set without the records that produced them. Each name is
+    un-escaped back to the real filename.
+    """
+    seen: Set[str] = set()
+    names: List[str] = []
+    for match in _AUDIO_REF_RE.finditer(text):
+        name = _unescape_dsl(match.group(1))
+        if name and name not in seen:
+            seen.add(name)
+            names.append(name)
+    return names
+
+
+def rewrite_audio_refs(text: str, rename: Dict[str, str]) -> str:
+    """Point each sound link at its bundled name, where the two differ."""
+    def replace(match: "re.Match[str]") -> str:
+        original = _unescape_dsl(match.group(1))
+        new = rename.get(original)
+        if new is None or new == original:
+            return match.group(0)
+        return f"[s]{escape_dsl(new)}[/s]"
+
+    return _AUDIO_REF_RE.sub(replace, text)
+
 
 
 def _sense_markers(tags: Sequence[str], profile: "LangProfile") -> str:
@@ -3072,6 +3135,143 @@ def fetch_list(args) -> int:
     return tally.exit_code()
 
 
+def _bundle_archive_keys(name: str) -> List[str]:
+    """Archive keys a bundled recording may be stored under.
+
+    A name disambiguated by :meth:`AudioPlan._final_name` carries a digest before
+    its extension that is not part of the archive key -- the plain basename is --
+    so the variants of the stripped name are tried as well.
+    """
+    keys = _audio_name_variants(name)
+    stem, ext = os.path.splitext(name)
+    stripped = re.sub(r"-[0-9a-f]{8}$", "", stem)
+    if stripped != stem:
+        for key in _audio_name_variants(stripped + ext):
+            if key not in keys:
+                keys.append(key)
+    return keys
+
+
+def _resolve_bundle_inputs(args) -> Tuple[str, Optional[str], str]:
+    """The archive and cache a rebuild reads, without touching the JSONL.
+
+    The dictionary already fixes which recordings are wanted, so only the
+    archive and the download cache are needed. The dump-date check against
+    kaikki.org and the JSONL are deliberately skipped, so a rebuild with a local
+    archive makes no network request at all.
+    """
+    if not args.dump_date and not args.jsonl:
+        raise SystemExit(
+            "pass --dump-date (or --jsonl) so the audio cache directory can be found"
+        )
+    snapshot = Snapshot(args.dump_date, args.cache_dir, RAW_JSONL_URL, args.audio_url)
+    audio_path = args.audio_tar
+    if not audio_path:
+        audio_path = download_cached(
+            snapshot.audio_url, snapshot.audio_path, args.force_download, args.timeout
+        )
+    return snapshot.dir, audio_path, os.path.join(snapshot.dir, "audio-cache")
+
+
+def bundle_audio(args) -> int:
+    """Rebuild the resource bundle of a rendered dictionary from the dictionary.
+
+    Finishes what a build started when it wrote its ``.dsl.dz`` and then could
+    not assemble the resource bundle -- a filename the filesystem refused, a
+    killed process, a full disk. The dictionary already references every
+    recording its articles want, so there is nothing to re-render: the sound
+    links name the files, this locates each in the cache or the archive, and
+    writes the same bundle a build would have written, beside the dictionary.
+    """
+    dict_path = args.dictionary
+    if not os.path.isfile(dict_path):
+        raise SystemExit(f"no dictionary at {dict_path}")
+    text = read_dictzip(dict_path)
+    # The about card also links the sense-marker icons as [s] names, and those
+    # are bundled unconditionally; only the recordings are looked up.
+    refs = [name for name in collect_audio_refs(text) if name not in _ICON_FILES]
+    rename = {
+        name: safe
+        for name in refs
+        if (safe := _safe_audio_filename(name)) != name
+    }
+
+    _snapshot_dir, audio_path, download_dir = _resolve_bundle_inputs(args)
+    res_base = dict_path[:-3] if dict_path.lower().endswith(".dz") else dict_path
+    zip_path = res_base + ".files.zip"
+    dir_path = res_base + ".files"
+
+    print(
+        f"dictionary: {dict_path}\n"
+        f"  references: {len(refs):,} recording(s)\n"
+        f"  archive:    {audio_path}\n"
+        f"  cache:      {download_dir}",
+        file=sys.stderr,
+    )
+
+    found = 0
+    missing: List[str] = []
+    with tempfile.TemporaryDirectory(prefix="kaikki-res-") as tmp:
+        for name in _ICON_FILES:
+            shutil.copyfile(os.path.join(_ICON_ASSET_DIR, name), os.path.join(tmp, name))
+
+        wanted: Dict[str, List[str]] = {}
+        for name in refs:
+            safe = rename.get(name, name)
+            # The cache first: a recording the archive lacked was downloaded
+            # there, and only the archive's members are extracted below.
+            cached = os.path.join(download_dir, safe)
+            if not os.path.isfile(cached) and safe != name:
+                cached = os.path.join(download_dir, name)
+            if os.path.isfile(cached):
+                shutil.copyfile(cached, os.path.join(tmp, safe))
+                found += 1
+                continue
+            # The archive stores the raw name, so the keys come from the
+            # reference; only the target file is renamed to the safe one.
+            wanted[safe] = _bundle_archive_keys(name)
+
+        if wanted:
+            batching = Progress("bundling audio", every=1, total=len(refs))
+            extracted, missing = extract_audio(audio_path, wanted, tmp, batching)
+            batching.done()
+            found += extracted
+
+        if args.audio_layout == "zip":
+            write_audio_zip(tmp, zip_path)
+            written = zip_path
+        else:
+            os.makedirs(dir_path, exist_ok=True)
+            for name in sorted(os.listdir(tmp)):
+                src = os.path.join(tmp, name)
+                if os.path.isfile(src):
+                    shutil.copyfile(src, os.path.join(dir_path, name))
+            written = dir_path
+
+    if rename:
+        # Point the dictionary at the names actually bundled. Written to a
+        # sibling and replaced, so an interrupted rewrite cannot truncate it.
+        rewritten = rewrite_audio_refs(text, rename)
+        part = dict_path + ".part"
+        with open(part, "wb") as f:
+            f.write(make_dictzip(encode_dsl(rewritten)))
+        os.replace(part, dict_path)
+        print(
+            f"  rewrote {len(rename):,} reference(s) to filesystem-safe names",
+            file=sys.stderr,
+        )
+
+    if missing:
+        print(
+            f"warning: {len(missing)} referenced recording(s) were not found in the "
+            f"archive or the cache",
+            file=sys.stderr,
+        )
+    print(f"bundled {found:,} of {len(refs):,} referenced recording(s)", file=sys.stderr)
+    print(f"wrote {written}", file=sys.stderr)
+    return 0
+
+
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
@@ -3117,6 +3317,12 @@ def build_parser() -> argparse.ArgumentParser:
             "  writes N disjoint shard files, each fetched by any machine with\n"
             "  'kaikki-to-dsl.py fetch-list <shard> --into <dir>', and the filled\n"
             "  directories are copied into <cache-dir>/<dump-date>/audio-cache/.\n"
+            "\n"
+            "  If a build wrote its .dsl.dz but could not finish the audio bundle\n"
+            "  (a refused filename, a kill, a full disk), rebuild the bundle from the\n"
+            "  dictionary alone without re-rendering:\n\n"
+            "    kaikki-to-dsl.py bundle-audio <out>/<name>.dsl.dz \\\n"
+            "        --dump-date 2026-09-02 --audio-tar <archive.tar>\n"
             "\n"
             "  The prefetcher must be given the same --source-lang,\n"
             "  --audio-per-word and --audio-lang as the build, because both decide\n"
@@ -3318,6 +3524,56 @@ def fetch_list_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def bundle_audio_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="kaikki-to-dsl.py bundle-audio",
+        description="Rebuild the resource bundle of an already-rendered dictionary, "
+        "reading the recordings to bundle from the dictionary itself. Recovers a build "
+        "that wrote its <name>.dsl.dz but could not finish bundling its audio -- a "
+        "refused filename, a killed process, a full disk -- without re-rendering the "
+        "snapshot, which is the expensive part of a build.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "Notes:\n"
+            "  The dictionary is the source of truth: every recording it references\n"
+            "  appears in it as a [s]...[/s] link, so the bundle is rebuilt from\n"
+            "  those alone. Nothing re-decides which recording an article gets, and\n"
+            "  the JSONL snapshot is not read.\n\n"
+            "  A recording is looked for in the audio cache first, then in the audio\n"
+            "  archive; one found in neither is warned about and left out, exactly as\n"
+            "  a build leaves out a recording the archive lacks. The bundle is written\n"
+            "  beside the dictionary as <base>.dsl.files.zip (or <base>.dsl.files/ with\n"
+            "  --audio-layout dir), the same name and layout a build uses.\n\n"
+            "  A recording whose name a filesystem refuses is bundled under the same\n"
+            "  safe name a build gives it, and the dictionary's link is rewritten to\n"
+            "  match, so no link points at a file that is not there. Passing --audio-tar\n"
+            "  makes the whole run offline; only --dump-date/--jsonl and --cache-dir are\n"
+            "  read to find the cache, never the snapshot's records.\n"
+        ),
+    )
+    parser.add_argument("dictionary",
+                        help="the rendered <name>.dsl.dz to rebuild the bundle for")
+    parser.add_argument("--dump-date",
+                        help="the snapshot the dictionary was built from, which locates "
+                             "the audio cache; pass --jsonl instead for a local-snapshot build")
+    parser.add_argument("--jsonl",
+                        help="marks a build made from a local --jsonl, whose cache is "
+                             "under <cache-dir>/local/; the file itself is not read")
+    parser.add_argument("--audio-tar",
+                        help="use a local Wiktionary audio tar instead of downloading")
+    parser.add_argument("--audio-url", default=AUDIO_TAR_URL,
+                        help="override the audio archive URL")
+    parser.add_argument("--cache-dir",
+                        default=os.path.join(os.path.expanduser("~"), ".cache", "aurelex-kaikki"))
+    parser.add_argument("--audio-layout", choices=["zip", "dir"], default="zip",
+                        help="how to bundle audio (default zip)")
+    parser.add_argument("--force-download", action="store_true",
+                        help="re-download a cached audio archive")
+    parser.add_argument("--timeout", type=int, default=60,
+                        help="network timeout in seconds (default 60)")
+    return parser
+
+
 def main(argv: Optional[Sequence[str]] = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     # Dispatched by hand rather than through argparse subparsers: the build's
@@ -3326,11 +3582,14 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     # the snapshot instead share the options that decide which articles -- and so
     # which audio -- are wanted, through _add_snapshot_args. The worker takes
     # neither: it is handed a finished list, so it needs nothing that decides what
-    # is wanted, only _add_fetch_args.
+    # is wanted, only _add_fetch_args. The rebuild takes the finished dictionary:
+    # it needs only where the audio is, not what was wanted.
     if argv and argv[0] == "prefetch-audio":
         return prefetch_audio(prefetch_parser().parse_args(argv[1:]))
     if argv and argv[0] == "fetch-list":
         return fetch_list(fetch_list_parser().parse_args(argv[1:]))
+    if argv and argv[0] == "bundle-audio":
+        return bundle_audio(bundle_audio_parser().parse_args(argv[1:]))
     args = build_parser().parse_args(argv)
     report = build(args)
     print(report.summary(), file=sys.stderr)

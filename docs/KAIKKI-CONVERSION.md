@@ -493,6 +493,41 @@ One plan per set of options: a shard is a snapshot of what one `--source-lang` /
 different options can overlap. Fetch only shards from the same plan into the
 same cache.
 
+#### Recovering a failed bundle
+
+A build writes `<name>.dsl.dz` **before** it assembles `<name>.dsl.files.zip`. If
+bundling fails — a filename the filesystem refuses, a kill, a full disk — the
+dictionary survives but its audio bundle does not, and re-running the build
+would pay the whole render again (about an hour for a full snapshot) to repeat a
+step that never needed the records.
+
+`bundle-audio` rebuilds just the bundle from the dictionary itself: it reads the
+`[s]…[/s]` links the dictionary already carries as the list of recordings, finds
+each in the cache or the archive, and writes the same bundle a build would have,
+beside the dictionary. Nothing is re-rendered and the snapshot is never read.
+
+```bash
+python scripts/kaikki-to-dsl.py bundle-audio \
+    dist/kaikki-en.dsl.dz \
+    --dump-date 2026-09-02 --audio-tar ~/.cache/aurelex-kaikki/audios.tar.gz
+```
+
+- The recordings come from the dictionary, so the rebuild bundles exactly what
+  the articles reference — no more and no less.
+- A reference whose filename a filesystem refuses is bundled under the same
+  safe name a build gives it, and the dictionary's link is rewritten to match,
+  so no link points at a file that is not there. A dictionary whose links are
+  already safe is not modified.
+- A recording is looked for in the audio cache first, then the archive; one in
+  neither is reported and left out, as a build leaves out an archive-missing
+  recording.
+- Pass `--dump-date` (or `--jsonl`) and, for a fully offline run, `--audio-tar`:
+  the mode contacts nothing, reads neither the JSONL nor the dump date, and
+  consults nothing but the cache directory and the archive.
+- The bundle is written to the same place and name a build uses
+  (`<base>.dsl.files.zip`, or `<base>.dsl.files/` with `--audio-layout dir`), so
+  the recovered dictionary is indistinguishable from a clean build.
+
 ### Audio archive index
 
 Resolving audio needs to know which recordings the archive holds, which means

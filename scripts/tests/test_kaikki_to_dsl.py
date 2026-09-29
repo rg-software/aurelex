@@ -1506,6 +1506,169 @@ class AudioShardTests(unittest.TestCase):
                 self.assertEqual(f.read(), contents)
 
 
+class BundleRebuildTests(unittest.TestCase):
+    """Rebuild a rendered dictionary's resource bundle without re-rendering."""
+
+    def bundle_args(self, tmp, dict_path, *extra):
+        return TOOL.bundle_audio_parser().parse_args(
+            [dict_path, "--jsonl", AUDIO_LIMIT_FIXTURE, "--cache-dir",
+             os.path.join(tmp, "cache")] + list(extra)
+        )
+
+    @contextlib.contextmanager
+    def captured(self):
+        stream = io.StringIO()
+        original = sys.stderr
+        sys.stderr = stream
+        try:
+            yield stream
+        finally:
+            sys.stderr = original
+
+    def write_dz(self, path, text):
+        with open(path, "wb") as f:
+            f.write(TOOL.make_dictzip(TOOL.encode_dsl(text)))
+
+    def cache_dir(self, tmp):
+        path = os.path.join(tmp, "cache", "local", "audio-cache")
+        os.makedirs(path, exist_ok=True)
+        return path
+
+    def zip_names(self, path):
+        with zipfile.ZipFile(path) as z:
+            return set(z.namelist())
+
+    def test_references_are_collected_in_order_and_unescaped(self):
+        text = (
+            "[s]a.ogg[/s] [s]b.ogg[/s] [s]a.ogg[/s] "
+            "[s]gd_tag_x.svg[/s] [s]we\\[ird\\].ogg[/s]"
+        )
+        self.assertEqual(
+            TOOL.collect_audio_refs(text),
+            ["a.ogg", "b.ogg", "gd_tag_x.svg", "we[ird].ogg"],
+        )
+
+    def test_rebuild_restores_the_bundle_a_build_wrote(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tar = os.path.join(tmp, "audios.tar")
+            make_tar(tar, ["audios/En-au-limitword.ogg", "audios/En-uk-limitword.ogg",
+                           "audios/En-us-limitword-gone1.ogg"])
+            out = os.path.join(tmp, "out")
+            TOOL.build(TOOL.build_parser().parse_args([
+                "--source-lang", "en", "--jsonl", AUDIO_LIMIT_FIXTURE,
+                "--out-dir", out, "--audio-tar", tar, "--audio-per-word", "3",
+                "--cache-dir", os.path.join(tmp, "cache"), "--no-audio-download",
+            ]))
+            dz = os.path.join(out, "kaikki-en.dsl.dz")
+            zip_path = os.path.join(out, "kaikki-en.dsl.files.zip")
+            before = self.zip_names(zip_path)
+            with open(dz, "rb") as f:
+                dz_before = f.read()
+            os.remove(zip_path)
+
+            with self.captured():
+                self.assertEqual(
+                    TOOL.bundle_audio(self.bundle_args(tmp, dz, "--audio-tar", tar)), 0)
+            self.assertEqual(self.zip_names(zip_path), before)
+            # the references were already safe, so the dictionary is untouched
+            with open(dz, "rb") as f:
+                self.assertEqual(f.read(), dz_before)
+
+            # repeating is safe and changes nothing
+            with self.captured():
+                self.assertEqual(
+                    TOOL.bundle_audio(self.bundle_args(tmp, dz, "--audio-tar", tar)), 0)
+            self.assertEqual(self.zip_names(zip_path), before)
+
+    def test_an_unsafe_reference_is_rewritten_and_bundled(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            raw = 'En-US_pronunciation_of_"lute".ogg'
+            dz = os.path.join(tmp, "x.dsl.dz")
+            self.write_dz(dz, f"[s]{raw}[/s]\n")
+            tar = os.path.join(tmp, "audios.tar")
+            make_tar(tar, ["audios/" + raw])
+
+            with self.captured() as out:
+                self.assertEqual(
+                    TOOL.bundle_audio(self.bundle_args(tmp, dz, "--audio-tar", tar)), 0)
+            safe = "En-US_pronunciation_of__lute_.ogg"
+            # the link and the bundled file both moved to the safe name
+            self.assertEqual(TOOL.collect_audio_refs(read_dz(dz)), [safe])
+            self.assertIn(safe, self.zip_names(os.path.join(tmp, "x.dsl.files.zip")))
+            self.assertIn("rewrote", out.getvalue())
+
+    def test_a_recording_only_in_the_cache_is_copied(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            dz = os.path.join(tmp, "x.dsl.dz")
+            self.write_dz(dz, "[s]only-cached.ogg[/s]\n")
+            with open(os.path.join(self.cache_dir(tmp), "only-cached.ogg"), "wb") as f:
+                f.write(b"OGGDATA")
+
+            with self.captured():
+                self.assertEqual(TOOL.bundle_audio(self.bundle_args(
+                    tmp, dz, "--audio-tar", os.path.join(tmp, "absent.tar"))), 0)
+            self.assertIn(
+                "only-cached.ogg", self.zip_names(os.path.join(tmp, "x.dsl.files.zip"))
+            )
+
+    def test_a_recording_found_nowhere_is_warned_about(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            dz = os.path.join(tmp, "x.dsl.dz")
+            self.write_dz(dz, "[s]nowhere.ogg[/s]\n")
+            tar = os.path.join(tmp, "audios.tar")
+            make_tar(tar, ["audios/something-else.ogg"])
+
+            with self.captured() as out:
+                self.assertEqual(
+                    TOOL.bundle_audio(self.bundle_args(tmp, dz, "--audio-tar", tar)), 0)
+            self.assertIn("were not found", out.getvalue())
+            names = self.zip_names(os.path.join(tmp, "x.dsl.files.zip"))
+            self.assertNotIn("nowhere.ogg", names)
+            self.assertTrue(set(TOOL._ICON_FILES) <= names)
+
+    def test_directory_layout_writes_the_files_directory(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            dz = os.path.join(tmp, "x.dsl.dz")
+            self.write_dz(dz, "[s]cached.ogg[/s]\n")
+            with open(os.path.join(self.cache_dir(tmp), "cached.ogg"), "wb") as f:
+                f.write(b"OGGDATA")
+
+            with self.captured():
+                self.assertEqual(TOOL.bundle_audio(self.bundle_args(
+                    tmp, dz, "--audio-tar", os.path.join(tmp, "absent.tar"),
+                    "--audio-layout", "dir")), 0)
+            self.assertTrue(
+                os.path.isfile(os.path.join(tmp, "x.dsl.files", "cached.ogg"))
+            )
+            self.assertFalse(os.path.exists(os.path.join(tmp, "x.dsl.files.zip")))
+
+    def test_rebuild_with_a_local_archive_is_offline(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            dz = os.path.join(tmp, "x.dsl.dz")
+            self.write_dz(dz, "[s]offline.ogg[/s]\n")
+            tar = os.path.join(tmp, "audios.tar")
+            make_tar(tar, ["audios/offline.ogg"])
+
+            original = TOOL._open_with_retries
+
+            def blocked(*args, **kwargs):
+                raise AssertionError("the network was used")
+
+            TOOL._open_with_retries = blocked
+            self.addCleanup(setattr, TOOL, "_open_with_retries", original)
+            with self.captured():
+                self.assertEqual(
+                    TOOL.bundle_audio(self.bundle_args(tmp, dz, "--audio-tar", tar)), 0)
+
+    def test_rebuild_needs_a_snapshot_marker_for_the_cache(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            dz = os.path.join(tmp, "x.dsl.dz")
+            self.write_dz(dz, "[s]a.ogg[/s]\n")
+            args = TOOL.bundle_audio_parser().parse_args([dz])
+            with self.assertRaises(SystemExit):
+                TOOL.bundle_audio(args)
+
+
 class LangProfileTests(unittest.TestCase):
     """Language-specific behaviour lives in the profile, not the renderer."""
 
