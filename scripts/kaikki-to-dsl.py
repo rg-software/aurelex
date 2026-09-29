@@ -860,11 +860,23 @@ class Progress:
         self.total = total
         self.count = 0
         self.t0 = time.time()
+        self._last = 0.0
         self._shown = False
 
     def tick(self, increment: int = 1) -> None:
         self.count += increment
-        if self.count == increment or self.count % self.every == 0:
+        if self.count == increment:
+            self._write()
+            return
+        if self.every == 1:
+            # A caller that ticks per item on a huge batch must not turn progress
+            # into one stderr write per item -- on a console that is orders of
+            # magnitude slower than the work itself. Throttle it by time, so
+            # updates stay visible and cheap.
+            if time.time() - self._last >= 0.1:
+                self._write()
+            return
+        if self.count % self.every == 0:
             self._write()
 
     def _write(self, final: bool = False) -> None:
@@ -878,6 +890,7 @@ class Progress:
         if final:
             stream.write("\n")
         stream.flush()
+        self._last = time.time()
         self._shown = True
 
     def done(self) -> None:
@@ -1218,6 +1231,8 @@ class AudioPlan:
         self.local: Dict[str, str] = {}    # final_name -> fetched file on disk
         self.missing: Set[str] = set()     # referenced sources not bundled
         self._fetched: Dict[str, Optional[str]] = {}  # source -> local path or None
+        self.cached_hits = 0               # recordings served from the local cache
+        self.on_cached = None              # optional callback(count) for progress
 
     def _final_name(self, source: str) -> str:
         base = _safe_audio_filename(_basename(source))
@@ -1270,7 +1285,13 @@ class AudioPlan:
                     path = dest
                     self.local[name] = dest
                     if cached:
-                        print(f"audio cached: {source}", file=sys.stderr)
+                        # Served from the cache: this can happen tens of
+                        # thousands of times over a large dictionary, and one
+                        # console line each would dominate the run. Count them
+                        # and let the caller show a coarse progress instead.
+                        self.cached_hits += 1
+                        if self.on_cached is not None:
+                            self.on_cached(self.cached_hits)
                     else:
                         print(f"audio downloaded: {source} (from {url})", file=sys.stderr)
             except Exception as exc:  # network errors must not abort the run
@@ -1462,18 +1483,48 @@ def extract_audio(
     return found, sorted(remaining)
 
 
-def write_audio_zip(src_dir: str, dest_zip: str) -> None:
-    """Write a deterministic zip of ``src_dir``'s files (sorted, fixed times)."""
-    names = sorted(
-        n for n in os.listdir(src_dir) if os.path.isfile(os.path.join(src_dir, n))
-    )
-    with zipfile.ZipFile(dest_zip, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-        for name in names:
-            info = zipfile.ZipInfo(filename=name, date_time=(1980, 1, 1, 0, 0, 0))
-            info.compress_type = zipfile.ZIP_DEFLATED
-            info.external_attr = 0o644 << 16
-            with open(os.path.join(src_dir, name), "rb") as f:
-                zf.writestr(info, f.read())
+def write_bundle(
+    sources: Dict[str, str],
+    dest: str,
+    layout: str,
+    progress: Optional[Progress] = None,
+) -> None:
+    """Write the resource bundle from a name -> source-path map.
+
+    The caller hands the *location* of every entry -- an icon in the assets, a
+    recording in the download cache, or one extracted from the archive into a
+    temporary directory -- so a file already sitting in the cache is read once,
+    into the bundle, instead of being copied into a staging directory first.
+
+    A zip bundle is written deterministically (names sorted, fixed timestamps)
+    and **stored, not deflated**: it is almost all audio that is already
+    compressed, so deflating tens of thousands of files spends minutes of CPU
+    for no size gain. Each entry is streamed rather than read whole, so peak
+    memory does not track the largest recording. The directory layout copies
+    each source to ``dest`` under its bundle name.
+    """
+    names = sorted(sources)
+    if layout == "zip":
+        with zipfile.ZipFile(dest, "w", compression=zipfile.ZIP_STORED) as zf:
+            for name in names:
+                path = sources[name]
+                info = zipfile.ZipInfo(filename=name, date_time=(1980, 1, 1, 0, 0, 0))
+                info.compress_type = zipfile.ZIP_STORED
+                info.external_attr = 0o644 << 16
+                info.file_size = os.path.getsize(path)
+                with open(path, "rb") as f, zf.open(info, "w") as entry:
+                    shutil.copyfileobj(f, entry, 1024 * 1024)
+                if progress is not None:
+                    progress.tick()
+        return
+    os.makedirs(dest, exist_ok=True)
+    for name in names:
+        with open(sources[name], "rb") as fsrc, open(
+            os.path.join(dest, name), "wb"
+        ) as fdst:
+            shutil.copyfileobj(fsrc, fdst, 1024 * 1024)
+        if progress is not None:
+            progress.tick()
 
 
 # ---------------------------------------------------------------------------
@@ -1490,6 +1541,7 @@ class Report:
         self.out_of_pair = 0
         self.missing_audio = 0
         self.audio_found = 0
+        self.audio_cached = 0
 
     def summary(self) -> str:
         return (
@@ -1499,6 +1551,7 @@ class Report:
             f"non-lexical records skipped: {self.skipped_nonlexical}\n"
             f"inflected records not indexed: {self.skipped_inflected}\n"
             f"audio files bundled: {self.audio_found}\n"
+            f"audio files from cache: {self.audio_cached}\n"
             f"audio files referenced but missing: {self.missing_audio}"
         )
 
@@ -2193,6 +2246,16 @@ def build(args) -> Report:
     )
     audio.download_dir = download_dir
 
+    def report_cached(count: int) -> None:
+        # A coarse progress for cache hits: the exact total is not known until
+        # the snapshot has been scanned, so this is a running count, not a
+        # fraction. One line per cached file would be tens of thousands of
+        # writes; one every thousand is enough to see it moving.
+        if count == 1 or count % 1000 == 0:
+            print(f"audio cached: {count:,}", file=sys.stderr)
+
+    audio.on_cached = report_cached
+
     header_name = args.name or f"kaikki-{args.source_lang}"
 
     out_lines: List[str] = []
@@ -2324,25 +2387,33 @@ def build(args) -> Report:
     # (when enabled), written as one archive by default or a directory on request.
     # Bundling is unconditional because the about card always references the icon
     # set, so the icons must resolve even when audio is disabled.
+    #
+    # Every entry is named by its source path, so a recording already in the
+    # download cache is read straight into the bundle rather than copied into a
+    # staging directory first; only archive members are extracted to ``tmp``.
+    sources: Dict[str, str] = {
+        name: os.path.join(_ICON_ASSET_DIR, name) for name in _ICON_FILES
+    }
     with tempfile.TemporaryDirectory(prefix="kaikki-res-") as tmp:
-        for name in _ICON_FILES:
-            shutil.copyfile(os.path.join(_ICON_ASSET_DIR, name), os.path.join(tmp, name))
         if want_audio and audio.referenced:
             fetched = {
                 name: path
                 for name, path in audio.local.items()
                 if name in audio.referenced and os.path.isfile(path)
             }
-            for name, path in fetched.items():
-                shutil.copyfile(path, os.path.join(tmp, name))
+            sources.update(fetched)
             wanted = {
                 name: list(audio.aliases.get(name, []))
                 for name in sorted(audio.referenced)
                 if name not in fetched
             }
-            batching = Progress("bundling audio", every=1, total=len(audio.referenced))
+            batching = Progress("bundling audio", every=1, total=len(wanted))
             found, missing = extract_audio(audio_path, wanted, tmp, batching)
             batching.done()
+            missing_set = set(missing)
+            for name in wanted:
+                if name not in missing_set:
+                    sources[name] = os.path.join(tmp, name)
             report.audio_found = len(fetched) + found
             if missing:
                 print(
@@ -2350,18 +2421,15 @@ def build(args) -> Report:
                     f"the archive while bundling",
                     file=sys.stderr,
                 )
-        if args.audio_layout == "zip":
-            write_audio_zip(tmp, res_base + ".files.zip")
-        else:
-            dest_dir = res_base + ".files"
-            os.makedirs(dest_dir, exist_ok=True)
-            for name in sorted(os.listdir(tmp)):
-                src = os.path.join(tmp, name)
-                if os.path.isfile(src):
-                    with open(src, "rb") as fsrc, open(os.path.join(dest_dir, name), "wb") as fdst:
-                        fdst.write(fsrc.read())
+        bundle_dest = (
+            res_base + ".files.zip" if args.audio_layout == "zip" else res_base + ".files"
+        )
+        packing = Progress("writing bundle", every=1, total=len(sources))
+        write_bundle(sources, bundle_dest, args.audio_layout, packing)
+        packing.done()
 
     report.missing_audio = len(audio.missing)
+    report.audio_cached = audio.cached_hits
     print(f"wrote {dz_path}", file=sys.stderr)
     return report
 
@@ -3211,42 +3279,43 @@ def bundle_audio(args) -> int:
 
     found = 0
     missing: List[str] = []
+    written = zip_path if args.audio_layout == "zip" else dir_path
     with tempfile.TemporaryDirectory(prefix="kaikki-res-") as tmp:
-        for name in _ICON_FILES:
-            shutil.copyfile(os.path.join(_ICON_ASSET_DIR, name), os.path.join(tmp, name))
-
+        # Icons are referenced from the assets; a cache hit is read straight from
+        # the cache. Only archive members need the temporary directory.
+        sources: Dict[str, str] = {
+            name: os.path.join(_ICON_ASSET_DIR, name) for name in _ICON_FILES
+        }
         wanted: Dict[str, List[str]] = {}
+        gathering = Progress("gathering audio", every=1, total=len(refs))
         for name in refs:
             safe = rename.get(name, name)
-            # The cache first: a recording the archive lacked was downloaded
-            # there, and only the archive's members are extracted below.
             cached = os.path.join(download_dir, safe)
             if not os.path.isfile(cached) and safe != name:
                 cached = os.path.join(download_dir, name)
             if os.path.isfile(cached):
-                shutil.copyfile(cached, os.path.join(tmp, safe))
+                sources[safe] = cached
                 found += 1
-                continue
-            # The archive stores the raw name, so the keys come from the
-            # reference; only the target file is renamed to the safe one.
-            wanted[safe] = _bundle_archive_keys(name)
+            else:
+                # The archive stores the raw name, so the keys come from the
+                # reference; only the target file is renamed to the safe one.
+                wanted[safe] = _bundle_archive_keys(name)
+            gathering.tick()
+        gathering.done()
 
         if wanted:
-            batching = Progress("bundling audio", every=1, total=len(refs))
+            batching = Progress("extracting audio", every=1, total=len(wanted))
             extracted, missing = extract_audio(audio_path, wanted, tmp, batching)
             batching.done()
             found += extracted
+            missing_set = set(missing)
+            for name in wanted:
+                if name not in missing_set:
+                    sources[name] = os.path.join(tmp, name)
 
-        if args.audio_layout == "zip":
-            write_audio_zip(tmp, zip_path)
-            written = zip_path
-        else:
-            os.makedirs(dir_path, exist_ok=True)
-            for name in sorted(os.listdir(tmp)):
-                src = os.path.join(tmp, name)
-                if os.path.isfile(src):
-                    shutil.copyfile(src, os.path.join(dir_path, name))
-            written = dir_path
+        packing = Progress("writing bundle", every=1, total=len(sources))
+        write_bundle(sources, written, args.audio_layout, packing)
+        packing.done()
 
     if rename:
         # Point the dictionary at the names actually bundled. Written to a

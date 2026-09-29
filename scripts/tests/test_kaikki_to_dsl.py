@@ -522,6 +522,69 @@ class AudioResolutionTests(unittest.TestCase):
             self.assertTrue(os.path.isdir(cache))
             self.assertEqual(len(os.listdir(cache)), 2)
 
+    def test_cached_recordings_are_counted_not_logged_one_by_one(self):
+        # A large dictionary serves tens of thousands of recordings from the
+        # cache; one log line each would dominate the run, so hits become a
+        # running count and a summary total, with no filename per file.
+        with tempfile.TemporaryDirectory() as tmp:
+            tar_path = os.path.join(tmp, "audios.tar")
+            make_tar(tar_path, ["audios/En-au-limitword.ogg"])
+
+            def first_downloader(url, dest):
+                os.makedirs(os.path.dirname(dest), exist_ok=True)
+                with open(dest, "wb") as f:
+                    f.write(b"FAKE-" + os.path.basename(dest).encode())
+
+            args = TOOL.build_parser().parse_args([
+                "--source-lang", "en", "--jsonl", AUDIO_LIMIT_FIXTURE,
+                "--out-dir", os.path.join(tmp, "out1"), "--audio-tar", tar_path,
+                "--audio-per-word", "3",
+            ])
+            args.audio_downloader = first_downloader
+            args.cache_dir = os.path.join(tmp, "cache")
+            stream = io.StringIO()
+            original = sys.stderr
+            sys.stderr = stream
+            try:
+                TOOL.build(args)  # fills the cache with the two archive-missing files
+            finally:
+                sys.stderr = original
+            # a real download is still named
+            self.assertRegex(stream.getvalue(), r"audio downloaded: \S+\.ogg")
+
+            # second run: both recordings are already cached, and download_cached
+            # would leave a verified file alone, so the stub writes nothing
+            written = []
+
+            def skip_if_cached(url, dest):
+                if not os.path.isfile(dest):
+                    written.append(dest)
+                    os.makedirs(os.path.dirname(dest), exist_ok=True)
+                    with open(dest, "wb") as f:
+                        f.write(b"FAKE")
+
+            args2 = TOOL.build_parser().parse_args([
+                "--source-lang", "en", "--jsonl", AUDIO_LIMIT_FIXTURE,
+                "--out-dir", os.path.join(tmp, "out2"), "--audio-tar", tar_path,
+                "--audio-per-word", "3",
+            ])
+            args2.audio_downloader = skip_if_cached
+            args2.cache_dir = os.path.join(tmp, "cache")
+            stream = io.StringIO()
+            sys.stderr = stream
+            try:
+                report = TOOL.build(args2)
+            finally:
+                sys.stderr = original
+
+            self.assertEqual(written, [])
+            self.assertEqual(report.audio_cached, 2)
+            self.assertIn("audio files from cache: 2", report.summary())
+            out = stream.getvalue()
+            self.assertIn("audio cached: 1", out)
+            # the filename is gone: no per-file cached line remains
+            self.assertNotRegex(out, r"audio cached: \S+\.ogg")
+
     def test_failed_download_omits_audio_without_failing(self):
         with tempfile.TemporaryDirectory() as tmp:
             def failing(url, dest):
@@ -1538,6 +1601,39 @@ class BundleRebuildTests(unittest.TestCase):
         with zipfile.ZipFile(path) as z:
             return set(z.namelist())
 
+    def test_the_bundle_stores_entries_rather_than_recompressing(self):
+        # The bundle is almost all already-compressed audio, so deflating it
+        # spends minutes of CPU for no size gain; entries must be stored.
+        with tempfile.TemporaryDirectory() as tmp:
+            sources = {}
+            for name in ("a.ogg", "b.mp3"):
+                path = os.path.join(tmp, name)
+                with open(path, "wb") as f:
+                    f.write(b"\0" * 4096)
+                sources[name] = path
+            out = os.path.join(tmp, "x.dsl.files.zip")
+            TOOL.write_bundle(sources, out, "zip")
+            with zipfile.ZipFile(out) as z:
+                self.assertEqual(z.testzip(), None)
+                self.assertTrue(
+                    all(i.compress_type == zipfile.ZIP_STORED for i in z.infolist())
+                )
+                self.assertEqual(sorted(z.namelist()), ["a.ogg", "b.mp3"])
+
+    def test_the_bundle_directory_layout_copies_each_source(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            sources = {}
+            for name in ("a.ogg", "b.mp3"):
+                path = os.path.join(tmp, "src-" + name)
+                with open(path, "wb") as f:
+                    f.write(b"DATA-" + name.encode())
+                sources[name] = path
+            out = os.path.join(tmp, "x.dsl.files")
+            TOOL.write_bundle(sources, out, "dir")
+            self.assertEqual(sorted(os.listdir(out)), ["a.ogg", "b.mp3"])
+            with open(os.path.join(out, "a.ogg"), "rb") as f:
+                self.assertEqual(f.read(), b"DATA-a.ogg")
+
     def test_references_are_collected_in_order_and_unescaped(self):
         text = (
             "[s]a.ogg[/s] [s]b.ogg[/s] [s]a.ogg[/s] "
@@ -1561,7 +1657,8 @@ class BundleRebuildTests(unittest.TestCase):
             ]))
             dz = os.path.join(out, "kaikki-en.dsl.dz")
             zip_path = os.path.join(out, "kaikki-en.dsl.files.zip")
-            before = self.zip_names(zip_path)
+            with open(zip_path, "rb") as f:
+                zip_before = f.read()
             with open(dz, "rb") as f:
                 dz_before = f.read()
             os.remove(zip_path)
@@ -1569,7 +1666,9 @@ class BundleRebuildTests(unittest.TestCase):
             with self.captured():
                 self.assertEqual(
                     TOOL.bundle_audio(self.bundle_args(tmp, dz, "--audio-tar", tar)), 0)
-            self.assertEqual(self.zip_names(zip_path), before)
+            # byte-for-byte what a build wrote, not merely the same names
+            with open(zip_path, "rb") as f:
+                self.assertEqual(f.read(), zip_before)
             # the references were already safe, so the dictionary is untouched
             with open(dz, "rb") as f:
                 self.assertEqual(f.read(), dz_before)
@@ -1578,7 +1677,8 @@ class BundleRebuildTests(unittest.TestCase):
             with self.captured():
                 self.assertEqual(
                     TOOL.bundle_audio(self.bundle_args(tmp, dz, "--audio-tar", tar)), 0)
-            self.assertEqual(self.zip_names(zip_path), before)
+            with open(zip_path, "rb") as f:
+                self.assertEqual(f.read(), zip_before)
 
     def test_an_unsafe_reference_is_rewritten_and_bundled(self):
         with tempfile.TemporaryDirectory() as tmp:
