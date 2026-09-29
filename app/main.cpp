@@ -26,7 +26,8 @@ int main(int argc, char *argv[])
     QGuiApplication app(argc, argv);
 
     // Localization: install the best-matching compiled catalog for the
-    // device's UI language (embedded via i18n.qrc as :/i18n/aurelex_<lang>.qm).
+    // device's UI language (embedded as :/i18n/aurelex_<lang>.qm, see the
+    // qt_add_resources("i18n") call in CMakeLists.txt).
     // Try each full locale first, then its language-only code; the first that
     // loads wins. No match falls back to English (no translator) — non-fatal.
     QTranslator *translator = new QTranslator(&app);
@@ -54,7 +55,8 @@ int main(int argc, char *argv[])
     else
         qInfo() << "[aurelex] no matching translation catalog; using English base strings";
 
-    // Register the Material Icons font (bundled via fonts.qrc) so QML can render
+    // Register the Material Icons font (bundled via qt_add_resources("fonts") in
+    // CMakeLists.txt) so QML can render
     // glyphs with the "Material Icons" family. See qt-material-ui change design D6.
     const int fontId = QFontDatabase::addApplicationFont(
         QStringLiteral(":/fonts/MaterialIcons-Regular.ttf"));
@@ -66,9 +68,10 @@ int main(int argc, char *argv[])
     }
 
     // Material Symbols Outlined (subset): a small secondary icon font holding a
-    // few glyphs the classic Material Icons set doesn't have (folder_open and
-    // match_word in the Material Symbols design). Rendered with the
-    // "Material Symbols" family. See the groups-tab-polish change.
+    // few glyphs the classic Material Icons set doesn't have (folder_open,
+    // match_word and light_mode_auto in the Material Symbols design). Rendered
+    // with the "Material Symbols Outlined" family. See the groups-tab-polish and
+    // tri-state-theme-control changes.
     const int msFontId = QFontDatabase::addApplicationFont(
         QStringLiteral(":/fonts/MaterialSymbols-Outlined-subset.ttf"));
     if (msFontId < 0) {

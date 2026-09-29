@@ -1,6 +1,0 @@
-<RCC>
-    <qresource prefix="/fonts">
-        <file alias="MaterialIcons-Regular.ttf">res/fonts/MaterialIcons-Regular.ttf</file>
-        <file alias="MaterialSymbols-Outlined-subset.ttf">res/fonts/MaterialSymbols-Outlined-subset.ttf</file>
-    </qresource>
-</RCC>

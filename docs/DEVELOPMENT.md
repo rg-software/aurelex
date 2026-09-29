@@ -153,7 +153,8 @@ consequences:
    re-run the script to recompile the `.qm`. Translation-only tweaks do not
    need step 2.
 4. **Commit the compiled `.qm` files** — they are the shipped artifacts; both
-   are embedded via `app/i18n.qrc`.
+   are embedded via the `qt_add_resources(aurelex "i18n" ...)` block in
+   `app/CMakeLists.txt`.
 5. If a new system language is added, also extend `app/android/res/values-xx/`
    (app label, tile/widget labels, notification strings) and add it to the
    `-Languages` array.

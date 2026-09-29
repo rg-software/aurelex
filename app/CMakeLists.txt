@@ -64,9 +64,27 @@ qt_add_executable(aurelex
     EngineController.cpp
     RemoteCatalog.cpp
     ArticleServer.cpp
-    fonts.qrc
-    i18n.qrc
     $<TARGET_OBJECTS:aurelex_carve>
+)
+
+# Bundled resources. Declared with qt_add_resources rather than .qrc files +
+# AUTORCC: AUTORCC does not emit the payload files listed *inside* a .qrc as
+# dependencies of the generated qrc_*.cpp, so regenerating a bundled font (e.g.
+# the icon subset) left the stale glyphs in the APK. qt_add_resources tracks
+# every FILES entry, so changing a .ttf or .qm re-runs rcc.
+qt_add_resources(aurelex "fonts"
+    PREFIX "/fonts"
+    BASE "${CMAKE_CURRENT_SOURCE_DIR}/res/fonts"
+    FILES
+        "${CMAKE_CURRENT_SOURCE_DIR}/res/fonts/MaterialIcons-Regular.ttf"
+        "${CMAKE_CURRENT_SOURCE_DIR}/res/fonts/MaterialSymbols-Outlined-subset.ttf"
+)
+qt_add_resources(aurelex "i18n"
+    PREFIX "/i18n"
+    BASE "${CMAKE_CURRENT_SOURCE_DIR}/i18n"
+    FILES
+        "${CMAKE_CURRENT_SOURCE_DIR}/i18n/aurelex_ru.qm"
+        "${CMAKE_CURRENT_SOURCE_DIR}/i18n/aurelex_ja.qm"
 )
 target_include_directories(aurelex PRIVATE
     "${CARVE_DIR}"

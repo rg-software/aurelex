@@ -62,14 +62,36 @@ This adb-installs the result (`-Install`); without it the APK lands in
 | 21 | Look up the same word twice | One history entry (dedupe, moves to front) | ✅ |
 | 22 | Look up a word not in any dict | **Not** added to history | ✅ |
 
-## Dark mode
+## Theme (dark / light / follow system)
+
+The dock's theme cell cycles **Light → Dark → Follow system → Light**. Its glyph and its
+accessibility name both show the theme the **next tap** selects, so the three icons read
+"tap to go dark" (moon), "tap to go light" (sun), and "tap to hand control back to the
+system" (auto). The stored setting is `themeMode` (`1` light, `2` dark, `-1` follow) in
+`files/settings.json`.
+
+Set the phone's theme first, then walk the cycle. Two of the three taps always change the
+appearance; the third is the tap that hands control back to a system which may already be
+showing what you just left (Dark → Follow on a dark system, or Follow → Light on a light
+one). That tap still changes the stored **mode** and the icon, so the control never looks
+dead — but do not expect a repaint on it.
 
 | # | How to test | Expected | Status |
 | --- | --- | --- | --- |
-| 23 | Toggle the **Dark mode** button in the bottom dock | Whole app re-palettes (Material theme follows `userDarkOverride`/`systemDark`); article re-renders in dark CSS | ✅ |
-| 24 | Toggle back | Returns to the previous theme | ✅ |
-| 25 | Follow-the-system: change the phone's theme (with the dark override off) | App follows the system dark/light setting (JNI system-dark read) | ⬜ (system switch not re-verified live) |
-| 26 | Force-stop and relaunch after forcing dark | Dark persists (`userDarkOverride` stored in `files/settings.json`) | ✅ |
+| 23 | System theme **light**: tap the theme cell three times | Mode goes light → dark → follows-system → light, and the name shows the next tap's target at each step ("Dark mode" → "Follow system theme" → "Light mode") | ✅ |
+| 24 | System theme **dark**: tap the theme cell three times | Mode goes dark → follows-system → light → dark, names "Follow system theme" → "Light mode" → "Dark mode" | ✅ |
+| 25 | Follow-system: change the phone's theme while the app is in follow-system | App follows the system dark/light setting (JNI system-dark read), without a restart | ✅ |
+| 25a | Pinned light, then change the phone's theme to dark (and vice versa) | App stays light — a pinned theme ignores the system, live and after a restart | ✅ |
+| 25b | With an article open, tap the theme cell | The open article flips theme in place, keeping the looked-up word (no re-lookup, no empty article) | ✅ |
+| 25c | Each of the three modes, in the on-device accessibility tree | Three distinct names, each announcing the next tap's target: "Dark mode" (from Light), "Follow system theme" (from Dark), "Light mode" (from Auto) | ✅ |
+| 25d | The glyph in each of the three states | A real icon, not `U+FFFD` tofu. Check all three: sun (`light_mode`) from Auto, moon (`dark_mode`) from Light, auto (`light_mode_auto`) from Dark | ✅ (human eyeball at 18 px: all three read as intended) |
+| 25e | Force-stop and relaunch in each of the three modes | The same **mode** comes back, not merely the same resolved theme | ✅ |
+| 25f | Migration: with the app stopped, write `files/settings.json` containing only `"darkMode": true`, then launch | Startup is dark, and the stored value becomes mode `2` | ✅ |
+| 25g | Migration: same with `"darkMode": false`, then launch | Startup follows the system (mode `-1`) | ✅ |
+| 25h | Migration: write an out-of-range `"themeMode": 7` | Falls back to mode `-1` rather than a state the control cannot represent | ✅ |
+| 25i | Cold start with a **persisted dark** mode, and do not tap the theme cell | The name reads "Follow system theme" on the very first frame | ✅ (regression: `loadSettings()` runs after the QML binds, so it must emit `themeModeChanged()`) |
+| 25j | In each of the three modes, compare the theme cell's glyph and label against the other dock tabs | The "Theme" label baseline matches the tab labels, and the auto glyph is the same size as the sun/moon. The auto glyph comes from the *secondary* subset font, so the subset's vertical metrics must be normalized to the classic font's 1.0 em (`asc=upm`, `desc=0`); otherwise its taller line box pushes the label down ~11 px | ✅ (measured: label top row 2270 for Theme = Search/Dicts/Groups/Favorites across states; auto glyph ink band 30–76 = sun) |
+| 26 | Force-stop and relaunch after forcing dark | Dark persists (`themeMode` stored in `files/settings.json`) | ✅ |
 
 ## Full-text search
 
@@ -147,7 +169,23 @@ under "Localization" in `docs/DEVELOPMENT.md`.
 
 - `.mdd` images not exercised on-device (#18) — needs a real MDict fixture.
 - QS tile / widget active-group (#37) — inherited from `quick-lookup-shortcuts`.
-- Dark-mode live system-switch (#25), icon visual (#47).
+- Theme control: the tri-state cycle, both migration paths, live system-switch, the
+  article in-place flip, the layout alignment and the glyphs are all verified
+  (#23–#25j).
+- Secondary icon font (`MaterialSymbols-Outlined-subset.ttf`, family "Material Symbols
+  Outlined"): it must keep the classic font's 1.0 em vertical metrics, or any Text mixing
+  the two families develops a taller line box and drops the sibling label (#25j). The
+  subset is built by `build_symbol_subset.py`, which pins `hhea`/OS-2 `asc=upm`,
+  `desc=0`, sets `USE_TYPO_METRICS`, and zeroes the `post` underline. Bundled resources
+  are declared with `qt_add_resources` in `app/CMakeLists.txt` (not `.qrc` files +
+  AUTORCC), because AUTORCC does not track the payload files listed inside a `.qrc` — a
+  regenerated `.ttf` silently stayed out of the APK until the resource was rebuilt by an
+  unrelated edit.
+- Icon codepoints: a wrong-but-real codepoint passes every "is the glyph in the font"
+  check. The sun shipped as `U+FFFD` because `icon()` had no `light_mode` key at all, and
+  the earlier sun/moon candidates (`0xe2c8`/`0xf6f0`) were really `folder_open`/`match_word`.
+  Use the Material Symbols `.codepoints` file as the authority and keep every name passed to
+  `icon()`/`symbolIcon()` backed by a map key — `icon()` now warns when it is not.
 - StarDict import stages the `.ifo` but not its required sibling `.idx`/`.dict`
   files (`isSupportedDictionaryName`), so StarDict dictionaries do not currently
   load; the intended contract remains in `dictionary-management`.
@@ -169,5 +207,5 @@ under "Localization" in `docs/DEVELOPMENT.md`.
 
 Device notes captured in archived changes: Motorola ThinkPhone (Android 15),
 verified 2026-09-03 across the Qt build — folder-scoped SAF storage, recursive
-scan, FTS prefix/whole-words, auto-index, history/favorites, dark mode (manual
-toggle), external entry points, tile/widget.
+scan, FTS prefix/whole-words, auto-index, history/favorites, theme (manual
+toggle, then the tri-state cycle), external entry points, tile/widget.

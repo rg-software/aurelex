@@ -45,7 +45,7 @@ class EngineController : public QObject
     Q_PROPERTY(QVariantList favorites READ favorites NOTIFY favoritesChanged)
     Q_PROPERTY(bool darkMode READ darkMode NOTIFY darkModeChanged)
     Q_PROPERTY(bool systemDark READ systemDark NOTIFY systemDarkChanged)
-    Q_PROPERTY(bool userDarkOverride READ userDarkOverride WRITE setUserDarkOverride NOTIFY userDarkOverrideChanged)
+    Q_PROPERTY(int themeMode READ themeMode WRITE setThemeMode NOTIFY themeModeChanged)
     Q_PROPERTY(bool onboarded READ onboarded WRITE setOnboarded NOTIFY onboardedChanged)
     // Article reflow zoom (percent, 75-250 in 25 steps; 100 = default). Persisted
     // in settings.json; rewriteArticleUrls bakes it into the article CSS, and
@@ -175,8 +175,11 @@ public:
     Q_INVOKABLE QString groupName(int groupId) const;
     bool darkMode() const { return m_darkMode; }
     bool systemDark() const { return m_systemDark; }
-    bool userDarkOverride() const { return m_userDarkOverride; }
-    void setUserDarkOverride(bool on);
+    // The theme the user asked for (kThemeFollowSystem / kThemeLight / kThemeDark).
+    // This is the SETTING; darkMode() is the theme it resolves to. Most consumers
+    // want darkMode() — the resolution already accounts for the system theme.
+    int themeMode() const { return m_themeMode; }
+    void setThemeMode(int mode);
     qreal articleZoom() const { return m_articleZoom; }
     qreal articleZoomMin() const { return kArticleZoomMin; }
     qreal articleZoomMax() const { return kArticleZoomMax; }
@@ -189,10 +192,13 @@ public:
     void setOnboarded(bool v);
     QVariantList scanFailures() const { return m_scanFailures; }
 
-    // Cycle the manual dark override: when following system, force dark; when
-    // forcing dark, return to following system. Drives Material.theme + the
-    // effective dark mode (article CSS).
-    Q_INVOKABLE void toggleDarkOverride();
+    // Cycle the theme mode Light -> Dark -> Follow-system -> Light. The order is
+    // deliberate: leaving Follow-system always lands on an explicit theme, which
+    // is by construction different from whatever the system is showing, so no tap
+    // is ever a visual no-op. (The reverse order reproduces the dead-button bug
+    // this replaced: under a dark system, the step out of follow-system selects
+    // dark — which is already showing.)
+    Q_INVOKABLE void toggleThemeMode();
 
     // Initialise the engine. `configDir`/`indexDir` are usually the same
     // AppLocalDataLocation; `stagedDir` is the dict folder the app stages to.
@@ -426,7 +432,7 @@ signals:
     void onboardedChanged();
     void articleBaseUrlChanged();
     void systemDarkChanged();
-    void userDarkOverrideChanged();
+    void themeModeChanged();
     void articleZoomChanged();
     void scanFailuresChanged();
     void ftsIndexProgressChanged();
@@ -616,8 +622,15 @@ private:
     QVariantList m_favorites;
     bool m_darkMode = false;
     bool m_systemDark = false;
-    bool m_userDarkOverride = false;
+    // Persisted theme setting. Stored as the int itself so settings.json carries
+    // no serialize step; the values are the on-disk representation.
+    int m_themeMode = kThemeFollowSystem;
     qreal m_articleZoom = 100.0;
+    // Theme modes. Follow-system is the default (and the migration target for
+    // any previously-unset or out-of-range stored value).
+    static constexpr int kThemeFollowSystem = -1;
+    static constexpr int kThemeLight = 1;
+    static constexpr int kThemeDark = 2;
     static constexpr qreal kArticleZoomMin = 75.0;
     static constexpr qreal kArticleZoomMax = 250.0;
     static constexpr qreal kArticleZoomStep = 25.0;

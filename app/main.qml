@@ -20,14 +20,13 @@ ApplicationWindow {
     visible: true
     title: "Aurelex"
 
-    // Material accent drives highlights; theme follows system dark with the
-    // manual D-toggle override (see EngineController userDarkOverride/systemDark).
-    // Task 3.1: Material.theme bound at the root so light/dark is driven by the
-    // effective dark mode (JNI systemDark + userDarkOverride), not by Qt's own
-    // (unreliable on Android 6.6) system detection.
+    // Material accent drives highlights. Task 3.1: Material.theme bound at the
+    // root so light/dark is driven by the EFFECTIVE theme, not by Qt's own
+    // (unreliable on Android 6.6) system detection. EngineController already
+    // resolves the user's theme setting against the JNI-sampled system state, so
+    // the whole app reads the one resolved value.
     Material.accent: Material.Purple
-    Material.theme: (engine.userDarkOverride || engine.systemDark)
-                    ? Material.Dark : Material.Light
+    Material.theme: engine.darkMode ? Material.Dark : Material.Light
 
     // 0 = search, 1 = dictionaries, 2 = article, 3 = groups, 4 = fts,
     // 5 = history, 6 = favorites.
@@ -57,7 +56,8 @@ ApplicationWindow {
     // Drives the Dicts-tab "Preparing dictionaries…" banner.
     property bool _stagingActive: engine.stagingActive
 
-    // Material icon font family (registered from fonts.qrc in main.cpp) + the
+    // Material icon font family (registered in main.cpp from the bundled
+    // resource declared by qt_add_resources("fonts") in CMakeLists.txt) + the
     // icon-name -> codepoint helper (qt-material-ui task 7.2).
     property string iconFontFamily: "Material Icons"
     // Secondary icon font: a Material Symbols Outlined subset holding glyphs the
@@ -150,6 +150,10 @@ ApplicationWindow {
             "translate": 0xe8e2,
             "delete": 0xe872,
             "bookmark": 0xe866,
+            // light_mode/dark_mode are present in the classic Material Icons font,
+            // so they come from icon() and not from symbolIcon(); only
+            // light_mode_auto needs the symbol subset.
+            "light_mode": 0xe518,
             "dark_mode": 0xe51c,
             "zoom_in": 0xe8ff,
             "zoom_out": 0xe900,
@@ -159,16 +163,31 @@ ApplicationWindow {
             "music_note": 0xe405,
             "music_off": 0xe440
         }
-        return map[name] !== undefined ? String.fromCharCode(map[name]) : "\uFFFD"
+        if (map[name] === undefined) {
+            // A missing key used to fail silently as U+FFFD tofu in the UI. That
+            // is how the theme button lost its sun: icon("light_mode") had no
+            // entry, so the control rendered a replacement character. Warn
+            // instead — the caller asked for an icon that does not exist.
+            console.warn("icon(): no such icon name:", name);
+            return "\uFFFD";
+        }
+        return String.fromCharCode(map[name]);
     }
     // Material Symbols icons (rendered with symbolFontFamily): glyphs that only
-    // exist in the Material Symbols Outlined subset (folder_open, match_word).
+    // exist in the Material Symbols Outlined subset (folder_open, match_word,
+    // light_mode_auto).
+    // fromCodePoint, not fromCharCode: light_mode_auto is U+FFF00, outside the
+    // BMP, so it needs a surrogate pair in UTF-16. fromCharCode truncates its
+    // argument to 16 bits, which would yield U+FF00 — a real glyph present in the
+    // subset's cmap — and the icon would render as the wrong character rather than
+    // failing visibly.
     function symbolIcon( name ) {
         var map = {
             "folder_open": 0xe2c8,
-            "match_word": 0xf6f0
+            "match_word": 0xf6f0,
+            "light_mode_auto": 0xfff00
         }
-        return map[name] !== undefined ? String.fromCharCode(map[name]) : "\uFFFD"
+        return map[name] !== undefined ? String.fromCodePoint(map[name]) : "\uFFFD"
     }
     // Convenient Material palette aliases (replaces the old darkMode ternaries).
     property color uiBg: Material.background
@@ -755,13 +774,23 @@ ApplicationWindow {
             }
 
             // Theme toggle: the 6th cell, a SIBLING of the TabBar so it can
-            // never become the selected tab. Forces dark (or follows the system
-            // theme); does not navigate.
+            // never become the selected tab. Cycles Light -> Dark -> follow the
+            // system; does not navigate.
             Button {
                 id: themeBtn
                 width: navRow.width - navBar.width
                 height: navRow.height
                 flat: true
+                // The icon and the accessible name both show what the NEXT tap
+                // selects, not the current theme: the moon means "tap to go dark",
+                // the sun "tap to go light", the auto glyph "tap to hand control
+                // back to the system". Current-state icons could not express the
+                // third mode — pinned-light and follow-system-under-a-light-system
+                // would draw the same sun.
+                readonly property int _nextMode: engine.themeMode === 1 ? 2
+                                                : engine.themeMode === 2 ? -1
+                                                                      : 1
+                readonly property bool _nextIsAuto: _nextMode === -1
                 contentItem: Column {
                     // The theme cell is sibling to the TabBar (no active-tab
                     // underline), and the Material Button's content area sits a
@@ -773,8 +802,10 @@ ApplicationWindow {
                     spacing: 0
                     Text {
                         anchors.horizontalCenter: parent.horizontalCenter
-                        text: root.icon("dark_mode")
-                        font.family: root.iconFontFamily
+                        text: themeBtn._nextIsAuto
+                              ? root.symbolIcon("light_mode_auto")
+                              : root.icon(themeBtn._nextMode === 2 ? "dark_mode" : "light_mode")
+                        font.family: themeBtn._nextIsAuto ? root.symbolFontFamily : root.iconFontFamily
                         font.pixelSize: 18
                         color: themeBtn.down ? themeBtn.Material.accentColor
                                             : themeBtn.Material.foreground
@@ -787,10 +818,14 @@ ApplicationWindow {
                                             : themeBtn.Material.foreground
                     }
                 }
-                Accessible.name: engine.userDarkOverride || engine.systemDark ? "Light mode" : "Dark mode"
+                // Invariant English (house rule): these are the documented
+                // UIAutomator test IDs, so they are never wrapped in qsTr.
+                Accessible.name: themeBtn._nextIsAuto ? "Follow system theme"
+                            : themeBtn._nextMode === 2 ? "Dark mode"
+                                                        : "Light mode"
                 Accessible.role: Accessible.Button
                 onClicked: {
-                    engine.toggleDarkOverride()
+                    engine.toggleThemeMode()
                     root._blurActive()
                 }
             }

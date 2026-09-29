@@ -117,7 +117,7 @@ elements in automated tests:
 | Nav | Groups tab | `"Groups"` (label localized) |
 | Nav | Full-text search tab | `"Full-text search"` (label localized) |
 | Nav | Favorites tab | `"Favorites"` (label localized) |
-| Nav | Dark-mode toggle | `"Light mode"` / `"Dark mode"` (dynamic); a plain button that is a SIBLING of the TabBar (not a TabButton) in the last (6th) slot of the bottom dock — never becomes the active tab |
+| Nav | Theme toggle | `"Dark mode"` / `"Light mode"` / `"Follow system theme"` (dynamic); a plain button that is a SIBLING of the TabBar (not a TabButton) in the last (6th) slot of the bottom dock — never becomes the active tab. Cycles Light → Dark → Follow-system → Light. The glyph AND the name both show the theme the **next tap** selects, not the current one (moon = "tap to go dark", sun = "tap to go light", auto glyph = "tap to hand control back to the system"), so no two modes look alike |
 | Top | Status strip | No interactive content — paints the edge-to-edge window's top chrome in the app background |
 | Search | Group button | `"Search group scope"` (shows the current group in the magenta accent scheme; always tappable — taps open the modal `Select group` picker, which has no "Groups" subtitle) |
 | Search | TextField | `"Search dictionaries"` |

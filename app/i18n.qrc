@@ -1,6 +1,0 @@
-<RCC>
-    <qresource prefix="/i18n">
-        <file alias="aurelex_ru.qm">i18n/aurelex_ru.qm</file>
-        <file alias="aurelex_ja.qm">i18n/aurelex_ja.qm</file>
-    </qresource>
-</RCC>

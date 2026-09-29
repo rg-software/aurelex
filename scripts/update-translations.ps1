@@ -10,7 +10,8 @@
 #   scripts/update-translations.ps1 -Languages @("ru")
 #
 # Catalogs live in app/i18n/aurelex.<lang>.ts (sources) and the compiled
-# aurelex_<lang>.qm (embedded via app/i18n.qrc, loaded at startup by main.cpp).
+# aurelex_<lang>.qm (embedded via the qt_add_resources("i18n") block in
+# app/CMakeLists.txt, loaded at startup by main.cpp).
 
 param(
     [string[]]$Languages = @("ru", "ja"),

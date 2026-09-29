@@ -2143,21 +2143,29 @@ QString EngineController::groupName(int groupId) const
     return QStringLiteral("All");
 }
 
-void EngineController::setUserDarkOverride(bool on)
+void EngineController::setThemeMode(int mode)
 {
-    if (m_userDarkOverride == on) return;
-    m_userDarkOverride = on;
+    // An out-of-range write is ignored rather than clamped to a neighbour: the
+    // only sources are our own cycle and the settings loader (which already
+    // normalizes), so anything else is a programming error, and silently
+    // snapping to the nearest mode would hide it. Same guard shape as
+    // setArticleZoom's no-op-on-unchanged write: no signal, no save, no churn.
+    if (mode != kThemeFollowSystem && mode != kThemeLight && mode != kThemeDark)
+        return;
+    if (m_themeMode == mode) return;
+    m_themeMode = mode;
     saveSettings();
     applyEffectiveDark();
-    emit userDarkOverrideChanged();
+    emit themeModeChanged();
 }
 
-void EngineController::toggleDarkOverride()
+void EngineController::toggleThemeMode()
 {
-    // The manual D toggle: force dark when following system, else return to
-    // following the system theme.
-    qInfo("toggleDarkOverride: %d -> %d", int(m_userDarkOverride), int(!m_userDarkOverride));
-    setUserDarkOverride(!m_userDarkOverride);
+    const int next = m_themeMode == kThemeLight    ? kThemeDark
+                   : m_themeMode == kThemeDark     ? kThemeFollowSystem
+                                                   : kThemeLight;
+    qInfo("toggleThemeMode: %d -> %d", m_themeMode, next);
+    setThemeMode(next);
 }
 
 void EngineController::setArticleZoom(qreal zoom)
@@ -2195,14 +2203,19 @@ void EngineController::updateSystemDark()
     }
 }
 
-// Effective dark = manual override OR system dark. Drives the Material.theme
-// palette (QML) and the engine preference. The OPEN article flips in place via
-// gdSetDarkMode() (rewriteArticleUrls always injects the dark controller), so
-// no re-lookup/reload is needed here — only the engine preference is kept in
-// sync off-thread for any future HTML generation.
+// Resolve the theme SETTING into the theme in EFFECT: an explicit light/dark
+// mode wins outright, follow-system defers to the sampled Android night state.
+// Every consumer of m_darkMode — the Material.theme palette (QML), the engine
+// preference, the system bar icons — reads this one resolved value, so they
+// can't disagree about what "dark mode" currently means. The OPEN article flips
+// in place via gdSetDarkMode() (rewriteArticleUrls always injects the dark
+// controller), so no re-lookup/reload is needed here — only the engine
+// preference is kept in sync off-thread for any future HTML generation.
 void EngineController::applyEffectiveDark()
 {
-    m_darkMode = m_userDarkOverride || m_systemDark;
+    m_darkMode = m_themeMode == kThemeLight  ? false
+               : m_themeMode == kThemeDark   ? true
+                                             : m_systemDark;
     // Our self-painted status/nav strips must invert the system bar icons to
     // the opposite contrast (dark icons on a light strip, light icons on dark).
     applySystemBarAppearance();
@@ -2935,13 +2948,32 @@ void EngineController::loadSettings()
     const QJsonDocument doc = QJsonDocument::fromJson(f.readAll());
     const QJsonObject obj = doc.object();
     m_onboarded = obj.value("onboarded").toBool(false);
-    // Migrate the old bumped 'darkMode' key to the explicit userDarkOverride
-    // (absent = follow system). A persisted darkMode=true means the user had
-    // forced dark; map that onto an override so the old toggle keeps working.
-    if (obj.contains("userDarkOverride"))
-        m_userDarkOverride = obj.value("userDarkOverride").toBool(false);
-    else if (obj.value("darkMode").toBool(false))
-        m_userDarkOverride = true;
+    // Theme mode, newest key first. The legacy keys are read-time fallbacks
+    // only — they are never rewritten — so an older build still reads this file
+    // unchanged if the user downgrades.
+    //   'themeMode'          present: the stored tri-state, taken as-is below.
+    //   'userDarkOverride'   true  -> the pre-tri-state app had forced dark.
+    //   'darkMode'           true  -> even older forced-dark key.
+    // Anything absent or out of range falls back to follow-system, matching the
+    // article-zoom clamp below: a hand-edited settings.json must not be able to
+    // push the app into a state it has no representation for.
+    int mode = kThemeFollowSystem;
+    if (obj.contains(QStringLiteral("themeMode"))) {
+        const int stored = obj.value(QStringLiteral("themeMode")).toInt(kThemeFollowSystem);
+        if (stored == kThemeFollowSystem || stored == kThemeLight || stored == kThemeDark)
+            mode = stored;
+    } else if (obj.value(QStringLiteral("userDarkOverride")).toBool(false)
+               || obj.value(QStringLiteral("darkMode")).toBool(false)) {
+        mode = kThemeDark;
+    }
+    m_themeMode = mode;
+    // loadSettings() runs from the gd_init watcher, i.e. AFTER the QML bindings
+    // are live, so a direct assignment above never reaches them. Without this
+    // notify the dock's theme cell keeps advertising the default target until
+    // the first tap snaps it back into sync. Same idiom as onboardedChanged()
+    // at the end of this function. applyEffectiveDark() below is what actually
+    // repaints; this only re-syncs the control.
+    emit themeModeChanged();
     // Article reflow zoom: default 100 when absent; snap/clamp the persisted
     // value so a hand-edited settings.json can't push it out of range.
     setArticleZoom(obj.value("articleZoom").toDouble(100.0));
@@ -2995,7 +3027,7 @@ void EngineController::saveSettings()
     QFile f(m_appDir + "/settings.json");
     if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate)) return;
     QJsonObject obj;
-    obj.insert("userDarkOverride", m_userDarkOverride);
+    obj.insert("themeMode", m_themeMode);
     obj.insert("onboarded", m_onboarded);
     obj.insert("articleZoom", m_articleZoom);
     obj.insert("remoteCatalogUrl", m_remoteCatalogUrl);
