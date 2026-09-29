@@ -39,4 +39,4 @@ APK's `lib/<abi>/`.
 OpenSSL is licensed under the Apache License 2.0 (OpenSSL 3.x). The binaries
 here are redistributed under that licence; the OpenSSL copyright and licence
 text is available at <https://www.openssl.org/source/license.html>. This is
-additive to Aurelex's GPLv3; see the repository `NOTICE`.
+additive to Aurelex's own GPLv3 licence.

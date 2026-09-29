@@ -7,7 +7,7 @@ in `patches/` or the boundary layer).
 ## Pin
 
 - **Upstream:** https://github.com/xiaoyifang/goldendict-ng
-- **License:** GPLv3 or later (see `LICENSE` / `NOTICE`)
+- **License:** GPLv3 or later (see `LICENSE`)
 - **Pinned tag:** `v26.8.0` (latest stable release, 2026-08-05)
 - **Commit:** `c84e0113b84fc9ee6d5cfef8de646b0eb95d7707`
 - **Resolved:** 2026-08-31
