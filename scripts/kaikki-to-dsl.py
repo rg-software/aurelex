@@ -996,19 +996,30 @@ def iter_candidate_headwords(
             yield str(word)
 
 
-def select_headwords(
+def select_headwords_and_splits(
     path: str,
     source_code: str,
-    sample: Optional[int],
-    sample_mode: str,
     progress: Optional["Progress"] = None,
-) -> Set[str]:
-    """The set of headwords that will be indexed (drives cross-reference safety).
+) -> Tuple[Set[str], Set[str]]:
+    """The indexed headwords, and those whose records are not contiguous.
 
-    This is the *full-build* selection: every candidate headword. It reads the
-    whole snapshot, so it is only used when no sample is requested.
+    The snapshot is not sorted by headword, so a headword's records can appear in
+    several runs separated by other words. Returning the split set lets the
+    render pass merge such a headword into one card instead of emitting it twice.
+    One pass; the run test is a set lookup per candidate.
     """
-    return set(iter_candidate_headwords(path, source_code, progress))
+    known: Set[str] = set()
+    split: Set[str] = set()
+    run_started: Set[str] = set()
+    previous: Optional[str] = None
+    for word in iter_candidate_headwords(path, source_code, progress):
+        known.add(word)
+        if word != previous:
+            if word in run_started:
+                split.add(word)
+            run_started.add(word)
+            previous = word
+    return known, split
 
 
 def sample_headwords(
@@ -1527,6 +1538,26 @@ def write_bundle(
             progress.tick()
 
 
+def bundle_entry_names(path: str) -> Optional[Set[str]]:
+    """The entry names of an existing resource bundle, or None when absent.
+
+    Reads only the zip's index (central directory) or the directory listing,
+    never a resource, so it is cheap enough to check a bundle for reuse.
+    """
+    if os.path.isfile(path):
+        try:
+            with zipfile.ZipFile(path) as zf:
+                return set(zf.namelist())
+        except (OSError, zipfile.BadZipFile):
+            return None
+    if os.path.isdir(path):
+        return {
+            n for n in os.listdir(path) if os.path.isfile(os.path.join(path, n))
+        }
+    return None
+
+
+
 # ---------------------------------------------------------------------------
 # Rendering records into DSL cards
 # ---------------------------------------------------------------------------
@@ -1542,6 +1573,9 @@ class Report:
         self.missing_audio = 0
         self.audio_found = 0
         self.audio_cached = 0
+        self.merged_headwords = 0   # headwords merged from non-adjacent records
+        self.dropped_cards = 0      # definition-less cards omitted
+        self.unlinked_refs = 0      # links left as plain text (target absent)
 
     def summary(self) -> str:
         return (
@@ -1550,6 +1584,9 @@ class Report:
             f"malformed records skipped: {self.skipped_malformed}\n"
             f"non-lexical records skipped: {self.skipped_nonlexical}\n"
             f"inflected records not indexed: {self.skipped_inflected}\n"
+            f"headwords merged from split records: {self.merged_headwords}\n"
+            f"cards omitted for having no definition: {self.dropped_cards}\n"
+            f"references left unlinked (target absent): {self.unlinked_refs}\n"
             f"audio files bundled: {self.audio_found}\n"
             f"audio files from cache: {self.audio_cached}\n"
             f"audio files referenced but missing: {self.missing_audio}"
@@ -1574,6 +1611,29 @@ def _cross_refs(record: dict, known: Set[str], limit: int = 12) -> List[str]:
             if len(refs) >= limit:
                 return refs
     return refs
+
+
+#: A card-level link to another headword. The captured text is DSL-escaped.
+_CROSS_REF_RE = re.compile(r"\[ref\](.*?)\[/ref\]")
+
+
+def unlink_absent_refs(body: str, present: Set[str]) -> Tuple[str, int]:
+    """Turn any ``[ref]X[/ref]`` whose target is not emitted back into plain ``X``.
+
+    ``known`` holds every candidate headword, but a candidate can render no card
+    at all; a link to such a headword would be dead. Returns the body and how
+    many links were unlinked.
+    """
+    unlinked = 0
+
+    def replace(match: "re.Match[str]") -> str:
+        nonlocal unlinked
+        if _unescape_dsl(match.group(1)) in present:
+            return match.group(0)
+        unlinked += 1
+        return match.group(1)
+
+    return _CROSS_REF_RE.sub(replace, body), unlinked
 
 
 # A rendered sense and the raw examples that illustrate it. ``text`` is the
@@ -2269,6 +2329,10 @@ def build(args) -> Report:
     # Words already emitted. In sample mode this is the only set cross-references
     # may point at, so a sample never links to a headword it does not contain.
     known: Set[str] = set()
+    # Rendered cards, held as data until every card is rendered: a card that ends
+    # up with no definition, and that nothing links to, is dropped, so the
+    # dictionary never describes a headword with an empty article.
+    cards: List[Tuple[str, str, str, int]] = []  # (headwords, body, word, records)
 
     def emit(word: str, records: List[dict]) -> None:
         nonlocal source_lang_name
@@ -2285,10 +2349,7 @@ def build(args) -> Report:
         body = render_card(records, audio, profile, known)
         if not body:
             return
-        out_lines.append("\n".join(headwords))
-        out_lines.append(body)
-        report.cards += 1
-        report.kept_records += len(records)
+        cards.append(("\n".join(headwords), body, word, len(records)))
         known.add(word)
 
     def flush() -> None:
@@ -2298,6 +2359,7 @@ def build(args) -> Report:
         emit(str(current_word), current_records)
         current_word, current_records = None, []
 
+    merged_order: List[str] = []
     if args.sample:
         # Single bounded pass over the snapshot: the whole-file selection the
         # full build needs would make a sample take minutes, and a sample only
@@ -2316,11 +2378,16 @@ def build(args) -> Report:
         flush()
     else:
         # Full build: the indexed-headword set drives cross-reference safety, so
-        # every reference points at a word the dictionary actually contains.
+        # every reference points at a word the dictionary actually contains. The
+        # snapshot is not word-sorted, so a headword's records can be split by
+        # other words; those headwords are merged into one card afterwards.
         selecting = Progress("selecting headwords")
-        known = select_headwords(jsonl_path, args.source_lang, None, args.sample_mode, selecting)
+        known, split_words = select_headwords_and_splits(
+            jsonl_path, args.source_lang, selecting
+        )
         selecting.done()
 
+        deferred: Dict[str, List[dict]] = {}
         rendering = Progress("rendering")
         for _, record in iter_records(jsonl_path, rendering):
             if record is None:
@@ -2336,12 +2403,43 @@ def build(args) -> Report:
                     report.skipped_nonlexical += 1
                 continue
             word = str(record.get("word"))
+            if word in split_words:
+                if word not in deferred:
+                    deferred[word] = []
+                    merged_order.append(word)
+                deferred[word].append(record)
+                continue
             if word != current_word:
                 flush()
                 current_word = word
             current_records.append(record)
         flush()
+        for word in merged_order:
+            emit(word, deferred[word])
         rendering.done()
+
+    # Drop the cards that describe nothing, unless something links to them; then
+    # leave no link pointing at a headword that did not survive. A card carries a
+    # definition when it has a gloss heading ([m1], [m2], ...).
+    referenced: Set[str] = set()
+    for _, body, _, _ in cards:
+        for match in _CROSS_REF_RE.finditer(body):
+            referenced.add(_unescape_dsl(match.group(1)))
+    kept: List[Tuple[str, str, str, int]] = []
+    for headwords_text, body, word, count in cards:
+        if "[m" not in body and word not in referenced:
+            report.dropped_cards += 1
+            continue
+        kept.append((headwords_text, body, word, count))
+    report.merged_headwords = len(merged_order)
+    present = {word for _, _, word, _ in kept}
+    for headwords_text, body, _word, count in kept:
+        body, unlinked = unlink_absent_refs(body, present)
+        report.unlinked_refs += unlinked
+        out_lines.append(headwords_text)
+        out_lines.append(body)
+        report.cards += 1
+        report.kept_records += count
 
     if report.cards == 0:
         raise SystemExit(
@@ -2387,46 +2485,76 @@ def build(args) -> Report:
     # (when enabled), written as one archive by default or a directory on request.
     # Bundling is unconditional because the about card always references the icon
     # set, so the icons must resolve even when audio is disabled.
-    #
-    # Every entry is named by its source path, so a recording already in the
-    # download cache is read straight into the bundle rather than copied into a
-    # staging directory first; only archive members are extracted to ``tmp``.
-    sources: Dict[str, str] = {
-        name: os.path.join(_ICON_ASSET_DIR, name) for name in _ICON_FILES
-    }
-    with tempfile.TemporaryDirectory(prefix="kaikki-res-") as tmp:
-        if want_audio and audio.referenced:
-            fetched = {
-                name: path
-                for name, path in audio.local.items()
-                if name in audio.referenced and os.path.isfile(path)
-            }
-            sources.update(fetched)
-            wanted = {
-                name: list(audio.aliases.get(name, []))
-                for name in sorted(audio.referenced)
-                if name not in fetched
-            }
-            batching = Progress("bundling audio", every=1, total=len(wanted))
-            found, missing = extract_audio(audio_path, wanted, tmp, batching)
-            batching.done()
-            missing_set = set(missing)
-            for name in wanted:
-                if name not in missing_set:
-                    sources[name] = os.path.join(tmp, name)
-            report.audio_found = len(fetched) + found
-            if missing:
+    bundle_dest = (
+        res_base + ".files.zip" if args.audio_layout == "zip" else res_base + ".files"
+    )
+    if args.reuse_bundle:
+        # Render only: keep the bundle already beside the dictionary. A build's
+        # references only shrink when cards are pruned or merged, so the existing
+        # bundle normally covers the new dictionary; it is checked rather than
+        # assumed, and only its entry names are read.
+        required = set(_ICON_FILES)
+        required.update(audio.referenced)
+        present = bundle_entry_names(bundle_dest)
+        if present is None:
+            print(
+                f"warning: --reuse-bundle, but there is no resource bundle at "
+                f"{bundle_dest}; the dictionary references resources that are not "
+                f"present",
+                file=sys.stderr,
+            )
+        else:
+            absent = sorted(required - present)
+            if absent:
                 print(
-                    f"warning: {len(missing)} planned audio file(s) were not found in "
-                    f"the archive while bundling",
+                    f"warning: the reused bundle {bundle_dest} lacks "
+                    f"{len(absent)} referenced resource(s); re-run without "
+                    f"--reuse-bundle to rebuild it",
                     file=sys.stderr,
                 )
-        bundle_dest = (
-            res_base + ".files.zip" if args.audio_layout == "zip" else res_base + ".files"
-        )
-        packing = Progress("writing bundle", every=1, total=len(sources))
-        write_bundle(sources, bundle_dest, args.audio_layout, packing)
-        packing.done()
+            else:
+                print(
+                    f"reused resource bundle: {bundle_dest} ({len(present):,} files)",
+                    file=sys.stderr,
+                )
+        report.audio_found = len(audio.referenced)
+    else:
+        # Every entry is named by its source path, so a recording already in the
+        # download cache is read straight into the bundle rather than copied into
+        # a staging directory first; only archive members are extracted to ``tmp``.
+        sources: Dict[str, str] = {
+            name: os.path.join(_ICON_ASSET_DIR, name) for name in _ICON_FILES
+        }
+        with tempfile.TemporaryDirectory(prefix="kaikki-res-") as tmp:
+            if want_audio and audio.referenced:
+                fetched = {
+                    name: path
+                    for name, path in audio.local.items()
+                    if name in audio.referenced and os.path.isfile(path)
+                }
+                sources.update(fetched)
+                wanted = {
+                    name: list(audio.aliases.get(name, []))
+                    for name in sorted(audio.referenced)
+                    if name not in fetched
+                }
+                batching = Progress("bundling audio", every=1, total=len(wanted))
+                found, missing = extract_audio(audio_path, wanted, tmp, batching)
+                batching.done()
+                missing_set = set(missing)
+                for name in wanted:
+                    if name not in missing_set:
+                        sources[name] = os.path.join(tmp, name)
+                report.audio_found = len(fetched) + found
+                if missing:
+                    print(
+                        f"warning: {len(missing)} planned audio file(s) were not found in "
+                        f"the archive while bundling",
+                        file=sys.stderr,
+                    )
+            packing = Progress("writing bundle", every=1, total=len(sources))
+            write_bundle(sources, bundle_dest, args.audio_layout, packing)
+            packing.done()
 
     report.missing_audio = len(audio.missing)
     report.audio_cached = audio.cached_hits
@@ -3424,6 +3552,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--audio-layout", choices=["zip", "dir"], default="zip",
         help="how to bundle audio (default zip)",
+    )
+    parser.add_argument(
+        "--reuse-bundle", action="store_true",
+        help="render the dictionary only and reuse the resource bundle already "
+             "beside it, instead of rebuilding it; the existing bundle is checked "
+             "to cover every resource the dictionary references",
     )
     parser.set_defaults(audio_downloader=None, force_audio_index=False)
     parser.add_argument("--sample", type=int, help="emit only N headwords")

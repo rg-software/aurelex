@@ -1769,6 +1769,139 @@ class BundleRebuildTests(unittest.TestCase):
                 TOOL.bundle_audio(args)
 
 
+class CardQualityTests(unittest.TestCase):
+    """One card per headword, and no definition-less or dangling cards."""
+
+    def build(self, tmp, records, *extra):
+        path = os.path.join(tmp, "in.jsonl")
+        with open(path, "w", encoding="utf-8") as f:
+            for record in records:
+                f.write(json.dumps(record) + "\n")
+        args = TOOL.build_parser().parse_args([
+            "--source-lang", "en", "--jsonl", path, "--out-dir", tmp,
+            "--no-audio", "--cache-dir", os.path.join(tmp, "cache"), *extra,
+        ])
+        return TOOL.build(args)
+
+    def text(self, tmp):
+        return read_dz(os.path.join(tmp, "kaikki-en.dsl.dz"))
+
+    def test_non_adjacent_records_merge_into_one_card(self):
+        # The snapshot is not word-sorted, so a headword's records can be split;
+        # they must still become a single card.
+        with tempfile.TemporaryDirectory() as tmp:
+            report = self.build(tmp, [
+                {"word": "zebra", "lang_code": "en", "pos": "noun",
+                 "senses": [{"glosses": ["Striped animal."]}]},
+                {"word": "apple", "lang_code": "en", "pos": "noun",
+                 "senses": [{"glosses": ["A fruit."]}]},
+                {"word": "zebra", "lang_code": "en", "pos": "adj",
+                 "senses": [{"glosses": ["Striped."]}]},
+            ])
+            text = self.text(tmp)
+            self.assertEqual(headword_lines(text).count("zebra"), 1)
+            self.assertIn("Striped animal.", text)
+            self.assertIn("Striped.", text)
+            self.assertEqual(report.merged_headwords, 1)
+
+    def test_a_definition_less_card_with_no_link_is_omitted(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            report = self.build(tmp, [
+                {"word": "solid", "lang_code": "en", "pos": "noun",
+                 "senses": [{"glosses": ["Firm."]}]},
+                {"word": "hollowish", "lang_code": "en", "pos": "adj",
+                 "senses": [{"tags": ["obsolete"]}]},
+            ])
+            heads = headword_lines(self.text(tmp))
+            self.assertIn("solid", heads)
+            self.assertNotIn("hollowish", heads)
+            self.assertEqual(report.dropped_cards, 1)
+
+    def test_a_linked_definition_less_card_is_kept(self):
+        # Dropping the stub would leave the link to it dangling, so it stays.
+        with tempfile.TemporaryDirectory() as tmp:
+            report = self.build(tmp, [
+                {"word": "alpha", "lang_code": "en", "pos": "noun",
+                 "senses": [{"glosses": ["First."]}],
+                 "related": [{"word": "beta"}]},
+                {"word": "beta", "lang_code": "en", "pos": "adj",
+                 "senses": [{"tags": ["obsolete"]}]},
+            ])
+            text = self.text(tmp)
+            self.assertIn("beta", headword_lines(text))
+            self.assertIn("[ref]beta[/ref]", text)
+            self.assertEqual(report.dropped_cards, 0)
+
+    def test_a_link_to_an_absent_headword_is_left_as_text(self):
+        body, unlinked = TOOL.unlink_absent_refs(
+            "See [ref]ghost[/ref] and [ref]real[/ref].", {"real"}
+        )
+        self.assertEqual(body, "See ghost and [ref]real[/ref].")
+        self.assertEqual(unlinked, 1)
+
+
+class ReuseBundleTests(unittest.TestCase):
+    """--reuse-bundle renders the dictionary and reuses the existing bundle."""
+
+    def args(self, tmp, out, *extra):
+        tar = os.path.join(tmp, "audios.tar")
+        if not os.path.exists(tar):
+            make_tar(tar, [
+                "audios/En-au-limitword.ogg",
+                "audios/En-uk-limitword.ogg",
+                "audios/En-us-limitword-gone1.ogg",
+            ])
+        return TOOL.build_parser().parse_args([
+            "--source-lang", "en", "--jsonl", AUDIO_LIMIT_FIXTURE,
+            "--out-dir", out, "--audio-tar", tar, "--audio-per-word", "3",
+            "--cache-dir", os.path.join(tmp, "cache"), "--no-audio-download",
+            *extra,
+        ])
+
+    @contextlib.contextmanager
+    def captured(self):
+        stream = io.StringIO()
+        original = sys.stderr
+        sys.stderr = stream
+        try:
+            yield stream
+        finally:
+            sys.stderr = original
+
+    def test_reusing_a_complete_bundle_leaves_it_unchanged(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = os.path.join(tmp, "out")
+            TOOL.build(self.args(tmp, out))
+            zip_path = os.path.join(out, "kaikki-en.dsl.files.zip")
+            with open(zip_path, "rb") as f:
+                before = f.read()
+
+            with self.captured() as out_err:
+                TOOL.build(self.args(tmp, out, "--reuse-bundle"))
+            with open(zip_path, "rb") as f:
+                self.assertEqual(f.read(), before)
+            self.assertIn("reused resource bundle", out_err.getvalue())
+
+    def test_a_reused_bundle_missing_a_resource_is_reported(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = os.path.join(tmp, "out")
+            # A first build with audio disabled leaves a bundle of icons only.
+            TOOL.build(self.args(tmp, out, "--no-audio"))
+            # The next build references audio the reused bundle does not hold.
+            with self.captured() as out_err:
+                TOOL.build(self.args(tmp, out, "--reuse-bundle"))
+            message = out_err.getvalue()
+            self.assertIn("lacks", message)
+            self.assertIn("referenced resource(s)", message)
+
+    def test_reuse_without_a_bundle_is_reported(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = os.path.join(tmp, "out")
+            with self.captured() as out_err:
+                TOOL.build(self.args(tmp, out, "--reuse-bundle"))
+            self.assertIn("no resource bundle", out_err.getvalue())
+
+
 class LangProfileTests(unittest.TestCase):
     """Language-specific behaviour lives in the profile, not the renderer."""
 
