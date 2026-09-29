@@ -35,3 +35,7 @@
 
 - [x] 6.1 Run `python -m unittest scripts.tests.test_kaikki_to_dsl` and confirm it is green
 - [x] 6.2 Run `openspec validate audio-bundle-rebuild --strict` and resolve any findings
+
+## 7. Bundle writer
+
+- [x] 7.1 Write the bundle from a name -> source map so a cache hit is read once instead of copied to a staging directory; store entries rather than deflate, stream each, give the writing progress a total, and report the build's cache hits as a running count plus a summary total

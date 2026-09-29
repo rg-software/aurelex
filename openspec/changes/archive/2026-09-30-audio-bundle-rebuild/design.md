@@ -31,7 +31,10 @@ This change adds that rebuild, reachable as a `bundle-audio` mode word beside
   bundle for a dictionary that was written completely.
 - No re-planning of which recordings an article gets; the dictionary has already
   decided, and the mode trusts it.
-- No preview regeneration and no change to the build or prefetch behavior.
+- No preview regeneration. The bundle writer is shared with the build and is
+  refactored (see D8), but the bundle a build writes stays byte-for-byte the
+  same; the only build-visible change is that already-cached recordings are
+  counted rather than logged one per line.
 
 ## Decisions
 
@@ -62,17 +65,17 @@ rebuilt dictionary equals a freshly built one.
 
 `_audio_name_variants` derives the archive keys from a name,
 `extract_audio` streams the tar into the temporary bundle directory, and
-`write_audio_zip`/the directory branch write it out — the same code a build
-uses, so the layout, ordering and zip metadata cannot diverge. A small
-`read_dictzip` (gzip-decode and drop the BOM; dictzip is gzip-compatible for a
-full read) is added, since only the writer existed.
+`write_bundle` writes the result — the same code a build uses, so the layout,
+ordering and zip metadata cannot diverge. A small `read_dictzip` (gzip-decode
+and drop the BOM; dictzip is gzip-compatible for a full read) is added, since
+only the writer existed.
 
 ### D4: Cache first, then archive
 
 A recording that the archive lacked was downloaded into the cache and never
-entered the tar, so the cache is checked first for each name; a hit is copied
-and the name is dropped from the set handed to `extract_audio`. This mirrors the
-build, which copies `audio.local` before streaming the archive.
+entered the tar, so the cache is checked first for each name; a hit is used in
+place and the name is dropped from the set handed to `extract_audio`. This
+mirrors the build, which reads `audio.local` before streaming the archive.
 
 ### D5: Resolve only the cache location and the archive
 
@@ -97,6 +100,21 @@ Matching the build's bundling step, a recording that cannot be found is counted
 and warned about, and the bundle is written without it. A rebuild is a recovery
 tool; refusing to produce anything because one recording is unfindable would be
 worse than producing the bundle and saying what is missing.
+
+### D8: The bundle is written from a name -> source map, stored
+
+Both the build and the rebuild assemble a `name -> source path` map (icons in
+the assets, cache hits where they already are, archive members extracted to a
+temporary directory) and hand it to one `write_bundle`. A recording already in
+the cache is therefore read once, into the archive, instead of being copied into
+a staging directory and then read again — on a full dictionary that is tens of
+thousands of files and was the slowest step of a rebuild. Entries are stored,
+not deflated (the bundle is almost all already-compressed audio), streamed so
+peak memory does not track the largest recording, and sorted by name so the
+output stays byte-for-byte identical to what a build wrote. The writing progress
+carries a total. The build's already-cached recordings are reported as a
+periodic running count rather than one line each, with the total added to the
+build summary.
 
 ## Risks / Trade-offs
 
