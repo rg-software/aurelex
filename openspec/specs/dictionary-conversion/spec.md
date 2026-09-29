@@ -553,3 +553,104 @@ holds. The dictionary SHALL still bundle these icons when audio is disabled.
 
 - **WHEN** the tool runs with audio disabled
 - **THEN** the sense icons are still bundled with the dictionary
+
+### Requirement: One card per headword
+
+The system SHALL emit exactly one article per indexed headword. When the source
+snapshot holds records for one headword that are not adjacent in file order, the
+system SHALL merge them into that single article instead of emitting a second
+card, and the result SHALL NOT depend on the order in which the records appear.
+
+#### Scenario: Non-adjacent records merge
+
+- **WHEN** a headword's source records are separated in the snapshot by records
+  of other headwords
+- **THEN** the headword's article is emitted once and carries the content of all
+  those records
+
+#### Scenario: Adjacent records still merge
+
+- **WHEN** a headword's source records are adjacent in the snapshot
+- **THEN** they are emitted as one article, as before
+
+#### Scenario: The merge is reported
+
+- **WHEN** a build merges records for a headword that were not adjacent
+- **THEN** the final report counts the headwords so merged
+
+### Requirement: Cards carry a definition
+
+The system SHALL NOT emit an article that has no definition, unless another
+emitted article links to that headword. A headword whose rendered article has no
+gloss and is not linked by any emitted article SHALL be omitted from the
+dictionary; one that is linked SHALL be kept so the link resolves. The system
+SHALL report how many articles were omitted for lack of a definition.
+
+#### Scenario: A definition-less, unlinked card is omitted
+
+- **WHEN** a headword's article would contain no gloss and no other article links
+  to that headword
+- **THEN** that headword is not emitted and the run counts it
+
+#### Scenario: A linked definition-less card is kept
+
+- **WHEN** a headword's article would contain no gloss but another emitted
+  article links to that headword
+- **THEN** the article is kept so the link resolves
+
+#### Scenario: The omission is reported
+
+- **WHEN** a build omits one or more definition-less articles
+- **THEN** the final report states how many were omitted
+
+### Requirement: No dangling headword links
+
+The system SHALL NOT emit a link to a headword that the produced dictionary does
+not contain. When a link would target a headword that is not emitted, the system
+SHALL render the target as plain text instead, and SHALL report the number of
+links so unlinked.
+
+#### Scenario: A link to an absent headword is left as text
+
+- **WHEN** an article would link to a headword that the dictionary does not
+  contain
+- **THEN** the target appears as plain text with no link
+
+#### Scenario: The unlinking is reported
+
+- **WHEN** a build leaves one or more would-be links as plain text
+- **THEN** the final report states how many were unlinked
+
+### Requirement: Optional reuse of an existing resource bundle
+
+The system SHALL provide an option to render the dictionary without rebuilding
+its resource bundle, leaving the bundle already present beside the dictionary as
+it is. When this option is used, the system SHALL verify that the existing bundle
+contains every resource the produced dictionary references and SHALL report any
+referenced resource that the bundle lacks, or the absence of a bundle, rather
+than leaving a broken reference silently.
+
+#### Scenario: An existing complete bundle is reused
+
+- **WHEN** the option is given and the resource bundle beside the dictionary
+  already contains every resource the rendered dictionary references
+- **THEN** the dictionary is written, the resource bundle is left unchanged, and
+  the run reports the reuse
+
+#### Scenario: A referenced resource is missing from the reused bundle
+
+- **WHEN** the option is given and the existing bundle lacks a resource the
+  rendered dictionary references
+- **THEN** the run warns and states how many referenced resources are missing
+
+#### Scenario: No bundle to reuse
+
+- **WHEN** the option is given and there is no resource bundle beside the
+  dictionary
+- **THEN** the run warns that the dictionary's referenced resources are not
+  present
+
+#### Scenario: The bundle is rebuilt when the option is not given
+
+- **WHEN** the option is not given
+- **THEN** the resource bundle is rebuilt from the cache and archive as before
