@@ -1,7 +1,8 @@
-# Generate the Android launcher icons and the Google Play store icon from the
+# Generate the Android launcher icons and the Google Play assets from the
 # single master artwork.
 #
-#   scripts/make-app-icons.ps1
+#   scripts/make-app-icons.ps1                    # launcher + Play icon
+#   scripts/make-app-icons.ps1 -FeatureGraphic    # ... plus the feature graphic
 #
 # The master is app/android/icon/aurelex-icon-1024.png (gold "Au" + open book
 # on a white background). The script knocks the white background out to a
@@ -13,6 +14,8 @@
 #       legacy (pre-API-26) launcher icons, logo on white
 #   * app/android/icon/play-store-icon-512.png
 #       Google Play listing icon, 512x512, flattened on white
+#   * app/android/icon/play-feature-graphic-1024x500.png   (with -FeatureGraphic)
+#       Google Play feature graphic: gradient background, mark + wordmark + tagline
 #
 # Requires ImageMagick 7 (`magick`) on PATH. Re-run after replacing the master.
 
@@ -21,7 +24,12 @@ param(
     [double]$SafeZone = 66.0 / 108.0,
     [double]$LegacyFill = 0.78,
     [double]$PlayFill = 0.72,
-    [string]$Background = "#FFFFFF"
+    [string]$Background = "#FFFFFF",
+    [switch]$FeatureGraphic,
+    [string]$FeatureFont = "Montserrat-Regular",
+    [string]$FeatureTitle = "Aurelex",
+    [string]$FeatureTagline1 = "Offline dictionaries,",
+    [string]$FeatureTagline2 = "beautifully fast"
 )
 
 $ErrorActionPreference = "Stop"
@@ -65,13 +73,38 @@ function New-Icon {
     if ($LASTEXITCODE -ne 0) { throw "failed to write $Dest" }
 }
 
+function New-FeatureGraphic {
+    param([string]$Dest)
+    # Capability strip uses an ASCII-safe middot separator so the script is
+    # encoding-independent.
+    $sep  = " " + [char]0x00B7 + " "
+    $cap1 = @("MDX", "DSL", "StarDict") -join $sep
+    $cap2 = @("Full-text search", "Audio") -join $sep
+    $cmd = @(
+        "-size", "1024x500", "-define", "gradient:angle=115", "gradient:#F6ECD0-#FFFFFF",
+        "(", $script:Logo, "-resize", "x230", ")",
+        "-gravity", "West", "-geometry", "+70+0", "-composite",
+        "-gravity", "NorthWest",
+        "-font", $FeatureFont, "-fill", "#2C2820", "-pointsize", "120", "-annotate", "+470+100", $FeatureTitle,
+        "-fill", "#6E6552", "-pointsize", "34", "-annotate", "+476+270", $FeatureTagline1,
+        "-annotate", "+476+316", $FeatureTagline2,
+        "-fill", "#A9862B", "-pointsize", "26", "-annotate", "+476+384", $cap1,
+        "-annotate", "+476+418", $cap2,
+        "-alpha", "remove", "-alpha", "off", "-depth", "8",
+        $Dest
+    )
+    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $Dest) | Out-Null
+    & $magick @cmd
+    if ($LASTEXITCODE -ne 0) { throw "failed to write $Dest" }
+}
+
 try {
-    # Knock the (near-)white background out to transparency. Flood-filling from
-    # a corner keeps the gold gradient and anti-aliased edges; the follow-up
-    # -opaque pass clears the enclosed counter of the "A".
+    # Knock the near-white background out to transparency. A global white key
+    # (rather than a corner flood-fill) also clears enclosed areas such as the
+    # counter of the "A", which matters whenever the art sits on a non-white
+    # surface (the dark feature-graphic variant, themed icons).
     $script:Logo = Join-Path $tmp "logo.png"
-    & $magick $Source -alpha set -fuzz 15% -fill none -draw "alpha 0,0 floodfill" `
-        -fuzz 12% -fill none -opaque white -trim +repage $script:Logo
+    & $magick $Source -alpha set -fuzz 10% -transparent white -trim +repage $script:Logo
     if ($LASTEXITCODE -ne 0) { throw "failed to extract the logo from $Source" }
 
     $dims = (& $magick identify -format "%w %h" $script:Logo) -split '\s+'
@@ -101,6 +134,12 @@ try {
     $play = Join-Path $IconDir "play-store-icon-512.png"
     New-Icon -Canvas 512 -ContentLong ([int][Math]::Round($PlayFill * 512)) -Dest $play -Background $Background
     Write-Output "  icon/play-store-icon-512.png  (512 x 512)"
+
+    if ($FeatureGraphic) {
+        $feature = Join-Path $IconDir "play-feature-graphic-1024x500.png"
+        New-FeatureGraphic -Dest $feature
+        Write-Output "  icon/play-feature-graphic-1024x500.png  (1024 x 500)"
+    }
 }
 finally {
     Remove-Item -LiteralPath $tmp -Recurse -Force -ErrorAction SilentlyContinue
