@@ -1034,6 +1034,45 @@ def _url_basename(name: str) -> str:
     return html.unescape(unquote(_basename(name)))
 
 
+#: Characters a filename may not carry on Windows. The archive's MediaWiki
+#: names are not filenames, and a run that extracts one verbatim dies on the
+#: first recording that uses a quote.
+_UNSAFE_FILENAME_CHARS = '<>:"/\\|?*'
+
+#: Windows device names that cannot be used as a file stem, extension or not.
+_RESERVED_FILENAME_STEMS = frozenset(
+    ["CON", "PRN", "AUX", "NUL"]
+    + [f"COM{i}" for i in range(1, 10)]
+    + [f"LPT{i}" for i in range(1, 10)]
+)
+
+
+def _safe_audio_filename(name: str) -> str:
+    """Make a bundled recording's name usable as a file on every platform.
+
+    The name is also the DSL reference to the bundled file, so it has to be
+    both a legal filename and identical in the article and the archive. Every
+    character the filesystem refuses becomes ``_`` (Windows rejects ``"``,
+    ``:``, ``*`` and friends outright, so extracting a recording that used one
+    aborted the whole run); a trailing space or dot, which Windows silently
+    strips, is dropped; and a device name such as ``CON`` is prefixed so it
+    does not name a device. The mapping is deterministic, and any collision it
+    introduces is resolved by the digest suffix in
+    :meth:`AudioPlan._final_name`.
+    """
+    cleaned = "".join(
+        "_" if ch in _UNSAFE_FILENAME_CHARS or ord(ch) < 0x20 else ch
+        for ch in name
+    )
+    cleaned = cleaned.rstrip(" .")
+    if not cleaned:
+        return "audio"
+    stem = os.path.splitext(cleaned)[0]
+    if stem.upper() in _RESERVED_FILENAME_STEMS:
+        return "_" + cleaned
+    return cleaned
+
+
 def _audio_match_key(name: str) -> str:
     """Normalisation that pairs a reference with an archive member.
 
@@ -1118,7 +1157,7 @@ class AudioPlan:
         self._fetched: Dict[str, Optional[str]] = {}  # source -> local path or None
 
     def _final_name(self, source: str) -> str:
-        base = _basename(source)
+        base = _safe_audio_filename(_basename(source))
         if base not in self._owner or self._owner[base] == source:
             self._owner[base] = source
             return base
@@ -2322,7 +2361,7 @@ class AudioWishlist:
         # a suffixed name also gets recorded under the plain one: whichever name
         # the build settles on, the file is there and no refetch is needed.
         final = os.path.basename(dest)
-        plain = _url_basename(url)
+        plain = _safe_audio_filename(_url_basename(url))
         stem, ext = os.path.splitext(final)
         if plain and plain != final and plain.endswith(ext):
             if stem.startswith(plain[: -len(ext)] if ext else plain):

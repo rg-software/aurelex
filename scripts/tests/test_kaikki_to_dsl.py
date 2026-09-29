@@ -19,6 +19,7 @@ import tempfile
 import time
 import unittest
 import urllib.error
+import zipfile
 import zlib
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -364,6 +365,58 @@ class EdgeCaseTests(unittest.TestCase):
             text = read_dz(os.path.join(tmp, "kaikki-en.dsl.dz"))
             for name in names:
                 self.assertIn("[s]" + name + "[/s]", text)
+
+    def test_audio_filename_is_made_filesystem_safe(self):
+        # A MediaWiki name is not a filename: a quote aborted the whole build
+        # when a recording used one, because the tar extract wrote it verbatim.
+        self.assertEqual(
+            TOOL._safe_audio_filename('En-US_pronunciation_of_"lute".ogg'),
+            "En-US_pronunciation_of__lute_.ogg",
+        )
+        # the characters Windows refuses, and control characters, fold to "_"
+        self.assertEqual(TOOL._safe_audio_filename("a<b>c:d*e?f.ogg"), "a_b_c_d_e_f.ogg")
+        self.assertEqual(TOOL._safe_audio_filename("line\nbreak.ogg"), "line_break.ogg")
+        # a trailing space or dot is dropped, as Windows would drop it silently
+        self.assertEqual(TOOL._safe_audio_filename("name .ogg"), "name .ogg")
+        self.assertEqual(TOOL._safe_audio_filename("trailing.ogg."), "trailing.ogg")
+        self.assertEqual(TOOL._safe_audio_filename("trailing.ogg "), "trailing.ogg")
+        # a device name gets a prefix so it names a file, not a device
+        self.assertEqual(TOOL._safe_audio_filename("CON.ogg"), "_CON.ogg")
+        self.assertEqual(TOOL._safe_audio_filename("com1"), "_com1")
+        # an empty result still has to be a name
+        self.assertEqual(TOOL._safe_audio_filename(' . '), "audio")
+
+    def test_audio_with_a_quote_in_its_name_still_builds(self):
+        # Build a dictionary whose only recording is named like the one that
+        # aborted the real run, and check the file lands and is referenced
+        # under its sanitised name.
+        with tempfile.TemporaryDirectory() as tmp:
+            jsonl = os.path.join(tmp, "quote.jsonl")
+            with open(jsonl, "w", encoding="utf-8") as f:
+                f.write(json.dumps({
+                    "word": "lute", "lang_code": "en", "pos": "noun",
+                    "senses": [{"glosses": ["A stringed instrument."]}],
+                    "sounds": [{
+                        "audio": "En-US_pronunciation_of_\u0022lute\u0022.ogg",
+                        "ogg_url": "https://upload.wikimedia.org/wikipedia/commons/4/4f/"
+                                   'En-US_pronunciation_of_%22lute%22.ogg',
+                        "tags": ["US"],
+                    }],
+                }) + "\n")
+            tar_path = os.path.join(tmp, "audios.tar")
+            make_tar(tar_path, ["audios/En-US_pronunciation_of_%22lute%22.ogg"])
+            args = TOOL.build_parser().parse_args([
+                "--source-lang", "en", "--jsonl", jsonl, "--out-dir", tmp,
+                "--audio-tar", tar_path, "--no-audio-download", "--audio-per-word", "1",
+            ])
+            report = TOOL.build(args)
+            self.assertEqual(report.audio_found, 1)
+            zip_path = os.path.join(tmp, "kaikki-en.dsl.files.zip")
+            with zipfile.ZipFile(zip_path) as zf:
+                bundled = only_audio(set(zf.namelist()))
+            self.assertEqual(bundled, {"En-US_pronunciation_of__lute_.ogg"})
+            text = read_dz(os.path.join(tmp, "kaikki-en.dsl.dz"))
+            self.assertIn("[s]En-US_pronunciation_of__lute_.ogg[/s]", text)
 
 
 class AudioResolutionTests(unittest.TestCase):
