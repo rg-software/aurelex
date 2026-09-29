@@ -191,6 +191,11 @@ jobs:
           # Wildcard mode must expand multi-term prefixes (pins patch 0003).
           printf '%s' "$out" | grep -q "FTS_WILD=OK" \
             || { echo "SMOKE FAILED: full-text wildcard assertion"; exit 1; }
+          # fts-indexing-performance: the sliced-build boundary contract. After a
+          # completed build the dictionary must report idle (build_state 0) and a
+          # cancel with nothing in flight must be a harmless no-op.
+          printf '%s' "$out" | grep -q "FTS_BUILD_STATE=OK" \
+            || { echo "SMOKE FAILED: fts build-state/cancel contract"; exit 1; }
           # DSL optional/hidden-zone markup must survive: the article's expander
           # markup is what the app's article-controls script binds to, so an
           # upstream bump that stops emitting it would ship a dead control.

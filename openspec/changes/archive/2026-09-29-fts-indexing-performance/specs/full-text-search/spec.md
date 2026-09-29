@@ -74,9 +74,11 @@ have its index built when the user first runs a full-text search over it.
 ### Requirement: Index build progress
 The system SHALL show progress or a completion state while a full-text index is
 being built, and the build SHALL NOT block the rest of the app: while indexing
-runs, ordinary headword lookups and full-text searches over already-indexed
-dictionaries SHALL be served without waiting for the build to finish, and other
-operations (scanning, group edits, dictionary removal) SHALL proceed.
+runs, ordinary headword lookups and full-text searches over other dictionaries
+SHALL be served without waiting more than one indexing slice for the build, and
+other operations (scanning, group edits, dictionary removal) SHALL proceed. The
+dictionary whose index is currently being built SHALL be withheld from lookups
+and full-text search until its index completes.
 
 #### Scenario: Progress indication
 - **WHEN** a dictionary is being full-text indexed
@@ -85,8 +87,9 @@ operations (scanning, group edits, dictionary removal) SHALL proceed.
 
 #### Scenario: Lookups and searches are served during a build
 - **WHEN** a full-text index build is running
-- **THEN** ordinary headword lookups and full-text searches over dictionaries that
-  already have an index return results without waiting for the build to finish
+- **THEN** ordinary headword lookups and full-text searches over other
+  dictionaries return results within one indexing slice, while the dictionary
+  being built is withheld until its index completes
 
 #### Scenario: Large dictionary
 - **WHEN** a very large dictionary is indexed

@@ -333,6 +333,21 @@ int main( int argc, char ** argv )
     if ( gd_fts_index_state( sdIdx, &st ) == 0 )
       std::printf( "gd_fts_index_state(%d) after -> %d\n", sdIdx, st );
 
+    // fts-indexing-performance: the build-state / cancel boundary contract. The
+    // build just finished, so the dictionary must report idle (state 0) and a
+    // cancel with nothing in flight must be a harmless no-op returning 0.
+    {
+      char idb[ 128 ] = { 0 };
+      int bst = -1;
+      const int bIdRc = gd_dict_id( sdIdx, idb, sizeof idb );
+      const int bStateRc = bIdRc == 0 ? gd_fts_build_state( idb, &bst ) : -1;
+      const int cancelRc = bIdRc == 0 ? gd_fts_cancel( idb ) : -1;
+      const bool buildStateOk = bStateRc == 0 && bst == 0 && cancelRc == 0;
+      std::printf( "gd_fts_build_state(%s) -> rc=%d state=%d; gd_fts_cancel -> %d\n",
+                   idb, bStateRc, bst, cancelRc );
+      std::printf( "FTS_BUILD_STATE=%s\n", buildStateOk ? "OK" : "FAIL" );
+    }
+
     std::vector< char > fts( 1 << 12 );
     const int ftsN = gd_fts_search( "mdx", 1, 0, fts.data(), static_cast< int >( fts.size() ) );
     std::printf( "gd_fts_search(\"mdx\", plain) -> %d results\n", ftsN );

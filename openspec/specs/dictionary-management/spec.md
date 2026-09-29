@@ -280,6 +280,14 @@ same identifier SHALL survive the removal. Removing one dictionary SHALL leave
 every other dictionary's indexes untouched. The effect on groups SHALL be
 durable immediately, not only after the next scan.
 
+Removal SHALL be available at any time, including while the app is staging,
+scanning, or full-text indexing: a removal issued during those phases SHALL be
+applied within a bounded time (at most one indexing slice, not the whole chain),
+and a removal issued while a full-text index build for that dictionary is
+running SHALL cancel or drop that build so the removed dictionary is neither
+left holding storage nor reintroduced by the build, while other dictionaries'
+builds continue unaffected.
+
 #### Scenario: Remove an individual dictionary
 - **WHEN** the user removes one loaded dictionary
 - **THEN** that dictionary's entry disappears from the dictionary list, its
@@ -338,6 +346,24 @@ durable immediately, not only after the next scan.
   from it
 - **THEN** the dictionary is imported again as a fresh entry (removal is not
   blocked), and its index is built anew rather than inherited from the removal
+
+#### Scenario: Remove control is available during processing
+- **WHEN** the app is staging, scanning, or full-text indexing dictionaries
+- **THEN** the Dicts Remove control is enabled for the current selection instead
+  of being disabled by the processing indication
+
+#### Scenario: Remove while a full-text build is running
+- **WHEN** the user removes a dictionary while its full-text index is being built
+- **THEN** the dictionary is removed within a bounded time (at most one indexing
+  slice, not the build's whole duration), its in-flight build is cancelled or
+  dropped, its staged files and index are deleted, and any other dictionaries
+  still being indexed continue unaffected
+
+#### Scenario: Remove while staging or scanning
+- **WHEN** the user removes a loaded dictionary while a newly picked folder is
+  being staged or scanned
+- **THEN** the removal is applied within a bounded time and the
+  newly imported dictionaries still load once the chain completes
 
 ### Requirement: Folder additions are serialized, never dropped
 The system SHALL accept dictionary folder additions requested while a previous

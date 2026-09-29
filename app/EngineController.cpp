@@ -429,29 +429,54 @@ void EngineController::autoIndexMissing()
     // (non-scan callers) still shows the banner.
     setProcessingActive(true);
     // Enumerate missing dictionary IDs OFF the UI thread: gd_dict_count/
-    // gd_fts_index_state/gd_dict_id take g_engineMutex, which the running FTS
-    // worker holds for the whole duration of a large dictionary build. Doing
-    // this on the UI thread would freeze the app. Deliver the list via a watcher
-    // (runs on the UI thread) which then only touches m_ftsQueue (no engine
-    // calls). IDs are stored, not engine indices, so removal mid-run can't
-    // shift/desync the queue (see ensureFtsWorker).
-    QFuture<QStringList> f = QtConcurrent::run([]{
-        QStringList ids;
+    // gd_fts_index_state/gd_dict_id/gd_dict_meta take g_engineMutex, which a
+    // running FTS worker can hold across a build slice. Doing this on the UI
+    // thread would freeze the app. Deliver the list via a watcher (runs on the
+    // UI thread) which then only touches m_ftsQueue (no engine calls). IDs are
+    // stored, not engine indices, so removal mid-run can't shift/desync the
+    // queue (see ensureFtsWorker). Dictionaries over kAutoFtsMaxBytes are
+    // deferred (built on first full-text search, D5), not enqueued here.
+    QSet<QString> failedSnapshot;
+    {
+        QMutexLocker lock(&m_ftsQueueMutex);
+        failedSnapshot = m_ftsBuildFailed;
+    }
+    QFuture<QPair<QStringList, QStringList>> f =
+        QtConcurrent::run([failedSnapshot]{
+        QStringList toIndex;
+        QStringList deferred;
         const int n = gd_dict_count();
         for (int i = 0; i < n; ++i) {
             int state = -1;
-            if (gd_fts_index_state(i, &state) == 0 && state == 1) {
-                char idb[128] = {0};
-                if (gd_dict_id(i, idb, static_cast<int>(sizeof(idb))) == 0)
-                    ids.append(QString::fromLocal8Bit(idb));
+            if (!(gd_fts_index_state(i, &state) == 0 && state == 1))
+                continue;
+            char idb[128] = {0};
+            if (gd_dict_id(i, idb, static_cast<int>(sizeof(idb))) != 0)
+                continue;
+            const QString id = QString::fromLocal8Bit(idb);
+            if (failedSnapshot.contains(id))
+                continue; // a previous build failed; never auto-retry it
+            char lf[64] = {0}, lt[64] = {0};
+            long long sizeBytes = 0;
+            if (gd_dict_meta(i, lf, static_cast<int>(sizeof(lf)),
+                             lt, static_cast<int>(sizeof(lt)), &sizeBytes) == 0
+                && sizeBytes > kAutoFtsMaxBytes) {
+                deferred.append(id);
+                continue;
             }
+            toIndex.append(id);
         }
-        return ids;
+        return QPair<QStringList, QStringList>(toIndex, deferred);
     });
-    auto *w = new QFutureWatcher<QStringList>(this);
-    connect(w, &QFutureWatcher<QStringList>::finished, this, [this, w]{
-        const QStringList missing = w->result();
+    auto *w = new QFutureWatcher<QPair<QStringList, QStringList>>(this);
+    connect(w, &QFutureWatcher<QPair<QStringList, QStringList>>::finished, this, [this, w]{
+        const QStringList missing = w->result().first;
+        const QStringList deferred = w->result().second;
         w->deleteLater();
+        m_ftsDeferred = QSet<QString>(deferred.begin(), deferred.end());
+        if (!deferred.isEmpty())
+            qInfo() << "[aurelex] autoIndexMissing: deferred (over size bound; built on demand) ="
+                    << deferred;
         qInfo() << "[aurelex] autoIndexMissing: dictionaries lacking an FTS index ="
                 << missing;
         // Enumeration done: drop the placeholder. If there is work, the worker
@@ -552,7 +577,14 @@ void EngineController::ensureFtsWorker()
             emit ftsIndexBatchProgress(done, runTotal, name);
             int st = -1;
             if (!(gd_fts_index_state(idx, &st) == 0 && st == 0)) {
-                gd_fts_index(idx);
+                const int rc = gd_fts_index(idx);
+                // -2 = cancelled (the dictionary is being removed): count it and
+                // move on. Any other failure is remembered (never auto-retried)
+                // so an on-demand re-run cannot loop on it.
+                if (rc != 0 && rc != -2 && !id.isEmpty()) {
+                    QMutexLocker lock(&m_ftsQueueMutex);
+                    m_ftsBuildFailed.insert(id);
+                }
             }
             ++done;
             emit ftsIndexBatchProgress(done, runTotal, name);
@@ -581,6 +613,10 @@ void EngineController::ensureFtsWorker()
         if (empty) {
             setFtsIndexProgress(0, 0, QString());
             setBuildingFts(false);
+            // A full-text search that triggered on-demand builds is owed one
+            // re-run now that the batch drained, so the deferred dictionaries'
+            // hits appear (D5).
+            reRunPendingFts();
             if (m_stagedRescanPending) {
                 // A download landed in files/staged/ while this batch was still
                 // indexing, so the tree we just indexed no longer covers it.
@@ -737,16 +773,11 @@ void EngineController::removeDictionary(int index) {
 
 void EngineController::removeDictionaries(const QVariantList &indices) {
     if (!m_ready || indices.isEmpty()) return;
-    // Refuse removals while the app is processing (staging / scanning / FTS
-    // build). Every gd_* call serializes on g_engineMutex, which the scan and
-    // the build hold for their whole duration, so a removal issued now would
-    // queue for minutes and race a mutating list. The QML Remove button is
-    // disabled on the same flag; this guards any other/future caller and an
-    // in-flight tap whose flag flipped after the click.
-    if (m_processingActive) {
-        qInfo() << "[aurelex] removeDictionaries ignored: processing in progress";
-        return;
-    }
+    // Removal is permitted during staging / scanning / full-text indexing
+    // (fts-indexing-performance): the build now interleaves with other gd_*
+    // calls, so a removal no longer queues for the whole build. Any in-flight
+    // build for a removed dictionary is cancelled and awaited (bounded) in the
+    // worker below before its files are reaped.
     // The QML side passes DISPLAY positions (indices into dictionaries(), which
     // is sorted by name). Resolve them to engine indices and capture each
     // source path on the UI thread BEFORE any gd_remove_dict shifts the engine
@@ -778,7 +809,7 @@ void EngineController::removeDictionaries(const QVariantList &indices) {
     const QString stagedRoot = m_stagedDir;
     const QString appDir = m_appDir;
 
-    QFuture<QPair<QVariantList, int>> f = QtConcurrent::run([targets]{
+    QFuture<QPair<QVariantList, int>> f = QtConcurrent::run([this, targets]{
         QVariantList removed;
         removed.reserve(static_cast<int>(targets.size()));
         for (const Target &t : targets) {
@@ -786,7 +817,32 @@ void EngineController::removeDictionaries(const QVariantList &indices) {
             QString id;
             if (gd_dict_id(t.engineIndex, idbuf, static_cast<int>(sizeof(idbuf))) == 0)
                 id = QString::fromLocal8Bit(idbuf);
+            // Cancel any in-flight full-text build for this dictionary and drop
+            // it from the queue BEFORE removing it from the engine (D4): the
+            // build stops at its next slice, so it cannot reintroduce the
+            // removed dictionary.
+            const QByteArray idb = id.toLocal8Bit();
+            if (!id.isEmpty()) {
+                {
+                    QMutexLocker lock(&m_ftsQueueMutex);
+                    m_ftsQueue.removeAll(id);
+                }
+                gd_fts_cancel(idb.constData());
+            }
             const int rc = gd_remove_dict(t.engineIndex);
+            // Wait (bounded) for the cancelled build to report idle before the
+            // caller reaps files, so a build that was mid-publish finishes
+            // first and cannot leave an orphan index behind.
+            if (rc == 0 && !id.isEmpty()) {
+                int st = 1;
+                for (int waited = 0; waited < kFtsIdleWaitMs; waited += 25) {
+                    if (gd_fts_build_state(idb.constData(), &st) == 0 && st == 0)
+                        break;
+                    QThread::msleep(25);
+                }
+                if (st != 0)
+                    qInfo() << "[aurelex] removal proceeding with FTS build not idle for" << id;
+            }
             QVariantMap m;
             m.insert("source", t.source);
             m.insert("name", t.name);
@@ -1787,6 +1843,14 @@ QVariantList EngineController::ftsSearch(const QString &query, int mode, int gro
     }
     qInfo() << "[aurelex] ftsSearch query='" << query << "' norm='" << norm
             << "' mode=" << mode << " group=" << groupId;
+    runFtsSearch(norm, mode, groupId, query, wholeWords);
+    return QVariantList();
+}
+
+void EngineController::runFtsSearch(const QString &norm, int mode, int groupId,
+                                    const QString &displayQuery, bool wholeWords)
+{
+    if (!m_ready) return;
     QFuture<QVariantList> f = QtConcurrent::run([norm, mode, groupId]{
         std::vector<char> buf(1 << 20);
         const int n = gd_fts_search(norm.toLocal8Bit().constData(), mode, groupId,
@@ -1812,12 +1876,79 @@ QVariantList EngineController::ftsSearch(const QString &query, int mode, int gro
         return list;
     });
     auto *w = new QFutureWatcher<QVariantList>(this);
-    connect(w, &QFutureWatcher<QVariantList>::finished, this, [this, query, w]{
-        emit ftsSearchReady(query, w->result());
+    connect(w, &QFutureWatcher<QVariantList>::finished, this, [this, displayQuery, w]{
+        emit ftsSearchReady(displayQuery, w->result());
         w->deleteLater();
     });
     w->setFuture(f);
-    return QVariantList();
+
+    // On-demand builds (D5): if the scoped group has dictionaries that lack an
+    // index, build them through the same single worker and re-run this query
+    // once they land. Results from already-indexed dictionaries are emitted
+    // above immediately, so the user sees partial results at once.
+    QSet<QString> failedSnapshot;
+    {
+        QMutexLocker lock(&m_ftsQueueMutex);
+        failedSnapshot = m_ftsBuildFailed;
+    }
+    QFuture<QStringList> g = QtConcurrent::run([groupId, failedSnapshot]{
+        QStringList ids;
+        const int cap = gd_dict_count();
+        if (cap <= 0) return ids;
+        std::vector<int> dictIdx(cap);
+        const int cnt = gd_group_dicts(groupId, dictIdx.data(), static_cast<int>(dictIdx.size()));
+        for (int k = 0; k < cnt; ++k) {
+            const int i = dictIdx[k];
+            int state = -1;
+            if (!(gd_fts_index_state(i, &state) == 0 && state == 1))
+                continue;
+            char idb[128] = {0};
+            if (gd_dict_id(i, idb, static_cast<int>(sizeof(idb))) != 0)
+                continue;
+            const QString id = QString::fromLocal8Bit(idb);
+            if (failedSnapshot.contains(id))
+                continue;
+            ids.append(id);
+        }
+        return ids;
+    });
+    auto *gwt = new QFutureWatcher<QStringList>(this);
+    connect(gwt, &QFutureWatcher<QStringList>::finished, this,
+            [this, norm, mode, groupId, displayQuery, wholeWords, gwt]{
+        const QStringList ids = gwt->result();
+        gwt->deleteLater();
+        if (ids.isEmpty()) return;
+        bool anyNew = false;
+        {
+            QMutexLocker lock(&m_ftsQueueMutex);
+            for (const QString &id : ids) {
+                if (!m_ftsQueue.contains(id)) {
+                    m_ftsQueue.append(id);
+                    anyNew = true;
+                }
+            }
+        }
+        if (!anyNew) return;
+        // Arm a one-shot re-run so the deferred dictionaries' hits appear.
+        m_pendingFtsNorm = norm;
+        m_pendingFtsMode = mode;
+        m_pendingFtsGroup = groupId;
+        m_pendingFtsQuery = displayQuery;
+        m_pendingFtsWhole = wholeWords;
+        m_pendingFtsValid = true;
+        qInfo() << "[aurelex] on-demand FTS builds enqueued for" << ids;
+        if (!m_ftsWorkerRunning)
+            ensureFtsWorker();
+    });
+    gwt->setFuture(g);
+}
+
+void EngineController::reRunPendingFts()
+{
+    if (!m_pendingFtsValid) return;
+    m_pendingFtsValid = false;
+    runFtsSearch(m_pendingFtsNorm, m_pendingFtsMode, m_pendingFtsGroup,
+                 m_pendingFtsQuery, m_pendingFtsWhole);
 }
 
 // ---------- Milestone 5: history + favorites ----------

@@ -164,6 +164,28 @@ std::recursive_mutex g_engineMutex;
 // g_engineMutex. Lock order is always g_engineMutex -> g_ftsProgressMutex.
 std::mutex g_ftsProgressMutex;
 
+// --- FTS build state (fts-indexing-performance) ---
+// The full-text build in flight, if any: its dictionary id is used by the
+// lookup path to withhold it from results (design D2) and by gd_fts_cancel;
+// g_ftsCancel is the token the engine polls (currently the never-set
+// isCancelled is replaced by this). All guarded by g_ftsProgressMutex so
+// readers never wait behind the build.
+bool g_ftsBuildActive = false;
+std::string g_ftsBuildId;
+QAtomicInt g_ftsCancel;
+
+// The set of dictionaries currently being built, for makeDefinitionFor's
+// mutedDicts. Empty when idle. Caller holds g_engineMutex (lock order
+// g_engineMutex -> g_ftsProgressMutex).
+QSet< QString > mutedInFlightDict()
+{
+  QSet< QString > muted;
+  std::lock_guard< std::mutex > plock( g_ftsProgressMutex );
+  if ( g_ftsBuildActive && !g_ftsBuildId.empty() )
+    muted.insert( QString::fromStdString( g_ftsBuildId ) );
+  return muted;
+}
+
 vector< string > collectFiles( const QString & dirPath, const QStringList & filters )
 {
   vector< string > out;
@@ -723,8 +745,10 @@ int gd_lookup( const char * word, char * out, int out_size )
 
   const QString w = QString::fromUtf8( word );
   // Use the active group (0 = "All"); article_maker filters to its dictionaries.
+  // A dictionary whose full-text index is currently being built is withheld
+  // (design D2) so a lookup never reads a dictionary the build is touching.
   auto req = g_state->articleMaker->makeDefinitionFor(
-    w, g_state->activeGroupId, QMap< QString, QString >(), QSet< QString >(), QStringList(), false );
+    w, g_state->activeGroupId, QMap< QString, QString >(), mutedInFlightDict(), QStringList(), false );
 
   // ArticleRequest delivers via queued signals; pump a real event loop
   // (bounded). Keep req alive until it is truly finished.
@@ -771,7 +795,7 @@ int gd_lookup_in_group( const char * word, int group_id, char * out, int out_siz
   // used so a result from a scoped context (e.g. FTS tab) opens in the same
   // group it was found in.
   auto req = g_state->articleMaker->makeDefinitionFor(
-    w, static_cast< unsigned >( group_id ), QMap< QString, QString >(), QSet< QString >(), QStringList(), false );
+    w, static_cast< unsigned >( group_id ), QMap< QString, QString >(), mutedInFlightDict(), QStringList(), false );
 
   QEventLoop loop;
   QTimer::singleShot( 15000, &loop, &QEventLoop::quit );
@@ -1266,42 +1290,86 @@ int gd_set_dark_mode( int on )
 int gd_fts_index( int dict_index )
 {
   QElapsedTimer wall; wall.start();
-  std::lock_guard< std::recursive_mutex > lock( g_engineMutex );
+  std::unique_lock< std::recursive_mutex > lock( g_engineMutex );
   if ( !g_state || dict_index < 0 || dict_index >= static_cast< int >( g_state->dictionaries.size() ) )
     return -1;
 
-  Dictionary::Class & d = *g_state->dictionaries[ dict_index ];
-  if ( !d.canFTS() )
+  // Keep the dictionary alive across the build even if it is concurrently
+  // removed from g_state (removal erases the sptr; this copy holds the object,
+  // so the build never touches freed memory).
+  sptr< Dictionary::Class > dict = g_state->dictionaries[ dict_index ];
+  if ( !dict->canFTS() )
     return -1; // not full-text searchable
 
-  // Register the current build so a UI poller can sample live progress via
-  // gd_fts_progress. Guarded by g_ftsProgressMutex (not g_engineMutex), so the
-  // poller never blocks behind the long build; the sptr keeps the dict alive
-  // even if the app concurrently rescans/removes it.
+  // Register the in-flight build: its id lets the lookup path withhold it
+  // (design D2) and lets gd_fts_cancel / gd_fts_build_state address it. Guarded
+  // by g_ftsProgressMutex (lock order g_engineMutex -> g_ftsProgressMutex) so a
+  // poller/canceller never blocks behind the build. One build at a time.
   {
     std::lock_guard< std::mutex > plock( g_ftsProgressMutex );
-    g_state->ftsProgressDict = g_state->dictionaries[ dict_index ];
+    if ( g_ftsBuildActive )
+      return -1; // another build is already in flight
+    g_ftsBuildActive         = true;
+    g_ftsBuildId             = dict->getId();
+    g_ftsCancel              = 0;
+    g_state->ftsProgressDict = dict;
   }
 
-  // makeFTSIndex() is the dict backend's virtual override (builds or reuses
-  // the xapian index). Blocking by design (D4): Kotlin drives it on the
-  // engine's single worker thread and shows a "building" state itself.
-  QAtomicInt isCancelled;
+  // Cooperative slicing (design D1): the engine calls this hook every slice so
+  // we briefly release g_engineMutex and let queued operations (lookups,
+  // searches, scans, removal) interleave with the build. The build reacquires
+  // before touching the engine again. The hook runs on this thread, so
+  // unlocking a recursive_mutex the unique_lock owns is safe.
+  FtsHelpers::setYieldCallback( [ &lock ]() {
+    lock.unlock();
+    QThread::msleep( 1 ); // let a waiter acquire before we reacquire
+    lock.lock();
+  } );
+
   int rc = 0;
   try {
-    d.makeFTSIndex( isCancelled );
+    dict->makeFTSIndex( g_ftsCancel );
   }
   catch ( std::exception & ) {
     rc = -1;
   }
+  FtsHelpers::setYieldCallback( nullptr );
+
+  const bool cancelled = ( g_ftsCancel.loadAcquire() != 0 );
 
   {
     std::lock_guard< std::mutex > plock( g_ftsProgressMutex );
+    g_ftsBuildActive = false;
+    g_ftsBuildId.clear();
     g_state->ftsProgressDict.reset();
   }
-  qInfo( "gd_fts_index dict=%d rc=%d took %lld ms",
-         dict_index, rc, wall.elapsed() );
+
+  if ( cancelled )
+    rc = -2; // distinct "cancelled" result (design D4)
+  qInfo( "gd_fts_index dict=%d rc=%d took %lld ms", dict_index, rc, wall.elapsed() );
   return rc;
+}
+
+int gd_fts_cancel( const char * dict_id )
+{
+  if ( !dict_id || !*dict_id )
+    return -1;
+  std::lock_guard< std::mutex > plock( g_ftsProgressMutex );
+  if ( !g_ftsBuildActive )
+    return 0; // nothing in flight
+  if ( g_ftsBuildId != dict_id )
+    return 1; // a different dictionary is being built
+  g_ftsCancel = 1;
+  return 0;
+}
+
+int gd_fts_build_state( const char * dict_id, int * out )
+{
+  if ( !dict_id || !*dict_id || !out )
+    return -1;
+  std::lock_guard< std::mutex > plock( g_ftsProgressMutex );
+  *out = ( g_ftsBuildActive && g_ftsBuildId == dict_id ) ? 1 : 0; // 1 building, 0 idle
+  return 0;
 }
 
 int gd_fts_progress( int * out_percent )
@@ -1437,6 +1505,20 @@ int gd_fts_search( const char * query, int mode, int group_id, char * out, int o
 
 void gd_cleanup()
 {
+  // Wait (bounded) for an in-flight full-text build to finish before freeing
+  // g_state: the build is interleaved and between slices still touches
+  // g_state's progress slot, so deleting state underneath it would
+  // use-after-free. As it winds down, ask it to stop at its next slice. The app
+  // does not call gd_cleanup in v1; this is a boundary invariant.
+  for ( ;; ) {
+    {
+      std::lock_guard< std::mutex > plock( g_ftsProgressMutex );
+      if ( !g_ftsBuildActive )
+        break;
+      g_ftsCancel = 1;
+    }
+    QThread::msleep( 10 );
+  }
   std::lock_guard< std::recursive_mutex > lock( g_engineMutex );
   delete g_state;
   g_state = nullptr;

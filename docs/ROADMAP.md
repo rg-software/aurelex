@@ -57,13 +57,21 @@ Status legend: 🟢 planned · 🔵 in progress · ✅ done · ⏸ parked
   dictionary from a curated, HTTPS-hosted JSON catalog with no sideloading —
   foreground download service, byte-level progress/cancel, atomic staging, and
   the existing scan → auto-index chain reused unchanged. Manifest format and
-  hosting: `docs/REMOTE-CATALOG.md`. The auto-index step it hands off to still
-  holds the engine mutex for the whole build, so a large freshly-downloaded
-  dictionary blocks lookups until indexed — the same limitation tracked under
-  "Off-thread FTS indexing" below.
+  hosting: `docs/REMOTE-CATALOG.md`. The auto-index step it hands off to now
+  interleaves with the rest of the engine (see `fts-indexing-performance`
+  below), so a large freshly-downloaded dictionary no longer blocks lookups
+  while indexed.
 
 ## Recently completed
 
+- ✅ **FTS indexing performance** (`fts-indexing-performance`): the full-text
+  build no longer holds the engine mutex for its whole run — it interleaves in
+  bounded slices, so lookups/searches over other dictionaries return within
+  about one slice while a dictionary indexes; the in-flight dictionary is
+  withheld until its index completes. Builds commit periodically (resume after
+  a kill) and publish by atomic rename instead of a second `compact()` pass;
+  removal during a build cancels and reaps it; very large dictionaries are
+  deferred and built on demand at the first search. Verified on-device.
 - ✅ **Search history in the candidate surface + browser-style article
   navigation** (`search-history-and-article-nav`, archived 2026-09-06): the
   History tab was abolished (history shows in the empty/fallback Search
@@ -72,16 +80,6 @@ Status legend: 🟢 planned · 🔵 in progress · ✅ done · ⏸ parked
 
 ## Candidate future milestones
 
-- 🟢 **Off-thread FTS indexing (UI responsiveness)** — `gd_fts_index` holds the
-  global `g_engineMutex` for the entire `makeFTSIndex()` build, and every other
-  `gd_*` call (lookup, groups, `pollFtsProgress`) takes the same lock. While a
-  large dictionary is being indexed the UI thread blocks on it, so **search is
-  effectively unusable until the build finishes** (and a group delete queues
-  behind it). Interim mitigation already in tree: the progress poller was
-  slowed to 1s (VeryCoarse). Real fix: stop holding the engine mutex across the
-  build (build into a side buffer and swap under a short lock), or run the
-  build against a snapshot so lookups can proceed concurrently. Boundary
-  change; needs care with `rebuildGroups()`/dictionary-removal ordering.
 - 🟢 **Translate-later / word-list export** — extract headwords/definitions to
   a file/anki. (Not yet proposed.)
 - 🟢 **Pre-built desktop-generated index caches** — copy indexes along with

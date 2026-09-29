@@ -1,0 +1,191 @@
+From 0000000000000000000000000000000000000004 Mon Sep 17 00:00:00 2001
+From: Aurelex contributors
+Date: Tue, 29 Sep 2026 00:00:00 +0900
+Subject: [PATCH] fts: build in slices, commit periodically, publish atomically
+
+Bound the engine lock the FTS build holds and make the build resumable:
+- commit every kCommitEvery documents and yield the caller's lock every
+  kSliceBudgetMs via a hook (setYieldCallback), so the boundary can let
+  other gd_* work interleave with the build (fts-indexing-performance D1);
+- publish the committed _temp as the final index with an atomic rename
+  instead of a second full pass (db.compact), and recover a _temp that was
+  finished but not published (D3).
+---
+
+diff --git a/src/ftshelpers.cc b/src/ftshelpers.cc
+index 5f8594e1..d535b8b3 100644
+--- a/src/ftshelpers.cc
++++ b/src/ftshelpers.cc
+@@ -11,6 +11,10 @@
+ 
+ #include <vector>
+ #include <string>
++#include <functional>
++#include <stdexcept>
++#include <QDir>
++#include <QElapsedTimer>
+ 
+ using std::vector;
+ using std::string;
+@@ -21,6 +25,63 @@ namespace FtsHelpers {
+ // finished  reversed   dehsinif
+ const static std::string finish_mark = std::string( "dehsinif" );
+ 
++// Aurelex patch (0004): build in bounded slices. Commit every kCommitEvery
++// documents (bounded peak memory + a resume point), and every kSliceBudgetMs
++// call the boundary's yield hook so it can release the engine lock briefly.
++constexpr int kCommitEvery   = 10000;
++constexpr int kSliceBudgetMs = 400;
++
++// Optional cooperative yield hook (see setYieldCallback).
++static std::function< void() > & yieldCallback()
++{
++  static std::function< void() > cb;
++  return cb;
++}
++
++void setYieldCallback( std::function< void() > cb )
++{
++  yieldCallback() = std::move( cb );
++}
++
++// True when the xapian database at `path` exists and its last document is the
++// finish_mark: a completed build that was not yet published (the process was
++// killed between the final commit and the atomic publish).
++static bool isCompleteIndex( const std::string & path )
++{
++  try {
++    const QByteArray encoded = QFile::encodeName( QString::fromStdString( path ) );
++    Xapian::Database db( encoded.toStdString() );
++    if ( db.get_lastdocid() == 0 )
++      return false;
++    return db.get_document( db.get_lastdocid() ).get_data() == finish_mark;
++  }
++  catch ( ... ) {
++    return false;
++  }
++}
++
++// Publish the committed `_temp` database as the final index: drop any stale
++// final first, then move the directory into place. Falls back to a compact
++// rewrite if the rename fails (e.g. a lingering file handle on Windows).
++static bool publishIndex( const std::string & tempPath, const std::string & finalPath )
++{
++  Utils::Fs::removeDirectory( finalPath );
++  if ( QDir().rename( QString::fromStdString( tempPath ), QString::fromStdString( finalPath ) ) )
++    return true;
++
++  try {
++    Xapian::WritableDatabase db( QFile::encodeName( QString::fromStdString( tempPath ) ).toStdString(),
++                                 Xapian::DB_OPEN );
++    db.compact( QFile::encodeName( QString::fromStdString( finalPath ) ).toStdString() );
++    db.close();
++    Utils::Fs::removeDirectory( tempPath );
++    return true;
++  }
++  catch ( ... ) {
++    return false;
++  }
++}
++
+ bool ftsIndexIsOldOrBad( BtreeIndexing::BtreeDictionary * dict )
+ {
+   try {
+@@ -64,6 +125,17 @@ void makeFTSIndex( BtreeIndexing::BtreeDictionary * dict, QAtomicInt & isCancell
+       throw exUserAbort();
+     }
+ 
++    // Aurelex patch (0004): a build that finished but was killed before the
++    // atomic publish leaves a committed `_temp` carrying finish_mark. Publish
++    // it as-is instead of re-indexing from scratch.
++    const std::string tempPath  = dict->ftsIndexName() + "_temp";
++    const std::string finalPath = dict->ftsIndexName();
++    if ( isCompleteIndex( tempPath ) ) {
++      if ( !publishIndex( tempPath, finalPath ) )
++        throw std::runtime_error( "failed to publish fts index" );
++      return;
++    }
++
+     // Open the database for update, creating a new database if necessary.
+     const std::string path       = dict->ftsIndexName() + "_temp";
+     const QByteArray encodedPath = QFile::encodeName( QString::fromStdString( path ) );
+@@ -128,6 +200,13 @@ void makeFTSIndex( BtreeIndexing::BtreeDictionary * dict, QAtomicInt & isCancell
+       indexedDoc += num_skipped;
+     }
+ 
++    // Aurelex patch (0004): bounded slices. Commit periodically for bounded
++    // memory and a resume point, and periodically yield so the caller can
++    // release its engine lock and let other work interleave with the build.
++    int sinceCommit = 0;
++    QElapsedTimer sliceTimer;
++    sliceTimer.start();
++
+     for ( auto it = start_it; it != offsets.cend(); ++it ) {
+       const auto & address = *it;
+       indexedDoc++;
+@@ -152,6 +231,21 @@ void makeFTSIndex( BtreeIndexing::BtreeDictionary * dict, QAtomicInt & isCancell
+       // Add the document to the database.
+       db.add_document( doc );
+       dict->setIndexedFtsDoc( indexedDoc );
++
++      if ( ++sinceCommit >= kCommitEvery ) {
++        db.commit();
++        sinceCommit = 0;
++      }
++
++      if ( sliceTimer.elapsed() >= kSliceBudgetMs ) {
++        if ( sinceCommit > 0 ) {
++          db.commit();
++          sinceCommit = 0;
++        }
++        if ( auto & cb = yieldCallback() )
++          cb();
++        sliceTimer.restart();
++      }
+     }
+ 
+     //add a special document to mark the end of the index.
+@@ -164,13 +258,13 @@ void makeFTSIndex( BtreeIndexing::BtreeDictionary * dict, QAtomicInt & isCancell
+     offsets.clear();
+ 
+     db.commit();
+-
+-    const QByteArray encodedFtsPath = QFile::encodeName( QString::fromStdString( dict->ftsIndexName() ) );
+-    db.compact( encodedFtsPath.toStdString() );
+-
+     db.close();
+ 
+-    Utils::Fs::removeDirectory( dict->ftsIndexName() + "_temp" );
++    // Aurelex patch (0004): publish the committed _temp as the final index with
++    // an atomic rename, instead of the previous full second rewrite via
++    // db.compact(final).
++    if ( !publishIndex( tempPath, finalPath ) )
++      throw std::runtime_error( "failed to publish fts index" );
+   }
+   catch ( Xapian::Error & e ) {
+     qWarning() << "create xapian index failed:" << QString::fromStdString( e.get_description() );
+diff --git a/src/ftshelpers.hh b/src/ftshelpers.hh
+index febb2e42..07bf4dc4 100644
+--- a/src/ftshelpers.hh
++++ b/src/ftshelpers.hh
+@@ -3,6 +3,7 @@
+ #include <QString>
+ #include <QList>
+ #include <QtConcurrentRun>
++#include <functional>
+ #include "dict/dictionary.hh"
+ #include "btreeidx.hh"
+ #include "fulltextsearch.hh"
+@@ -12,6 +13,12 @@ namespace FtsHelpers {
+ 
+ bool ftsIndexIsOldOrBad( BtreeIndexing::BtreeDictionary * dict );
+ 
++// Aurelex patch (0004): cooperative slicing. When set, makeFTSIndex() calls the
++// hook periodically (bounded by a wall-clock slice) so the caller can briefly
++// release its engine lock and let other work interleave with the build. The
++// hook runs on the build thread; pass an empty function to clear it.
++void setYieldCallback( std::function< void() > cb );
++
+ void makeFTSIndex( BtreeIndexing::BtreeDictionary * dict, QAtomicInt & isCancelled );
+ 
+ class FTSResultsRequest: public Dictionary::DataRequest

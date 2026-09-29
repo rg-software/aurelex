@@ -1463,20 +1463,17 @@ text: root._stagingActive
                 }
                 // Delete selection: sits right next to Add, styled like the
                 // By Pair toggle — gray while nothing is selected, magenta
-                // (highlighted) once a selection exists.
-                // Disabled while the app is processing (staging / scanning /
-                // indexing): every gd_* call serializes on g_engineMutex, which
-                // the scan and the FTS build hold for their whole duration, so a
-                // removal tapped then would queue for minutes and — on repeated
-                // taps — run against stale indices after the list shifts.
+                // (highlighted) once a selection exists. Enabled during staging/
+                // scanning/indexing too (fts-indexing-performance): the build now
+                // interleaves with other engine calls, and a removal cancels any
+                // in-flight build for its dictionary, so it no longer queues for
+                // minutes.
                 Button {
                     text: root.icon("delete")
                     font.family: root.iconFontFamily
                     font.pixelSize: 18
                     highlighted: dictsPane.selectedDicts.length > 0
-                        && !engine.processingActive
                     enabled: dictsPane.selectedDicts.length > 0
-                        && !engine.processingActive
                     Accessible.name: "Remove"
                     Accessible.role: Accessible.Button
                     onClicked: dictsPane._removeSelected()
@@ -3051,11 +3048,6 @@ text: root._stagingActive
         color: root.uiBg
         visible: root.state === 4
 
-        Connections {
-            target: engine
-            function onBuildingFtsChanged() { ftsInput.enabled = !engine.buildingFts; ftsSearchBtn.enabled = !engine.buildingFts }
-        }
-
         ColumnLayout {
             anchors.fill: parent
             anchors.margins: 12
@@ -3071,7 +3063,6 @@ text: root._stagingActive
                     Layout.preferredWidth: 7
                     placeholderText: qsTr("Full-text search")
                     font.pixelSize: 18
-                    enabled: !engine.buildingFts
                     Accessible.name: "Full-text search"
                     Accessible.role: Accessible.EditableText
                     onAccepted: { ftsInput.focus = false; root._runFts() }
@@ -3115,7 +3106,6 @@ text: root._stagingActive
                     // in the middle of the button.
                     leftPadding: 12
                     rightPadding: 12
-                    enabled: !engine.buildingFts
                     Accessible.name: "Whole words"
                     Accessible.role: Accessible.CheckBox
                     onClicked: {
@@ -3135,9 +3125,10 @@ text: root._stagingActive
                 }
             }
 
-            // 8.1: index-build progress is shown in the Dicts tab banner; the
-            // FTS pane only disables its controls while building (no duplicate
-            // bars).
+            // 8.1: index-build progress is shown in the Dicts tab banner only.
+            // The FTS controls stay enabled while a build runs: the build now
+            // interleaves with the engine, so a search over other dictionaries
+            // returns within about one indexing slice (fts-indexing-performance).
 
             RowLayout {
                 Layout.fillWidth: true
@@ -3147,7 +3138,6 @@ text: root._stagingActive
                     id: ftsSearchBtn
                     text: qsTr("Search")
                     highlighted: true
-                    enabled: !engine.buildingFts
                     Accessible.name: "Search"
                     Accessible.role: Accessible.Button
                     onClicked: root._runFts()

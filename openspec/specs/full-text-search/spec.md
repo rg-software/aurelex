@@ -18,7 +18,10 @@ build missing indexes automatically, in bulk, after dictionaries are imported,
 without requiring a per-dictionary manual index action, and SHALL tolerate
 dictionaries being added *while* a bulk build is already running — newly added
 dictionaries are incorporated without restarting, without double-work, and
-without falsely completing the overall progress.
+without falsely completing the overall progress. Automatic bulk indexing SHALL be
+bounded: a dictionary large enough that building its index would dominate the
+import chain SHALL NOT have its index built during that chain, and SHALL instead
+have its index built when the user first runs a full-text search over it.
 
 #### Scenario: Index build on demand
 - **WHEN** the user loads a dictionary and initiates a full-text search on it
@@ -43,6 +46,13 @@ without falsely completing the overall progress.
 - **THEN** the app builds their indexes automatically in bulk, with no
   per-dictionary manual Index action, and each dictionary becomes searchable as
   its index completes
+
+#### Scenario: Very large dictionary is deferred, not auto-built during import
+- **WHEN** an imported dictionary is large enough that building its full-text
+  index would dominate the import chain
+- **THEN** the import completes without building that dictionary's full-text
+  index during the chain, and the index is built when the user first runs a
+  full-text search over that dictionary
 
 #### Scenario: Dictionary added while a bulk build is running
 - **WHEN** the user imports a new dictionary while one or more other dictionaries
@@ -117,17 +127,44 @@ the FTS scope group, exactly like a typed headword lookup.
 
 ### Requirement: Index build progress
 The system SHALL show progress or a completion state while a full-text index is
-being built and shall not block the rest of the app while indexing runs.
+being built, and the build SHALL NOT block the rest of the app: while indexing
+runs, ordinary headword lookups and full-text searches over other dictionaries
+SHALL be served without waiting more than one indexing slice for the build, and
+other operations (scanning, group edits, dictionary removal) SHALL proceed. The
+dictionary whose index is currently being built SHALL be withheld from lookups
+and full-text search until its index completes.
 
 #### Scenario: Progress indication
 - **WHEN** a dictionary is being full-text indexed
 - **THEN** the app shows an in-progress state for that dictionary and the user can
   keep using the rest of the app
 
+#### Scenario: Lookups and searches are served during a build
+- **WHEN** a full-text index build is running
+- **THEN** ordinary headword lookups and full-text searches over other
+  dictionaries return results within one indexing slice, while the dictionary
+  being built is withheld until its index completes
+
 #### Scenario: Large dictionary
 - **WHEN** a very large dictionary is indexed
 - **THEN** the app remains responsive, the build runs on a background service, and
   the index completes or the app reports why it could not
+
+### Requirement: Interrupted index build resumes
+The system SHALL persist incremental progress while building a full-text index, so
+a build interrupted by app termination or a system kill resumes from its last
+persisted point on a later run instead of re-indexing from the beginning, and a
+build for a very large dictionary completes without exhausting device memory.
+
+#### Scenario: Build interrupted then resumed
+- **WHEN** a full-text index build is interrupted before finishing (e.g. the app
+  process is killed) and the app is launched again
+- **THEN** the build continues from its last persisted point instead of
+  re-indexing articles that were already persisted
+
+#### Scenario: Very large dictionary completes
+- **WHEN** a very large dictionary is fully indexed
+- **THEN** the build completes without the device running out of memory
 
 ### Requirement: Progress never falsely completes on concurrent add
 The system SHALL NOT clear the "indexing in progress" indication for the overall

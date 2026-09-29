@@ -81,6 +81,9 @@ This adb-installs the result (`-Install`); without it the APK lands in
 | 30 | Check "Whole words" then `boo` | Exact-term match only (no `book`) | ✅ |
 | 31 | Result respects the FTS scope button | Hits limited to the group chosen in the FTS pane's own scope control | ✅ |
 | 32 | Tap a result | Opens the normal article for that headword | ✅ |
+| 32a | While a large dictionary indexes, look up a word in an already-imported dictionary | Lookup returns within about one indexing slice (not after the whole build); the dictionary being indexed is absent from results until its index completes | ✅ |
+| 32b | Tap Remove on a dictionary while it is being indexed | It disappears within a moment; its staged files + index are deleted; other dictionaries keep indexing | ✅ |
+| 32c | Import a dictionary above the auto-index size bound, then run a full-text search over it | Import does not build its index; the first search builds it and its hits appear on completion | ✅ |
 
 ## Launcher shortcuts (QS tile + home-screen widget)
 
@@ -156,8 +159,11 @@ under "Localization" in `docs/DEVELOPMENT.md`.
 - Speex (`.spx`) audio is silently skipped rather than explicitly indicated (#20).
 - Release APK/AAB currently package every Qt kit library and plugin, including
   debug/tooling binaries (`app/build.ps1` staging), rather than a filtered set.
-- FTS indexing holds the engine mutex for the whole build, so the UI can block
-  while a large dictionary indexes; per-dictionary index state is not shown.
+- FTS indexing now interleaves with other engine calls instead of holding the
+  engine mutex for the whole build: existing dictionaries stay usable during a
+  build, and the dictionary being built is withheld until its index completes.
+  A very large dictionary is not auto-indexed during import; its index is built
+  on the first full-text search over it (`fts-indexing-performance`).
 
 ## Provenance
 

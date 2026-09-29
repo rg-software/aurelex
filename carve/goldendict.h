@@ -70,8 +70,22 @@
 //                 engine is not initialized.
 // - gd_fts_index:  build/refresh the full-text (xapian) index for dictionary
 //                 `dict_index` if it is missing or stale. Blocking; runs on
-//                 the calling thread. Returns 0 on success (or -1 if the dict
-//                 index is out of range / the dictionary cannot be indexed).
+//                 the calling thread, but interleaves with other gd_* calls:
+//                 the engine lock is released between bounded build slices, so
+//                 lookups/searches/scans/removal proceed. The dictionary being
+//                 built is withheld from lookup and full-text search until its
+//                 index completes. Returns 0 on success, -1 if the dict index
+//                 is out of range / the dictionary cannot be indexed / another
+//                 build is already in flight, -2 if cancelled (see
+//                 gd_fts_cancel).
+// - gd_fts_cancel: request cancellation of the full-text build for `dict_id`
+//                 (the id gd_dict_id returns). The build stops at its next
+//                 slice. Returns 0 if the build was signalled (or nothing was
+//                 in flight), 1 if a DIFFERENT dictionary is being built, -1 on
+//                 invalid args.
+// - gd_fts_build_state: report whether `dict_id` has a full-text build in
+//                 flight: *out = 1 building, 0 idle. Returns 0 on success,
+//                 -1 on invalid args.
 // - gd_fts_index_state: report per-dictionary full-text index availability:
 //                 0 = built, 1 = missing/stale. Returns 0 on success, -1 if
 //                 the dictionary does not exist or does not support FTS.
@@ -145,6 +159,8 @@ int gd_group_active( int * id_out );
 int gd_group_set_active( int id );
 int gd_set_dark_mode( int on );
 int gd_fts_index( int dict_index );
+int gd_fts_cancel( const char * dict_id );
+int gd_fts_build_state( const char * dict_id, int * out );
 // Report live full-text index progress of the dictionary currently being built
 // by gd_fts_index (safe to call from another thread while the build runs).
 // Fills *out_percent with 0..100. Returns 1 if a build is in flight, 0 if idle

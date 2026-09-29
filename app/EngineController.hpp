@@ -14,6 +14,7 @@
 #include <QThreadPool>
 #include <QList>
 #include <QHash>
+#include <QSet>
 
 #include <atomic>
 
@@ -447,6 +448,15 @@ private:
     void runScan();    void autoIndexMissing();
     // Start the single FTS worker if it isn't already draining the queue.
     void ensureFtsWorker();
+    // Run one full-text search: emit ftsSearchReady(displayQuery, results), and
+    // (unless the engine is mid-batch) enqueue on-demand index builds for the
+    // group's dictionaries that lack an index, arming a one-shot re-run of this
+    // query when those builds finish.
+    void runFtsSearch(const QString &norm, int mode, int groupId,
+                      const QString &displayQuery, bool wholeWords);
+    // Re-run the query a deferred/on-demand build was owed, once, when the batch
+    // drains. No-op when none is pending.
+    void reRunPendingFts();
     // Permanently delete an imported dictionary's staged copy (when not shared)
     // and its engine index cache. Called after gd_remove_dict; indices may have
     // shifted, so operate on captured paths/ids.
@@ -567,6 +577,15 @@ private:
     // logs what to do. A relaunch re-scans the staged root and frees the mutex.
     QTimer m_scanWatchdog;
     static constexpr int kScanWatchdogMs = 90000;
+    // FTS auto-index size bound: a dictionary whose source is larger than this
+    // is not built during the import chain (it would dominate it); it is built
+    // on demand at the user's first full-text search over it
+    // (fts-indexing-performance D5). The value is a tunable; behavior does not
+    // depend on it.
+    static constexpr qint64 kAutoFtsMaxBytes = 200LL * 1024 * 1024;
+    // How long a removal waits for a cancelled in-flight build to report idle
+    // before it reaps the removed dictionary's files anyway (D4).
+    static constexpr int kFtsIdleWaitMs = 3000;
     int m_clipboardRetries = 0;
     // Serial engine dispatcher (last-wins). Every user-facing engine call
     // (suggest/lookup/prefetch) runs one-at-a-time on this single worker
@@ -630,6 +649,19 @@ private:
     // whether autoIndexMissing starts a new run; a re-import mid-build appends
     // to the queue the running worker picks up.
     bool m_ftsWorkerRunning = false;
+    // Dictionary ids skipped by auto-index because their source exceeds
+    // kAutoFtsMaxBytes (built on demand instead), and ids whose build failed
+    // (never auto-retried, so an on-demand re-run cannot loop). UI-thread only.
+    QSet<QString> m_ftsDeferred;
+    QSet<QString> m_ftsBuildFailed;
+    // A full-text search owed a re-run once the on-demand builds it triggered
+    // finish (D5). One-shot: cleared before re-running.
+    QString m_pendingFtsNorm;
+    QString m_pendingFtsQuery;
+    int m_pendingFtsMode = 0;
+    int m_pendingFtsGroup = 0;
+    bool m_pendingFtsWhole = false;
+    bool m_pendingFtsValid = false;
     QPointer<ArticleServer> m_articleServer;
 
     // Small per-(word, active group, dark) article cache. Suggested words are
