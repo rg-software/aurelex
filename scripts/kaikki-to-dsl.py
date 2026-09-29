@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+from collections import deque
 import gzip
 import hashlib
 import heapq
@@ -51,7 +52,9 @@ import time
 import urllib.error
 import urllib.request
 import zipfile
-from typing import Dict, Iterator, List, Optional, Sequence, Set, Tuple
+from typing import (
+    Deque, Dict, Iterable, Iterator, List, Optional, Sequence, Set, Tuple,
+)
 from urllib.parse import quote, unquote, urlsplit, urlunsplit
 
 # ---------------------------------------------------------------------------
@@ -79,6 +82,16 @@ USER_AGENT = (
 # Minimum gap between requests to a single host, to stay clear of rate limits.
 _DOWNLOAD_SPACING_SECONDS = 1.0
 _DOWNLOAD_RETRIES = 4
+# Ceiling on any single backoff sleep, so a hostile or mistaken Retry-After
+# cannot park a run for hours.
+_DOWNLOAD_MAX_BACKOFF_SECONDS = 60.0
+
+# Filling the audio cache is a bulk back-fill against Wikimedia, not the
+# incidental fetch a build does, so it runs slower and retries longer: their
+# robot policy expects bulk clients to stay well clear of one request per second
+# and to give up rather than hammer a 429.
+_PREFETCH_SPACING_SECONDS = 2.0
+_PREFETCH_RETRIES = 6
 
 # Parts of speech that are not lexical headwords in this converter's sense.
 NON_LEXICAL_POS = {"soft-redirect", "romanization"}
@@ -600,12 +613,13 @@ def verify_sidecar(path: str) -> bool:
 _last_request_time = 0.0
 
 
-def _throttle() -> None:
+def _throttle(gap: Optional[float] = None) -> None:
     """Sleep so consecutive requests to the same host stay polite."""
     global _last_request_time
-    gap = time.time() - _last_request_time
-    if gap < _DOWNLOAD_SPACING_SECONDS:
-        time.sleep(_DOWNLOAD_SPACING_SECONDS - gap)
+    spacing = _DOWNLOAD_SPACING_SECONDS if gap is None else gap
+    elapsed = time.time() - _last_request_time
+    if elapsed < spacing:
+        time.sleep(spacing - elapsed)
     _last_request_time = time.time()
 
 
@@ -626,17 +640,58 @@ def _ascii_url(url: str) -> str:
     return urlunsplit((parts.scheme, parts.netloc, path, query, parts.fragment))
 
 
-def _open_with_retries(url: str, timeout: int):
+def _retry_after_seconds(exc: urllib.error.HTTPError) -> Optional[float]:
+    """The server's own requested wait, in seconds, if it sent one.
+
+    Wikimedia sets ``Retry-After`` on a 429 with its robot-policy cooldown, and
+    that is the number it will actually hold us to; guessing a shorter backoff
+    just earns another 429. Returns ``None`` when the header is absent or
+    unparseable, leaving the caller on its own exponential schedule.
+    """
+    headers = getattr(exc, "headers", None)
+    if headers is None:
+        return None
+    try:
+        raw = headers.get("Retry-After")
+    except AttributeError:
+        return None
+    if not raw:
+        return None
+    try:
+        seconds = float(str(raw).strip())
+    except ValueError:
+        # the header may also be an HTTP-date; we cannot parse one without a
+        # full date library, and the exponential fallback is the safe answer
+        return None
+    return max(0.0, seconds)
+
+
+def _open_with_retries(
+    url: str,
+    timeout: int,
+    retries: Optional[int] = None,
+    spacing: Optional[float] = None,
+    max_backoff: Optional[float] = None,
+):
     """Open ``url``, retrying rate limits and transient server errors.
 
     Wikimedia answers an over-eager client with 429 (sometimes with a robot-policy
     message); backing off and retrying turns that into a slow success rather than
-    a missing file.
+    a missing file. A ``Retry-After`` on the response overrides the computed
+    backoff, capped by ``max_backoff`` so a hostile or mistaken header cannot
+    park the run for hours.
+
+    ``retries``/``spacing``/``max_backoff`` default to the module-level policy;
+    the audio prefetcher passes its own, because filling a large cache back is a
+    different job from fetching a handful of files during a build.
     """
     last: Optional[Exception] = None
     url = _ascii_url(url)
-    for attempt in range(_DOWNLOAD_RETRIES):
-        _throttle()
+    attempts = _DOWNLOAD_RETRIES if retries is None else max(1, retries)
+    gap = _DOWNLOAD_SPACING_SECONDS if spacing is None else max(0.0, spacing)
+    ceiling = _DOWNLOAD_MAX_BACKOFF_SECONDS if max_backoff is None else max_backoff
+    for attempt in range(attempts):
+        _throttle(gap)
         request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
         try:
             return urllib.request.urlopen(request, timeout=timeout)
@@ -644,18 +699,58 @@ def _open_with_retries(url: str, timeout: int):
             last = exc
             if exc.code not in (429, 500, 502, 503, 504):
                 raise
-            delay = _DOWNLOAD_SPACING_SECONDS * (2 ** attempt)
+            delay = min(ceiling, gap * (2 ** attempt))
+            asked = _retry_after_seconds(exc)
+            if asked is not None:
+                delay = min(ceiling, max(delay, asked))
             print(f"  rate limited ({exc.code}), retrying in {delay:.0f}s ...",
                   file=sys.stderr)
             time.sleep(delay)
         except (urllib.error.URLError, TimeoutError) as exc:
             last = exc
-            time.sleep(_DOWNLOAD_SPACING_SECONDS * (2 ** attempt))
+            time.sleep(min(ceiling, gap * (2 ** attempt)))
     assert last is not None
     raise last
 
 
-def download_cached(url: str, dest: str, force: bool = False, timeout: int = 60) -> str:
+# Statuses a retry cannot fix: the file is gone, or never was there. Anything
+# else -- 429, 5xx, 403 from a bot filter, a timeout, a dropped connection -- is
+# worth trying again, because the next run might be the one that gets through.
+# The split is what lets the prefetcher say "stop" instead of "keep going": a
+# dead URL retried on every run never succeeds, so without recording it the run
+# could never report itself finished.
+PERMANENT_HTTP_STATUS = frozenset({400, 404, 410, 451})
+
+
+def failure_is_permanent(exc: BaseException) -> bool:
+    """Whether retrying ``exc`` could ever succeed.
+
+    Only a definitive HTTP answer counts. A 404 or 410 is a statement about the
+    file rather than the moment; everything else -- including statuses that are
+    usually temporary -- is treated as worth another try, because the cost of a
+    wrong "permanent" is a pronunciation the article silently never gets.
+    """
+    return isinstance(exc, urllib.error.HTTPError) and exc.code in PERMANENT_HTTP_STATUS
+
+
+def describe_failure(exc: BaseException) -> str:
+    """A short human reason for a failed fetch, for the dead-file record."""
+    if isinstance(exc, urllib.error.HTTPError):
+        return f"HTTP {exc.code}"
+    if isinstance(exc, urllib.error.URLError):
+        return str(exc.reason)
+    return type(exc).__name__
+
+
+def download_cached(
+    url: str,
+    dest: str,
+    force: bool = False,
+    timeout: int = 60,
+    retries: Optional[int] = None,
+    spacing: Optional[float] = None,
+    max_backoff: Optional[float] = None,
+) -> str:
     """Download ``url`` to ``dest`` once, writing a sha256 sidecar.
 
     Reuses an existing, verified file unless ``force`` is set. The write is
@@ -667,7 +762,8 @@ def download_cached(url: str, dest: str, force: bool = False, timeout: int = 60)
         return dest
     part = dest + ".part"
     print(f"downloading {url} ...", file=sys.stderr)
-    with _open_with_retries(url, timeout) as response, open(part, "wb") as out:
+    with _open_with_retries(url, timeout, retries, spacing, max_backoff) as response, \
+            open(part, "wb") as out:
         while True:
             block = response.read(1024 * 1024)
             if not block:
@@ -795,15 +891,30 @@ def is_inflected(record: dict) -> bool:
     return any(isinstance(s, dict) and s.get("form_of") for s in senses)
 
 
-def iter_candidate_headwords(
+def iter_candidate_records(
     path: str, source_code: str, progress: Optional["Progress"] = None
-) -> Iterator[str]:
-    """Yield headword candidates (source language, lexical, not inflected)."""
+) -> Iterator[dict]:
+    """Yield the records that become indexed headwords, in file order.
+
+    This is the single definition of what a build indexes: the source language,
+    lexical, and not an inflected form. Everything that walks the snapshot for
+    those records goes through here -- the build, the headword selection, and the
+    audio prefetcher -- so a change to the rules cannot leave one of them
+    planning against a different set of articles than the others.
+    """
     for _, record in iter_records(path, progress):
         if record is None or record.get("lang_code") != source_code:
             continue
         if not is_lexical(record) or is_inflected(record):
             continue
+        yield record
+
+
+def iter_candidate_headwords(
+    path: str, source_code: str, progress: Optional["Progress"] = None
+) -> Iterator[str]:
+    """Yield headword candidates (source language, lexical, not inflected)."""
+    for record in iter_candidate_records(path, source_code, progress):
         word = record.get("word")
         if word:
             yield str(word)
@@ -1354,7 +1465,12 @@ def _group_senses(
     Returns ``(heading, entries)`` pairs.
     """
     groups: Dict[str, List[SenseEntry]] = {}    # heading -> child entries
-    items: List[Tuple[str, str, List[str]]] = []  # (kind, text, examples)
+    # (kind, text, group key, examples). A group's key is the *raw* parent
+    # gloss, which render() may alter (it trims and collapses whitespace,
+    # escapes markup, drops a relation prefix, wraps a form-of target in
+    # [ref]); the key travels beside the rendered heading so the children can
+    # be looked up by the string they were stored under.
+    items: List[Tuple[str, str, str, List[str]]] = []
     seen: Set[str] = set()
 
     def fresh(text: str) -> bool:
@@ -1381,14 +1497,14 @@ def _group_senses(
 
         if len(parts) == 1:
             if fresh(parts[0]):
-                items.append(("plain", markers + render(parts[0]), examples))
+                items.append(("plain", markers + render(parts[0]), "", examples))
             continue
         parent, children = parts[0], parts[1:]
         if parent not in groups:
             if not fresh(parent):
                 continue
             groups[parent] = []
-            items.append(("group", render(parent), []))
+            items.append(("group", render(parent), parent, []))
         if children and fresh(children[0]):
             groups[parent].append((markers + render(children[0]), examples))
         for child in children[1:]:
@@ -1396,8 +1512,8 @@ def _group_senses(
                 groups[parent].append((render(child), []))
 
     return [
-        (text, groups[text]) if kind == "group" else ("", [(text, ex)])
-        for kind, text, ex in items
+        (text, groups[key]) if kind == "group" else ("", [(text, ex)])
+        for kind, text, key, ex in items
     ]
 
 
@@ -1892,9 +2008,20 @@ def _language_name(record: Optional[dict], code: str) -> str:
     return code.upper()
 
 
-def build(args) -> Report:
-    report = Report()
+def _resolve_inputs(
+    args, want_audio: bool
+) -> Tuple[Snapshot, str, Optional[str], Optional[Set[str]], Optional[str]]:
+    """Resolve the snapshot both the build and the audio prefetcher read.
 
+    Checks the pinned dump date against kaikki.org (unless a local ``--jsonl`` is
+    given), downloads the JSONL and the audio archive into the cache if they are
+    not there yet, and indexes the archive's member names (itself cached beside
+    the archive). Returns
+    ``(snapshot, jsonl_path, audio_path, available_names, download_dir)``.
+
+    Every stage is a cached, sidecar-verified download, so a second run over the
+    same snapshot does no network I/O at all.
+    """
     if not args.jsonl:
         if not args.dump_date:
             raise SystemExit("--dump-date is required when downloading (or pass --jsonl)")
@@ -1917,7 +2044,6 @@ def build(args) -> Report:
             snapshot.jsonl_url, snapshot.jsonl_path, args.force_download, args.timeout
         )
 
-    want_audio = (not args.no_audio) and args.audio_per_word > 0
     audio_path: Optional[str] = None
     available: Optional[Set[str]] = None
     if want_audio:
@@ -1942,6 +2068,17 @@ def build(args) -> Report:
     download_dir = None
     if want_audio and not args.no_audio_download:
         download_dir = os.path.join(snapshot.dir, "audio-cache")
+    return snapshot, jsonl_path, audio_path, available, download_dir
+
+
+def build(args) -> Report:
+    report = Report()
+
+    want_audio = (not args.no_audio) and args.audio_per_word > 0
+    snapshot, jsonl_path, audio_path, available, download_dir = _resolve_inputs(
+        args, want_audio
+    )
+
     downloader = args.audio_downloader
     if downloader is None and download_dir is not None:
         timeout = args.timeout
@@ -2128,6 +2265,775 @@ def build(args) -> Report:
 
 
 # ---------------------------------------------------------------------------
+# Audio prefetch
+# ---------------------------------------------------------------------------
+
+class AudioWishlist:
+    """Decides, one headword at a time, which recordings a build would fetch.
+
+    Handed to :class:`AudioPlan` in place of the cached downloader, so planning
+    runs the real selection logic and simply records what it *would* have asked
+    for instead of asking. Nothing reaches the network from here; the caller
+    fetches what :meth:`scan` yields, as it yields it.
+
+    ``probed`` is the raw record of everything planning asked for, which is a
+    superset of what any article ends up referencing -- an unresolved candidate
+    does not use up a per-word slot, so planning keeps looking past it.
+    :meth:`consider` narrows that to the referenced subset.
+    """
+
+    def __init__(
+        self,
+        download_dir: str,
+        per_word: int,
+        preferred_lang: Optional[str],
+        available: Optional[Set[str]] = None,
+        dead: Optional[Set[str]] = None,
+    ) -> None:
+        self.download_dir = download_dir
+        self.per_word = per_word
+        self.preferred_lang = preferred_lang
+        # A private copy of the archive's names: a wanted-but-absent recording is
+        # added to it so it counts against the per-word cap (see ``consider``).
+        self.reachable: Set[str] = set(available or ())
+        # recordings a previous run found permanently gone, by match key
+        self.dead: Set[str] = set(dead or ())
+        self.probed: Dict[str, str] = {}  # destination path -> url, in file order
+        self.satisfied: Set[str] = set()  # already in the cache before this run
+        # A destination is offered once per run. A failure is left for the next
+        # run rather than retried here: a rate-limited URL should be left alone.
+        self.offered: Set[str] = set()
+        self.failed: Set[str] = set()
+        # the headword currently being offered, its full candidate set, and the
+        # fallback offers a failure has produced for it; the caller drains the
+        # latter (see mark_failed)
+        self._batch: Sequence[dict] = ()
+        self._batch_probed: Set[str] = set()
+        self.replacements: List[Tuple[str, str]] = []
+
+    def __call__(self, url: str, dest: str) -> None:
+        if os.path.isfile(dest):
+            self.satisfied.add(dest)
+            return
+        self.probed.setdefault(dest, url)
+        # ``AudioPlan._final_name`` disambiguates two different recordings that
+        # share a basename by suffixing a digest of the source. Enumeration and
+        # the build agree on that order only while they see the same records, so
+        # a suffixed name also gets recorded under the plain one: whichever name
+        # the build settles on, the file is there and no refetch is needed.
+        final = os.path.basename(dest)
+        plain = _url_basename(url)
+        stem, ext = os.path.splitext(final)
+        if plain and plain != final and plain.endswith(ext):
+            if stem.startswith(plain[: -len(ext)] if ext else plain):
+                alias = os.path.join(self.download_dir, plain)
+                if not os.path.isfile(alias):
+                    self.probed.setdefault(alias, url)
+
+    def _plan(self, records: Sequence[dict]) -> Set[str]:
+        audio = AudioPlan(
+            self.per_word, self.preferred_lang, True, self.reachable, self
+        )
+        audio.download_dir = self.download_dir
+        for record in records:
+            audio.plan(record)
+        return audio.referenced
+
+    def consider(self, records: Sequence[dict]) -> List[Tuple[str, str]]:
+        """What one headword's records need fetched, as (destination, url).
+
+        The batch is planned twice. The first pass records every candidate the
+        archive lacks. The second treats those as obtainable and replans, which
+        is precisely what the build will see once the cache holds them: an
+        unresolved candidate does not consume a per-word slot, so the first pass
+        alone would keep looking past a file that will in fact be there, and
+        would fetch every later candidate too. Replanning through the same
+        :meth:`AudioPlan.plan` rather than re-deriving the choice keeps the two
+        in step by construction.
+
+        Only the headword's own records are needed, and they are contiguous in
+        the snapshot, so this decides each headword as it is read rather than
+        waiting for a whole-dictionary pass.
+        """
+        before = len(self.probed)
+        self._plan(records)
+        for dest in list(self.probed)[before:]:
+            self._batch_probed.add(dest)
+            key = _audio_match_key(os.path.basename(dest))
+            if key in self.dead:
+                # recorded as gone in an earlier run. Deliberately not added to
+                # ``reachable``: it will not be there when the build runs either,
+                # so the build slot-fills past it, and the replacement it settles
+                # on has to be fetched here for the article to come out whole.
+                continue
+            self.reachable.add(key)
+        referenced = self._plan(records)
+        offers: List[Tuple[str, str]] = []
+        # Over the headword's *whole* candidate set, not just what this pass
+        # probed: on a replan after a failure, what needs offering is a candidate
+        # the first pass already knew about but had no reason to want yet.
+        for dest in self._batch_probed:
+            if os.path.basename(dest) not in referenced:
+                continue
+            # a recording another headword already asked for, or one that has
+            # already failed this run, is not offered twice: a rate-limited URL
+            # should be retried in the next run, not hammered within this one
+            if dest in self.offered or dest in self.failed or os.path.isfile(dest):
+                continue
+            if _audio_match_key(os.path.basename(dest)) in self.dead:
+                continue
+            self.offered.add(dest)
+            offers.append((dest, self.probed[dest]))
+        return offers
+
+    def mark_failed(self, dest: str) -> None:
+        """Record a fetch that did not land, and take it out of ``reachable``.
+
+        ``reachable`` stands in for what the build will find, so a name that
+        stayed in it after a failure would keep a later headword from slot-
+        filling around the gap: that headword would be planned as if the file
+        were there, and the recording it actually falls back to would never be
+        offered. Withdrawing it lets the next headword consider the same
+        candidate list the build will.
+
+        The headword that asked for the file is replanned as well. Both planning
+        passes assume every probed candidate lands, so the plan it holds is the
+        one for a *successful* fetch; now that this one is known to have failed,
+        the build will slot-fill past it, and the recording it falls back to has
+        to be fetched here or the article keeps the gap. Its replacement offers
+        land in :attr:`replacements` for the caller to drain.
+        """
+        self.failed.add(dest)
+        self.reachable.discard(_audio_match_key(os.path.basename(dest)))
+        self._replan_current()
+
+    def mark_dead(self, dest: str) -> None:
+        """Record a file that is permanently gone, so no run ever requests it again.
+
+        The headword is replanned exactly as for a transient failure -- the build
+        will slot-fill past the gap either way -- but the file leaves the dead
+        list, which is what lets a later run report the cache finished instead of
+        retrying a 404 forever.
+
+        The withdrawal from ``reachable`` matters here as much as it does for a
+        transient failure: a file that only just turned out to be dead was added
+        to the set when this headword was first planned, and a replan that still
+        believed in it would re-select the dead file and fetch no replacement.
+        """
+        self.dead.add(_audio_match_key(os.path.basename(dest)))
+        self.failed.add(dest)
+        self.reachable.discard(_audio_match_key(os.path.basename(dest)))
+        self._replan_current()
+
+    def _replan_current(self) -> None:
+        if self._batch:
+            self.replacements.extend(self.consider(self._batch))
+
+    def take_replacements(self) -> List[Tuple[str, str]]:
+        """Drain the offers :meth:`mark_failed` queued, leaving the queue empty."""
+        queued, self.replacements = self.replacements, []
+        return queued
+
+    def scan(
+        self, jsonl_path: str, source_lang: str, sample: Optional[int],
+        sample_mode: str,
+    ) -> Iterator[Tuple[str, str]]:
+        """Yield (destination, url) as each headword's recordings are decided.
+
+        Batches the records by headword the way a build does, so the per-word cap
+        is applied over exactly the same set of candidates. Headwords are
+        contiguous in the snapshot, so nothing has to be buffered beyond the
+        batch in hand.
+        """
+        if sample:
+            sampling = Progress("sampling headwords")
+            records: Iterable[dict] = sample_headwords(
+                jsonl_path, source_lang, sample, sample_mode, sampling
+            )
+            sampling.done()
+        else:
+            records = iter_candidate_records(jsonl_path, source_lang)
+
+        batch: List[dict] = []
+        current: Optional[str] = None
+        for record in records:
+            word = str(record.get("word"))
+            if word != current:
+                # kept so a failure can be replanned against this headword
+                self._batch = batch
+                self._batch_probed = set()
+                yield from self.consider(batch)
+                batch = []
+                current = word
+            batch.append(record)
+        self._batch = batch
+        self._batch_probed = set()
+        yield from self.consider(batch)
+
+
+def _collect_wishlist(
+    args,
+    jsonl_path: str,
+    available: Optional[Set[str]],
+    download_dir: str,
+    dead: Optional[Set[str]] = None,
+) -> AudioWishlist:
+    """A wishlist over one snapshot, driven with the build's own audio options.
+
+    Which files are wanted follows from the same
+    :meth:`AudioPlan.plan` the build uses, over the same records batched the
+    same way, so the file *names* here are the names the build references. That
+    is why the audio-affecting options (``--audio-per-word``, ``--audio-lang``)
+    have to match the build's: a different per-word cap or preference changes
+    which candidates are considered and therefore which files are wanted.
+
+    ``dead`` carries the match keys an earlier run found permanently gone, so
+    they are neither requested again nor counted as obtainable.
+
+    Nothing is decided here; :meth:`AudioWishlist.scan` yields each headword's
+    files as it reads them, so the caller can fetch them immediately.
+    """
+    return AudioWishlist(
+        download_dir, args.audio_per_word, args.audio_lang, available, dead
+    )
+
+
+class TabularLog:
+    """A ``name<TAB>url[\\TAB reason]`` record of what a run found.
+
+    Written and flushed per line, so a run that is interrupted still leaves a
+    valid record -- which is the point when the run is being cut short by a rate
+    limit rather than by finishing.
+
+    ``truncate`` suits the manifest, which describes one run and must not
+    accumulate. The dead-file record is cache *state* that carries across runs,
+    so it is opened for append and skips names it already holds; that is what
+    keeps a file that is gone on Wikimedia from being requested on every future
+    run.
+
+    ``header`` lines are written ahead of the first entry, and only when the
+    file is created rather than appended to. They exist for the shard files
+    (see :class:`ShardSet`), which are handed to another machine and have to
+    say how to fetch themselves; the manifest is only ever read by this tool and
+    is left in the plain format the tests and the docs describe.
+    """
+
+    def __init__(
+        self,
+        path: str,
+        download_dir: str,
+        truncate: bool = True,
+        header: Sequence[str] = (),
+    ) -> None:
+        self.path = path
+        self.download_dir = download_dir
+        self.count = 0  # entries written by this run
+        self.names: Set[str] = set()  # every name the file holds
+        self._truncate = truncate
+        self._header = list(header)
+        # read eagerly even though the write is lazy: the caller consults the
+        # names already held before offering anything
+        if not truncate and os.path.exists(path):
+            with open(path, "r", encoding="utf-8") as f:
+                self.names = {
+                    line.split("\t", 1)[0]
+                    for line in f
+                    if line.strip() and not line.startswith("#")
+                }
+        # opened on the first entry, so a run with nothing to record does not
+        # leave an empty file behind, and truncating still happens before any
+        # line is written
+        self._stream = None
+
+    def add(self, dest: str, url: str, reason: Optional[str] = None) -> bool:
+        """Record one file. False if the name is already held."""
+        name = os.path.relpath(dest, self.download_dir).replace(os.sep, "/")
+        if name in self.names:
+            return False
+        if self._stream is None:
+            os.makedirs(os.path.dirname(self.path) or ".", exist_ok=True)
+            self._stream = open(
+                self.path, "w" if self._truncate else "a", encoding="utf-8"
+            )
+            if self._truncate:
+                for line in self._header:
+                    self._stream.write(line + "\n")
+                self._stream.flush()
+
+        fields = [name, url] + ([reason] if reason else [])
+        self._stream.write("\t".join(fields) + "\n")
+        self._stream.flush()
+        self.names.add(name)
+        self.count += 1
+        return True
+
+    def close(self) -> None:
+        if self._stream is not None:
+            self._stream.close()
+            self._stream = None
+
+    def describe(self) -> List[str]:
+        """How much work this record turned out to hold, for the run's summary."""
+        return [f"  to download:    {self.count:,}"]
+
+
+def shard_paths(manifest_path: str, count: int) -> List[str]:
+    """Where the shards of ``manifest_path`` go.
+
+    Derived from the manifest so that one option still names the whole job and
+    the names of its parts follow from it: ``missing.tsv`` becomes
+    ``missing.shard-01-of-04.tsv``.
+    """
+    base, ext = os.path.splitext(manifest_path)
+    width = len(str(count))
+    return [
+        f"{base}.shard-{i:0{width}d}-of-{count}{ext or '.tsv'}"
+        for i in range(1, count + 1)
+    ]
+
+
+class ShardSet:
+    """The outstanding audio work divided into N disjoint shard files.
+
+    Stands in for the manifest where the prefetcher records what it found, so
+    the run itself is unchanged: the work is offered one file at a time and this
+    decides which file each one goes to.
+
+    Each name goes to the shard that the count of names *accepted so far* names
+    as it is offered. That is what makes the shards disjoint and evenly sized:
+    the de-duplication :meth:`TabularLog.add` already does is applied first, so
+    a name two headwords both asked for is recorded once, and two machines are
+    never sent to fetch the same file. Routing on the accepted count rather
+    than on the running total is also what balances them: a repeated name does
+    not consume a turn, and the counts can differ by at most one.
+
+    Nothing is buffered and the snapshot is still read exactly once, because the
+    decision needs nothing but the running count.
+    """
+
+    def __init__(
+        self,
+        manifest_path: str,
+        download_dir: str,
+        count: int,
+        args,
+        snapshot: "Snapshot",
+    ) -> None:
+        self.count = 0
+        self.paths = shard_paths(manifest_path, count)
+        self._shards = [
+            TabularLog(path, download_dir, header=_shard_header(args, snapshot))
+            for path in self.paths
+        ]
+
+    def add(self, dest: str, url: str) -> bool:
+        shard = self._shards[self.count % len(self._shards)]
+        if not shard.add(dest, url):
+            return False
+        self.count += 1
+        return True
+
+    def describe(self) -> List[str]:
+        lines = [f"  to download:    {self.count:,}, in {len(self._shards)} shard(s):"]
+        for path, shard in zip(self.paths, self._shards):
+            lines.append(f"    {path}  ({shard.count:,})")
+        return lines
+
+    def close(self) -> None:
+        for shard in self._shards:
+            shard.close()
+
+
+def _shard_header(args, snapshot: "Snapshot") -> List[str]:
+    """The lines that make a shard file explain itself to whoever is handed it.
+
+    A shard leaves this machine and is fetched by a command that knows nothing
+    about the snapshot that produced it, so it has to carry the command line
+    that fetches it, the options it was planned with -- a different
+    ``--audio-per-word`` wants a different set of files, so shards from two
+    plans of the same snapshot may overlap -- and what to do with the result.
+    """
+    plan = [f"--source-lang {args.source_lang}", f"--audio-per-word {args.audio_per_word}"]
+    if args.audio_lang:
+        plan.append(f"--audio-lang {args.audio_lang}")
+    if args.jsonl:
+        plan.append(f"--jsonl {args.jsonl}")
+    elif args.dump_date:
+        plan.append(f"--dump-date {args.dump_date}")
+    return [
+        "# a shard of the audio a kaikki-to-dsl.py build could not take from the",
+        "# Wiktionary archive. Fetch it with:",
+        "#   python scripts/kaikki-to-dsl.py fetch-list <this file> --into <dir>",
+        f"# planned with: {' '.join(plan)}",
+        "# combine the results by copying the filled <dir> into the building",
+        "# machine's <cache-dir>/<dump-date>/audio-cache/, then re-run",
+        "# 'prefetch-audio' there: it skips every file the cache now holds.",
+    ]
+
+
+class FetchTally:
+    """What one run attempted, and the verdict those attempts imply.
+
+    Shared by the two fetch modes -- the prefetcher walking the snapshot and a
+    worker walking a shard file (see design D6) -- so that the summary wording
+    and the exit status are the same whichever one ran. The user learns to read
+    this output, and the docs quote it; a second phrasing would be a second
+    thing to learn.
+
+    ``--limit`` bounds *attempts*, not successes: a run in which files are
+    failing is the run most at risk of earning a harder rate limit, so it must
+    not sail on through the rest of the work.
+    """
+
+    def __init__(
+        self,
+        limit: Optional[int] = None,
+        dead_label: str = "audio-dead.tsv",
+        done_text: str = "every recording that exists is now cached -- run the build",
+    ) -> None:
+        self.limit = limit
+        self.attempted = 0
+        self.fetched = 0
+        self.already = 0  # skipped: present and verified before this run
+        self.gone: Dict[str, int] = {}  # reason -> how many are permanently gone
+        self.transient = 0
+        self.complete = True
+        self._dead_label = dead_label
+        self._done_text = done_text
+
+    def spent(self) -> bool:
+        """True once the run's attempt budget is used up."""
+        return self.limit is not None and self.attempted >= self.limit
+
+    def report(self) -> List[str]:
+        """The run's summary lines, in the order the docs show them."""
+        lines = [
+            f"fetched {self.fetched:,} of {self.attempted:,} "
+            f"attempted file(s) this run"
+        ]
+        # The two kinds of failure are reported apart because they call for
+        # opposite action: one is finished business, the other is worth coming
+        # back to.
+        if self.gone:
+            breakdown = ", ".join(
+                f"{n} {reason}" for reason, n in sorted(self.gone.items())
+            )
+            lines.append(
+                f"  {sum(self.gone.values()):,} permanently gone ({breakdown}) -- "
+                f"recorded in {self._dead_label}, never requested again"
+            )
+        if self.transient:
+            lines.append(
+                f"  {self.transient:,} rate-limited, blocked or interrupted "
+                f"-- re-run later"
+            )
+        if not self.complete:
+            lines.append(
+                f"  stopped at --limit {self.limit}; more files remain "
+                f"-- re-run to continue"
+            )
+        elif self.transient:
+            lines.append(
+                "  not finished: re-run when the rate limit clears, and the files "
+                "that did land are skipped"
+            )
+        else:
+            # Every recording that was asked for is on disk. The ones that do
+            # not exist cannot be fetched, and the build slot-fills past them, so
+            # re-running would only re-read the work to reach the same verdict.
+            lines.append(f"  done: {self._done_text}")
+        return lines
+
+    def exit_code(self) -> int:
+        return 1 if (self.transient or not self.complete) else 0
+
+
+def fetch_one(
+    url: str,
+    dest: str,
+    args,
+    tally: FetchTally,
+    dead_log: "TabularLog",
+    on_failure=None,
+) -> bool:
+    """Put one file in the cache, and account for it.
+
+    Returns False *only* when the run's attempt budget is spent, so the caller
+    can stop without having touched the network. A file already present and
+    verified is not an attempt and is not re-requested, so a re-run over a full
+    cache spends nothing.
+
+    One bad file must not end the pass, so every failure is caught and filed
+    rather than raised: a file that is *gone* is recorded so no future run asks
+    for it again, and one that was merely refused or timed out is left for the
+    next run. ``on_failure(dest, permanent)`` is how the prefetcher re-plans the
+    headword that wanted the file; a worker has no records to re-plan against
+    and passes nothing.
+    """
+    if not args.force_download and verify_sidecar(dest):
+        tally.already += 1
+        return True
+    if tally.spent():
+        return False
+    tally.attempted += 1
+    try:
+        download_cached(
+            url, dest, args.force_download, args.timeout,
+            args.retries, args.spacing, args.max_backoff,
+        )
+    except Exception as exc:  # one bad file must not end the pass
+        permanent = failure_is_permanent(exc)
+        if permanent:
+            reason = describe_failure(exc)
+            dead_log.add(dest, url, reason)
+            tally.gone[reason] = tally.gone.get(reason, 0) + 1
+            print(
+                f"  gone ({reason}): {os.path.basename(dest)}", file=sys.stderr
+            )
+        else:
+            tally.transient += 1
+            print(
+                f"  failed, will retry: {os.path.basename(dest)}: {exc}",
+                file=sys.stderr,
+            )
+        if on_failure is not None:
+            on_failure(dest, permanent)
+        return True
+    tally.fetched += 1
+    return True
+
+
+def prefetch_audio(args) -> int:
+    """Fetch, politely and resumably, the audio a build cannot take from the tar.
+
+    The build itself has to render the articles that reference a recording, so
+    the dictionary is re-rendered after this -- but that pass is pure CPU and
+    local archive I/O: every file this command leaves in the cache is found by
+    its sha256 sidecar and never requested again. Running it in chunks over
+    several rate-limit windows is therefore just a matter of repeating the
+    command; each run skips what it already has.
+
+    Fetching is interleaved with the scan rather than deferred until it ends. A
+    headword's decision needs only its own records, which are contiguous in the
+    snapshot, so there is nothing to wait for: the first files are on disk within
+    seconds of starting, and a run stopped by ``--limit`` never reads the rest of
+    the snapshot at all.
+
+    ``--split N`` records the same work as N disjoint shard files instead of one
+    manifest, for machines other than this one to fetch: see
+    :class:`ShardSet` for how they are divided and ``fetch-list`` for the other
+    end. Splitting also lists, because a shard is a plan to hand out rather than
+    a job to finish here.
+    """
+    want_audio = args.audio_per_word > 0
+    if not want_audio:
+        raise SystemExit("--audio-per-word 0 disables audio; nothing to prefetch")
+    if args.split is not None:
+        if args.split < 1:
+            raise SystemExit("--split needs a shard count of at least 1")
+        if args.limit is not None:
+            raise SystemExit(
+                "--split plans the whole job so the shards can be handed out; "
+                "--limit would silently drop the rest of it, and belongs on a "
+                "fetching run instead"
+            )
+        # A shard is a plan to give away, so splitting is listing.
+        args.list_only = True
+    snapshot, jsonl_path, _audio_path, available, download_dir = _resolve_inputs(
+        args, True
+    )
+    if download_dir is None:
+        raise SystemExit("--no-audio-download leaves nowhere to cache prefetched audio")
+    if not available:
+        print(
+            "warning: the audio archive holds no known recordings; every audio "
+            "file in this dictionary will be fetched one by one",
+            file=sys.stderr,
+        )
+
+    # The dead-file record is cache *state*, not a report, so it always lives
+    # beside the cache rather than following --manifest around.
+    dead_path = os.path.join(snapshot.dir, "audio-dead.tsv")
+    dead_log = TabularLog(dead_path, download_dir, truncate=False)
+    wishlist = _collect_wishlist(
+        args, jsonl_path, available, download_dir, dead_log.names
+    )
+    manifest_path = args.manifest or os.path.join(snapshot.dir, "audio-missing.tsv")
+    if args.split:
+        work = ShardSet(manifest_path, download_dir, args.split, args, snapshot)
+    else:
+        work = TabularLog(manifest_path, download_dir)
+    print(
+        f"audio cache: {download_dir}\n"
+        f"  manifest:   {manifest_path}\n"
+        f"  gone:       {dead_path} ({len(dead_log.names):,} recorded)",
+        file=sys.stderr,
+    )
+    os.makedirs(download_dir, exist_ok=True)
+
+    tally = FetchTally(args.limit, os.path.basename(dead_path))
+    fetching = Progress("fetching audio", every=25)
+
+    def replan(dest: str, permanent: bool) -> None:
+        """A file did not land, so the build will slot-fill past it.
+
+        Both classes are replanned the same way -- the build moves on either
+        way -- but a gone file also leaves the dead list, which is what lets a
+        later run report the cache finished instead of retrying a 404 forever.
+        The headword that asked for the file is replanned as well, and the
+        replacements it yields are queued, so the article keeps the same
+        recording count it would have had if the fetch had worked.
+        """
+        if permanent:
+            wishlist.mark_dead(dest)
+        else:
+            wishlist.mark_failed(dest)
+        queue.extend(wishlist.take_replacements())
+
+    # Offers are pulled one at a time: draining the scan into the queue up front
+    # would read the whole snapshot before fetching anything, which is the very
+    # thing this avoids. A failed file can queue a replacement for its own
+    # headword, so the queue outlives any single headword's offers.
+    scan = wishlist.scan(jsonl_path, args.source_lang, args.sample, args.sample_mode)
+    queue: Deque[Tuple[str, str]] = deque()
+    exhausted = False
+    try:
+        while True:
+            while not queue and not exhausted:
+                try:
+                    queue.append(next(scan))
+                except StopIteration:
+                    exhausted = True
+            if not queue:
+                break
+            dest, url = queue.popleft()
+            work.add(dest, url)
+            if args.list_only:
+                continue
+            if not fetch_one(url, dest, args, tally, dead_log, replan):
+                # stop consuming the scan: the rest of the snapshot does not
+                # need reading to know there is more to come
+                tally.complete = False
+                break
+            fetching.tick()
+    finally:
+        if not args.list_only:
+            fetching.done()
+        work.close()
+        dead_log.close()
+
+    if args.list_only:
+        print(f"  already cached: {len(wishlist.satisfied):,}", file=sys.stderr)
+        for line in work.describe():
+            print(line, file=sys.stderr)
+        print("listing only; nothing was downloaded", file=sys.stderr)
+        return 0
+
+    for line in tally.report():
+        print(line, file=sys.stderr)
+    return tally.exit_code()
+
+
+def iter_list_entries(path: str) -> Iterator[Tuple[str, str]]:
+    """Yield ``(name, url)`` for each entry of a manifest or shard file.
+
+    Read as a generator: a full dictionary's outstanding work runs to hundreds
+    of thousands of lines, and neither a worker nor ``--limit`` has any use for
+    the ones past the end.
+
+    Blank lines and ``#`` comments are skipped, and a third column -- which the
+    dead list carries as its reason -- is ignored, so the three file kinds share
+    one format. A line with no tab is refused with its number rather than
+    skipped: a silently dropped line is a silently missing recording, which is
+    the one failure this whole feature exists to avoid. Names are held to being
+    relative and inside their directory, so a list file from somewhere else
+    cannot write outside ``--into``.
+    """
+    with open(path, "r", encoding="utf-8") as stream:
+        for number, raw in enumerate(stream, 1):
+            line = raw.rstrip("\n").rstrip("\r")
+            if not line.strip() or line.startswith("#"):
+                continue
+            fields = line.split("\t")
+            if len(fields) < 2 or not fields[1].strip():
+                raise SystemExit(
+                    f"{path}:{number}: expected 'name<TAB>url', got {line!r}"
+                )
+            name = fields[0].strip()
+            parts = name.replace("\\", "/").split("/")
+            if (
+                not name
+                or name.startswith("/")
+                or (len(parts) > 1 and os.path.isabs(name))
+                or ".." in parts
+            ):
+                raise SystemExit(
+                    f"{path}:{number}: {name!r} is not a plain relative name"
+                )
+            yield name, fields[1].strip()
+
+
+def fetch_list(args) -> int:
+    """Fetch one shard of the outstanding audio into a cache directory.
+
+    The other end of ``prefetch-audio --split``, and deliberately much smaller:
+    this command needs no snapshot, no audio archive, and no contact with
+    kaikki.org, only the shard file, so any machine with Python can take one.
+
+    A recording is written under the name the shard gives it, with the same
+    checksum sidecar the prefetcher writes, which is what makes the filled
+    directory indistinguishable from one this machine filled itself. The
+    directory is therefore combined with the others by copying: the building
+    machine's audio cache is a flat set of named, verified files, and a file
+    already there is left alone.
+
+    There is no re-planning here. A file that is permanently gone is recorded
+    and skipped, where the prefetcher would fetch the headword's next candidate
+    instead -- a worker has no records to choose one with. The build slot-fills
+    past the gap, and the closing ``prefetch-audio`` run on the building machine
+    is the pass that finishes whatever no worker could.
+    """
+    into = args.into
+    if not os.path.isdir(into):
+        os.makedirs(into, exist_ok=True)
+    dead_path = args.dead or (args.list + ".dead.tsv")
+    dead_log = TabularLog(dead_path, into, truncate=False)
+    tally = FetchTally(
+        args.limit,
+        os.path.basename(dead_path),
+        done_text=(
+            "every recording this shard lists is now cached -- copy the "
+            "directory into the building machine's audio cache"
+        ),
+    )
+    print(
+        f"audio cache: {into}\n"
+        f"  shard:      {args.list}\n"
+        f"  gone:       {dead_path} ({len(dead_log.names):,} recorded)",
+        file=sys.stderr,
+    )
+    fetching = Progress("fetching audio", every=25)
+    try:
+        for name, url in iter_list_entries(args.list):
+            dest = os.path.join(into, *name.split("/"))
+            if not fetch_one(url, dest, args, tally, dead_log):
+                # --limit bounds attempts, so the rest of the list is left for
+                # another run -- which costs nothing, because every file already
+                # in the directory is skipped
+                tally.complete = False
+                break
+            fetching.tick()
+    finally:
+        fetching.done()
+        dead_log.close()
+
+    print(f"  already cached: {tally.already:,}", file=sys.stderr)
+    for line in tally.report():
+        print(line, file=sys.stderr)
+    return tally.exit_code()
+
+
+# ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
 
@@ -2156,7 +3062,26 @@ def build_parser() -> argparse.ArgumentParser:
             "  The output is <name>.dsl.dz plus <name>.dsl.files.zip (or the\n"
             "  .files/ directory with --audio-layout dir). The archive holds the\n"
             "  sense-marker icons in addition to any bundled audio, so it is\n"
-            "  written even with --no-audio.\n"
+            "  written even with --no-audio.\n\n"
+            "  A recording Wikimedia rate-limits is left out of the article rather\n"
+            "  than emitted as a broken link, so a long build can end with gaps.\n"
+            "  The 'prefetch-audio' subcommand fills those gaps on its own,\n"
+            "  politely and in resumable chunks, so the rate-limited fetching does\n"
+            "  not have to share a run with rendering:\n\n"
+            "    kaikki-to-dsl.py prefetch-audio --source-lang en \\\n"
+            "        --dump-date 2026-09-02 --list      # see what is missing\n"
+            "    kaikki-to-dsl.py prefetch-audio --source-lang en \\\n"
+            "        --dump-date 2026-09-02 --limit 500  # fetch a chunk\n"
+            "    kaikki-to-dsl.py --source-lang en --dump-date 2026-09-02\n"
+            "\n"
+            "  Several machines can share the back-fill: 'prefetch-audio --split N'\n"
+            "  writes N disjoint shard files, each fetched by any machine with\n"
+            "  'kaikki-to-dsl.py fetch-list <shard> --into <dir>', and the filled\n"
+            "  directories are copied into <cache-dir>/<dump-date>/audio-cache/.\n"
+            "\n"
+            "  The prefetcher must be given the same --source-lang,\n"
+            "  --audio-per-word and --audio-lang as the build, because both decide\n"
+            "  which recordings an article gets.\n"
         ),
     )
     parser.add_argument("--source-lang", required=True, help="ISO code of the dictionary's language (e.g. en)")
@@ -2201,9 +3126,173 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _add_snapshot_args(parser: argparse.ArgumentParser) -> None:
+    """The options that decide *which* articles, and so which audio, are wanted.
+
+    Shared by the build and the prefetcher: enumerating a different set of
+    articles than the build renders is the one way the prefetched cache could end
+    up holding files nothing references, or missing files the build asks for.
+    """
+    parser.add_argument("--source-lang", required=True,
+                        help="ISO code of the dictionary's language (e.g. en)")
+    parser.add_argument("--dump-date", help="pinned kaikki.org dump date (YYYY-MM-DD); required unless --jsonl")
+    parser.add_argument("--jsonl", help="use a local wiktextract JSONL(.gz) instead of downloading")
+    parser.add_argument("--audio-tar", help="use a local Wiktionary audio tar instead of downloading")
+    parser.add_argument("--jsonl-url", default=RAW_JSONL_URL, help="override the JSONL source URL")
+    parser.add_argument("--audio-url", default=AUDIO_TAR_URL, help="override the audio archive URL")
+    parser.add_argument("--cache-dir", default=os.path.join(os.path.expanduser("~"), ".cache", "aurelex-kaikki"))
+    parser.add_argument("--audio-per-word", type=int, default=3, help="max audio files per headword (default 3)")
+    parser.add_argument("--audio-lang", help="prefer audio whose tags match this language/accent (e.g. US)")
+    parser.add_argument("--sample", type=int, help="emit only N headwords")
+    parser.add_argument(
+        "--sample-mode", choices=["first", "random"], default="first",
+        help="how --sample picks headwords: first N in file order, or a "
+        "deterministic spread over thousands of headwords (default first). "
+        "Both read only a bounded part of the snapshot, so a sample is quick",
+    )
+    parser.add_argument("--no-audio-download", action="store_true",
+                        help="do not fetch audio missing from the archive from Wikimedia (tar only)")
+    parser.add_argument("--force-audio-index", action="store_true",
+                        help="rebuild the cached audio-archive name index even if it looks current")
+    parser.add_argument("--force-download", action="store_true", help="re-download cached files")
+    parser.add_argument("--skip-date-check", action="store_true",
+                        help="skip verifying the dump date against kaikki.org")
+    parser.add_argument("--timeout", type=int, default=60, help="network timeout in seconds (default 60)")
+
+
+def prefetch_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="kaikki-to-dsl.py prefetch-audio",
+        description="Fetch the pronunciation recordings a build cannot take from the "
+        "audio archive, into the same cache the build reads. Walks the snapshot and, "
+        "as each headword's recordings are decided, downloads them at a polite rate. "
+        "Nothing is fetched twice, so the command is safe to repeat until the cache "
+        "is complete; the build then bundles the whole set with no network I/O.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "Notes:\n"
+            "  Pass the same --source-lang, --audio-per-word, --audio-lang and\n"
+            "  snapshot as the build you are preparing for; those decide which\n"
+            "  recordings each article gets, and therefore which files are wanted.\n\n"
+            "  Fetching is interleaved with the scan, so the first files land within\n"
+            "  seconds and --limit stops before the rest of the snapshot is read.\n"
+            "  --list is the exception: it downloads nothing, so it reads everything in\n"
+            "  order to write a complete manifest -- the way to size the job before\n"
+            "  spending any of your rate limit on it.\n\n"
+            "  --split N is how several machines share the job. It records the same work as\n"
+            "  N disjoint shard files, each carrying a header saying how to fetch it, and\n"
+            "  implies --list. Then, on each machine:\n"
+            "    python scripts/kaikki-to-dsl.py fetch-list \\\n"
+            "        <cache>/<dump-date>/audio-missing.shard-01-of-04.tsv --into ./cache01\n"
+            "  Copy the filled directories into <cache-dir>/<dump-date>/audio-cache/ and\n"
+            "  re-run prefetch-audio here to check nothing was missed. See 'fetch-list --help'.\n\n"
+            "  Each run ends by saying whether there is anything left to do, and the\n"
+            "  exit status agrees: 0 means every recording that exists is cached, 1\n"
+            "  means a rate limit or --limit cut the run short. Failures are reported\n"
+            "  in two classes, because they want opposite things from you:\n"
+            "    * gone (HTTP 404 and similar) -- recorded in <cache>/<dump-date>/\n"
+            "      audio-dead.tsv and never requested again. Retrying cannot help, so\n"
+            "      these do not count as outstanding work; the build uses the next\n"
+            "      candidate instead, and the article keeps a pronunciation.\n"
+            "    * rate-limited, blocked or interrupted -- left for the next run.\n"
+        ),
+    )
+    _add_snapshot_args(parser)
+    parser.add_argument("--list", dest="list_only", action="store_true",
+                        help="write the manifest of missing files and exit without downloading; "
+                             "reads the whole snapshot, so it overrides --limit")
+    parser.add_argument("--manifest", help="where to write the manifest (default <cache>/<dump-date>/audio-missing.tsv)")
+    parser.add_argument("--split", type=int, metavar="N",
+                        help="record the outstanding work as N disjoint shard files "
+                             "instead of one manifest (missing.tsv becomes "
+                             "missing.shard-01-of-04.tsv), for other machines to fetch "
+                             "with 'fetch-list'; the shards differ in size by at most "
+                             "one file and no two hold the same one, so no machine is "
+                             "sent to fetch another's work. Implies --list, since a "
+                             "shard is a plan to hand out, and cannot be combined with "
+                             "--limit")
+    _add_fetch_args(parser)
+    return parser
+
+
+def _add_fetch_args(parser: argparse.ArgumentParser) -> None:
+    """The options that shape a fetching run, whichever mode is fetching.
+
+    Shared by the prefetcher and the worker, so a file is fetched the same way
+    whichever list it came from. Deliberately *not* the snapshot options: none
+    of these change which files are wanted, only how they are asked for.
+    """
+    parser.add_argument("--limit", type=int,
+                        help="attempt at most N files this run, then stop; anything "
+                             "left is picked up by the next run. Counts attempts, so "
+                             "a run where files are failing cannot outrun its window")
+    parser.add_argument("--spacing", type=float, default=_PREFETCH_SPACING_SECONDS,
+                        help=f"minimum seconds between requests (default {_PREFETCH_SPACING_SECONDS}; "
+                             "Wikimedia asks bulk clients to stay well above 1)")
+    parser.add_argument("--retries", type=int, default=_PREFETCH_RETRIES,
+                        help=f"attempts per file (default {_PREFETCH_RETRIES})")
+    parser.add_argument("--max-backoff", type=float, default=600.0,
+                        help="ceiling on a single backoff sleep, honouring Retry-After up to it (default 600)")
+
+
+def fetch_list_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="kaikki-to-dsl.py fetch-list",
+        description="Fetch the recordings one shard of the outstanding audio lists, into "
+        "a cache directory. Needs nothing but the shard file: no dictionary snapshot, no "
+        "audio archive, no contact with kaikki.org, so any machine with Python can take "
+        "one -- which is the point, since Wikimedia's rate limit is per client and "
+        "several machines fetching disjoint parts of a job finish it sooner. Copy the "
+        "filled directory into the building machine's audio cache afterwards.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "Notes:\n"
+            "  A shard is written by 'prefetch-audio --split N', which must be run with\n"
+            "  the same --source-lang, --audio-per-word, --audio-lang and snapshot as the\n"
+            "  build; those decide which recordings each article gets. Each shard says so\n"
+            "  in its own header lines.\n\n"
+            "  --into is an ordinary directory: give each shard its own, and copy them all\n"
+            "  into <cache-dir>/<dump-date>/audio-cache/ on the machine that builds. Every\n"
+            "  file is written with a .sha256 sidecar and an existing verified file is\n"
+            "  never re-requested, so copying a directory over another -- or over itself --\n"
+            "  is all the combining there is. Re-running 'prefetch-audio' on the building\n"
+            "  machine afterwards is the check: it asks for nothing the cache now holds.\n\n"
+            "  A file that is permanently gone is recorded and skipped rather than replaced.\n"
+            "  The prefetcher can substitute the headword's next candidate because it has\n"
+            "  the records; a worker cannot, and the build slot-fills past the gap instead.\n\n"
+            "  The summary and exit status are the prefetcher's: 0 means the shard is done,\n"
+            "  1 means a rate limit or --limit cut the run short. The dead list is written\n"
+            "  beside the shard (<shard>.dead.tsv), never into the cache directory.\n"
+        ),
+    )
+    parser.add_argument("list", help="the shard file to fetch ('prefetch-audio --split N')")
+    parser.add_argument("--into", required=True,
+                        help="the directory to fill; copy it into <cache-dir>/<dump-date>/"
+                             "audio-cache/ on the machine that builds the dictionary")
+    parser.add_argument("--dead",
+                        help="where to record permanently-gone files (default <shard>.dead.tsv)")
+    parser.add_argument("--force-download", action="store_true",
+                        help="re-download files already present in the directory")
+    parser.add_argument("--timeout", type=int, default=60,
+                        help="network timeout in seconds (default 60)")
+    _add_fetch_args(parser)
+    return parser
+
+
 def main(argv: Optional[Sequence[str]] = None) -> int:
-    parser = build_parser()
-    args = parser.parse_args(argv)
+    argv = list(sys.argv[1:] if argv is None else argv)
+    # Dispatched by hand rather than through argparse subparsers: the build's
+    # options have stayed flat and heavily used since the tool's first release,
+    # and a subparser would put them behind a mode word. The two modes that need
+    # the snapshot instead share the options that decide which articles -- and so
+    # which audio -- are wanted, through _add_snapshot_args. The worker takes
+    # neither: it is handed a finished list, so it needs nothing that decides what
+    # is wanted, only _add_fetch_args.
+    if argv and argv[0] == "prefetch-audio":
+        return prefetch_audio(prefetch_parser().parse_args(argv[1:]))
+    if argv and argv[0] == "fetch-list":
+        return fetch_list(fetch_list_parser().parse_args(argv[1:]))
+    args = build_parser().parse_args(argv)
     report = build(args)
     print(report.summary(), file=sys.stderr)
     return 0

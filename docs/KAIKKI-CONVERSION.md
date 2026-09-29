@@ -96,6 +96,12 @@ phone (same folder) and add that folder in Aurelex.
 | `--force-download` | Re-download cached files. |
 | `--timeout SECONDS` | Network timeout (default 60). |
 
+A second mode shares the options that decide *which* articles, and so which
+audio, are wanted — `--source-lang`, `--dump-date`, `--jsonl`, `--audio-tar`,
+`--cache-dir`, `--audio-per-word`, `--audio-lang`, `--sample`, `--sample-mode` —
+and adds `--list`, `--limit N`, `--spacing`, `--retries`, `--max-backoff` and
+`--manifest`. See [Filling the audio cache separately](#filling-the-audio-cache-separately).
+
 ## Headwords, base forms, and inflections
 
 Indexed headwords are **base forms only** by default. Entries that are inflected
@@ -327,7 +333,165 @@ prefers the source language/accent (`--audio-lang`).
 
 Downloads identify the tool with a descriptive User-Agent and space out requests
 to Wikimedia; a rate limit (HTTP 429) is retried with backoff rather than being
-treated as a missing file.
+treated as a missing file, and a `Retry-After` on the response overrides the
+computed backoff (capped, so a mistaken header cannot park a run for hours).
+
+### Filling the audio cache separately
+
+On a long dictionary run Wikimedia will rate-limit partway through, and because an
+unresolved recording is deliberately left out of the article, the run finishes
+with gaps. Those gaps are cheap to close later: `prefetch-audio` enumerates the
+recordings the articles reference but the archive lacks, and downloads them into
+the same cache the build reads. Everything it writes is verified by a `.sha256`
+sidecar, so a build that follows finds the files without making a single request.
+
+```bash
+# see the size of the job, spending no rate limit
+python scripts/kaikki-to-dsl.py prefetch-audio \
+    --source-lang en --dump-date 2026-09-02 --list
+
+# fetch what fits in this rate-limit window
+python scripts/kaikki-to-dsl.py prefetch-audio \
+    --source-lang en --dump-date 2026-09-02 --limit 500
+
+# repeat until it reports the cache is complete, then build as usual
+python scripts/kaikki-to-dsl.py --source-lang en --dump-date 2026-09-02
+```
+
+The run ends with a verdict rather than a bare count, because "should I run this
+again?" is the question that matters after a rate limit:
+
+```
+fetched 500 of 500 attempted file(s) this run
+  12 permanently gone (12 HTTP 404) -- recorded in audio-dead.tsv, never requested again
+  3 rate-limited, blocked or interrupted -- re-run later
+  stopped at --limit 500; more files remain -- re-run to continue
+```
+
+against a finished cache, which costs one re-read of the snapshot and no
+requests at all:
+
+```
+fetched 0 of 0 attempted file(s) this run
+  done: every recording that exists is now cached -- run the build
+```
+
+Notes:
+
+- It is **resumable by construction**: a file already in the cache is skipped, so
+  repeating the command continues where the last one stopped, and a completed
+  pass is a no-op.
+- **Each run tells you whether you are finished, and the exit status agrees.**
+  `0` means every recording that exists is now cached — build. `1` means a rate
+  limit or `--limit` cut the run short, and there is more to come back to. The
+  failures inside a run are reported in two classes, because they want opposite
+  things from you:
+  - **Permanently gone** (HTTP 404 and similar). A deleted file cannot come back,
+    so it is appended to `<cache>/<dump-date>/audio-dead.tsv` with the reason and
+    never requested again. It does *not* count as outstanding work — otherwise a
+    cache that can never grow past a 404 would report itself unfinished forever.
+  - **Rate-limited, blocked or interrupted.** A refusal or a dropped connection is
+    a statement about the moment, not the file, so it is left for the next run
+    and is *not* written to the dead list.
+- **A failed recording is replaced, not left as a gap.** The plan is built
+  assuming every file it considered will land, so a failure invalidates it; the
+  headword is replanned with the hole known and the next candidate is fetched
+  instead — in the same run, whichever class the failure fell into. That is what
+  the build would do on its own, and doing it here keeps the article whole.
+- **Fetching is interleaved with the scan.** A headword's decision needs only its
+  own records, which are contiguous in the snapshot, so the first files land
+  within seconds and `--limit N` stops before the rest of the snapshot is read at
+  all. There is no "scan the whole dictionary, then download" phase.
+- `--limit N` bounds **attempts, not successes**. That is the point: a run where
+  files are failing is the run most at risk of a harder rate limit, so it must
+  not sail on through the rest of the dictionary. The summary line reports both
+  counts — `fetched 480 of 500 attempted file(s) this run` — so you can tell a
+  window you spent on trouble from one you spent on volume.
+- The wishlist is exactly what the build will reference, not a superset — a
+  candidate past the `--audio-per-word` cap is not fetched. `--list` is the way
+  to size the job: it downloads nothing, so it reads everything and writes a
+  complete manifest (`<cache>/<dump-date>/audio-missing.tsv`, one
+  `name<TAB>url` per line, in the order the scan found them). A run stopped by
+  `--limit` writes only what it reached, which is a partial record; `--list` is
+  always the complete one.
+- Give it the **same** `--source-lang`, `--audio-per-word`, `--audio-lang` and
+  snapshot as the build. Those decide which candidates an article gets, and so
+  which files are wanted; a mismatched `--audio-per-word` fetches a different set.
+- The build must be re-run afterwards, because the `[s]…[/s]` references are
+  written while rendering. That pass is CPU and local archive I/O only — the
+  expensive part of a build, the network, is skipped entirely.
+- Fetching is deliberately slower than the build's own fallback: `--spacing`
+  (default 2 s), `--retries` (default 6) and `--max-backoff` (default 600 s) are
+  there because a back-fill is exactly the bulk client Wikimedia's robot policy
+  asks to be gentle with. A file that still fails is logged and skipped, not
+  fatal, and stays in the manifest for the next run.
+
+#### Splitting the job across machines
+
+One machine at a polite 2 s per request would spend hours on a big gap, even
+though Wikimedia's rate limit is **per client** — a pool of rooms on a
+university network, say, is one client. That is the case for shards:
+`--split N` records the same work as `N` disjoint list files instead of one
+manifest, for other machines to fetch. Each carries a header saying how it was
+planned and the command that fetches it.
+
+```bash
+# on the machine that owns the snapshot: plan, and write 4 shards
+python scripts/kaikki-to-dsl.py prefetch-audio \
+    --source-lang en --audio-per-word 3 --dump-date 2026-09-02 --split 4
+```
+
+`--split` implies `--list` (a shard is a plan to hand out, not a job to finish
+here), cannot be combined with `--limit`, and writes
+`audio-missing.shard-01-of-04.tsv` … `audio-missing.shard-04-of-04.tsv` next to
+where the manifest would have gone. The shards are **disjoint and balanced**: no
+recording appears in two of them, and their sizes differ by at most one file, so
+no machine is asked for another's work.
+
+On each machine, fetch one shard into its own directory. There is nothing else
+to set up — the needs are the list, Python, and the network:
+
+```bash
+python scripts/kaikki-to-dsl.py fetch-list \
+    ~/.cache/aurelex-kaikki/2026-09-02/audio-missing.shard-01-of-04.tsv \
+    --into ./fetch-01
+```
+
+`fetch-list` has no snapshot options by design: the shard already names the
+files and the directory they belong in. It spaces, retries, verifies and writes
+`.sha256` sidecars exactly as `prefetch-audio` does, so what lands is
+indistinguishable from files this machine fetched itself, and it accepts a plain
+manifest too (`prefetch-audio --list` can be handed to a worker as-is). It
+bounds `--limit`, `--spacing`, `--retries` and `--max-backoff` the same way, and
+a permanently-gone file is recorded in `<shard>.dead.tsv` — next to the shard,
+never inside the directory. One thing it does **not** do is substitute a missing
+candidate: with no records to choose the next one from, a worker records the
+404 and lets the build slot-fill past it. A build run with `--no-audio-download`
+is the one case that shows the difference — there the affected headword may
+carry fewer than `--audio-per-word` recordings, because the substitution never
+happened. Losing a worker's `<shard>.dead.tsv` only costs re-requests: the
+closing `prefetch-audio` pass asks for those files again, records them dead
+itself, and still finishes.
+
+Combine the filled directories by copying — the building machine's audio cache
+is a flat set of named, verified files, and a file already there is left alone:
+
+```bash
+cp -r ./fetch-*/* ~/.cache/aurelex-kaikki/2026-09-02/audio-cache/
+```
+
+Then re-run `prefetch-audio` with the same options in the usual place. It skips
+every file the cache now holds, so a complete transfer costs no requests at all;
+anything a worker gave up on is picked up here, and the run's verdict tells you
+whether that pass is finished. A silence or a `0` against a shard directory that
+you know the workers filled means the transfer missed something — the two lists
+were planned from different snapshots, or a shard went to two machines and the
+first copy was overwritten.
+
+One plan per set of options: a shard is a snapshot of what one `--source-lang` /
+`--audio-per-word` / `--audio-lang` combination wanted, so shards planned with
+different options can overlap. Fetch only shards from the same plan into the
+same cache.
 
 ### Audio archive index
 
@@ -417,4 +581,16 @@ Wikimedia download fallback and its cache, the progress indicator, preview tag
 balance and icon rendering, determinism, the bounded sample selection (both
 modes, and that a small file is not over-strided), the sample headword count,
 and the no-headwords report. No test touches the network: every audio build
-either passes `--no-audio-download` or injects a stub downloader.
+either passes `--no-audio-download`, injects a stub downloader, or blocks
+`_open_with_retries` outright.
+
+The audio prefetcher is covered end to end by driving the real sequence a user
+does — build (gaps), prefetch, build again — and asserting the second build
+reaches the network zero times. Its resume, `--limit` chunking (bounded by
+attempt, and stopping before the rest of the snapshot is read), failure
+isolation, replacement of a failed recording, the two failure classes (a
+permanently gone file is recorded and never requested again while the run
+reports itself finished; a rate-limited one is left for the next run and
+reported as not finished), manifest contents, and `Retry-After` handling
+(honoured, capped, and falling back to exponential backoff when unparseable) each
+have a test.

@@ -5,11 +5,13 @@ Run with:  python -m unittest discover -s scripts/tests
 """
 
 import gzip
+import contextlib
 import importlib.util
 import io
 import json
 import os
 import re
+import shutil
 import struct
 import sys
 import tarfile
@@ -493,6 +495,964 @@ class AudioResolutionTests(unittest.TestCase):
             self.assertEqual(audio_refs, ["En-au-limitword.ogg"])
 
 
+class AudioPrefetchTests(unittest.TestCase):
+    """The prefetcher's contract: fill the cache, and the build just works.
+
+    The point of splitting the two is that a rate-limited fetch should not have
+    to share a run with rendering, so the tests here drive the real sequence a
+    user does -- build (gaps), prefetch, build again -- and assert the second
+    build asks the network for nothing.
+    """
+
+    def build_args(self, tmp, tar_path, *extra):
+        args = TOOL.build_parser().parse_args(
+            [
+                "--source-lang", "en", "--jsonl", AUDIO_LIMIT_FIXTURE,
+                "--out-dir", os.path.join(tmp, "out"), "--audio-tar", tar_path,
+                "--audio-per-word", "3",
+            ]
+            + list(extra)
+        )
+        args.cache_dir = os.path.join(tmp, "cache")
+        return args
+
+    def prefetch_args(self, tmp, tar_path, *extra):
+        args = TOOL.prefetch_parser().parse_args(
+            [
+                "--source-lang", "en", "--jsonl", AUDIO_LIMIT_FIXTURE,
+                "--audio-tar", tar_path, "--audio-per-word", "3",
+            ]
+            + list(extra)
+        )
+        args.cache_dir = os.path.join(tmp, "cache")
+        return args
+
+    def with_stubbed_downloads(self, stub):
+        """Run a block with ``download_cached`` replaced, restoring it after."""
+        original = TOOL.download_cached
+        TOOL.download_cached = stub
+
+        def restore():
+            TOOL.download_cached = original
+
+        self.addCleanup(restore)
+
+    @contextlib.contextmanager
+    def no_network(self, exc):
+        """Fail every fetch attempt, to prove a run needs none."""
+        original = TOOL._open_with_retries
+
+        def blocked(*args, **kwargs):
+            raise exc("the network was used")
+
+        TOOL._open_with_retries = blocked
+        try:
+            yield
+        finally:
+            TOOL._open_with_retries = original
+
+    @staticmethod
+    def stub_writer(calls):
+        def stub(url, dest, *args, **kwargs):
+            calls.append((url, dest))
+            os.makedirs(os.path.dirname(dest), exist_ok=True)
+            with open(dest, "wb") as f:
+                f.write(b"OGGDATA-" + os.path.basename(dest).encode())
+            with open(dest + ".sha256", "w", encoding="ascii") as f:
+                f.write(TOOL._sha256_file(dest))
+            return dest
+
+        return stub
+
+    def manifest_names(self, path):
+        with open(path, "r", encoding="utf-8") as f:
+            return [line.split("\t")[0] for line in f if line.strip()]
+
+    def test_list_names_the_recordings_the_archive_lacks(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tar_path = os.path.join(tmp, "audios.tar")
+            make_tar(tar_path, ["audios/En-au-limitword.ogg"])
+            manifest = os.path.join(tmp, "missing.tsv")
+            calls = []
+            self.with_stubbed_downloads(self.stub_writer(calls))
+            TOOL.prefetch_audio(
+                self.prefetch_args(tmp, tar_path, "--list", "--manifest", manifest)
+            )
+            # nothing was fetched, and the recording the tar holds is not wanted
+            self.assertEqual(calls, [])
+            # exactly the recordings the article will reference, and no more:
+            # the fifth candidate is past the per-word cap of three, so fetching
+            # it would spend rate limit on a file nothing points at. The order is
+            # the order the scan found them in, which for a streaming run is the
+            # only order it can write them.
+            self.assertEqual(sorted(self.manifest_names(manifest)), [
+                "En-uk-limitword.ogg",
+                "En-us-limitword-gone1.ogg",
+            ])
+
+    def test_prefetched_files_let_the_next_build_run_offline(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tar_path = os.path.join(tmp, "audios.tar")
+            make_tar(tar_path, ["audios/En-au-limitword.ogg"])
+
+            # 1. a build that cannot reach the network leaves gaps
+            with self.no_network(OSError):
+                report = TOOL.build(self.build_args(tmp, tar_path))
+            self.assertEqual(report.audio_found, 1)
+            self.assertEqual(report.missing_audio, 4)
+
+            # 2. the prefetcher fills the cache with exactly what was missing
+            calls = []
+            self.with_stubbed_downloads(self.stub_writer(calls))
+            TOOL.prefetch_audio(self.prefetch_args(tmp, tar_path))
+            self.assertEqual(
+                sorted(os.path.basename(d) for _u, d in calls),
+                ["En-uk-limitword.ogg", "En-us-limitword-gone1.ogg"],
+            )
+
+            # 3. a build that may not touch the network still gets whole
+            #    articles, because the cache answers before any request is made
+            with self.no_network(AssertionError):
+                report = TOOL.build(
+                    self.build_args(tmp, tar_path, "--out-dir", os.path.join(tmp, "out2"))
+                )
+            self.assertEqual(report.missing_audio, 0)
+            self.assertEqual(report.audio_found, 3)
+            import zipfile
+            with zipfile.ZipFile(
+                os.path.join(tmp, "out2", "kaikki-en.dsl.files.zip")
+            ) as zf:
+                bundled = only_audio(set(zf.namelist()))
+            self.assertEqual(bundled, {
+                "En-au-limitword.ogg",
+                "En-uk-limitword.ogg",
+                "En-us-limitword-gone1.ogg",
+            })
+
+    def test_a_second_prefetch_fetches_nothing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tar_path = os.path.join(tmp, "audios.tar")
+            make_tar(tar_path, ["audios/En-au-limitword.ogg"])
+            calls = []
+            self.with_stubbed_downloads(self.stub_writer(calls))
+            TOOL.prefetch_audio(self.prefetch_args(tmp, tar_path))
+            self.assertEqual(len(calls), 2)
+            calls.clear()
+            TOOL.prefetch_audio(self.prefetch_args(tmp, tar_path))
+            self.assertEqual(calls, [])
+
+    def test_limit_leaves_the_rest_for_the_next_run(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tar_path = os.path.join(tmp, "audios.tar")
+            make_tar(tar_path, ["audios/En-au-limitword.ogg"])
+            manifest = os.path.join(tmp, "missing.tsv")
+            calls = []
+            self.with_stubbed_downloads(self.stub_writer(calls))
+            TOOL.prefetch_audio(
+                self.prefetch_args(tmp, tar_path, "--limit", "1", "--manifest", manifest)
+            )
+            self.assertEqual(len(calls), 1)
+            # the whole wishlist is still on record, and the next run continues
+            self.assertEqual(len(self.manifest_names(manifest)), 2)
+            TOOL.prefetch_audio(
+                self.prefetch_args(tmp, tar_path, "--limit", "1", "--manifest", manifest)
+            )
+            self.assertEqual(len(calls), 2)
+
+    def test_a_file_is_fetched_before_the_snapshot_is_fully_read(self):
+        # the whole point of interleaving: the first file lands while the scan is
+        # still early in the file, and a run stopped by --limit never reads the
+        # rest of the snapshot at all
+        with tempfile.TemporaryDirectory() as tmp:
+            words = [f"streamword{i}" for i in range(20)]
+            jsonl = os.path.join(tmp, "many.jsonl")
+            with open(jsonl, "w", encoding="utf-8") as f:
+                for word in words:
+                    f.write(json.dumps({
+                        "word": word, "lang_code": "en", "pos": "noun",
+                        "senses": [{"glosses": ["Something."]}],
+                        "sounds": [{
+                            "audio": f"{word}.ogg",
+                            "ogg_url": f"https://upload.wikimedia.org/w/commons/a/a1/{word}.ogg",
+                        }],
+                    }) + "\n")
+            tar_path = os.path.join(tmp, "audios.tar")
+            make_tar(tar_path, ["audios/En-au-limitword.ogg"])
+
+            calls = []
+            read = []
+            original = TOOL.iter_candidate_records
+
+            def counting(path, source_code, progress=None):
+                for record in original(path, source_code, progress):
+                    read.append(record.get("word"))
+                    yield record
+
+            TOOL.iter_candidate_records = counting
+            self.addCleanup(setattr, TOOL, "iter_candidate_records", original)
+            self.with_stubbed_downloads(self.stub_writer(calls))
+            TOOL.prefetch_audio(
+                self.prefetch_args(tmp, tar_path, "--limit", "3", "--jsonl", jsonl)
+            )
+            self.assertEqual(len(calls), 3)
+            # Five of twenty records, not the whole snapshot: three headwords are
+            # fetched, and deciding the third takes reading two records past it
+            # (one to see the batch end, one to reach the fourth headword's
+            # first offer, which is where --limit stops the scan).
+            self.assertEqual(read, words[:5])
+            self.assertLess(len(read), len(words))
+
+    def test_a_full_run_reads_the_whole_snapshot_and_stops_repeating(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            words = [f"offered{i}" for i in range(5)]
+            jsonl = os.path.join(tmp, "many.jsonl")
+            with open(jsonl, "w", encoding="utf-8") as f:
+                for word in words:
+                    f.write(json.dumps({
+                        "word": word, "lang_code": "en", "pos": "noun",
+                        "senses": [{"glosses": ["Something."]}],
+                        "sounds": [{
+                            "audio": f"{word}.ogg",
+                            "ogg_url": f"https://upload.wikimedia.org/w/commons/a/a1/{word}.ogg",
+                        }],
+                    }) + "\n")
+            tar_path = os.path.join(tmp, "audios.tar")
+            make_tar(tar_path, ["audios/En-au-limitword.ogg"])
+            args = self.prefetch_args(tmp, tar_path, "--jsonl", jsonl)
+
+            calls = []
+            self.with_stubbed_downloads(self.stub_writer(calls))
+            TOOL.prefetch_audio(args)
+            self.assertEqual(len(calls), 5)
+            # the second headword asking for a file the first already fetched
+            # must not produce a second request
+            calls.clear()
+            TOOL.prefetch_audio(args)
+            self.assertEqual(calls, [])
+
+    def test_one_bad_file_does_not_end_the_pass(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tar_path = os.path.join(tmp, "audios.tar")
+            make_tar(tar_path, ["audios/En-au-limitword.ogg"])
+            calls = []
+
+            def flaky(url, dest, *args, **kwargs):
+                if "gone1" in url:
+                    calls.append((url, dest))
+                    raise OSError("gateway timeout")
+                return self.stub_writer(calls)(url, dest)
+
+            self.with_stubbed_downloads(flaky)
+            self.assertEqual(
+                TOOL.prefetch_audio(self.prefetch_args(tmp, tar_path)), 1
+            )
+            # the other one still made it into the cache, and the article is left
+            # whole anyway: the failed recording is replaced by the next candidate
+            # rather than costing the headword a pronunciation
+            cache = os.path.join(tmp, "cache", "local", "audio-cache")
+            self.assertEqual(
+                sorted(n for n in os.listdir(cache) if not n.endswith(".sha256")),
+                ["En-uk-limitword.ogg", "En-us-limitword-gone2.ogg"],
+            )
+
+    def test_limit_counts_attempts_so_failing_files_cannot_sail_past_it(self):
+        # the failure mode this guards: --limit bounded *successes*, so a run in
+        # which every file failed tried the entire dictionary -- the one run that
+        # most deserves to stop is the one that would have refused to
+        with tempfile.TemporaryDirectory() as tmp:
+            tar_path = os.path.join(tmp, "audios.tar")
+            make_tar(tar_path, ["audios/En-au-limitword.ogg"])
+            calls = []
+
+            def always_fails(url, dest, *args, **kwargs):
+                calls.append(url)
+                raise OSError("gateway timeout")
+
+            self.with_stubbed_downloads(always_fails)
+            self.assertEqual(
+                TOOL.prefetch_audio(self.prefetch_args(tmp, tar_path, "--limit", "1")),
+                1,
+            )
+            # one attempt, then it stopped -- and the manifest still records what
+            # it had found, so the next run knows where to pick up
+            self.assertEqual(len(calls), 1)
+            self.assertEqual(
+                len(self.manifest_names(
+                    os.path.join(tmp, "cache", "local", "audio-missing.tsv")
+                )),
+                2,
+            )
+
+    def test_a_failed_recording_is_replaced_so_the_build_stays_offline(self):
+        # Every planning pass assumes the files it probed will land, so a failure
+        # invalidates the plan that was built on top of it: the build slot-fills
+        # past the gap, and the recording it falls back to was never fetched.
+        # The prefetcher has to notice the failure and fetch the replacement,
+        # which is the whole promise -- afterwards the build asks for nothing.
+        with tempfile.TemporaryDirectory() as tmp:
+            jsonl = os.path.join(tmp, "gap.jsonl")
+            dead = "https://upload.wikimedia.org/w/commons/a/a1/dead.ogg"
+            with open(jsonl, "w", encoding="utf-8") as f:
+                for word in ("alpha", "beta"):
+                    f.write(json.dumps({
+                        "word": word, "lang_code": "en", "pos": "noun",
+                        "senses": [{"glosses": ["Something."]}],
+                        "sounds": [
+                            # tags matching --audio-lang win the ranking, so this
+                            # is the recording the article takes
+                            {"audio": f"{word}.ogg", "ogg_url": dead,
+                             "tags": ["British English"]},
+                            {"audio": f"{word}.ogg",
+                             "ogg_url": f"https://upload.wikimedia.org/w/commons/a/a1/{word}-alt.ogg"},
+                        ],
+                    }) + "\n")
+            tar_path = os.path.join(tmp, "audios.tar")
+            make_tar(tar_path, ["audios/En-au-limitword.ogg"])
+
+            calls = []
+
+            def dead_fails(url, dest, *args, **kwargs):
+                if url == dead:
+                    calls.append(url)
+                    raise OSError("gateway timeout")
+                return self.stub_writer(calls)(url, dest)
+
+            self.with_stubbed_downloads(dead_fails)
+            args = TOOL.prefetch_parser().parse_args([
+                "--source-lang", "en", "--jsonl", jsonl, "--audio-tar", tar_path,
+                "--audio-per-word", "1", "--audio-lang", "en",
+            ])
+            args.cache_dir = os.path.join(tmp, "cache")
+            self.assertEqual(TOOL.prefetch_audio(args), 1)  # the dead one failed
+
+            # the dead file was asked for once -- not once per headword, since a
+            # URL that just failed gets no second request this run -- and each
+            # headword got the recording the build will fall back to
+            self.assertEqual(calls.count(dead), 1)
+            cache = os.path.join(tmp, "cache", "local", "audio-cache")
+            self.assertEqual(
+                sorted(n for n in os.listdir(cache) if not n.endswith(".sha256")),
+                ["alpha-alt.ogg", "beta-alt.ogg"],
+            )
+
+            # and the build that follows reaches the network for nothing, with
+            # every headword still holding the recording it was promised. The
+            # dead candidate is still counted as missing -- it is, and the build
+            # had to try it before slot-filling -- but no article lost anything.
+            build = TOOL.build_parser().parse_args([
+                "--source-lang", "en", "--jsonl", jsonl, "--out-dir",
+                os.path.join(tmp, "out"), "--audio-tar", tar_path,
+                "--audio-per-word", "1", "--audio-lang", "en",
+            ])
+            build.cache_dir = os.path.join(tmp, "cache")
+            with self.no_network(AssertionError):
+                report = TOOL.build(build)
+            self.assertEqual(report.audio_found, 2)
+            self.assertEqual(report.missing_audio, 1)
+
+
+    @contextlib.contextmanager
+    def captured(self):
+        """Capture stderr, which is where the run reports what happened."""
+        stream = io.StringIO()
+        original = sys.stderr
+        sys.stderr = stream
+        try:
+            yield stream
+        finally:
+            sys.stderr = original
+
+    def dead_names(self, tmp):
+        path = os.path.join(tmp, "cache", "local", "audio-dead.tsv")
+        if not os.path.exists(path):
+            return []
+        with open(path, "r", encoding="utf-8") as f:
+            return [line.split("\t")[0] for line in f if line.strip()]
+
+    def test_a_deleted_file_is_never_asked_for_again_and_the_run_reports_done(self):
+        # The question a run has to answer is "am I finished?", and a URL that is
+        # gone cannot ever succeed. Retrying it on every run would make a finished
+        # cache look like permanent outstanding work, so the refusal is recorded
+        # and the run is allowed to call itself done.
+        with tempfile.TemporaryDirectory() as tmp:
+            jsonl = os.path.join(tmp, "gone.jsonl")
+            gone = "https://upload.wikimedia.org/w/commons/a/a1/gone.ogg"
+            with open(jsonl, "w", encoding="utf-8") as f:
+                for word in ("alpha", "beta"):
+                    f.write(json.dumps({
+                        "word": word, "lang_code": "en", "pos": "noun",
+                        "senses": [{"glosses": ["Something."]}],
+                        "sounds": [
+                            # the tags make this the recording an article takes
+                            {"audio": f"{word}.ogg", "ogg_url": gone,
+                             "tags": ["British English"]},
+                            {"audio": f"{word}.ogg",
+                             "ogg_url": f"https://upload.wikimedia.org/w/commons/a/a1/{word}-alt.ogg"},
+                        ],
+                    }) + "\n")
+            tar_path = os.path.join(tmp, "audios.tar")
+            make_tar(tar_path, ["audios/En-au-limitword.ogg"])
+
+            calls = []
+
+            def deleted(url, dest, *args, **kwargs):
+                calls.append(os.path.basename(dest))
+                if url == gone:
+                    raise urllib.error.HTTPError(url, 404, "Not Found", None, None)
+                return self.stub_writer([])(url, dest)
+
+            self.with_stubbed_downloads(deleted)
+            args = TOOL.prefetch_parser().parse_args([
+                "--source-lang", "en", "--jsonl", jsonl, "--audio-tar", tar_path,
+                "--audio-per-word", "1", "--audio-lang", "en", "--spacing", "0",
+            ])
+            args.cache_dir = os.path.join(tmp, "cache")
+
+            with self.captured() as out:
+                self.assertEqual(TOOL.prefetch_audio(args), 0)
+            self.assertIn("permanently gone", out.getvalue())
+            self.assertIn("HTTP 404", out.getvalue())
+            self.assertIn("done:", out.getvalue())
+            # the replacement for each headword was fetched in the same run, so
+            # no article is left short, and the dead file is on the record
+            self.assertEqual(sorted(calls), ["alpha-alt.ogg", "beta-alt.ogg", "gone.ogg"])
+            self.assertEqual(self.dead_names(tmp), ["gone.ogg"])
+
+            # the next run asks for nothing at all, and is still finished
+            calls.clear()
+            with self.captured() as out:
+                self.assertEqual(TOOL.prefetch_audio(args), 0)
+            self.assertEqual(calls, [])
+            self.assertIn("done:", out.getvalue())
+            self.assertEqual(self.dead_names(tmp), ["gone.ogg"])
+
+    def test_a_rate_limited_file_is_left_for_later_and_the_run_says_not_finished(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            jsonl = os.path.join(tmp, "blocked.jsonl")
+            blocked = "https://upload.wikimedia.org/w/commons/a/a1/blocked.ogg"
+            with open(jsonl, "w", encoding="utf-8") as f:
+                for word in ("alpha", "beta"):
+                    f.write(json.dumps({
+                        "word": word, "lang_code": "en", "pos": "noun",
+                        "senses": [{"glosses": ["Something."]}],
+                        "sounds": [
+                            {"audio": f"{word}.ogg", "ogg_url": blocked,
+                             "tags": ["British English"]},
+                            {"audio": f"{word}.ogg",
+                             "ogg_url": f"https://upload.wikimedia.org/w/commons/a/a1/{word}-alt.ogg"},
+                        ],
+                    }) + "\n")
+            tar_path = os.path.join(tmp, "audios.tar")
+            make_tar(tar_path, ["audios/En-au-limitword.ogg"])
+
+            calls = []
+            limited = [True]
+
+            def throttled(url, dest, *args, **kwargs):
+                calls.append(os.path.basename(dest))
+                if url == blocked and limited[0]:
+                    raise urllib.error.HTTPError(
+                        url, 429, "Too Many Requests", None, None
+                    )
+                return self.stub_writer([])(url, dest)
+
+            self.with_stubbed_downloads(throttled)
+            args = TOOL.prefetch_parser().parse_args([
+                "--source-lang", "en", "--jsonl", jsonl, "--audio-tar", tar_path,
+                "--audio-per-word", "1", "--audio-lang", "en", "--spacing", "0",
+            ])
+            args.cache_dir = os.path.join(tmp, "cache")
+
+            with self.captured() as out:
+                # still work to do, so still work to come back to
+                self.assertEqual(TOOL.prefetch_audio(args), 1)
+            self.assertIn("rate-limited, blocked or interrupted", out.getvalue())
+            self.assertIn("not finished", out.getvalue())
+            # a refusal is not a verdict about the file, so it is not recorded as
+            # permanently gone -- that would throw the file away for good
+            self.assertEqual(self.dead_names(tmp), [])
+
+            # once the limit clears, the same run picks it up and finishes
+            limited[0] = False
+            calls.clear()
+            with self.captured() as out:
+                self.assertEqual(TOOL.prefetch_audio(args), 0)
+            self.assertEqual(calls, ["blocked.ogg"])
+            self.assertIn("done:", out.getvalue())
+
+    def test_only_a_definitive_status_counts_as_permanent(self):
+        def http_error(code):
+            return urllib.error.HTTPError("u", code, "m", None, None)
+
+        for code in sorted(TOOL.PERMANENT_HTTP_STATUS):
+            self.assertTrue(TOOL.failure_is_permanent(http_error(code)), code)
+        # a refusal or a hiccup is not a statement about the file: calling these
+        # permanent would silently drop a recording the article could have had
+        for code in (403, 429, 500, 502, 503, 504):
+            self.assertFalse(TOOL.failure_is_permanent(http_error(code)), code)
+        self.assertFalse(TOOL.failure_is_permanent(OSError("timed out")))
+        self.assertFalse(TOOL.failure_is_permanent(
+            urllib.error.URLError("connection reset")
+        ))
+
+
+class AudioShardTests(unittest.TestCase):
+    """The split-and-fetch workflow: several machines can share one gap.
+
+    One machine plans, many machines fetch disjoint lists, and the building
+    machine combines the results by copying -- no merge command, because a file
+    already in the cache is skipped anyway. The re-run of the prefetcher over the
+    combined cache is both the check and the backstop.
+    """
+
+    def make_tar_with_limit(self, tmp):
+        path = os.path.join(tmp, "audios.tar")
+        make_tar(path, ["audios/En-au-limitword.ogg"])
+        return path
+
+    def prefetch_args(self, tmp, tar_path, *extra):
+        args = TOOL.prefetch_parser().parse_args(
+            [
+                "--source-lang", "en", "--jsonl", AUDIO_LIMIT_FIXTURE,
+                "--audio-tar", tar_path, "--audio-per-word", "3",
+            ]
+            + list(extra)
+        )
+        args.cache_dir = os.path.join(tmp, "cache")
+        return args
+
+    def build_args(self, tmp, tar_path, *extra):
+        args = TOOL.build_parser().parse_args(
+            [
+                "--source-lang", "en", "--jsonl", AUDIO_LIMIT_FIXTURE,
+                "--out-dir", os.path.join(tmp, "out"), "--audio-tar", tar_path,
+                "--audio-per-word", "3",
+            ]
+            + list(extra)
+        )
+        args.cache_dir = os.path.join(tmp, "cache")
+        return args
+
+    @contextlib.contextmanager
+    def no_network(self, exc):
+        """Fail every fetch attempt, to prove a run needs none."""
+        original = TOOL._open_with_retries
+
+        def blocked(*args, **kwargs):
+            raise exc("the network was used")
+
+        TOOL._open_with_retries = blocked
+        try:
+            yield
+        finally:
+            TOOL._open_with_retries = original
+
+    def stub_writer(self, calls):
+        def stub(url, dest, *args, **kwargs):
+            calls.append((url, dest))
+            os.makedirs(os.path.dirname(dest), exist_ok=True)
+            with open(dest, "wb") as f:
+                f.write(b"OGGDATA-" + os.path.basename(dest).encode())
+            with open(dest + ".sha256", "w", encoding="ascii") as f:
+                f.write(TOOL._sha256_file(dest))
+            return dest
+
+        return stub
+
+    def shard_names(self, path):
+        with open(path, "r", encoding="utf-8") as f:
+            return [
+                line.split("\t")[0]
+                for line in f
+                if line.strip() and not line.startswith("#")
+            ]
+
+    @contextlib.contextmanager
+    def captured(self):
+        stream = io.StringIO()
+        original = sys.stderr
+        sys.stderr = stream
+        try:
+            yield stream
+        finally:
+            sys.stderr = original
+
+    def test_split_writes_disjoint_balanced_shards_that_explain_themselves(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tar_path = self.make_tar_with_limit(tmp)
+            manifest = os.path.join(tmp, "missing.tsv")
+            calls = []
+            original = TOOL.download_cached
+            TOOL.download_cached = self.stub_writer(calls)
+            self.addCleanup(setattr, TOOL, "download_cached", original)
+
+            # what an unsharded --list would have written, for comparison
+            with self.captured():
+                TOOL.prefetch_audio(
+                    self.prefetch_args(tmp, tar_path, "--list", "--manifest", manifest)
+                )
+            expected = self.shard_names(manifest)
+
+            for count in (1, 2, 5):  # N at, below and above the file count
+                split_manifest = os.path.join(tmp, f"missing-{count}.tsv")
+                calls.clear()
+                with self.captured() as out:
+                    self.assertEqual(
+                        TOOL.prefetch_audio(
+                            self.prefetch_args(
+                                tmp, tar_path, "--split", str(count),
+                                "--manifest", split_manifest,
+                            )
+                        ),
+                        0,
+                    )
+                # splitting is listing: nothing was fetched
+                self.assertEqual(calls, [])
+                self.assertIn("listing only", out.getvalue())
+
+                shards = TOOL.shard_paths(split_manifest, count)
+                self.assertIn(".shard-1-of-%d." % count, shards[0])
+                found = []
+                for path in shards:
+                    if os.path.exists(path):
+                        found.extend(self.shard_names(path))
+                        with open(path, encoding="utf-8") as header_file:
+                            header = header_file.read()
+                        self.assertTrue(header.startswith("#"), path)
+                        self.assertIn("fetch-list", header, path)
+                        self.assertIn("planned with", header, path)
+                # complete against the manifest and disjoint: every name once
+                self.assertEqual(sorted(found), sorted(expected))
+                self.assertEqual(len(found), len(set(found)))
+                # balanced to within one file, from "one shard" down to "more
+                # shards than files" (where the surplus shards are not written)
+                sizes = [
+                    len(self.shard_names(p))
+                    for p in shards
+                    if os.path.exists(p)
+                ]
+                self.assertLessEqual(max(sizes) - min(sizes), 1)
+
+    def test_local_cache_is_absent_and_an_empty_plan_writes_no_shards(self):
+        # 4.9 / 2.4: a file the local cache already holds is not work, and a run
+        # with nothing outstanding leaves no shard file behind at all -- the
+        # wishlist is exactly what a would-be build would still fetch.
+        expected = ["En-uk-limitword.ogg", "En-us-limitword-gone1.ogg"]
+        with tempfile.TemporaryDirectory() as tmp:
+            tar_path = self.make_tar_with_limit(tmp)
+            cache = os.path.join(tmp, "cache", "local", "audio-cache")
+            os.makedirs(cache, exist_ok=True)
+            with open(os.path.join(cache, expected[0]), "wb") as f:
+                f.write(b"OGGDATA")
+            with open(os.path.join(cache, expected[0] + ".sha256"), "w",
+                      encoding="ascii") as f:
+                f.write(TOOL._sha256_file(os.path.join(cache, expected[0])))
+
+            manifest = os.path.join(tmp, "missing.tsv")
+            original = TOOL.download_cached
+            TOOL.download_cached = self.stub_writer([])
+            self.addCleanup(setattr, TOOL, "download_cached", original)
+            with self.captured() as out:
+                TOOL.prefetch_audio(
+                    self.prefetch_args(tmp, tar_path, "--split", "2",
+                                       "--manifest", manifest)
+                )
+            self.assertIn("already cached: 1", out.getvalue())
+            remaining = []
+            for path in TOOL.shard_paths(manifest, 2):
+                if os.path.exists(path):
+                    remaining.extend(self.shard_names(path))
+            self.assertEqual(remaining, [expected[1]])
+
+            # fill the last gap: the next split has no shards to write. Remove
+            # the previous run's shards first, so a fresh run is what is judged.
+            for path in TOOL.shard_paths(manifest, 2):
+                if os.path.exists(path):
+                    os.remove(path)
+            with open(os.path.join(cache, expected[1]), "wb") as f:
+                f.write(b"OGGDATA")
+            with open(os.path.join(cache, expected[1] + ".sha256"), "w",
+                      encoding="ascii") as f:
+                f.write(TOOL._sha256_file(os.path.join(cache, expected[1])))
+            with self.captured() as out:
+                TOOL.prefetch_audio(
+                    self.prefetch_args(tmp, tar_path, "--split", "2",
+                                       "--manifest", manifest)
+                )
+            self.assertIn("already cached: 2", out.getvalue())
+            self.assertEqual(
+                [p for p in TOOL.shard_paths(manifest, 2) if os.path.exists(p)],
+                [],
+            )
+
+    def test_split_rejects_contradictory_and_broken_counts(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tar_path = self.make_tar_with_limit(tmp)
+            for bad, message in (
+                ("--limit", "--split"),
+            ):
+                with self.assertRaises(SystemExit):
+                    TOOL.prefetch_audio(
+                        self.prefetch_args(tmp, tar_path, "--split", "2", bad, "1")
+                    )
+            with self.assertRaises(SystemExit):
+                TOOL.prefetch_audio(
+                    self.prefetch_args(tmp, tar_path, "--split", "0")
+                )
+
+    def test_workers_fill_directories_the_building_machine_just_copies(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tar_path = self.make_tar_with_limit(tmp)
+
+            # 1. a build that cannot reach the network leaves gaps to fill
+            with self.no_network(OSError):
+                report = TOOL.build(self.build_args(tmp, tar_path))
+            self.assertEqual(report.audio_found, 1)
+            self.assertEqual(report.missing_audio, 4)
+
+            # 2. the owner plans with --split
+            manifest = os.path.join(tmp, "missing.tsv")
+            with self.captured():
+                TOOL.prefetch_audio(
+                    self.prefetch_args(tmp, tar_path, "--split", "2",
+                                       "--manifest", manifest)
+                )
+
+            # 3. each worker fetches its shard into its own directory
+            calls = []
+            original = TOOL.download_cached
+            TOOL.download_cached = self.stub_writer(calls)
+            self.addCleanup(setattr, TOOL, "download_cached", original)
+            worker_dirs = []
+            for shard in TOOL.shard_paths(manifest, 2):
+                worker_dir = os.path.join(tmp, "worker" + os.path.basename(shard))
+                worker_dirs.append(worker_dir)
+                args = TOOL.fetch_list_parser().parse_args(
+                    [shard, "--into", worker_dir, "--spacing", "0"]
+                )
+                with self.captured():
+                    self.assertEqual(TOOL.fetch_list(args), 0)
+
+            # every recording landed exactly once, each with a .sha256 sidecar
+            self.assertEqual(len(calls), 2)
+            self.assertEqual(len({calls[0][1], calls[1][1]}), 2)
+            landed = []
+            for worker_dir in worker_dirs:
+                for name in os.listdir(worker_dir):
+                    landed.append(worker_dir + os.sep + name)
+            self.assertEqual(
+                sorted(os.path.basename(n) for n in landed),
+                ["En-uk-limitword.ogg", "En-uk-limitword.ogg.sha256",
+                 "En-us-limitword-gone1.ogg",
+                 "En-us-limitword-gone1.ogg.sha256"],
+            )
+
+            # 4. combining is copying: a flat set of named, verified files
+            cache = os.path.join(tmp, "cache", "local", "audio-cache")
+            os.makedirs(cache, exist_ok=True)
+            for worker_dir in worker_dirs:
+                for name in os.listdir(worker_dir):
+                    shutil.copy2(
+                        os.path.join(worker_dir, name), os.path.join(cache, name)
+                    )
+
+            # 5. the closing prefetch run has nothing to ask for
+            calls.clear()
+            with self.captured() as out:
+                self.assertEqual(TOOL.prefetch_audio(
+                    self.prefetch_args(tmp, tar_path)
+                ), 0)
+            self.assertEqual(calls, [])
+            self.assertIn("done:", out.getvalue())
+
+            # 6. a build that may not touch the network gets whole articles
+            with self.no_network(AssertionError):
+                report = TOOL.build(
+                    self.build_args(tmp, tar_path, "--audio-per-word", "1")
+                )
+            self.assertEqual(report.missing_audio, 0)
+
+    def test_a_partial_worker_run_is_finished_by_the_closing_local_pass(self):
+        # 4.8: a worker that stops early leaves a gap, and the re-run that checks
+        # the copy is also what closes it -- it requests only what is missing.
+        with tempfile.TemporaryDirectory() as tmp:
+            tar_path = self.make_tar_with_limit(tmp)
+            shard = os.path.join(tmp, "one.tsv")
+            base = "https://upload.wikimedia.org/wikipedia/commons/"
+            with open(shard, "w", encoding="utf-8") as f:
+                f.write("En-uk-limitword.ogg\t" + base + "a/a1/En-uk-limitword.ogg\n")
+                f.write("En-us-limitword-gone1.ogg\t" + base + "a/a3/En-us-limitword-gone1.ogg\n")
+
+            calls = []
+            original = TOOL.download_cached
+            TOOL.download_cached = self.stub_writer(calls)
+            self.addCleanup(setattr, TOOL, "download_cached", original)
+
+            # the worker fetches one of the two, then stops at its attempt cap
+            worker_dir = os.path.join(tmp, "partial")
+            args = TOOL.fetch_list_parser().parse_args(
+                [shard, "--into", worker_dir, "--limit", "1", "--spacing", "0"]
+            )
+            with self.captured():
+                self.assertEqual(TOOL.fetch_list(args), 1)
+            cache = os.path.join(tmp, "cache", "local", "audio-cache")
+            os.makedirs(cache, exist_ok=True)
+            for name in os.listdir(worker_dir):
+                shutil.copy2(os.path.join(worker_dir, name), os.path.join(cache, name))
+
+            # the closing local run requests exactly the recording no worker took
+            calls.clear()
+            with self.captured() as out:
+                self.assertEqual(TOOL.prefetch_audio(
+                    self.prefetch_args(tmp, tar_path)
+                ), 0)
+            self.assertEqual(len(calls), 1)
+            self.assertEqual(
+                os.path.basename(calls[0][1]), "En-us-limitword-gone1.ogg"
+            )
+            self.assertIn("done:", out.getvalue())
+
+    def test_worker_records_a_deleted_file_beside_the_shard(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            shard = os.path.join(tmp, "one.tsv")
+            gone = "https://upload.wikimedia.org/w/commons/a/a1/gone.ogg"
+            with open(shard, "w", encoding="utf-8") as f:
+                f.write("# a hand-written shard for this test\n")
+                f.write("sub/gone.ogg\t" + gone + "\n")
+
+            calls = []
+
+            def still_writes_if_gone_not_asked(url, dest, *args, **kwargs):
+                self.assertNotEqual(url, gone)
+                calls.append((url, dest))
+                return self.stub_writer([])(url, dest)
+
+            original = TOOL.download_cached
+            TOOL.download_cached = lambda url, dest, *a, **kw: (
+                self.stub_writer(calls)(url, dest)
+                if url != gone
+                else (_ for _ in ()).throw(
+                    urllib.error.HTTPError(url, 404, "Not Found", None, None)
+                )
+            )
+            self.addCleanup(setattr, TOOL, "download_cached", original)
+
+            args = TOOL.fetch_list_parser().parse_args(
+                [shard, "--into", os.path.join(tmp, "fill")]
+            )
+            with self.captured() as out:
+                self.assertEqual(TOOL.fetch_list(args), 0)
+            # gone is recorded next to the shard, and the directory stays clean
+            self.assertEqual(os.listdir(os.path.join(tmp, "fill")), [])
+            self.assertEqual(
+                self.shard_names(shard + ".dead.tsv"), ["sub/gone.ogg"]
+            )
+            self.assertIn("permanently gone", out.getvalue())
+            self.assertIn("done:", out.getvalue())
+
+    def test_worker_limits_attempts_and_a_repeat_finishes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            shard = os.path.join(tmp, "two.tsv")
+            base = "https://upload.wikimedia.org/w/commons/a/a1/"
+            with open(shard, "w", encoding="utf-8") as f:
+                for i in range(4):
+                    f.write(f"a{i}.ogg\t{base}a{i}.ogg\n")
+
+            calls = []
+            original = TOOL.download_cached
+            TOOL.download_cached = self.stub_writer(calls)
+            self.addCleanup(setattr, TOOL, "download_cached", original)
+
+            fill = os.path.join(tmp, "fill")
+            args = TOOL.fetch_list_parser().parse_args(
+                [shard, "--into", fill, "--limit", "1", "--spacing", "0"]
+            )
+            with self.captured() as out:
+                self.assertEqual(TOOL.fetch_list(args), 1)
+            self.assertIn("stopped at --limit 1", out.getvalue())
+            self.assertEqual([os.path.basename(d) for _u, d in calls], ["a0.ogg"])
+
+            # a continuation run skips what landed and fetches only the rest
+            calls.clear()
+            args = TOOL.fetch_list_parser().parse_args(
+                [shard, "--into", fill, "--spacing", "0"]
+            )
+            with self.captured() as out:
+                self.assertEqual(TOOL.fetch_list(args), 0)
+            self.assertEqual(
+                sorted(os.path.basename(d) for _u, d in calls),
+                ["a1.ogg", "a2.ogg", "a3.ogg"],
+            )
+            self.assertIn("done:", out.getvalue())
+            self.assertIn("already cached: 1", out.getvalue())
+
+    def test_worker_refuses_malformed_and_escaping_lines(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            shard = os.path.join(tmp, "bad.tsv")
+            fill = os.path.join(tmp, "fill")
+            # no entry may reach a real network: the good line only documents the
+            # format, and it would be stubbed anyway once we get past it
+            original = TOOL.download_cached
+            TOOL.download_cached = lambda url, dest, *a, **kw: dest
+            self.addCleanup(setattr, TOOL, "download_cached", original)
+            with open(shard, "w", encoding="utf-8") as f:
+                f.write("# comment lines are fine\n")
+                f.write("good.ogg\thttps://example/good.ogg\n")
+                f.write("this-line-has-no-tab\n")
+            args = TOOL.fetch_list_parser().parse_args([shard, "--into", fill])
+            with self.assertRaises(SystemExit) as ctx:
+                TOOL.fetch_list(args)
+            self.assertIn("bad.tsv:3", str(ctx.exception))
+
+            with open(shard, "w", encoding="utf-8") as f:
+                f.write("../escape.ogg\thttps://example/escape.ogg\n")
+            with self.assertRaises(SystemExit) as ctx:
+                TOOL.fetch_list(args)
+            self.assertIn("..", str(ctx.exception))
+
+    def test_copying_a_cache_over_itself_changes_nothing(self):
+        # 4.10: the combine step is a plain copy, and a copy that lands on an
+        # existing cache still leaves every file verified and unchanged.
+        with tempfile.TemporaryDirectory() as tmp:
+            shard = os.path.join(tmp, "two.tsv")
+            base = "https://upload.wikimedia.org/w/commons/a/a1/"
+            with open(shard, "w", encoding="utf-8") as f:
+                for i in range(2):
+                    f.write(f"b{i}.ogg\t{base}b{i}.ogg\n")
+
+            calls = []
+            original = TOOL.download_cached
+            TOOL.download_cached = self.stub_writer(calls)
+            self.addCleanup(setattr, TOOL, "download_cached", original)
+
+            cache = os.path.join(tmp, "cache")
+            args = TOOL.fetch_list_parser().parse_args(
+                [shard, "--into", cache, "--spacing", "0"]
+            )
+            with self.captured():
+                self.assertEqual(TOOL.fetch_list(args), 0)
+            with open(os.path.join(cache, "b0.ogg"), "rb") as f:
+                contents = f.read()
+
+            # the combine step is literally a copy; copying a cache back over
+            # itself (via a duplicate of it) must not disturb the files
+            mirror = os.path.join(tmp, "mirror")
+            shutil.copytree(cache, mirror)
+            for name in os.listdir(mirror):
+                shutil.copy2(os.path.join(mirror, name), os.path.join(cache, name))
+
+            calls.clear()
+            args = TOOL.fetch_list_parser().parse_args(
+                [shard, "--into", cache, "--spacing", "0"]
+            )
+            with self.captured() as out:
+                self.assertEqual(TOOL.fetch_list(args), 0)
+            self.assertEqual(calls, [])
+            self.assertIn("already cached: 2", out.getvalue())
+            with open(os.path.join(cache, "b0.ogg"), "rb") as f:
+                self.assertEqual(f.read(), contents)
+
+
 class LangProfileTests(unittest.TestCase):
     """Language-specific behaviour lives in the profile, not the renderer."""
 
@@ -820,6 +1780,23 @@ class SenseGroupingTests(unittest.TestCase):
             self.EN, {"swap"}, "swap",
         )
         self.assertEqual(groups[0][1][0][0], "Alternative spelling of swap.")
+
+    def test_group_children_survive_a_heading_rendered_differently(self):
+        # the children are stored under the raw parent gloss but printed under
+        # the rendered heading; when rendering changes the text (whitespace is
+        # trimmed here, and it is escaped, stripped of a relation prefix or
+        # linked elsewhere) the two must still be joined up
+        senses = [
+            {"glosses": ["The fourth digestive compartment of a cow:  ",
+                         "The lining of said compartment, as a foodstuff."]},
+        ]
+        groups = TOOL._group_senses(senses, self.EN)
+        self.assertEqual(len(groups), 1)
+        heading, children = groups[0]
+        self.assertEqual(heading, "The fourth digestive compartment of a cow:")
+        self.assertEqual(sense_texts(children), [
+            "The lining of said compartment, as a foodstuff.",
+        ])
 
     def test_shared_parent_with_different_tags_merges(self):
         # monkey's figurative senses share a parent but each carries tags; the
@@ -1582,6 +2559,97 @@ class DownloadPolicyTests(unittest.TestCase):
         finally:
             TOOL.urllib.request.urlopen = original
             TOOL.time.sleep = original_sleep
+
+    def fake_rate_limited(self, sleeps, retry_after=None):
+        """A 429 on the first attempt, then success; records the backoff waits."""
+        attempts = []
+
+        class FakeResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+            def read(self, n=-1):
+                return b""
+
+        def fake_urlopen(request, timeout):
+            attempts.append(request.full_url)
+            if len(attempts) == 1:
+                headers = {"Retry-After": retry_after} if retry_after else {}
+                raise urllib.error.HTTPError(
+                    request.full_url, 429, "Too many requests", headers, None
+                )
+            return FakeResponse()
+
+        original = TOOL.urllib.request.urlopen
+        original_sleep = TOOL.time.sleep
+        TOOL.urllib.request.urlopen = fake_urlopen
+
+        def record(seconds):
+            sleeps.append(seconds)
+            # _throttle measures against a real clock, which the mocked sleep
+            # does not advance; without this the next attempt would throttle too
+            TOOL._last_request_time = 0.0
+
+        TOOL.time.sleep = record
+
+        def restore():
+            TOOL.urllib.request.urlopen = original
+            TOOL.time.sleep = original_sleep
+
+        # a throttle gap left by an earlier test would show up as a first sleep
+        TOOL._last_request_time = 0.0
+        return attempts, restore
+
+    def test_retry_after_is_honoured_over_the_computed_backoff(self):
+        # Wikimedia's cooldown is the number it will actually hold us to, so a
+        # short guess only earns another 429
+        sleeps = []
+        attempts, restore = self.fake_rate_limited(sleeps, retry_after="45")
+        try:
+            with TOOL._open_with_retries("https://example.invalid/x", 5, spacing=1.0):
+                pass
+        finally:
+            restore()
+        self.assertEqual(len(attempts), 2)
+        self.assertEqual(sleeps, [45.0])
+
+    def test_retry_after_cannot_exceed_the_backoff_ceiling(self):
+        sleeps = []
+        attempts, restore = self.fake_rate_limited(sleeps, retry_after="86400")
+        try:
+            with TOOL._open_with_retries(
+                "https://example.invalid/x", 5, spacing=1.0, max_backoff=30.0
+            ):
+                pass
+        finally:
+            restore()
+        self.assertEqual(len(attempts), 2)
+        self.assertEqual(sleeps, [30.0])
+
+    def test_an_unparseable_retry_after_falls_back_to_exponential_backoff(self):
+        sleeps = []
+        attempts, restore = self.fake_rate_limited(sleeps, retry_after="Wed, 21 Oct")
+        try:
+            with TOOL._open_with_retries("https://example.invalid/x", 5, spacing=1.0):
+                pass
+        finally:
+            restore()
+        self.assertEqual(len(attempts), 2)
+        self.assertEqual(sleeps, [1.0])
+
+    def test_spacing_is_the_floor_even_when_retry_after_is_shorter(self):
+        sleeps = []
+        attempts, restore = self.fake_rate_limited(sleeps, retry_after="0")
+        try:
+            with TOOL._open_with_retries("https://example.invalid/x", 5, spacing=2.0):
+                pass
+        finally:
+            restore()
+        self.assertEqual(len(attempts), 2)
+        self.assertEqual(sleeps, [2.0])
 
 
 class ProgressTests(unittest.TestCase):
