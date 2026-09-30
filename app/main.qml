@@ -1044,7 +1044,13 @@ ColumnLayout {
                     placeholderText: qsTr("Search dictionaries")
                     Accessible.name: "Search dictionaries"
                     Accessible.role: Accessible.EditableText
-                    font.pixelSize: 18
+                    // No font.pixelSize override: enlarging it makes the
+                    // placeholder's largestHeight exceed what Material's
+                    // MaterialTextContainer budgets for, so the floating label is
+                    // positioned at the unfloated y and lands ON the box border
+                    // (reproduced on desktop Qt 6.6.3 and two Android devices;
+                    // see docs/repro/labelglitch.qml). Material's default size
+                    // keeps the label where the style expects it.
                     onDisplayTextChanged: searchPane._doSuggest()
                     onAccepted: searchPane._submitSearch()
                     Component.onCompleted: {
@@ -3328,9 +3334,10 @@ text: root._stagingActive
                     Layout.fillWidth: true
                     Layout.preferredWidth: 7
                     placeholderText: qsTr("Full-text search")
-                    font.pixelSize: 18
                     Accessible.name: "Full-text search"
                     Accessible.role: Accessible.EditableText
+                    // No font.pixelSize override: see the Search field above —
+                    // enlarging it breaks the floating label's placement.
                     // Typing never runs a search, but it invalidates results that
                     // no longer match the box (control-state-and-fts-whole-words).
                     // displayText, not text: during IME composition `text` lags
