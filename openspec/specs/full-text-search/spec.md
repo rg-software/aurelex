@@ -123,7 +123,7 @@ MUST NOT return longer words that merely resemble it.
 - **WHEN** the query text differs from the text that produced the displayed results
 - **THEN** the displayed results are cleared rather than left shown against the new query
 
-#### Scenario: Changing the scope group re-runs the search
+#### Scenario: Changing the scope group does not start a search
 - **WHEN** the user selects a different group in the scope control
 - **THEN** no search runs at that moment; the next submit runs the search in the newly selected group
 
@@ -131,7 +131,7 @@ MUST NOT return longer words that merely resemble it.
 - **WHEN** the user selects a different group in the scope control while results from a previous search are displayed
 - **THEN** those results are cleared, so no result from the previous scope is shown as if it belonged to the new scope
 
-#### Scenario: Toggling whole words re-runs the search
+#### Scenario: Toggling whole words does not start a search
 - **WHEN** the user toggles the whole-words control
 - **THEN** no search runs at that moment; the next submit runs the search with the new matching mode
 
