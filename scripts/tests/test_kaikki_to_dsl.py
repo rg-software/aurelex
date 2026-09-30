@@ -59,16 +59,16 @@ def headword_lines(text):
 def sense_texts(entries):
     """Just the glosses of a ``_group_senses`` entry list.
 
-    Each entry is a ``(gloss, examples)`` pair; grouping tests that only care
-    about the glosses compare through this so they do not have to spell out the
-    example list every time.
+    Each entry is a ``(gloss, examples, allow_archaic)`` triple; grouping tests
+    that only care about the glosses compare through this so they do not have to
+    spell out the example list every time.
     """
-    return [text for text, _examples in entries]
+    return [text for text, _examples, _archaic in entries]
 
 
 def sense_examples(entries):
     """The raw example strings carried by a ``_group_senses`` entry list."""
-    return [examples for _text, examples in entries]
+    return [examples for _text, examples, _archaic in entries]
 
 
 def zip_names(path):
@@ -1840,6 +1840,56 @@ class CardQualityTests(unittest.TestCase):
         self.assertEqual(unlinked, 1)
 
 
+class ArchaicExampleTests(unittest.TestCase):
+    """An archaic sense may fall back to an archaic example; a modern one may not."""
+
+    def examples(self, raw, word, allow_archaic):
+        return TOOL._sense_examples(raw, word, (), allow_archaic)
+
+    def test_a_modern_sense_drops_an_archaic_example(self):
+        self.assertEqual(self.examples(["I haue worke in hand."], "work", False), [])
+
+    def test_an_archaic_sense_falls_back_to_an_archaic_example(self):
+        out = self.examples(["I haue worke in hand."], "work", True)
+        self.assertEqual(len(out), 1)
+        self.assertIn("haue", out[0])
+
+    def test_an_archaic_sense_prefers_a_readable_example(self):
+        out = self.examples(
+            ["I haue worke in hand.", "My work involves travel."], "work", True
+        )
+        self.assertEqual(len(out), 1)
+        self.assertIn("travel", out[0])
+
+    def test_a_bookkeeping_example_is_dropped_even_when_archaic(self):
+        self.assertEqual(self.examples(["Citations:work."], "work", True), [])
+
+    def test_the_fallback_reaches_the_rendered_card(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "in.jsonl")
+            with open(path, "w", encoding="utf-8") as f:
+                for record in (
+                    {"word": "oldword", "lang_code": "en", "pos": "adj",
+                     "senses": [{"glosses": ["Old use."], "tags": ["obsolete"],
+                                 "examples": [{"text": "I haue oldword in hand."}]}]},
+                    {"word": "modword", "lang_code": "en", "pos": "noun",
+                     "senses": [{"glosses": ["Modern."],
+                                 "examples": [{"text": "I haue modword in hand."}]}]},
+                ):
+                    f.write(json.dumps(record) + "\n")
+            TOOL.build(TOOL.build_parser().parse_args([
+                "--source-lang", "en", "--jsonl", path, "--out-dir", tmp,
+                "--no-audio", "--cache-dir", os.path.join(tmp, "cache"),
+            ]))
+            text = read_dz(os.path.join(tmp, "kaikki-en.dsl.dz"))
+            old = text.split("oldword", 1)[1].split("modword", 1)[0]
+            mod = text.split("modword", 1)[1]
+            # the obsolete sense fell back to its archaic quotation
+            self.assertIn("[ex]", old)
+            # the modern sense did not: it may not show an archaic example
+            self.assertNotIn("[ex]", mod)
+
+
 class ReuseBundleTests(unittest.TestCase):
     """--reuse-bundle renders the dictionary and reuses the existing bundle."""
 
@@ -2098,7 +2148,7 @@ class SenseGroupingTests(unittest.TestCase):
 
     def test_single_fragment_sense_has_no_heading(self):
         groups = TOOL._group_senses([{"glosses": ["A penis."]}], self.EN)
-        self.assertEqual(groups, [("", [("A penis.", [])])])
+        self.assertEqual(groups, [("", [("A penis.", [], False)])])
 
     def test_each_entry_carries_its_own_examples(self):
         # an example belongs to the sense that illustrates it, so it travels

@@ -446,6 +446,13 @@ _SENSE_TAG_ICONS = {
     "archaic": "gd_tag_obsolete.svg",
 }
 
+#: Tags that mark a sense as archaic use: exactly those that show the usage icon.
+#: Such a sense is allowed to fall back to an archaic example (see
+#: ``_sense_examples``).
+_USAGE_TAGS = {
+    tag for tag, icon in _SENSE_TAG_ICONS.items() if icon == "gd_tag_obsolete.svg"
+}
+
 
 def _icon_ref(name: str) -> str:
     """A DSL picture reference for one bundled sense-marker icon."""
@@ -1636,9 +1643,11 @@ def unlink_absent_refs(body: str, present: Set[str]) -> Tuple[str, int]:
     return _CROSS_REF_RE.sub(replace, body), unlinked
 
 
-# A rendered sense and the raw examples that illustrate it. ``text`` is the
-# gloss line; ``examples`` are the source lines, still unfiltered.
-SenseEntry = Tuple[str, List[str]]
+# A rendered sense, the raw examples that illustrate it, and whether the sense's
+# own usage (obsolete/dated/archaic) lets an archaic example stand in when no
+# readable one qualifies. ``text`` is the gloss line; ``examples`` are the source
+# lines, still unfiltered.
+SenseEntry = Tuple[str, List[str], bool]
 
 
 def _extract_examples(sense: dict) -> List[str]:
@@ -1680,12 +1689,12 @@ def _group_senses(
     Returns ``(heading, entries)`` pairs.
     """
     groups: Dict[str, List[SenseEntry]] = {}    # heading -> child entries
-    # (kind, text, group key, examples). A group's key is the *raw* parent
-    # gloss, which render() may alter (it trims and collapses whitespace,
-    # escapes markup, drops a relation prefix, wraps a form-of target in
-    # [ref]); the key travels beside the rendered heading so the children can
+    # (kind, text, group key, examples, allow_archaic). A group's key is the
+    # *raw* parent gloss, which render() may alter (it trims and collapses
+    # whitespace, escapes markup, drops a relation prefix, wraps a form-of target
+    # in [ref]); the key travels beside the rendered heading so the children can
     # be looked up by the string they were stored under.
-    items: List[Tuple[str, str, str, List[str]]] = []
+    items: List[Tuple[str, str, str, List[str], bool]] = []
     seen: Set[str] = set()
 
     def fresh(text: str) -> bool:
@@ -1703,6 +1712,9 @@ def _group_senses(
             continue
         markers = _sense_markers(sense.get("tags"), profile)
         examples = _extract_examples(sense)
+        # An archaic/obsolete/dated sense may show an archaic example rather than
+        # none; a modern sense may not.
+        allow_archaic = bool(_USAGE_TAGS & {str(t) for t in (sense.get("tags") or [])})
 
         def render(part: str) -> str:
             # drop the relation phrase the icon already conveys, escape the free
@@ -1712,23 +1724,23 @@ def _group_senses(
 
         if len(parts) == 1:
             if fresh(parts[0]):
-                items.append(("plain", markers + render(parts[0]), "", examples))
+                items.append(("plain", markers + render(parts[0]), "", examples, allow_archaic))
             continue
         parent, children = parts[0], parts[1:]
         if parent not in groups:
             if not fresh(parent):
                 continue
             groups[parent] = []
-            items.append(("group", render(parent), parent, []))
+            items.append(("group", render(parent), parent, [], False))
         if children and fresh(children[0]):
-            groups[parent].append((markers + render(children[0]), examples))
+            groups[parent].append((markers + render(children[0]), examples, allow_archaic))
         for child in children[1:]:
             if fresh(child):
-                groups[parent].append((render(child), []))
+                groups[parent].append((render(child), [], allow_archaic))
 
     return [
-        (text, groups[key]) if kind == "group" else ("", [(text, ex)])
-        for kind, text, key, ex in items
+        (text, groups[key]) if kind == "group" else ("", [(text, ex, allow_archaic)])
+        for kind, text, key, ex, allow_archaic in items
     ]
 
 
@@ -1762,22 +1774,28 @@ _ARCHAIC_MARKERS = (
 )
 
 
+def _example_is_bookkeeping(text: str) -> bool:
+    """Whether an example is a cross-reference stub that says nothing about use."""
+    return bool(_CITATION_RE.search(text))
+
+
+def _example_is_archaic(text: str) -> bool:
+    """Whether an example reads as Early Modern or Middle English."""
+    if "ſ" in text:                     # long s: an archaic quote
+        return True
+    lowered = text.lower()
+    return any(marker in lowered for marker in _ARCHAIC_MARKERS)
+
+
 def _example_is_usable(text: str) -> bool:
     """Whether an example is worth showing a modern learner.
 
-    Archaic quotations (Early Modern and Middle English) and ``Citations:``
-    pointers are unreadable or say nothing, and the source records far more of
-    them than modern usage; they are dropped so the few current examples are not
-    drowned out.
+    A cross-reference stub says nothing, and an Early Modern or Middle English
+    quotation is hard to read; both are dropped for a modern sense. An
+    archaic-marked sense may still show an archaic one (see
+    :func:`_sense_examples`).
     """
-    if "ſ" in text:                     # long s: an archaic quote
-        return False
-    if _CITATION_RE.search(text):
-        return False
-    lowered = text.lower()
-    if any(marker in lowered for marker in _ARCHAIC_MARKERS):
-        return False
-    return True
+    return not _example_is_bookkeeping(text) and not _example_is_archaic(text)
 
 
 def _truncate_example(text: str, limit: int = _EXAMPLE_MAX_CHARS) -> str:
@@ -1835,25 +1853,32 @@ def _example_shows_word(text: str, word: str, forms: Sequence[str] = ()) -> bool
 
 
 def _sense_examples(
-    raw: Sequence[str], word: str, forms: Sequence[str] = ()
+    raw: Sequence[str],
+    word: str,
+    forms: Sequence[str] = (),
+    allow_archaic: bool = False,
 ) -> List[str]:
     """Optional-zone lines for one sense's examples.
 
     Only examples that actually contain the headword (or one of the record's
-    forms) are kept, and archaic quotations or "Citations:" placeholders are
-    dropped — neither says anything about how the word is used today. The
-    survivors are ordered shortest-first and capped, because a sense needs one
-    crisp illustration, not every quotation the source happens to record.
+    forms) are kept, and a ``Citations:`` stub is never shown. A modern-readable
+    example is preferred; when the sense itself is marked obsolete, dated or
+    archaic (``allow_archaic``) and nothing readable qualifies, an archaic
+    quotation is shown rather than leaving the sense bare. One survives, shortest
+    first.
     """
-    usable = [
+    candidates = [
         text
         for text in (str(t).strip() for t in raw)
-        if text and _example_is_usable(text) and _example_shows_word(text, word, forms)
+        if text and not _example_is_bookkeeping(text)
+        and _example_shows_word(text, word, forms)
     ]
-    usable.sort(key=len)
+    readable = [text for text in candidates if not _example_is_archaic(text)]
+    chosen = readable if readable else (candidates if allow_archaic else [])
+    chosen.sort(key=len)
     return [
         f"\t[ex]{escape_dsl(_truncate_example(text))}[/ex]"
-        for text in usable[:_EXAMPLE_MAX_PER_SENSE]
+        for text in chosen[:_EXAMPLE_MAX_PER_SENSE]
     ]
 
 
@@ -2039,9 +2064,11 @@ def render_card(
                         heading = f"{group_nom}. {heading}"
                     lines.append(f"\t[m1]{heading}[/m]")
                 level = 2 if heading else 1
-                for text, raw_examples in entries:
+                for text, raw_examples, allow_archaic in entries:
                     lines.append(f"\t[m{level}]\u2022 {text}[/m]")
-                    examples = _sense_examples(raw_examples, words[i], forms_by_record[i])
+                    examples = _sense_examples(
+                        raw_examples, words[i], forms_by_record[i], allow_archaic
+                    )
                     if examples:
                         lines.append("\t[*]")
                         lines.extend(examples)
