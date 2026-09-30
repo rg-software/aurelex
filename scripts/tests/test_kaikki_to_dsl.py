@@ -1839,6 +1839,21 @@ class CardQualityTests(unittest.TestCase):
         self.assertEqual(body, "See ghost and [ref]real[/ref].")
         self.assertEqual(unlinked, 1)
 
+    def test_unlinking_a_nested_link_leaves_plain_text(self):
+        body, unlinked = TOOL.unlink_absent_refs("[ref][ref]ghost[/ref][/ref]", set())
+        self.assertEqual(body, "ghost")
+        self.assertGreaterEqual(unlinked, 1)
+
+    def test_a_target_named_by_two_relations_is_linked_once(self):
+        # alt_of and form_of both name "ho": the second wrap used to land inside
+        # the first, producing [ref][ref]ho[/ref][/ref].
+        escaped = TOOL.escape_dsl("Alternative form of [[ho]], ho, ho.")
+        sense = {"alt_of": [{"word": "ho"}], "form_of": [{"word": "ho"}]}
+        out = TOOL._link_form_targets(escaped, sense, {"ho"}, "ho ho")
+        self.assertIn("[ref]ho[/ref]", out)
+        self.assertEqual(out.count("[ref]"), 1)
+        self.assertEqual(out.count("[/ref]"), 1)
+
 
 class ArchaicExampleTests(unittest.TestCase):
     """An archaic sense may fall back to an archaic example; a modern one may not."""

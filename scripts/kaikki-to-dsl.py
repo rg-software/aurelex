@@ -493,12 +493,16 @@ def _link_form_targets(
     ``escaped`` is the gloss already run through :func:`escape_dsl`; the target is
     a plain word, so escaping leaves it unchanged and it can be wrapped in place.
     """
+    targets: List[str] = []
     for entry in list(sense.get("alt_of") or []) + list(sense.get("form_of") or []):
         if not isinstance(entry, dict):
             continue
         target = str(entry.get("word") or "").strip()
-        if not target or target == word:
-            continue
+        # A target named by several relations is linked once: a second wrap would
+        # land inside the first link and nest [ref] inside [ref].
+        if target and target != word and target not in targets:
+            targets.append(target)
+    for target in targets:
         if not known or target not in known:
             continue
         pattern = re.compile(
@@ -1629,18 +1633,22 @@ def unlink_absent_refs(body: str, present: Set[str]) -> Tuple[str, int]:
 
     ``known`` holds every candidate headword, but a candidate can render no card
     at all; a link to such a headword would be dead. Returns the body and how
-    many links were unlinked.
+    many links were unlinked. A malformed nested link (``[ref][ref]X[/ref][/ref]``)
+    is peeled one layer per pass until only plain text remains.
     """
     unlinked = 0
+    while True:
+        def replace(match: "re.Match[str]") -> str:
+            nonlocal unlinked
+            if _unescape_dsl(match.group(1)) in present:
+                return match.group(0)
+            unlinked += 1
+            return match.group(1)
 
-    def replace(match: "re.Match[str]") -> str:
-        nonlocal unlinked
-        if _unescape_dsl(match.group(1)) in present:
-            return match.group(0)
-        unlinked += 1
-        return match.group(1)
-
-    return _CROSS_REF_RE.sub(replace, body), unlinked
+        new_body = _CROSS_REF_RE.sub(replace, body)
+        if new_body == body:
+            return body, unlinked
+        body = new_body
 
 
 # A rendered sense, the raw examples that illustrate it, and whether the sense's
