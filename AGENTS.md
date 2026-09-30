@@ -131,7 +131,7 @@ elements in automated tests:
 | Top | Status strip | No interactive content — paints the edge-to-edge window's top chrome in the app background |
 | Search | Group button | `"Search group scope"` (shows the current group in the magenta accent scheme; always tappable — taps open the modal `Select group` picker, which has no "Groups" subtitle) |
 | Search | TextField | `"Search dictionaries"` |
-| Search | Clipboard button | `"Clipboard"` |
+| Search | Clipboard button | `"Clipboard"` (magnifier-over-page glyph, primary accent styling; **disabled while the clipboard holds no usable text** — it is enabled only when the clipboard has non-whitespace text, and tracks clipboard changes live) |
 | Search | Suggestion dropdown | Rendered as an HTML `<a>` panel (`#gd-sugg`) *inside* the article WebView — QML controls can't stack above Android's native WebView surface. Each entry carries a `data-w` word and dispatches via the QML link poller (`engine.lookup`), so no page navigation happens; the panel collapses when the article loads. UIAutomator sees entries via the WebView's own DOM accessibility subtree (content-desc = the word). No separate Qt node. |
 | Dicts | Add dict button | `"Add"` (icon-only folder-open glyph; imports a dictionary folder) |
 | Dicts | By Pair toggle | `"By Pair"` (translate glyph icon; highlighted when on) |
@@ -173,6 +173,7 @@ elements in automated tests:
 | FTS | TextField | `"Full-text search"` |
 | FTS | Whole words toggle | `"Whole words"` (Material Symbols "match word" glyph; magenta-filled when on, gray when off) |
 | FTS | Group button | `"Full-text search group scope"` (shows the current group in the magenta accent scheme; always tappable; sits inline next to the field, like Search; opens the same modal `Select group` picker) |
+| FTS | Search button | `"Search"` (magnifier icon button on its own row below the field; the only way to submit a search — typing, a scope change and the whole-words toggle do not search. Disabled while the query is blank and while a submitted search is running) |
 | FTS | Results list | `"Full-text search results"` |
 | History | Clear all | Rendered as a `data-action="clear-history"` row *inside* the article WebView when the search field is empty |
 | History | Word rows | Rendered as `data-w` anchors (tap = lookup) with `data-action="remove-history"` per-row buttons in the WebView; no separate Qt list/tab |

@@ -607,3 +607,14 @@ The create-group and rename-group dialogs SHALL lay out their name field and act
 #### Scenario: Labels of any length stay centered
 - **WHEN** the rename-group dialog is shown in a language whose action labels are longer than English
 - **THEN** the name field and the action buttons remain centered within the dialog and fully visible
+
+### Requirement: An empty error banner is not shown
+The engine-error banner SHALL be shown only when the engine reports a non-blank message; a whitespace-only message MUST NOT paint the banner.
+
+#### Scenario: Blank message paints nothing
+- **WHEN** the engine reports a message that is empty or only whitespace
+- **THEN** no error banner is shown
+
+#### Scenario: A real message is shown
+- **WHEN** the engine reports a non-blank message
+- **THEN** the error banner is shown with that message

@@ -32,16 +32,6 @@ terms that extend it (prefix matching). The two modes SHALL be distinct search
 modes, not just a suffix difference, so a whole-words search for a short word
 MUST NOT return longer words that merely resemble it.
 
-<!--
-Coverage note for the three scenarios below: `ui-polish` introduced them to
-assert that the keyboard submit, a scope-group change, and the whole-words
-toggle each *run* a search. This change abolishes the auto-triggers, so their
-bodies now assert the opposite. The scenario *names* are retained because the
-delta validator requires a MODIFIED block to carry every scenario name the
-current spec has; the names are now misleading and are corrected in the main
-spec when this change is archived.
--->
-
 #### Scenario: Plain-text match
 - **WHEN** the user enters a term present in an article body but not as a headword and submits it
 - **THEN** the app returns that article's headword as a result
@@ -54,17 +44,17 @@ spec when this change is archived.
 - **WHEN** the query text differs from the text that produced the displayed results
 - **THEN** the displayed results are cleared rather than left shown against the new query
 
-#### Scenario: Changing the scope group does not start a search
+#### Scenario: Changing the scope group re-runs the search
 - **WHEN** the user selects a different group in the scope control
-- **THEN** no full-text search runs until the user submits
+- **THEN** no search runs at that moment; the next submit runs the search in the newly selected group
 
 #### Scenario: Changing the scope group clears the other group's results
 - **WHEN** the user selects a different group in the scope control while results from a previous search are displayed
 - **THEN** those results are cleared, so no result from the previous scope is shown as if it belonged to the new scope
 
-#### Scenario: Toggling whole words does not start a search
+#### Scenario: Toggling whole words re-runs the search
 - **WHEN** the user toggles the whole-words control
-- **THEN** no full-text search runs until the user submits, and the next submitted search uses the new mode
+- **THEN** no search runs at that moment; the next submit runs the search with the new matching mode
 
 #### Scenario: Toggling whole words clears results from the other mode
 - **WHEN** the user toggles the whole-words control while results from a previous search are displayed
@@ -118,14 +108,6 @@ spec when this change is archived.
 #### Scenario: Submitting from the keyboard runs the search
 - **WHEN** the user presses the keyboard's submit action with a non-empty query
 - **THEN** the app runs a full-text search for that query in the selected scope — the keyboard submit is the same submit path as the search control
-
-#### Scenario: Changing the scope group re-runs the search
-- **WHEN** the user selects a different group in the scope control and then submits
-- **THEN** the app runs the search in the newly selected group — the scope change alone runs nothing, but the next submit uses the new scope
-
-#### Scenario: Toggling whole words re-runs the search
-- **WHEN** the user toggles the whole-words control and then submits
-- **THEN** the app runs the search with the new matching mode — the toggle alone runs nothing, but the next submit uses the new mode
 
 #### Scenario: Search with wildcards
 - **WHEN** the user enters a term ending in `*` (e.g. `read*`) with whole words off and submits it
