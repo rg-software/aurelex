@@ -285,13 +285,10 @@ ApplicationWindow {
             // fresh inline WebView is (re)created by inlineWebTimer shortly
             // after; the pending suggestions are flushed once it's ready.
             //
-            // Focus and text must not be applied in the same frame as the pane
-            // switch: Material's floating label animates between "inside the
-            // box" and "above the border" from (activeFocus || length > 0), and
-            // a focus grant landing while the pane is still settling leaves the
-            // label drawn ON the border. Re-assert focus on the next turn so the
-            // label animates from a settled state (same class of in-flight-state
-            // race as _suppressSuggest below).
+            // Focus is granted on the next turn, once the pane is actually
+            // visible: the field's frame repaints on focus and on text, while
+            // its floating label settles on its own schedule, so granting focus
+            // mid-switch can leave the frame redrawn through the label.
             Qt.callLater(function() {
                 if (root.state !== 0) return
                 input.forceActiveFocus()
@@ -1072,6 +1069,10 @@ ColumnLayout {
                     highlighted: true
                     padding: 4
                     font.pixelSize: 14
+                    // Never take keyboard focus: tapping this would move active
+                    // focus off the search field and desync its frame from its
+                    // floating label (see the clipboard button).
+                    focusPolicy: Qt.NoFocus
                     text: {
                         if (engine.groups.length === 0) return ""
                         const i = root._groupIndexForId(root.searchGroupId)
@@ -1097,6 +1098,12 @@ ColumnLayout {
                     // usable text (control-state-and-fts-whole-words).
                     highlighted: true
                     enabled: root.clipboardHasText
+                    // Never take keyboard focus. Qt would otherwise move active
+                    // focus off the search field on press, repainting the field's
+                    // frame from magenta to grey while the floating label keeps its
+                    // old position — and restoring focus repaints only the frame,
+                    // leaving it drawn through the label. A tap does not need focus.
+                    focusPolicy: Qt.NoFocus
                     Accessible.name: "Clipboard"
                     Accessible.role: Accessible.Button
                     // Paste clipboard text into the search field (so the looked-up
@@ -1104,15 +1111,18 @@ ColumnLayout {
                     onClicked: {
                         const t = engine.clipboardText()
                         if (t.length > 0) {
-                            // Assign the text with suggestion queries suppressed
-                            // (the assignment fires onDisplayTextChanged, and an
+                            // Ensure the field is the focused control before the
+                            // text changes, so the frame and the label both settle
+                            // from the focused state.
+                            input.forceActiveFocus()
+                            // Assign with suggestion queries suppressed (the
+                            // assignment fires onDisplayTextChanged, and an
                             // unsuppressed suggest would race the lookup below).
                             root._suppressSuggest = true
                             input.text = t
                             root._suppressSuggest = false
                             root._requestedWord = t
                             engine.lookup(t)
-                            Qt.callLater(function() { input.forceActiveFocus() })
                         }
                     }
                 }

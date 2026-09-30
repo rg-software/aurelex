@@ -1,18 +1,23 @@
 // Minimal repro for the Material TextField floating-label glitch.
 //
-// The app's Search field rendered its "floating" placeholder label ON the box
-// border instead of above it, on two Android devices. This file strips
-// everything else away: stock Material style, one TextField with the app's
-// settings, plus a default-sized control field.
+// The app's Search field drew its "floating" placeholder label straight through
+// the box border instead of above it. Two independent triggers were found, both
+// reproduced in this file:
 //
-// Cause: `font.pixelSize: 18`. Material's MaterialTextContainer positions the
-// floating label from the placeholder's largestHeight, and at 18px that exceeds
-// what the style budgets for, so the label is drawn at the unfloated y.
+// 1. FONT SIZE. Material's MaterialTextContainer positions the floating label
+//    from the placeholder's largestHeight, and font.pixelSize: 18 exceeds what
+//    the style budgets for, so the label is drawn at the unfloated y.
+//    Field A below is the fixed version; uncomment its font.pixelSize line to
+//    see it.
+//
+// 2. FOCUS STEALING. A Button next to the field takes keyboard focus on press,
+//    which repaints the field's frame grey while the label keeps its position.
+//    Restoring focus repaints only the frame, leaving it drawn through the
+//    label. Fixed in the app with focusPolicy: Qt.NoFocus on the neighbouring
+//    buttons; tap "B" here (a focusable Button) to see the effect.
 //
 // Run:  C:\Qt\6.6.3\msvc2019_64\bin\qmlscene.exe docs\repro\labelglitch.qml
-//   A (top)    - the app's field; correct now that font.pixelSize is gone.
-//                Uncomment the font.pixelSize line in field A to see the glitch:
-//                the label drops onto the border and overlaps the text.
+//   A (top)    - the app's field settings; correct as written.
 //   B (bottom) - default font size; always correct. The control.
 import QtQuick
 import QtQuick.Controls.Material
