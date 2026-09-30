@@ -62,6 +62,41 @@ This adb-installs the result (`-Install`); without it the APK lands in
 | 21 | Look up the same word twice | One history entry (dedupe, moves to front) | ✅ |
 | 22 | Look up a word not in any dict | **Not** added to history | ✅ |
 
+## Article zoom & reflow
+
+Zoom is a **CSS root font-size** on the open article, not a page scale: the
+layout reflows to the new measure instead of scaling a fixed-width column. The
+value is stored as `articleZoom` in `files/settings.json`, snapped to 25% steps
+and clamped to **75–250%**, so it survives a restart.
+
+| # | How to test | Expected | Status |
+| --- | --- | --- | --- |
+| 18a | Open an article, tap "Zoom in" twice (100 → 150%) | Text and images grow together; **no** horizontal scrollbar appears; long paragraphs re-wrap to the wider measure rather than being clipped | ⬜ |
+| 18b | Tap "Zoom out" to the floor | Stops at 75%; the button greys out and stays there | ⬜ |
+| 18c | Tap "Zoom in" to the ceiling | Stops at 250%; the button greys out and stays there | ⬜ |
+| 18d | At 150%, look up a *different* word | The new article opens at 150% — zoom is a property of the surface, not of one article | ⬜ |
+| 18e | Force-stop at 150%, relaunch, open an article | Still 150% | ⬜ |
+| 18f | Zoom in on an article that has an `<img>` and a sense-marker icon | Both scale; the `gd_tag_*` icons stay inline with the text rather than drifting | ⬜ |
+| 18g | Zoom to 75% on a long article and scroll to the end | No horizontal overflow at any zoom level | ⬜ |
+
+## Article optional parts (`[*]…[/opt]`)
+
+DSL dictionaries hide author-marked optional content (answers, notes, extra
+examples) behind a single `[+]` expander per entry, rendered by the engine as an
+`<img class="hidden_expand_opt">` and driven by
+`app/android/assets/scripts/gd-article-controls.js`. One expander reveals **all**
+of that entry's zones at once. UIAutomator sees it through the WebView's DOM
+accessibility subtree, where the state is the `alt` text: `[+]` collapsed,
+`[-]` revealed.
+
+| # | How to test | Expected | Status |
+| --- | --- | --- | --- |
+| 18h | Open a kaikki DSL article that has examples or a `See also` zone | A `[+]` expander is present; the zone content is hidden | ⬜ |
+| 18i | Tap the expander | The icon swaps to `[-]` and **every** zone in that entry expands at once | ⬜ |
+| 18j | Tap again | Collapses back to `[+]`; the page returns to its previous height | ⬜ |
+| 18k | Check the accessibility tree while expanded | `content-desc` reads `[-]`, not `[+]` — the alt text is the state flag | ⬜ |
+| 18l | Look up a headword with **no** optional zone | No expander rendered at all (there is nothing to reveal) | ⬜ |
+
 ## Theme (dark / light / follow system)
 
 The dock's theme cell cycles **Light → Dark → Follow system → Light**. Its glyph and its
@@ -165,6 +200,34 @@ under "Localization" in `docs/DEVELOPMENT.md`.
 | 54 | In RU/JA, inspect the Quick Settings tile and home-screen widget | Tile/widget labels localize ("Поиск в Aurelex", "Aurelex で検索") | ⬜ (needs the RU/JA device) |
 | 55 | UIAutomator / Appium dump in RU or JA | `Accessible.name`/`content-desc`/`className` remain stable English IDs (localization never touches the accessibility names) | ⬜ (re-run the existing on-device flows under any locale) |
 
+## Remote dictionary catalog
+
+"Add from remote" (the cloud button in the Dictionaries toolbar) opens a
+full-page catalog pane. Opening it **re-probes automatically** — there is no
+refresh button. Nothing is fetched at app start, so an install that never opens
+the pane makes no catalog request. Format, manifest and hosting rules:
+`docs/REMOTE-CATALOG.md`.
+
+| # | How to test | Expected | Status |
+| --- | --- | --- | --- |
+| 56 | Dictionaries toolbar → "Add from remote" | The catalog pane opens with the title "Dictionary catalog" and a Back arrow; the manifest is fetched | ⬜ |
+| 57 | Wait for the list | Entries appear as rows named `<entry name>` under "Remote catalog list", with attribution/licence beneath | ⬜ |
+| 58 | Tap an entry name, then the header download icon | The row highlights, the icon becomes "Cancel download", and a `ProgressBar` plus a non-interactive line appear | ⬜ |
+| 59 | Let a download finish | The row goes grey and its accessible name gains `, installed`; the entry then appears in the Dictionaries list after the rescan, and the auto-index banner follows | ⬜ |
+| 60 | Back out to the dictionary list while a download runs | The download keeps running; reopening the pane shows its progress | ⬜ |
+| 61 | Tap "Cancel download" mid-transfer | The line reads "Download cancelled."; the partially written files never appear as a dictionary and no stray entry is left in the list | ⬜ |
+| 62 | Re-install an entry that is already installed | Clean no-op: the row reads `, installed`, is **not** selectable, and no duplicate dictionary row appears | ⬜ |
+| 63 | An entry with an optional audio bundle | The row carries a music-note toggle named "Audio for `<name>`"; tapping the note first switches it to "No audio for `<name>`" and the selection downloads the dictionary without audio | ⬜ |
+| 64 | An **installed** entry still missing its bundle | Its audio toggle is enabled and tapping it fetches only the bundle into the same directory; audio then plays after the dictionary reloads, with no app restart | ⬜ |
+| 65 | With < 512 MiB free, start a download | Refused with the "Not enough free space" dialog naming the need and the free amount; nothing is fetched | ⬜ |
+| 66 | With between 512 MiB and 2 GiB free, start a download | "Not much free space" dialog; Cancel aborts, OK proceeds (the index built afterwards also needs room) | ⬜ |
+| 67 | Airplane mode, then open the pane | A previously-fetched catalog still renders, with the warning "Showing the last saved catalog. Downloads need a connection to the catalog host."; a per-entry download attempt fails with a stated reason rather than silently | ⬜ |
+| 68 | Airplane mode on a **first** run with no cached manifest | "The catalog could not be loaded." with the reason; the app does not crash and the rest of the Dicts tab works | ⬜ |
+| 69 | Point the app at a manifest containing an unsupported format (`.epwing`) | The entry is **listed but not selectable**, with "This dictionary's format is not supported by this app version." — the rest of the catalog still loads | ⬜ |
+| 70 | Inspect a downloaded dictionary's files | It is a staged copy under `files/staged/<contentHash>/`; re-importing the same folder is still deduped (#4/#5) | ⬜ |
+| 71 | Install an `.mdx`+`.mdd` catalog entry | The entry reports installed only once **both** halves have landed | ⬜ |
+| 72 | A release build, on a device with no other TLS user | The catalog loads. ⚠️ If it reports "TLS initialization failed" while everything else works, the APK shipped without the vendored `libcrypto_3.so`/`libssl_3.so` — the WebView brings its own TLS, so this is the only feature that notices | ⬜ |
+
 ## Known gaps
 
 - `.mdd` images not exercised on-device (#18) — needs a real MDict fixture.
@@ -202,10 +265,21 @@ under "Localization" in `docs/DEVELOPMENT.md`.
   build, and the dictionary being built is withheld until its index completes.
   A very large dictionary is not auto-indexed during import; its index is built
   on the first full-text search over it (`fts-indexing-performance`).
+- The remote catalog has **no on-device coverage at all** (#56–#72). It is the
+  largest shipped feature with zero device verification, and the only one that
+  depends on TLS working in a release build.
+- Article zoom/reflow (#18a–#18g) and the optional-parts expander
+  (#18h–#18l) are likewise unexercised on a device.
+- The compiled-in catalog URL is still the maintainer's temporary self-hosted
+  share rather than the documented GitHub Pages address, so a released build
+  cannot currently fetch the real catalog (`docs/REMOTE-CATALOG.md` § Hosting).
 
 ## Provenance
 
-Device notes captured in archived changes: Motorola ThinkPhone (Android 15),
-verified 2026-09-03 across the Qt build — folder-scoped SAF storage, recursive
-scan, FTS prefix/whole-words, auto-index, history/favorites, theme (manual
-toggle, then the tri-state cycle), external entry points, tile/widget.
+Device notes captured in archived changes: **Motorola ThinkPhone (Android 15)**.
+The baseline pass was 2026-09-03 (folder-scoped SAF storage, recursive scan, FTS
+prefix/whole-words, auto-index, history/favorites, theme toggle, external entry
+points, tile/widget); later items were verified on later passes — the tri-state
+theme control and FTS-indexing interleaving on 2026-09-29, the search-field focus
+and floating-label fixes on 2026-10-01. Items still marked ⬜ have **not** been
+seen on any device.

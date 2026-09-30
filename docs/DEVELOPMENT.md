@@ -12,8 +12,17 @@ Aurelex. If you are a user, see the top-level `README.md` instead.
 - `app/` — the Qt app (QML + WebView, Android) that consumes the carve in-process.
 - `openspec/` — planning artifacts (proposals, specs, design, tasks); the design is the source
   of truth for scope.
-- `docs/` — in-repo guidance: `TESTING.md`, `SIGNING.md`, `ROADMAP.md`, `UPSTREAM.md`,
-  `KAIKKI-CONVERSION.md`.
+- `docs/` — in-repo guidance. Start here, then follow the link you need:
+  - `DEVELOPMENT.md` — this file: layout, build, tests, workflow.
+  - `UPSTREAM.md` — the engine pin, the four deviation patches, the bump procedure.
+  - `TESTING.md` — the on-device verification checklist (what is verified, what is not).
+  - `REMOTE-CATALOG.md` — the remote catalog's manifest format, hosting, and free-space rules.
+  - `KAIKKI-CONVERSION.md` — building DSL dictionaries from kaikki.org extracts.
+  - `ROADMAP.md` — milestone tracker and the permanent cut register.
+  - `SIGNING.md` — signing channels, Play/F-Droid split, app identity.
+  - `repro/` — standalone host repros for rendering bugs; each is referenced from
+    the code comment or archived change that motivated it, and each carries its
+    own run instructions.
 - `scripts/` — `apply-patches.*`, fixture generators, build helpers, and
   `kaikki-to-dsl.py` (build DSL dictionaries from kaikki.org Wiktionary extracts).
 
@@ -70,12 +79,65 @@ to adb-install the result. A signed release APK is produced by the CI workflow
 `versionName`/`versionCode` come from the tag. See `docs/SIGNING.md` for the Google Play /
 F-Droid signing split.
 
-## Engine smoke test
+## Tests
+
+There are three test layers. None of them needs a device; the device recipe
+lives in `docs/TESTING.md`.
+
+### Host unit tests (`app/tests`, desktop Qt)
+
+`app/tests/CMakeLists.txt` is a **standalone host project**, deliberately not part
+of `app/CMakeLists.txt` (that one is Android-only and pulls in the whole carved
+engine). Each target links only the slice of app code it exercises and stubs
+whatever boundary it needs — `article_server_test` links Qt Core + Qt Network and
+stubs `gd_get_resource`/`gd_get_audio`; the other four are Qt Core only against
+header-only code — so these build and run in seconds on a desktop Qt.
+
+```powershell
+cmake -S app/tests -B build-app-tests -DCMAKE_PREFIX_PATH=C:/Qt/6.6.3/msvc2019_64 -G Ninja
+cmake --build build-app-tests --config Release
+foreach ($t in @('article_server_test','index_migration_test','index_cleanup_test','dictionary_index_test','catalog_test')) {
+  & "build-app-tests/$t.exe"; if ($LASTEXITCODE -ne 0) { throw "$t failed" }
+}
+```
+
+| Target | Covers |
+| --- | --- |
+| `article_server_test` | `ArticleServer` resource/audio requests, with `gd_get_resource`/`gd_get_audio` stubbed |
+| `index_migration_test` | the index-directory path separator and the stray-sweep migration |
+| `index_cleanup_test` | index removal on dictionary delete |
+| `dictionary_index_test` | display-order ↔ engine-index mapping |
+| `catalog_test` | the remote-catalog manifest parser, installed-detection and the free-space preflight constants, against the fixtures in `app/tests/fixtures/` |
+
+Building a single target is often enough while iterating:
+`cmake --build build-app-tests --target catalog_test`. Adding a new test means
+adding a target here; keep it host-only (the project hard-fails on `ANDROID`).
+
+### Converter tests (`scripts/tests`, Python)
+
+The kaikki converter has its own suite, standard library only, no network — every
+audio path either passes `--no-audio-download`, injects a stub downloader, or
+blocks the opener:
+
+```powershell
+python -m unittest discover -s scripts/tests
+```
+
+### Engine smoke test (`carve/smoke`, CI)
 
 `carve/` builds a host smoke tool (`AURELEX_BUILD_SMOKE=ON`) exercised by
-`.github/workflows/engine-smoke.yml` on every engine/patch/carve change: it scans a fixture
-folder (including a nested-subfolder fixture, asserting recursion), looks up a known word, and
-checks FTS + group/remove behavior. Any upstream bump must keep the smoke green.
+`.github/workflows/engine-smoke.yml` on every engine/patch/carve change: it scans a
+fixture folder (including a nested-subfolder fixture, asserting recursion), looks
+up a known word, and checks FTS + group/remove behavior. **Any upstream bump must
+keep the smoke green** — it is the gate that catches an engine merge that
+compiles but breaks the boundary.
+
+## On-device verification
+
+`docs/TESTING.md` holds the manual recipes (build/install, lookup, article
+rendering, audio, groups, FTS, history/favorites, storage, the remote catalog,
+external entry points) with a per-item status. It is the record of what has
+actually been seen on hardware, as opposed to what the tests above prove.
 
 ## Upstream & maintenance
 
@@ -93,11 +155,6 @@ Planning artifacts live in `openspec/`. Features/fixes flow through changes:
 4. Verify on-device, archive, then update `docs/ROADMAP.md`.
 
 See `docs/ROADMAP.md` for the milestone tracker and cut register.
-
-## Testing
-
-Manual verification recipes live in `docs/TESTING.md` (build/install, lookup, article rendering,
-audio, groups, FTS, history/favorites, storage, external entry points).
 
 ## Localization
 

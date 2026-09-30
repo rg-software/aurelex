@@ -13,8 +13,12 @@ attaches both to a GitHub release:
 
 | Artifact | Path | Used by |
 | --- | --- | --- |
-| `.apk` | `build-qtquick/apk/build/outputs/apk/release/aurelex-release.apk` | GitHub releases / F-Droid / sideload |
-| `.aab` | `build-qtquick/apk/build/outputs/bundle/release/aurelex-release.aab` | Google Play upload |
+| `.apk` | `build-qtquick/apk/build/outputs/apk/release/*.apk` | GitHub releases / F-Droid / sideload |
+| `.aab` | `build-qtquick/apk/build/outputs/bundle/release/*.aab` | Google Play upload |
+
+The release workflow locates both by glob, not by name, and fails the job if
+either glob comes up empty — so the exact Gradle-assigned filename is free to
+change and nothing should depend on it.
 
 (`app/build.ps1 -Configuration Release -Bundle` produces the same pair
 locally.) `versionName` is the tag (`vX.Y.Z` → `X.Y.Z`); `versionCode` is derived

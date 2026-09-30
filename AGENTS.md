@@ -32,7 +32,8 @@ for the milestone tracker).
 ## Repository layout (target)
 
 - `engine/` — goldendict-ng submodule, pinned at a release tag, never edited.
-- `patches/` — the only deviations from upstream (3 patches: dsl svg-drop, android home, fts wildcard cap). Keep it small.
+- `patches/` — the only deviations from upstream (4 patches: dsl svg-drop, android home,
+  fts wildcard cap, fts sliced build). Keep it small; `docs/UPSTREAM.md` enumerates them.
 - `carve/` — the `gd_*` C boundary (`goldendict.h`, `gd_boundary.cc`) + selected engine sources
   compiled once as an object library, shared by the Qt app and the CI smoke tool.
 - `app/` — the Qt app (QML + WebView, Android) that consumes the carve in-process.
@@ -103,6 +104,13 @@ SHALL/MUST language) — follow the instructions output before writing any artif
   four fixed names to `/icons/`). When adding an icon the engine emits into articles, add the
   asset to `app/android/assets/icons/` and a bounded rewrite (fixed names, not a wildcard) in
   `rewriteArticleUrls`; keep `bres://` for genuinely per-dictionary resources (images, audio).
+  The rule is about **Aurelex's rendering path**, not about the artifact a producer emits: the
+  converter still writes the `gd_tag_*.svg` set into each generated dictionary's `.files` bundle so
+  the output stays self-contained for non-Aurelex consumers (GoldenDict desktop, the standalone
+  preview HTML). That is deliberate, and it is not a counterexample — because the rewrite maps all
+  four names, the app never fetches the bundled copies. Do not "fix" the converter to stop
+  bundling them, and do not treat their presence in a bundle as a reason to skip the asset or the
+  rewrite.
 - **Localization:** English is the source language. If user-visible English text changes in Qt
   sources (`qsTr`/`tr` arguments) or in `app/android/res/values/strings.xml`, the other shipped
   languages (RU, JA) MUST be updated in the same change: run

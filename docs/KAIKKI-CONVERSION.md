@@ -80,6 +80,7 @@ phone (same folder) and add that folder in Aurelex.
 | `--jsonl PATH` | Use a local JSONL/`.jsonl.gz` instead of downloading. |
 | `--jsonl-url URL` / `--audio-url URL` | Override the source URLs (e.g. a small per-language extract). |
 | `--audio-tar PATH` | Use a local audio tar instead of downloading. |
+| `--skip-date-check` | Do not verify the pinned dump date against kaikki.org. Needed for any date kaikki has since rotated away. |
 | `--cache-dir DIR` | Download cache (default `~/.cache/aurelex-kaikki`). |
 | `--out-dir DIR` | Output directory (default `dist`). |
 | `--name NAME` | Output base name (default `kaikki-<source>`). |
@@ -90,17 +91,28 @@ phone (same folder) and add that folder in Aurelex.
 | `--no-audio-download` | Do not fetch audio that the archive lacks from Wikimedia (archive only). |
 | `--force-audio-index` | Rebuild the cached audio-archive name index even if it looks current. |
 | `--audio-layout {zip,dir}` | Bundle audio as one archive (default) or a loose directory. |
+| `--reuse-bundle` | Render the dictionary only and reuse the resource bundle already beside it instead of rebuilding it; the existing bundle is checked to cover every resource the dictionary references. Use it when a re-render changes only the text — it skips the audio-archive pass entirely. Fails rather than shipping a dictionary whose bundle is missing a referenced file. |
 | `--sample N` | Emit exactly N headwords (a word with several records is one headword); reads only a bounded part of the snapshot, so it is quick. |
 | `--sample-mode {first,random}` | How `--sample` picks headwords: first N in file order, or a reproducible spread over thousands of headwords (default `first`). |
 | `--preview` | Also write `<name>.preview.html`. |
 | `--force-download` | Re-download cached files. |
 | `--timeout SECONDS` | Network timeout (default 60). |
 
-A second mode shares the options that decide *which* articles, and so which
-audio, are wanted — `--source-lang`, `--dump-date`, `--jsonl`, `--audio-tar`,
-`--cache-dir`, `--audio-per-word`, `--audio-lang`, `--sample`, `--sample-mode` —
-and adds `--list`, `--limit N`, `--spacing`, `--retries`, `--max-backoff` and
-`--manifest`. See [Filling the audio cache separately](#filling-the-audio-cache-separately).
+The table above is the **build** parser. The tool has three more modes, each
+with flags of its own that this table does not accept:
+
+| Mode | Its own flags | Covered in |
+| --- | --- | --- |
+| `prefetch-audio` | `--list`, `--limit N`, `--spacing`, `--retries`, `--max-backoff`, `--manifest`, `--split N` | [Filling the audio cache separately](#filling-the-audio-cache-separately) |
+| `fetch-list FILE` | `--into DIR` (required), `--dead PATH`, `--force-download`, `--limit N`, `--spacing`, `--retries`, `--max-backoff` | [Splitting the job across machines](#splitting-the-job-across-machines) |
+| `bundle-audio` | — (reuses the build's audio options) | [Recovering a failed bundle](#recovering-a-failed-bundle) |
+
+`prefetch-audio` also accepts the build's *selection* options — `--source-lang`,
+`--dump-date`, `--jsonl`, `--audio-tar`, `--cache-dir`, `--audio-per-word`,
+`--audio-lang`, `--sample`, `--sample-mode` — because they decide which articles,
+and so which recordings, are wanted. Give it the **same** values as the build: a
+mismatched `--audio-per-word` fetches a different set of files than the build
+will reference.
 
 ## Headwords, base forms, and inflections
 

@@ -10,15 +10,23 @@ no scraping, no accounts, and no entry versioning. Everything a user installs
 from it is downloaded once and then searched entirely on-device, exactly like a
 dictionary they imported themselves.
 
+The app knows one catalog address. There is **no UI** for changing it; the
+address is a compiled-in default that `settings.json` may override via a
+`remoteCatalogUrl` key (a non-`https://` value is ignored and the compiled
+default is used instead). The key exists so a maintainer can repoint a build
+without a release; making it user-editable is a later, additive settings change.
+
 ## How it works in the app
 
 - "Add from remote" (the cloud button in the Dictionaries pane) opens the
   catalog sheet and fetches the manifest over HTTPS. Nothing is fetched at app
   start; if the screen is never opened, no catalog request is made.
 - The manifest is cached in `settings.json` (`remoteCatalogManifest`,
-  `remoteCatalogFetchedAt`). A cached copy still renders read-only while
-  offline, but starting a download requires a successful re-probe; per-entry
-  download attempts from a stale list fail with a stated reason.
+  `remoteCatalogFetchedAt`, and a `remoteCatalogReachable` flag). A cached copy
+  still renders read-only while offline, but starting a download requires a
+  successful re-probe; per-entry download attempts from a stale list fail with a
+  stated reason. A failed re-probe deliberately leaves the last good manifest in
+  place rather than blanking the list mid-refresh.
 - Choosing entries downloads them in a foreground service
   (`DictionaryDownloadService`) with byte-level progress and a Cancel button.
   Files stream into `files/staging-tmp/<contentHash>/`, are verified, then
@@ -26,10 +34,20 @@ dictionary they imported themselves.
 - The existing scan → auto-index → refresh chain then picks them up unchanged:
   `runScan()` walks `files/staged` recursively and does not care how the bytes
   arrived. An installed entry is removed by the normal Remove button.
-- Optional bundles (audio and other resources) are opt-in. After installing an
-  entry, a "Add audio" action fetches the optional files into the **same**
-  `files/staged/<contentHash>/` directory and reloads just that dictionary so
+- Optional bundles (audio and other resources) are **opt-in per entry**, not a
+  separate post-install step: each catalog row carries a music-note toggle
+  (`Audio for <name>` / `No audio for <name>`) that arms the optional files for
+  the next download, and stays enabled for an installed entry that is still
+  missing its bundle. Fetching them writes into the **same**
+  `files/staged/<contentHash>/` directory and reloads just that dictionary, so
   the new resources take effect without an app restart.
+- Before a batch starts, a free-space preflight runs. It has **two** tiers, and
+  the second is advisory: under 512 MiB of headroom the download is refused
+  outright ("Not enough free space"); under 2 GiB it proceeds only after an
+  explicit confirmation ("Not much free space"), because the FTS index built
+  afterwards also needs room. The transfer itself is still bounded by the
+  server's `Content-Length`, so a manifest that understates `sizeBytes` fails
+  with a real reason rather than silently truncating.
 
 ## Layout and shared identity
 
@@ -156,7 +174,16 @@ every installed app) and it is served from a CDN with proper HTTP semantics
 serves a cached copy and re-probes at most once every 6 hours (or on an explicit
 refresh), so an update reaches users without hammering the host.
 
+The address is the constant `EngineController::kDefaultRemoteCatalogUrl`
+(`app/EngineController.hpp`). **It does not point at Pages yet** — it is still
+the maintainer's temporary self-hosted share, kept there to exercise the real
+download path on device. Swapping that constant to the Pages URL above is the
+last step of standing this up; until it happens, no released build can fetch the
+catalog.
+
 The manifest must be no larger than 4 MiB; the app aborts the fetch past that.
+A fetch also gives up after 15 s, so a slow link fails to a stated error instead
+of leaving the catalog spinner up indefinitely.
 
 ## Adding an entry
 
