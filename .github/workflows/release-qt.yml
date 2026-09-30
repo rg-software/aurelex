@@ -276,6 +276,15 @@ jobs:
       # is the last point before the artifact is published.
       - name: Assert vendored TLS libraries are in the packaged artifacts
         shell: pwsh
+        # The artifacts step publishes the located paths as step *outputs*
+        # (GITHUB_OUTPUT), which become ${{ steps.artifacts.outputs.* }} in YAML
+        # but are NOT process env vars in later steps. Map them in explicitly --
+        # otherwise $env:APK_PATH / $env:AAB_PATH are empty and this step fails on
+        # its own wiring ("path not set by the artifacts step") before it ever
+        # opens a zip, which is a false alarm, not a missing-TLS finding.
+        env:
+          APK_PATH: ${{ steps.artifacts.outputs.APK_PATH }}
+          AAB_PATH: ${{ steps.artifacts.outputs.AAB_PATH }}
         run: |
           Add-Type -AssemblyName System.IO.Compression.FileSystem
           # Which ABIs must the artifact contain? The ones this job builds, which
