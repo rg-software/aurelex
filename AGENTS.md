@@ -78,6 +78,16 @@ SHALL/MUST language) — follow the instructions output before writing any artif
 ## Conventions
 
 - Spec capability paths: kebab-case, flat layout (`dictionary-management`, `lookup`, ...).
+- **`app/openssl/<abi>/*.so` are vendored binaries, not build output — keep them tracked.**
+  The repo `.gitignore` has a blanket `*.so` rule for NDK/vcpkg artifacts with one scoped
+  negation (`!app/openssl/**/*.so`) for this directory. Do not remove that negation and do not
+  delete these files as build output. Qt's Android TLS is the OpenSSL backend and `dlopen()`s
+  them at run time, so an artifact built without them has **no working TLS** — the remote
+  dictionary catalog silently fails with "TLS initialization failed" while everything else
+  looks fine, because the WebView brings its own TLS. The CMake configure step fails hard if
+  they are missing, and the release workflow asserts they reached the packaged APK/AAB. Provenance
+  (upstream commit, version, per-file digests) is recorded in `app/openssl/README.md`; an upgrade
+  replaces the files and updates that table in the same commit.
 - Before any upstream bump: build the engine, run the CI smoke test, and update specs only if
   observable behavior changed (never massage specs to fit a refactor).
 - Work flows through OpenSpec changes first; implementation does not run ahead of the plan.

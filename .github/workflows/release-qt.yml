@@ -264,6 +264,96 @@ jobs:
           Write-Host "release AAB (relative): $aabRel"
           "AAB_REL=$aabRel" >> $env:GITHUB_OUTPUT
 
+      # Qt's Android TLS is the OpenSSL backend, which dlopen()s
+      # libcrypto_3.so / libssl_3.so at run time; the Qt android kit does not ship
+      # them, so they are vendored in app/openssl/<abi> and packaged via
+      # QT_ANDROID_EXTRA_LIBS. Without them the shipped app has NO working TLS and
+      # every QNetworkAccessManager HTTPS request fails with "TLS initialization
+      # failed" -- the remote dictionary catalog being the only feature to notice.
+      # The WebView is unaffected (Chromium has its own TLS), so nothing else in
+      # the app reveals it. The CMake configure step already fails when the libs
+      # are missing from the checkout; this asserts they survived packaging, which
+      # is the last point before the artifact is published.
+      - name: Assert vendored TLS libraries are in the packaged artifacts
+        shell: pwsh
+        run: |
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          # Which ABIs must the artifact contain? The ones this job builds, which
+          # is the set of installed Qt android kits -- derived rather than
+          # hardcoded, so adding a kit to the install step above needs no edit
+          # here. Qt kit directory names and Android ABI directory names differ
+          # (android_arm64_v8a vs lib/arm64-v8a/), so map them explicitly instead
+          # of string-substituting, and refuse to guess on an unmapped kit.
+          $kitToAbi = @{
+              "android_arm64_v8a" = "arm64-v8a"
+              "android_armv7"     = "armeabi-v7a"
+              "android_x86_64"    = "x86_64"
+              "android_x86"       = "x86"
+          }
+          $kits = @(Get-ChildItem "$env:AURELEX_QT_BASE\android_*" -Directory -ErrorAction SilentlyContinue)
+          if (-not $kits) { throw "no Qt android kit under $env:AURELEX_QT_BASE" }
+          $abis = @()
+          foreach ($kit in $kits) {
+              if (-not $kitToAbi.ContainsKey($kit.Name)) {
+                  throw "unmapped Qt android kit '$($kit.Name)'; add it to `$kitToAbi so the expected ABI list stays correct"
+              }
+              $abis += $kitToAbi[$kit.Name]
+          }
+          $abis = @($abis | Sort-Object -Unique)
+          # Every built ABI must also be vendored. The CMake configure step
+          # already fails in that case, so getting here means the guard was
+          # bypassed -- say so rather than quietly checking a smaller set.
+          $vendored = @(Get-ChildItem "$env:GITHUB_WORKSPACE\app\openssl" -Directory -ErrorAction SilentlyContinue | ForEach-Object { $_.Name })
+          $unvendored = @($abis | Where-Object { $vendored -notcontains $_ })
+          if ($unvendored) {
+              throw "built ABI(s) not vendored under app/openssl: $($unvendored -join ', ') (vendored: $($vendored -join ', ')) -- the CMake guard should have failed the configure step"
+          }
+          Write-Host "Qt android kits -> ABIs: $($abis -join ', ')"
+          $libs = @("libcrypto_3.so", "libssl_3.so")
+
+          $failures = @()
+          foreach ($artifact in @(
+              @{ Label = "APK"; Path = $env:APK_PATH; Prefix = "lib/{0}" },
+              @{ Label = "AAB"; Path = $env:AAB_PATH; Prefix = "base/lib/{0}" })) {
+              if (-not $artifact.Path) { $failures += "$($artifact.Label): path not set by the artifacts step"; continue }
+              if (-not (Test-Path $artifact.Path)) { $failures += "$($artifact.Label): not found: $($artifact.Path)"; continue }
+              $zip = [System.IO.Compression.ZipFile]::OpenRead($artifact.Path)
+              try {
+                  $entries = @($zip.Entries | ForEach-Object { $_.FullName })
+                  # Local .so files carry no compression in an APK/AAB, but do not
+                  # rely on that: match on the entry name, whatever the method.
+                  foreach ($abi in $abis) {
+                      foreach ($lib in $libs) {
+                          $expected = $artifact.Prefix.Replace("{0}", $abi) + "/" + $lib
+                          if ($entries -contains $expected) {
+                              Write-Host "  OK  $($artifact.Label)  $expected"
+                          } else {
+                              $failures += "$($artifact.Label): missing '$expected' (Qt dlopen()s it at run time; Qt TLS is dead without it)"
+                              Write-Host "  MISSING  $($artifact.Label)  $expected"
+                          }
+                      }
+                  }
+              } finally { $zip.Dispose() }
+          }
+
+          if ($failures) {
+              Write-Host ""
+              Write-Host "Vendored TLS libraries are not correctly packaged. Entries actually present under lib/:"
+              foreach ($artifact in @($env:APK_PATH, $env:AAB_PATH)) {
+                  if (-not $artifact -or -not (Test-Path $artifact)) { continue }
+                  $zip = [System.IO.Compression.ZipFile]::OpenRead($artifact)
+                  try {
+                      Write-Host "--- $([System.IO.Path]::GetFileName($artifact)) ---"
+                      $zip.Entries | Where-Object { $_.FullName -match '(^|/)lib[^/]*/.*\.so$' } |
+                          ForEach-Object { Write-Host "  $($_.FullName)" }
+                  } finally { $zip.Dispose() }
+              }
+              Write-Host ""
+              $failures | ForEach-Object { Write-Host "FAIL: $_" -ForegroundColor Red }
+              throw "packaged artifacts are missing the vendored TLS libraries; refusing to publish"
+          }
+          Write-Host "vendored TLS libraries present in both artifacts for: $($abis -join ', ')"
+
       - name: Upload release artifacts
         uses: actions/upload-artifact@v4
         with:

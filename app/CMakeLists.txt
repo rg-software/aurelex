@@ -136,16 +136,43 @@ set_target_properties(aurelex PROPERTIES
 # call. The prebuilt OpenSSL 3 libs are vendored in app/openssl/<abi> (see
 # app/openssl/README.md for provenance and licence); QT_ANDROID_EXTRA_LIBS makes
 # androiddeployqt copy them into the APK's lib/<abi>/.
+#
+# Gated on ANDROID: ANDROID_ABI is only set by the Android toolchain, and these
+# libraries are an Android-runtime concern only. Configuring this file with any
+# other toolchain must not trip the fatal check below.
+if(ANDROID)
 set(_aurelex_openssl_dir "${CMAKE_CURRENT_SOURCE_DIR}/openssl/${ANDROID_ABI}")
-if(EXISTS "${_aurelex_openssl_dir}/libcrypto_3.so")
+set(_aurelex_openssl_libs libcrypto_3.so libssl_3.so)
+set(_aurelex_openssl_missing "")
+foreach(_lib IN LISTS _aurelex_openssl_libs)
+    if(NOT EXISTS "${_aurelex_openssl_dir}/${_lib}")
+        list(APPEND _aurelex_openssl_missing "${_aurelex_openssl_dir}/${_lib}")
+    endif()
+endforeach()
+if(_aurelex_openssl_missing)
+    string(REPLACE ";" "\n  " _aurelex_openssl_missing_pretty "${_aurelex_openssl_missing}")
+    # Fatal in every configuration, not a warning: these files are tracked in the
+    # repository (see app/openssl/README.md), so their absence means a broken or
+    # pruned checkout rather than a build that legitimately has nothing to link.
+    # A build that continued here would produce an artifact whose Qt TLS cannot
+    # initialize -- an app that looks fine until it makes its first HTTPS request
+    # (the remote dictionary catalog), which is exactly the defect a release once
+    # shipped. The WebView keeps working because Chromium has its own TLS, so
+    # nothing else in the app reveals the problem.
+    message(FATAL_ERROR
+        "vendored Android OpenSSL missing for ABI ${ANDROID_ABI}; Qt's TLS "
+        "backend dlopen()s these at run time and there is no fallback:\n"
+        "  ${_aurelex_openssl_missing_pretty}\n"
+        "They are tracked in git -- restore them with:\n"
+        "  git checkout -- app/openssl\n"
+        "See app/openssl/README.md for provenance.")
+else()
     set_property(TARGET aurelex APPEND PROPERTY QT_ANDROID_EXTRA_LIBS
         "${_aurelex_openssl_dir}/libcrypto_3.so"
         "${_aurelex_openssl_dir}/libssl_3.so"
     )
-else()
-    message(WARNING "no vendored OpenSSL for ABI ${ANDROID_ABI}; "
-                    "HTTPS will fail at runtime")
 endif()
+endif() # ANDROID
 # NOTE: qt_add_apk_target is absent from the installed Qt 6.6.3 carve subset
 # (no Qt6AndroidDeployQt cmake package). The APK is packaged manually with
 # androiddeployqt (see README notes).

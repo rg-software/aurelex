@@ -39,9 +39,12 @@ script:
 
 Android TLS needs OpenSSL, which the Qt kit does not ship; the prebuilt libs are
 vendored in `app/openssl/<abi>/` and linked into the APK via
-`QT_ANDROID_EXTRA_LIBS` (see `app/openssl/README.md`). If a build fails to do
-HTTPS at runtime with *TLS initialization failed*, those libs are missing from
-the APK's `lib/<abi>/`.
+`QT_ANDROID_EXTRA_LIBS` (see `app/openssl/README.md`). Those files are tracked in
+git, and the CMake configure step **fails** if either one is missing for the ABI
+being built — a build cannot silently produce an app with no TLS. If you ever see
+*TLS initialization failed* at runtime, the APK is either from a build that
+predates that guard or was packaged without the libs; check the APK's
+`lib/<abi>/` for `libcrypto_3.so` and `libssl_3.so`.
 
 ```powershell
 pwsh -File .\app\build.ps1 -Configuration Release            # signed release APK

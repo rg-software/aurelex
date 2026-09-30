@@ -24,6 +24,10 @@ CMakeFiles/
 cmake_install.cmake
 Makefile
 *.so
+# ...except the vendored Android OpenSSL, which is deliberately tracked: the
+# Qt TLS backend dlopen()s these at run time, so a release built without them
+# ships an app with no working TLS. See app/openssl/README.md.
+!app/openssl/**/*.so
 *.o
 *.a
 build-host/
