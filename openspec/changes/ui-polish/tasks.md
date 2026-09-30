@@ -24,6 +24,6 @@
 ## 4. Verification and documentation
 
 - [x] 4.1 Build the Android app and run the existing tests/smoke checks; run `openspec validate ui-polish`. (Built: `app/build.ps1 -Abi arm64-v8a -Configuration Debug` → `aurelex-debug.apk`, 60.5 MB; `qmlcachegen` compiled `main.qml`, so the QML parses. All 5 host suites pass: article_server, catalog, dictionary_index, index_cleanup, index_migration. `openspec validate` passes.)
-- [ ] 4.2 On-device pass over every scenario above in both themes, plus a Russian-locale check of the rename dialog and the wider group buttons in portrait and landscape.
+- [x] 4.2 On-device pass over every scenario above in both themes, plus a Russian-locale check of the rename dialog and the wider group buttons in portrait and landscape. (Device ZY22HC8LTR, 1080x2400. Verified: FTS pane has no `Search` button; membership editor exposes `By Pair`/`Rename group` icon buttons; By Pair OFF shows no captions and ON shows `English/English` + `English/Japanese` caption rows while all 3 members keep their `Reorder` handles (member list ungrouped); the RU rename dialog is centered with `Отмена`/`Переименовать` fully visible; long names elide clear of the trailing `+`/`✕` icons. No crash/ANR.)
 - [x] 4.3 Update the AGENTS.md accessible-element table: remove the FTS Search button row, add the membership-editor `By Pair` control, and note that `Add group` is now an icon control with its name unchanged.
 - [x] 4.4 If any Qt source string changed, run `scripts/update-translations.ps1`, update the RU/JA catalogs, and recommit `app/i18n/*.qm`.
