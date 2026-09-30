@@ -144,6 +144,8 @@ ApplicationWindow {
             "arrow_forward": 0xe5c8,
             "close": 0xe5cd,
             "add": 0xe145,
+            // Add-group control (ui-polish): classic Material Icons glyph.
+            "create_new_folder": 0xe2cc,
             "check": 0xe5ca,
             "edit": 0xe150,
             "drag_handle": 0xe25d,
@@ -347,11 +349,28 @@ ApplicationWindow {
         root._suggWords = engine.history
         root._applySuggestOverlay()
     }
+    // True while the query currently in the box is owned by an article rather
+    // than by the candidate dropdown: a lookup for that query is in flight
+    // (_requestedWord), or the article for it is already rendered. In either
+    // state a late suggestion reply must NOT repaint over the article (the
+    // group-switch / Enter dropdown-over-article bug).
+    function _articleOwnsSurface() {
+        const q = input.displayText.trim()
+        if (q.length === 0) return false
+        if (root._requestedWord.length > 0 && root._requestedWord === q) return true
+        return root.inlineArticle && root.currentWord === q
+    }
     function _applySuggestOverlay() {
         const wv = root.inlineWv
         // Need a live WebView that actually has a loaded document (URL present).
         // runJavaScript on a doc-less WebView silently does nothing.
         if (!wv || root._blankPending) return
+        // The submitted query owns the surface: never paint candidates over it.
+        if (root._articleOwnsSurface()) {
+            root._clearOverlayDom()
+            root._suggVisible = false
+            return
+        }
         const words = root._suggWords
         const url = wv.url.toString()
         if (url.length < 6) return
@@ -378,9 +397,13 @@ ApplicationWindow {
         const fg = dark ? "#e0e0e0" : "#202124"
         const sep = dark ? "#3a3b3c" : "#eeeeee"
         const accent = dark ? "#b388ff" : "#6200ee"
+        // History (recent lookups) fills the whole inline article pane; the
+        // suggestions dropdown stays bounded so the article behind it shows.
+        const fillPane = root._suggMode === "history"
         var html = '<div id="gd-sugg" style="position:fixed;top:0;left:0;right:0;'
             + 'z-index:9999;background:' + bg + ';color:' + fg + ';'
-            + 'box-shadow:0 2px 10px rgba(0,0,0,0.4);overflow-y:auto;max-height:72%;'
+            + 'box-shadow:0 2px 10px rgba(0,0,0,0.4);overflow-y:auto;'
+            + (fillPane ? 'bottom:0;' : 'max-height:72%;')
             + 'font-family:Roboto,sans-serif;font-size:16px;text-align:left;">'
         if (root._suggMode === "history") {
             if (words.length === 0) {
@@ -588,6 +611,16 @@ ApplicationWindow {
             if (engine.groups[i].id === groupId) return engine.groups[i].name
         }
         return root._allGroupLabel
+    }
+    // Language pair ("English/Russian", unknown side '?') for a dictionary's
+    // engine index. The membership list's rows (from groupDicts) carry the engine
+    // index but not the language pair, so read it from the dictionary list.
+    function _pairForDictIndex(idx) {
+        const d = engine.dictionaries
+        for (var i = 0; i < d.length; ++i) {
+            if (d[i].engineIndex === idx) return root.fmtPair(d[i])
+        }
+        return "?"
     }
     // Is `word` a favorite in the given group (favorites are {word, group})?
     function _isFavorite(word, group) {
@@ -846,6 +879,25 @@ ApplicationWindow {
         color: root.uiBg
         visible: root.state === 0
 
+        // Keyboard submit (IME action). Opens the top suggestion when there is
+        // one, otherwise looks up the literal typed text. Either way the article
+        // owns the surface: `_requestedWord` + the shown-article check in
+        // `_articleOwnsSurface()` keep a late suggestion reply from repainting
+        // over it.
+        function _submitSearch() {
+            input.focus = false
+            const typed = input.displayText.trim()
+            if (typed.length === 0) return
+            let word = typed
+            if (root._suggMode === "sugg" && root._suggWords.length > 0) {
+                const first = root._suggWords[0]
+                if (typeof first === "string" && first.indexOf("(no results") !== 0)
+                    word = first
+            }
+            root._requestedWord = word
+            engine.lookup(word)
+        }
+
         function _doSuggest() {
             // Programmatic box updates (article open via Back/Forward) must not
             // re-trigger a suggestion query that would race the article render.
@@ -886,6 +938,10 @@ ApplicationWindow {
                 // NB: compare against displayText, not text — during IME
                 // composition text lags behind what the user sees/typed.
                 if (prefix.trim() !== input.displayText.trim()) return
+                // A submitted query owns the surface: drop this reply instead of
+                // painting suggestions over the article that is loading or has
+                // already been rendered for that query.
+                if (root._articleOwnsSurface()) return
                 searchPane.pendingSuggestions = suggestions
                 // A typed query that matches nothing falls back to history.
                 if (suggestions.length === 0) {
@@ -898,6 +954,10 @@ ApplicationWindow {
                 // A failed lookup returns the surface to history (only while the
                 // field is empty or matches the failed word; a new typed query
                 // must keep showing its own suggestions instead).
+                // Stale replies are dropped like onArticleLoaded's: only the word
+                // we are actually waiting for releases the surface guard.
+                if (root._requestedWord.length > 0 && word.trim() !== root._requestedWord) return
+                root._requestedWord = ""
                 const cur = input.displayText.trim()
                 if (cur.length === 0 || word.trim() === cur)
                     root._showHistoryOverlay()
@@ -926,7 +986,7 @@ ColumnLayout {
                     Accessible.role: Accessible.EditableText
                     font.pixelSize: 18
                     onDisplayTextChanged: searchPane._doSuggest()
-                    onAccepted: { input.focus = false; root._requestedWord = text.trim(); engine.lookup(text.trim()) }
+                    onAccepted: searchPane._submitSearch()
                     Component.onCompleted: {
                         // Focus the field + show the keyboard only AFTER
                         // onboarding — on first run the keyboard must not pop
@@ -938,7 +998,7 @@ ColumnLayout {
                 Button {
                     id: searchGroupButton
                     Layout.fillWidth: true
-                    Layout.preferredWidth: 3
+                    Layout.preferredWidth: 3.9
                     Layout.minimumWidth: 0
                     // Permanently `highlighted` so the Material style paints the
                     // app's standard accent fill (magenta) with white label text,
@@ -961,11 +1021,11 @@ ColumnLayout {
                     }
                 }
 
-                ToolButton {
+                Button {
                     id: clipboardBtn
                     text: root.icon("content_paste_search")
                     font.family: root.iconFontFamily
-                    font.pixelSize: 20
+                    font.pixelSize: 18
                     Accessible.name: "Clipboard"
                     Accessible.role: Accessible.Button
                     // Paste clipboard text into the search field (so the looked-up
@@ -2110,6 +2170,13 @@ text: root._stagingActive
         property int editingGroup: -1
         property string editingGroupName: ""
         property var groupNonMembers: []
+        // By Pair (ui-polish): group the available-to-add list under language-pair
+        // captions. The member list is deliberately NOT grouped — it is one flat,
+        // draggable order (the article order).
+        property bool byPair: false
+        // Flattened rows for the available list: {type:"header", pair} or
+        // {type:"dict", name, index}. Rebuilt from groupNonMembers.
+        property var nonMemberRows: []
         property int renameGroupId: -1
         property string renameGroupName: ""
         property string renameGroupNameError: ""
@@ -2176,7 +2243,32 @@ text: root._stagingActive
             // onGroupDictsReady replaces them.
             memberModel.clear()
             groupsPane.groupNonMembers = []
+            groupsPane.nonMemberRows = []
             engine.groupDicts(id)
+        }
+        // Rebuild the available-to-add rows. Flat when By Pair is off; grouped
+        // under pair caption rows (same pairing as the Dicts tab) when on.
+        function _rebuildNonMemberRows() {
+            const src = groupsPane.groupNonMembers
+            const rows = []
+            if (!groupsPane.byPair) {
+                for (let i = 0; i < src.length; i++)
+                    rows.push({ type: "dict", name: src[i].name, index: src[i].index })
+            } else {
+                const byPair = {}
+                for (let i = 0; i < src.length; i++) {
+                    const p = root._pairForDictIndex(src[i].index)
+                    if (!byPair[p]) byPair[p] = []
+                    byPair[p].push(src[i])
+                }
+                const pairs = Object.keys(byPair).sort()
+                for (const p of pairs) {
+                    rows.push({ type: "header", pair: p })
+                    for (const it of byPair[p])
+                        rows.push({ type: "dict", name: it.name, index: it.index })
+                }
+            }
+            groupsPane.nonMemberRows = rows
         }
         function _openRename(id, name) {
             if (id <= 0) return // "All" cannot be renamed
@@ -2317,6 +2409,7 @@ text: root._stagingActive
                 for (let i = 0; i < m.length; ++i)
                     memberModel.append({ "dictName": m[i].name, "dictIndex": m[i].index })
                 groupsPane.groupNonMembers = nm
+                groupsPane._rebuildNonMemberRows()
                 // The membership editor may be freshly shown (or the same group
                 // reopened): force the two lists to re-layout so dict names are
                 // always drawn, not left blank from a stale frame.
@@ -2339,10 +2432,13 @@ text: root._stagingActive
                 Layout.fillWidth: true
                 spacing: 8
 
-                // "Add" button opens the name dialog; a new group is created and
-                // the membership editor opens immediately on OK.
+                // "Add" is an icon button (standard icon-button styling, like the
+                // dictionary toolbar) that opens the name dialog; a new group is
+                // created and the membership editor opens immediately on OK.
                 Button {
-                    text: qsTr("Add group")
+                    text: root.icon("create_new_folder")
+                    font.family: root.iconFontFamily
+                    font.pixelSize: 18
                     highlighted: true
                     Accessible.name: "Add group"
                     Accessible.role: Accessible.Button
@@ -2428,7 +2524,6 @@ text: root._stagingActive
             standardButtons: Dialog.NoButton
 
             contentItem: ColumnLayout {
-                width: parent.width
                 spacing: 8
                 TextField {
                     id: createGroupNameInput
@@ -2483,7 +2578,6 @@ text: root._stagingActive
             standardButtons: Dialog.NoButton
 
             contentItem: ColumnLayout {
-                width: parent.width
                 spacing: 8
                 TextField {
                     id: renameGroupInput
@@ -2594,10 +2688,26 @@ text: root._stagingActive
                     font.bold: true
                     elide: Text.ElideMiddle
                 }
-                ToolButton {
+                // By Pair: group the available-to-add list under language-pair
+                // captions (the member list stays one flat, draggable order).
+                // Meaningless for "All" (no available-to-add list), so hidden.
+                Button {
+                    text: root.icon("translate")
+                    font.family: root.iconFontFamily
+                    font.pixelSize: 18
+                    highlighted: groupsPane.byPair
+                    visible: groupsPane.editingGroup !== 0
+                    Accessible.name: "By Pair"
+                    Accessible.role: Accessible.Button
+                    onClicked: {
+                        groupsPane.byPair = !groupsPane.byPair
+                        groupsPane._rebuildNonMemberRows()
+                    }
+                }
+                Button {
                     text: root.icon("edit")
                     font.family: root.iconFontFamily
-                    font.pixelSize: 22
+                    font.pixelSize: 18
                     // "All" is fixed: it cannot be renamed.
                     visible: groupsPane.editingGroup !== 0
                     Accessible.name: "Rename group"
@@ -2643,7 +2753,12 @@ text: root._stagingActive
 
                     contentItem: Item {
                         RowLayout {
-                            anchors.fill: parent
+                            // Reserve the trailing remove button's width so a long
+                            // dictionary name elides clear of it (ui-polish).
+                            anchors {
+                                fill: parent
+                                rightMargin: 56
+                            }
                             spacing: 6
                             // Only the left-hand handle is the drag surface. A
                             // fixed-width slot whose MouseArea fills it, so a
@@ -2732,23 +2847,63 @@ text: root._stagingActive
                 Layout.fillHeight: true
                 clip: true
                 visible: groupsPane.editingGroup !== 0
-                model: groupsPane.groupNonMembers
+                model: groupsPane.nonMemberRows
                 spacing: 2
                 Accessible.name: "Available dictionaries to add"
                 Accessible.role: Accessible.List
                 delegate: ItemDelegate {
                     id: nonMemberRow
                     property var rowData: modelData
+                    readonly property bool isHeader: rowData && rowData.type === "header"
                     width: ListView.view.width
-                    height: 44
-                    padding: 4
-                    Accessible.name: nonMemberRow.rowData.name
-                    Accessible.role: Accessible.ListItem
+                    height: isHeader ? 40 : 44
+                    padding: isHeader ? 8 : 4
+                    Accessible.name: nonMemberRow.isHeader ? rowData.pair
+                        : (rowData ? rowData.name : "")
+                    Accessible.role: nonMemberRow.isHeader ? Accessible.StaticText
+                        : Accessible.ListItem
 
-                    contentItem: Label {
-                        text: nonMemberRow.rowData.name
-                        elide: Text.ElideMiddle
-                        verticalAlignment: Text.AlignVCenter
+                    contentItem: Loader {
+                        anchors.fill: parent
+                        sourceComponent: nonMemberRow.isHeader
+                            ? nonMemberHeaderComp : nonMemberDictComp
+                    }
+
+                    // Pair caption row (By Pair on). Cosmetic separator only —
+                    // available dictionaries are never reordered.
+                    Component {
+                        id: nonMemberHeaderComp
+                        Item {
+                            anchors.fill: parent
+                            Rectangle {
+                                anchors.fill: parent
+                                color: root.uiSectionBg
+                            }
+                            Label {
+                                anchors {
+                                    left: parent.left; leftMargin: 10
+                                    right: parent.right; rightMargin: 10
+                                    verticalCenter: parent.verticalCenter
+                                }
+                                text: nonMemberRow.rowData.pair
+                                font.pixelSize: 13
+                                font.bold: true
+                                color: root.uiSectionFg
+                                elide: Text.ElideMiddle
+                            }
+                        }
+                    }
+
+                    Component {
+                        id: nonMemberDictComp
+                        Label {
+                            // Reserve the trailing add button's width so a long
+                            // name elides clear of it instead of running under it.
+                            text: nonMemberRow.rowData.name
+                            elide: Text.ElideMiddle
+                            rightPadding: 56
+                            verticalAlignment: Text.AlignVCenter
+                        }
                     }
 
                     ToolButton {
@@ -2757,6 +2912,7 @@ text: root._stagingActive
                             rightMargin: 4
                             verticalCenter: parent.verticalCenter
                         }
+                        visible: !nonMemberRow.isHeader
                         text: root.icon("add")
                         font.family: root.iconFontFamily
                         font.pixelSize: 20
@@ -3106,7 +3262,7 @@ text: root._stagingActive
                 Button {
                     id: ftsGroupButton
                     Layout.fillWidth: true
-                    Layout.preferredWidth: 3
+                    Layout.preferredWidth: 3.9
                     Layout.minimumWidth: 0
                     // Same permanent accent fill as the Search tab's group button.
                     highlighted: true
@@ -3165,19 +3321,9 @@ text: root._stagingActive
             // interleaves with the engine, so a search over other dictionaries
             // returns within about one indexing slice (fts-indexing-performance).
 
-            RowLayout {
-                Layout.fillWidth: true
-                spacing: 8
-
-                Button {
-                    id: ftsSearchBtn
-                    text: qsTr("Search")
-                    highlighted: true
-                    Accessible.name: "Search"
-                    Accessible.role: Accessible.Button
-                    onClicked: root._runFts()
-                }
-            }
+            // No dedicated submit button (ui-polish): with a non-empty query the
+            // search runs on keyboard submit (ftsInput.onAccepted), on a scope
+            // group change, and on the Whole words toggle above.
 
             Label {
                 Layout.fillWidth: true
@@ -3226,6 +3372,10 @@ text: root._stagingActive
     // which group button to update on selection and whether the Search WebView
     // needs the teardown/restore dance (only the Search tab has an inline WebView).
     property string _pickerTarget: "search"
+    // Set when a Search-scope selection started an article lookup. On close the
+    // candidate surface must then be left for that article instead of being
+    // re-queried for suggestions (which used to repaint over the article).
+    property bool _pickerStartedLookup: false
     Dialog {
         id: groupPicker
         anchors.centerIn: parent
@@ -3241,6 +3391,7 @@ text: root._stagingActive
         closePolicy: Popup.CloseOnPressOutside | Popup.CloseOnEscape
         function openAt(index, target) {
             root._pickerTarget = target !== undefined ? target : "search"
+            root._pickerStartedLookup = false
             if (root._pickerTarget === "search") {
                 // Tear down the inline WebView so its native surface can't sit
                 // above the modal dialog. Its document/history survive in
@@ -3265,6 +3416,12 @@ text: root._stagingActive
             // (suggestions for a typed query, or history when empty). The
             // _suggWords/_suggMode state survives, but re-querying ensures the
             // results are fresh after the WebView destruction + group change.
+            // Exception: a Search-scope selection that started a lookup owns the
+            // surface — do not re-query suggestions over the incoming article.
+            if (root._pickerStartedLookup) {
+                root._pickerStartedLookup = false
+                return
+            }
             if (input.displayText.trim().length > 0) searchPane._doSuggest()
             else root._showHistoryOverlay()
         }
@@ -3316,7 +3473,9 @@ text: root._stagingActive
                                     // Switching the group actually triggers a lookup
                                     // of the typed query in the new group. This also
                                     // sets the active group and records the entry
-                                    // (a fresh search → new history item).
+                                    // (a fresh search → new history item). Flag it so
+                                    // onClosed leaves the surface for the article.
+                                    root._pickerStartedLookup = true
                                     root._requestedWord = q
                                     engine.lookupInGroupWithSwitch(q, g.id)
                                 } else {

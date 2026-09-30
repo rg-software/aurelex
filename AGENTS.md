@@ -148,7 +148,7 @@ elements in automated tests:
 | Catalog | Free-space dialog | A modal `Dialog`; the OK/Cancel are the standard Material buttons (no custom `Accessible.name`) |
 | Catalog | Download progress | A `ProgressBar` with `Accessible.role: ProgressBar`, plus a non-interactive line; no banner/buttons |
 | Catalog | Download / cancel | `"Download selected"` (header icon; downloads the selected entries) and `"Cancel download"` (same button becomes an X while a batch runs) |
-| Groups | Add button | `"Add group"` (opens the name dialog; on OK the group is created and its membership editor opens) — a visible button, not an icon-only control |
+| Groups | Add button | `"Add group"` (icon-only `create_new_folder` button; opens the name dialog; on OK the group is created and its membership editor opens) |
 | Groups | Add-group dialog | `"Add group"` (`"New group name"` field inside; OK/Cancel) |
 | Groups | ListView | `"Groups list"` |
 | Groups | Group row | Named `<group name>`; tapping the row opens the group's membership editor (no separate edit/pencil button in the list). The `All` row opens the same editor in reorder-only mode (no add/remove/rename): dragging sets the article order used by search |
@@ -156,7 +156,8 @@ elements in automated tests:
 | Groups | Delete confirmation | `"Delete group confirmation"` (OK/Cancel) |
 | Groups | Rename dialog | `"Rename group"` (`"New group name"` field inside) |
 | Membership | Back button | `"Back"` |
-| Membership | Rename group | `"Rename group"` (header button in the membership editor) |
+| Membership | Rename group | `"Rename group"` (header icon button in the membership editor) |
+| Membership | By Pair | `"By Pair"` (header icon toggle; groups the available-to-add list by source/target language pair; hidden on the `All` group) |
 | Membership | Members list | `"Group members"` |
 | Membership | Reorder surface | Drag the member row's left-hand handle to reorder; the name area scrolls the list, and the trailing `Remove from group` sliver is excluded |
 | Membership | Remove from group | `"Remove from group"` |
@@ -172,7 +173,6 @@ elements in automated tests:
 | FTS | TextField | `"Full-text search"` |
 | FTS | Whole words toggle | `"Whole words"` (Material Symbols "match word" glyph; magenta-filled when on, gray when off) |
 | FTS | Group button | `"Full-text search group scope"` (shows the current group in the magenta accent scheme; always tappable; sits inline next to the field, like Search; opens the same modal `Select group` picker) |
-| FTS | Search button | `"Search"` |
 | FTS | Results list | `"Full-text search results"` |
 | History | Clear all | Rendered as a `data-action="clear-history"` row *inside* the article WebView when the search field is empty |
 | History | Word rows | Rendered as `data-w` anchors (tap = lookup) with `data-action="remove-history"` per-row buttons in the WebView; no separate Qt list/tab |
