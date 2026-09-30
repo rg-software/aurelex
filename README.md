@@ -4,7 +4,7 @@ Aurelex is a mobile dictionary app for Android built upon [GoldenDict-NG](https:
 dictionary engine. Look up words offline in your mdict / DSL / StarDict dictionaries, rendered in a
 clean mobile interface. Download free dictionaries from our curated collection.
 
-> This is a work in progress. The current builds are usable but still rough. Only one downloadable dictionary is available at the moment.
+> This is a work in progress. The current builds are usable but still rough. Only one downloadable dictionary is available at the moment as a proof of concept.
 
 ## Why Aurelex
 
@@ -39,7 +39,11 @@ Indexing will take time. You can use the dictionary normally during this process
 
 ## Privacy
 
-Dictionary files you bring are your own and are never uploaded. Lookups happen entirely on-device. The app (a) may access remote resources embedded into article definitions; (b) will read a remote catalog if you attempt to download a remote dictionary.
+Dictionary files you bring are your own and are never uploaded. Lookups happen entirely on-device. The app
+
+- may access remote resources embedded into article definitions;
+- will read a remote catalog if you attempt to download a remote dictionary;
+- will send diagnostic information (Google Play version only).
 
 ## License
 
