@@ -48,6 +48,17 @@ jobs:
       AURELEX_VCPKG_BASE: ${{ github.workspace }}\vcpkg
       AURELEX_NDK_ROOT: ${{ github.workspace }}\ndk\android-ndk-r23c
       AURELEX_ANDROID_SDK: ${{ github.workspace }}\android-sdk
+      # The ABI the app is built and packaged for, and the single source of
+      # truth for it: passed to app/build.ps1 -Abi, and re-exported as
+      # PACKAGED_ABIS for the vendored-TLS assertion further down. The
+      # dependency chain is arm64-only today (vcpkg arm64-android triplet,
+      # xapian built for arm64-v8a, build.gradle.properties
+      # qtTargetAbiList=arm64-v8a), so arm64-v8a is the only value that
+      # builds. It is named here rather than inferred, because a runner also
+      # has an unused android_x86_64 kit installed (see the aqt step) and
+      # "which kits are installed" is not "which ABIs ship" -- assuming so made
+      # the TLS assertion demand x86_64 entries that no build produces.
+      AURELEX_ABI: arm64-v8a
     steps:
       - name: Checkout with submodules
         uses: actions/checkout@v4
@@ -236,11 +247,11 @@ jobs:
         run: |
           if (Test-Path "$env:AURELEX_KEYSTORE_PATH") {
             Write-Host "=== signed build ==="
-            & "$env:GITHUB_WORKSPACE\app\build.ps1" -Configuration Release -Bundle
+            & "$env:GITHUB_WORKSPACE\app\build.ps1" -Abi $env:AURELEX_ABI -Configuration Release -Bundle
             if ($LASTEXITCODE -ne 0) { throw "build.ps1 failed" }
           } else {
             Write-Host "=== AURELEX_KEYSTORE_PATH not present; building unsigned release APK + AAB for dry-run ===" -ForegroundColor Yellow
-            & "$env:GITHUB_WORKSPACE\app\build.ps1" -Configuration Release -Bundle
+            & "$env:GITHUB_WORKSPACE\app\build.ps1" -Abi $env:AURELEX_ABI -Configuration Release -Bundle
             if ($LASTEXITCODE -ne 0) { throw "build.ps1 failed" }
           }
 
@@ -257,6 +268,10 @@ jobs:
           Write-Host "release AAB: $($aab.FullName) ($([math]::Round($aab.Length/1MB,1)) MB)"
           "APK_PATH=$($apk.FullName)" >> $env:GITHUB_OUTPUT
           "AAB_PATH=$($aab.FullName)" >> $env:GITHUB_OUTPUT
+          # The ABI these artifacts were built for, so the vendored-TLS
+          # assertion checks the ABIs that actually ship instead of guessing
+          # from the Qt kits installed on the runner.
+          "PACKAGED_ABIS=$env:AURELEX_ABI" >> $env:GITHUB_OUTPUT
           # Workspace-relative, forward-slash path for the Play upload action:
           # its file matcher runs on Node and cannot resolve an absolute Windows
           # (backslash) path (it reports "no release file matching <path>").
@@ -285,30 +300,19 @@ jobs:
         env:
           APK_PATH: ${{ steps.artifacts.outputs.APK_PATH }}
           AAB_PATH: ${{ steps.artifacts.outputs.AAB_PATH }}
+          PACKAGED_ABIS: ${{ steps.artifacts.outputs.PACKAGED_ABIS }}
         run: |
           Add-Type -AssemblyName System.IO.Compression.FileSystem
-          # Which ABIs must the artifact contain? The ones this job builds, which
-          # is the set of installed Qt android kits -- derived rather than
-          # hardcoded, so adding a kit to the install step above needs no edit
-          # here. Qt kit directory names and Android ABI directory names differ
-          # (android_arm64_v8a vs lib/arm64-v8a/), so map them explicitly instead
-          # of string-substituting, and refuse to guess on an unmapped kit.
-          $kitToAbi = @{
-              "android_arm64_v8a" = "arm64-v8a"
-              "android_armv7"     = "armeabi-v7a"
-              "android_x86_64"    = "x86_64"
-              "android_x86"       = "x86"
-          }
-          $kits = @(Get-ChildItem "$env:AURELEX_QT_BASE\android_*" -Directory -ErrorAction SilentlyContinue)
-          if (-not $kits) { throw "no Qt android kit under $env:AURELEX_QT_BASE" }
-          $abis = @()
-          foreach ($kit in $kits) {
-              if (-not $kitToAbi.ContainsKey($kit.Name)) {
-                  throw "unmapped Qt android kit '$($kit.Name)'; add it to `$kitToAbi so the expected ABI list stays correct"
-              }
-              $abis += $kitToAbi[$kit.Name]
-          }
-          $abis = @($abis | Sort-Object -Unique)
+          # Which ABIs must the artifact contain? Exactly the ones this build
+          # targeted, which the artifacts step re-exports as PACKAGED_ABIS from
+          # the same AURELEX_ABI the build script was invoked with. Deriving it
+          # from the Qt kits *installed on the runner* (the previous approach)
+          # is wrong: the runner also has an unused android_x86_64 kit, and the
+          # app is arm64-only (vcpkg arm64-android, xapian arm64-v8a,
+          # qtTargetAbiList=arm64-v8a), so that demanded x86_64 entries no build
+          # produces and failed the release on an ABI nothing ships.
+          $abis = @($env:PACKAGED_ABIS -split "," | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+          if (-not $abis) { throw "PACKAGED_ABIS not set by the artifacts step" }
           # Every built ABI must also be vendored. The CMake configure step
           # already fails in that case, so getting here means the guard was
           # bypassed -- say so rather than quietly checking a smaller set.
@@ -317,7 +321,7 @@ jobs:
           if ($unvendored) {
               throw "built ABI(s) not vendored under app/openssl: $($unvendored -join ', ') (vendored: $($vendored -join ', ')) -- the CMake guard should have failed the configure step"
           }
-          Write-Host "Qt android kits -> ABIs: $($abis -join ', ')"
+          Write-Host "Packaged ABIs: $($abis -join ', ')"
           $libs = @("libcrypto_3.so", "libssl_3.so")
 
           $failures = @()

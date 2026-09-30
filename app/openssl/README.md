@@ -14,12 +14,19 @@ request.
 
 ## Contents
 
-Prebuilt OpenSSL 3 shared libraries for each ABI the app builds:
+Prebuilt OpenSSL 3 shared libraries, per ABI directory:
 
 ```
 <abi>/libcrypto_3.so
 <abi>/libssl_3.so
 ```
+
+Only the ABI the release is built for (`arm64-v8a`) is packaged today — the
+dependency chain is arm64-only (vcpkg `arm64-android`, xapian for `arm64-v8a`,
+`qtTargetAbiList=arm64-v8a`). The `x86_64/` copies are vendored ahead of an
+emulator ABI so adding one is a build-config change, not a vendoring task; they
+are not shipped, and the release workflow asserts the TLS libraries only for
+the ABIs the build actually targets.
 
 These files are **tracked in version control**, not build output. The repository
 `.gitignore` has a blanket `*.so` rule for the NDK/vcpkg build artifacts it was
