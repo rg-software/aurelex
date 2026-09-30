@@ -34,7 +34,7 @@
 - [x] 5.4 Note in `AGENTS.md` that the `app/openssl/` binaries are intentionally tracked despite the blanket `*.so` rule, so a future contributor does not "clean up" the negation or delete them as build output
 - [x] 5.5 Confirm no user-visible English text changed, so no `app/i18n/*.ts` or `app/android/res/values*/strings.xml` update is required
 - [x] 5.6 Run `openspec validate vendor-android-openssl`
-- [ ] 5.7 Commit with a conventional message
+- [x] 5.7 Commit with a conventional message
 - [x] 5.8 Leave a note for the maintainer: the already-published Play internal-test build stays broken until a new release tag is cut from this tree (out of scope for this change)
 
 ## Verification outcome

@@ -14,7 +14,10 @@ supply, or authenticate to a catalog location, and SHALL NOT perform discovery
 or scraping of any other source. The system SHALL keep the remote-add action
 available regardless of reachability, and SHALL report a catalog that cannot be
 reached with a stated reason inside the catalog view rather than disabling the
-action. Folder import SHALL continue to be offered and unaffected.
+action. Folder import SHALL continue to be offered and unaffected. A build
+distributed to users SHALL have a working TLS transport for the catalog fetch: a
+build whose TLS cannot initialize is a build defect, and the system SHALL NOT
+ship such a build as a catalog that is merely unreachable.
 
 #### Scenario: Catalog is reachable
 - **WHEN** the user opens the Dictionaries pane and the catalog can be fetched
@@ -34,6 +37,12 @@ action. Folder import SHALL continue to be offered and unaffected.
 - **WHEN** the app starts
 - **THEN** the catalog is not fetched as part of startup, and a remote-add
   request fetches it on demand
+
+#### Scenario: A distributed build completes the catalog fetch
+- **WHEN** a user runs a build obtained from a release channel rather than one
+  produced on a maintainer's machine, and opens the remote catalog
+- **THEN** the catalog is fetched over TLS and its entries are listed, with no
+  transport-level failure attributable to the build
 
 ### Requirement: Browsing the catalog
 The system SHALL present the catalog as a list of entries shown in place over the
