@@ -257,8 +257,10 @@ public:
     Q_INVOKABLE QVariantList ftsIndexStates() const;
     // Whole-words: when true (exact), the query matches exact terms; when false
     // (default), each term is treated as a prefix (a trailing * is appended).
-    Q_INVOKABLE QVariantList ftsSearch(const QString &query, int mode, int groupId = 0,
-                                       bool wholeWords = false);
+    // Run a full-text search. `mode` is the FTS::SearchMode to use: 0 (whole
+    // words) parses the query as exact terms, 2 (wildcards) as prefixes
+    // (control-state-and-fts-whole-words). `groupId` selects the scope, 0 = All.
+    Q_INVOKABLE QVariantList ftsSearch(const QString &query, int mode, int groupId = 0);
 
     // History + favorites persistence. The carve's engine has no built-in
     // history/favorites; we use a small JSON file in AppLocalDataLocation
@@ -285,6 +287,11 @@ public:
     // Clipboard lookup: reads the system clipboard text (via the JNI clipboard
     // bridge) and returns it. Empty when the clipboard has no text.
     Q_INVOKABLE QString clipboardText();
+
+    // Whether the clipboard currently holds usable (non-whitespace) text. The
+    // Search pane's clipboard control is enabled only when this is true; QML
+    // re-queries it on clipboardChanged (control-state-and-fts-whole-words).
+    Q_INVOKABLE bool clipboardHasText();
 
     bool buildingFts() const { return m_buildingFts; }
     bool ftsStarting() const { return m_ftsStarting; }
@@ -401,6 +408,9 @@ signals:
     void dictCountChanged();
     void readyChanged();
     void lastErrorChanged();
+    // The system clipboard's contents changed. QML re-queries clipboardHasText()
+    // on this to keep the Search pane's clipboard control in sync.
+    void clipboardChanged();
     void dictionariesChanged();
     void groupsChanged();
     void activeGroupChanged();
@@ -459,7 +469,7 @@ private:
     // group's dictionaries that lack an index, arming a one-shot re-run of this
     // query when those builds finish.
     void runFtsSearch(const QString &norm, int mode, int groupId,
-                      const QString &displayQuery, bool wholeWords);
+                      const QString &displayQuery);
     // Re-run the query a deferred/on-demand build was owed, once, when the batch
     // drains. No-op when none is pending.
     void reRunPendingFts();
@@ -673,7 +683,6 @@ private:
     QString m_pendingFtsQuery;
     int m_pendingFtsMode = 0;
     int m_pendingFtsGroup = 0;
-    bool m_pendingFtsWhole = false;
     bool m_pendingFtsValid = false;
     QPointer<ArticleServer> m_articleServer;
 

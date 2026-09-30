@@ -32,6 +32,16 @@ terms that extend it (prefix matching). The two modes SHALL be distinct search
 modes, not just a suffix difference, so a whole-words search for a short word
 MUST NOT return longer words that merely resemble it.
 
+<!--
+Coverage note for the three scenarios below: `ui-polish` introduced them to
+assert that the keyboard submit, a scope-group change, and the whole-words
+toggle each *run* a search. This change abolishes the auto-triggers, so their
+bodies now assert the opposite. The scenario *names* are retained because the
+delta validator requires a MODIFIED block to carry every scenario name the
+current spec has; the names are now misleading and are corrected in the main
+spec when this change is archived.
+-->
+
 #### Scenario: Plain-text match
 - **WHEN** the user enters a term present in an article body but not as a headword and submits it
 - **THEN** the app returns that article's headword as a result
@@ -104,6 +114,18 @@ MUST NOT return longer words that merely resemble it.
 #### Scenario: Empty or invalid query
 - **WHEN** the user submits an empty or malformed query
 - **THEN** the app reports the problem instead of crashing
+
+#### Scenario: Submitting from the keyboard runs the search
+- **WHEN** the user presses the keyboard's submit action with a non-empty query
+- **THEN** the app runs a full-text search for that query in the selected scope — the keyboard submit is the same submit path as the search control
+
+#### Scenario: Changing the scope group re-runs the search
+- **WHEN** the user selects a different group in the scope control and then submits
+- **THEN** the app runs the search in the newly selected group — the scope change alone runs nothing, but the next submit uses the new scope
+
+#### Scenario: Toggling whole words re-runs the search
+- **WHEN** the user toggles the whole-words control and then submits
+- **THEN** the app runs the search with the new matching mode — the toggle alone runs nothing, but the next submit uses the new mode
 
 #### Scenario: Search with wildcards
 - **WHEN** the user enters a term ending in `*` (e.g. `read*`) with whole words off and submits it

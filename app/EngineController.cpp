@@ -132,6 +132,12 @@ EngineController::EngineController(QObject *parent)
     connect(&m_pollTimer, &QTimer::timeout, this, &EngineController::pollPendingLookup);
     m_pollTimer.start(500);
 
+    // Clipboard changes: the Search pane's clipboard control stays in sync with
+    // whether the clipboard holds usable text (control-state-and-fts-whole-words).
+    // The signal carries no payload; QML re-queries clipboardHasText().
+    if (QClipboard *cb = QGuiApplication::clipboard())
+        connect(cb, &QClipboard::dataChanged, this, &EngineController::clipboardChanged);
+
     // Scan failsafe (see runScan): if a scan is still 'active' long past any
     // plausible duration, the engine mutex is parked by a wedged worker. Clear
     // the banner and tell the user to relaunch (which frees the mutex and
@@ -205,7 +211,10 @@ void EngineController::setReady(bool r) {
 }
 
 void EngineController::setLastError(const QString &e) {
-    m_lastError = e;
+    // Never store a blank message: a whitespace-only value used to paint an
+    // empty "engine error:" banner (control-state-and-fts-whole-words). A blank
+    // report clears the error, which is what callers mean by it.
+    m_lastError = e.trimmed().isEmpty() ? QString() : e;
     emit lastErrorChanged();
 }
 
@@ -1838,15 +1847,20 @@ void EngineController::ftsIndex(int dictIndex)
     w->setFuture(f);
 }
 
-QVariantList EngineController::ftsSearch(const QString &query, int mode, int groupId, bool wholeWords)
+QVariantList EngineController::ftsSearch(const QString &query, int mode, int groupId)
 {
     if (!m_ready) return QVariantList();
     if (query.isEmpty()) return QVariantList();
-    // In Xapian's wildcard mode a term without a trailing `*` matches exactly,
-    // so `boo` misses `book`. By default (prefix search) we append a `*` to
-    // terms lacking one; with wholeWords=true we leave the query exact.
+    // The caller selects the mode (control-state-and-fts-whole-words): whole
+    // words submits SearchMode::WholeWords (0), which parses a folded term as an
+    // exact term; prefix search submits Wildcards (2). In Xapian's wildcard mode
+    // a term without a trailing `*` would otherwise match exactly, so for the
+    // prefix mode we append `*` to terms lacking one. Whole words deliberately
+    // does NOT get that suffix: it must not expand to similar terms (the old
+    // `vire` -> `vaudeville` bug, where a bare term in wildcard mode parsed as
+    // `WILDCARD SYNONYM`).
     QString norm = query;
-    if (mode == 2 && !wholeWords) {
+    if (mode == 2) {
         QStringList parts;
         const QStringList toks = query.split(QLatin1Char(' '), Qt::SkipEmptyParts);
         for (const QString &t : toks) {
@@ -1859,12 +1873,12 @@ QVariantList EngineController::ftsSearch(const QString &query, int mode, int gro
     }
     qInfo() << "[aurelex] ftsSearch query='" << query << "' norm='" << norm
             << "' mode=" << mode << " group=" << groupId;
-    runFtsSearch(norm, mode, groupId, query, wholeWords);
+    runFtsSearch(norm, mode, groupId, query);
     return QVariantList();
 }
 
 void EngineController::runFtsSearch(const QString &norm, int mode, int groupId,
-                                    const QString &displayQuery, bool wholeWords)
+                                    const QString &displayQuery)
 {
     if (!m_ready) return;
     QFuture<QVariantList> f = QtConcurrent::run([norm, mode, groupId]{
@@ -1930,7 +1944,7 @@ void EngineController::runFtsSearch(const QString &norm, int mode, int groupId,
     });
     auto *gwt = new QFutureWatcher<QStringList>(this);
     connect(gwt, &QFutureWatcher<QStringList>::finished, this,
-            [this, norm, mode, groupId, displayQuery, wholeWords, gwt]{
+            [this, norm, mode, groupId, displayQuery, gwt]{
         const QStringList ids = gwt->result();
         gwt->deleteLater();
         if (ids.isEmpty()) return;
@@ -1950,7 +1964,6 @@ void EngineController::runFtsSearch(const QString &norm, int mode, int groupId,
         m_pendingFtsMode = mode;
         m_pendingFtsGroup = groupId;
         m_pendingFtsQuery = displayQuery;
-        m_pendingFtsWhole = wholeWords;
         m_pendingFtsValid = true;
         qInfo() << "[aurelex] on-demand FTS builds enqueued for" << ids;
         if (!m_ftsWorkerRunning)
@@ -1964,7 +1977,7 @@ void EngineController::reRunPendingFts()
     if (!m_pendingFtsValid) return;
     m_pendingFtsValid = false;
     runFtsSearch(m_pendingFtsNorm, m_pendingFtsMode, m_pendingFtsGroup,
-                 m_pendingFtsQuery, m_pendingFtsWhole);
+                 m_pendingFtsQuery);
 }
 
 // ---------- Milestone 5: history + favorites ----------
@@ -3335,6 +3348,11 @@ QString EngineController::clipboardText()
     QClipboard *cb = QGuiApplication::clipboard();
     if (!cb) return QString();
     return cb->text();
+}
+
+bool EngineController::clipboardHasText()
+{
+    return !clipboardText().trimmed().isEmpty();
 }
 
 

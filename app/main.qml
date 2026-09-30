@@ -38,6 +38,18 @@ ApplicationWindow {
     // switch) rather than Button.checked so it renders exactly the same accent
     // fill as the other magenta buttons.
     property bool ftsWholeWordsOn: false
+    // True from the moment a search is submitted until its results land. Drives
+    // the search control's enabled state; cleared in onFtsSearchReady.
+    property bool ftsSearching: false
+    // The inputs the DISPLAYED results were produced from. Compared against the
+    // live inputs to invalidate stale results (control-state-and-fts-whole-words).
+    property string ftsAppliedQuery: ""
+    property int ftsAppliedGroup: -1
+    property bool ftsAppliedWhole: false
+    // Whether the clipboard holds usable text. Re-queried whenever the system
+    // clipboard changes, so the Search pane's clipboard control enables/disables
+    // live. Initialized at startup (engine is constructed before QML).
+    property bool clipboardHasText: engine.clipboardHasText()
     property int searchGroupId: 0
     property int ftsGroupId: 0
     // The article WebView is the Search tab's inline pane (articleLoader aliases
@@ -246,7 +258,9 @@ ApplicationWindow {
         interval: 420
         repeat: false
         running: root.state === 0
-        onTriggered: root.inlineWebReady = true
+        onTriggered: {
+            root.inlineWebReady = true
+        }
     }
     onStateChanged: {
         if (root.state !== 0) {
@@ -270,8 +284,19 @@ ApplicationWindow {
             // re-populate candidates for the text that's still typed. The
             // fresh inline WebView is (re)created by inlineWebTimer shortly
             // after; the pending suggestions are flushed once it's ready.
-            input.forceActiveFocus()
-            if (input.displayText.trim().length > 0) searchPane._doSuggest()
+            //
+            // Focus and text must not be applied in the same frame as the pane
+            // switch: Material's floating label animates between "inside the
+            // box" and "above the border" from (activeFocus || length > 0), and
+            // a focus grant landing while the pane is still settling leaves the
+            // label drawn ON the border. Re-assert focus on the next turn so the
+            // label animates from a settled state (same class of in-flight-state
+            // race as _suppressSuggest below).
+            Qt.callLater(function() {
+                if (root.state !== 0) return
+                input.forceActiveFocus()
+                if (input.displayText.trim().length > 0) searchPane._doSuggest()
+            })
         }
     }
     // Guards the onStateChanged re-focus/re-suggest so it only runs on an
@@ -655,19 +680,46 @@ ApplicationWindow {
         // Don't clear ftsResults here: switching tabs must be idempotent, so
         // the last search results survive a round trip (the field keeps its
         // query and the results stay valid). A new search replaces them.
+        // Also clear any busy flag left by a submit whose reply was dropped for
+        // a stale query, so the control cannot stay disabled across a re-entry.
+        root.ftsSearching = false
         state = 4
     }
     function _openFavorites() {
         _blurActive()
         state = 6
     }
+    // Submit a full-text search. This is the ONLY path that runs a search
+    // (control-state-and-fts-whole-words): typing, a scope change, and the
+    // whole-words toggle change what a later search does, not whether one runs.
+    // The mode is chosen here from the toggle — whole words -> FTS::
+    // WholeWords (0, exact terms), off -> Wildcards (2, prefix terms). The scope
+    // is the group selected in the FTS tab's group button (All by default).
     function _runFts() {
-        // Single v1 mode: Wildcards (FTS::SearchMode=2). By default each term is
-        // treated as a prefix (boo -> boo*); the "Match whole words" checkbox
-        // switches to exact-term matching. The scope is the group selected in
-        // the FTS tab's group button (All by default).
+        // displayText: during IME composition `text` lags what the user sees.
+        const q = ftsInput.displayText.trim()
+        if (q.length === 0) return
         const gid = engine.groupExists(root.ftsGroupId) ? root.ftsGroupId : 0
-        engine.ftsSearch(ftsInput.text, 2, gid, root.ftsWholeWordsOn)
+        // Record the inputs this submit is for: displayed results belong to
+        // them, so an input change invalidates the list (see _invalidateFtsResults).
+        root.ftsAppliedQuery = ftsInput.displayText
+        root.ftsAppliedGroup = gid
+        root.ftsAppliedWhole = root.ftsWholeWordsOn
+        root.ftsSearching = true
+        engine.ftsSearch(ftsInput.displayText, root.ftsWholeWordsOn ? 0 : 2, gid)
+    }
+    // Clear the result list when an input differs from the one the shown results
+    // were produced from, so the list never disagrees with the visible inputs.
+    // Called from every non-submit input change (query edit, scope change,
+    // whole-words toggle). Leaving/re-entering the pane does not call it, so a
+    // round trip keeps the results.
+    function _invalidateFtsResults() {
+        const gid = engine.groupExists(root.ftsGroupId) ? root.ftsGroupId : 0
+        if (ftsInput.displayText === root.ftsAppliedQuery
+            && gid === root.ftsAppliedGroup
+            && root.ftsWholeWordsOn === root.ftsAppliedWhole)
+            return
+        if (root.ftsResults.length > 0) root.ftsResults = []
     }
     // Navigation labels/icons for the bottom TabBar. The visible `label` is
     // translated; `a11y` stays the literal English accessibility name so the
@@ -718,8 +770,16 @@ ApplicationWindow {
     Connections {
         target: engine
         function onFtsSearchReady(query, results) {
-            if (query !== ftsInput.text) return
+            // Results have landed: the busy window for this submit is over, so
+            // re-enable the search control even if this reply turns out to be
+            // stale (otherwise a dropped reply would strand the button disabled).
+            root.ftsSearching = false
+            if (query !== ftsInput.displayText) return
             ftsResults = results
+        }
+        // Keep the Search pane's clipboard control in sync with the clipboard.
+        function onClipboardChanged() {
+            root.clipboardHasText = engine.clipboardHasText()
         }
     }
 
@@ -1026,6 +1086,11 @@ ColumnLayout {
                     text: root.icon("content_paste_search")
                     font.family: root.iconFontFamily
                     font.pixelSize: 18
+                    // Primary action: accent styling so it never reads as the
+                    // disabled grey. Enabled only while the clipboard holds
+                    // usable text (control-state-and-fts-whole-words).
+                    highlighted: true
+                    enabled: root.clipboardHasText
                     Accessible.name: "Clipboard"
                     Accessible.role: Accessible.Button
                     // Paste clipboard text into the search field (so the looked-up
@@ -1033,10 +1098,15 @@ ColumnLayout {
                     onClicked: {
                         const t = engine.clipboardText()
                         if (t.length > 0) {
+                            // Assign the text with suggestion queries suppressed
+                            // (the assignment fires onDisplayTextChanged, and an
+                            // unsuppressed suggest would race the lookup below).
+                            root._suppressSuggest = true
                             input.text = t
-                            input.forceActiveFocus()
+                            root._suppressSuggest = false
                             root._requestedWord = t
                             engine.lookup(t)
+                            Qt.callLater(function() { input.forceActiveFocus() })
                         }
                     }
                 }
@@ -1046,7 +1116,9 @@ ColumnLayout {
 
             Label {
                 Layout.fillWidth: true
-                visible: engine.lastError.length > 0
+                // Trimmed check: a whitespace-only message must not paint an
+                // empty "engine error:" line.
+                visible: engine.lastError.trim().length > 0
                 text: qsTr("engine error: %1").arg(engine.lastError)
                 color: Material.color(Material.Red)
                 wrapMode: Text.Wrap
@@ -2708,6 +2780,9 @@ text: root._stagingActive
                     text: root.icon("edit")
                     font.family: root.iconFontFamily
                     font.pixelSize: 18
+                    // Primary action: accent styling so the pencil does not read
+                    // as disabled (control-state-and-fts-whole-words).
+                    highlighted: true
                     // "All" is fixed: it cannot be renamed.
                     visible: groupsPane.editingGroup !== 0
                     Accessible.name: "Rename group"
@@ -3256,13 +3331,20 @@ text: root._stagingActive
                     font.pixelSize: 18
                     Accessible.name: "Full-text search"
                     Accessible.role: Accessible.EditableText
-                    onAccepted: { ftsInput.focus = false; root._runFts() }
+                    // Typing never runs a search, but it invalidates results that
+                    // no longer match the box (control-state-and-fts-whole-words).
+                    // displayText, not text: during IME composition `text` lags
+                    // behind what the user sees, so the submit guard and the
+                    // search control's enabled state must read what is on screen
+                    // (same reason the Search tab's _doSuggest uses displayText).
+                    onDisplayTextChanged: root._invalidateFtsResults()
+                    onAccepted: root._runFts()
                 }
 
                 Button {
                     id: ftsGroupButton
                     Layout.fillWidth: true
-                    Layout.preferredWidth: 3.9
+                    Layout.preferredWidth: 3
                     Layout.minimumWidth: 0
                     // Same permanent accent fill as the Search tab's group button.
                     highlighted: true
@@ -3300,8 +3382,10 @@ text: root._stagingActive
                     Accessible.name: "Whole words"
                     Accessible.role: Accessible.CheckBox
                     onClicked: {
+                        // The toggle changes the NEXT search's mode; it does not
+                        // run one. Results from the other mode are invalidated.
                         root.ftsWholeWordsOn = !root.ftsWholeWordsOn
-                        if (ftsInput.text.trim().length > 0) root._runFts()
+                        root._invalidateFtsResults()
                     }
                     contentItem: Text {
                         text: root.symbolIcon("match_word")
@@ -3316,18 +3400,50 @@ text: root._stagingActive
                 }
             }
 
+            // The one way to submit a full-text search. Its own row below the
+            // query/scope/whole-words controls so those keep their original
+            // sizes and the row keeps its original 7:3 split. Disabled while the
+            // query is blank and for the whole duration of a submitted search, so
+            // a slow search cannot be started twice.
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: 6
+
+                Button {
+                    id: ftsSearchButton
+                    Layout.preferredWidth: 48
+                    leftPadding: 12
+                    rightPadding: 12
+                    highlighted: true
+                    enabled: !root.ftsSearching && ftsInput.displayText.trim().length > 0
+                    Accessible.name: "Search"
+                    Accessible.role: Accessible.Button
+                    onClicked: root._runFts()
+                    contentItem: Text {
+                        text: root.icon("search")
+                        font.family: root.iconFontFamily
+                        font.pixelSize: 20
+                        horizontalAlignment: Text.AlignHCenter
+                        verticalAlignment: Text.AlignVCenter
+                        color: ftsSearchButton.enabled
+                            ? ftsSearchButton.Material.primaryHighlightedTextColor
+                            : ftsSearchButton.Material.foreground
+                    }
+                }
+                Item { Layout.fillWidth: true }
+            }
+
             // 8.1: index-build progress is shown in the Dicts tab banner only.
             // The FTS controls stay enabled while a build runs: the build now
             // interleaves with the engine, so a search over other dictionaries
             // returns within about one indexing slice (fts-indexing-performance).
 
-            // No dedicated submit button (ui-polish): with a non-empty query the
-            // search runs on keyboard submit (ftsInput.onAccepted), on a scope
-            // group change, and on the Whole words toggle above.
-
             Label {
                 Layout.fillWidth: true
-                visible: engine.lastError.length > 0
+                // A whitespace-only message is not an error worth painting: the
+                // engine can report a blank string, which used to show an empty
+                // red "engine error:" line.
+                visible: engine.lastError.trim().length > 0
                 text: qsTr("engine error: %1").arg(engine.lastError)
                 color: Material.color(Material.Red)
                 wrapMode: Text.Wrap
@@ -3464,8 +3580,10 @@ text: root._stagingActive
                             groupPickerList.currentIndex = index
                             if (root._pickerTarget === "fts") {
                                 root.ftsGroupId = g.id
-                                // Re-run the FTS for the new scope if a query is present.
-                                if (ftsInput.text.trim().length > 0) root._runFts()
+                                // A scope change does not run a search: it changes
+                                // what the next submit will search, and invalidates
+                                // results produced for the previous scope.
+                                root._invalidateFtsResults()
                             } else {
                                 root.searchGroupId = g.id
                                 const q = input.displayText.trim()
