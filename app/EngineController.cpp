@@ -103,6 +103,22 @@ static void installDiagLog(const QString &appDir)
 EngineController::EngineController(QObject *parent)
     : QObject(parent)
 {
+    // Resolve the theme before any QML binding evaluates. main.cpp constructs this
+    // controller (line 89) before the QML engine (line 92), and the QML palette
+    // binds straight to m_darkMode -- but applyEffectiveDark() first runs from the
+    // gd_init watcher, long after the first frame. Sampling the system night state
+    // here (the tick does the same read 500 ms later) means a dark-mode user does
+    // not see the correct dark launch starting window followed by a LIGHT app
+    // (system-splash-theme, design D4).
+    //
+    // Only the two fields are touched. applyEffectiveDark() is deliberately not
+    // called: it pushes gd_set_dark_mode off-thread, which must not happen before
+    // gd_init has run. A user who has FORCED a theme still gets the system theme
+    // here -- that is the most available before settings.json has been read, and
+    // loadSettings() re-resolves it once the engine is up.
+    m_systemDark = readSystemDark();
+    m_darkMode = m_systemDark; // m_themeMode is follow-the-system at construction
+
     // Serial engine dispatch: at most one interactive gd_* call in flight (see
     // m_enginePool in the header). The single thread is kept alive so rapid
     // typing/lookups never pay a thread-spawn cost.

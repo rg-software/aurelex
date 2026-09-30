@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The app's only Android theme. It carries background attributes and nothing
+         else: AurelexActivity sets the system-bar icon contrast programmatically
+         (setSystemBarAppearance, on every theme change), so the theme must not be
+         relied on for it, and Qt paints all of the app's own chrome.
+
+         `android:windowBackground` is the starting window on releases that predate
+         the platform splash screen; values-v31/styles.xml adds the API 31+ attribute
+         to the same theme so the two paths cannot drift. Both point at one color
+         resource, `app_background`, which is values/ or values-night/ depending on
+         the system night setting (system-splash-theme, design D1/D3). -->
+    <style name="Theme.Aurelex" parent="@android:style/Theme.DeviceDefault.NoActionBar">
+        <item name="android:windowBackground">@color/app_background</item>
+    </style>
+</resources>

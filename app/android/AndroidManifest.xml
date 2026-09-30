@@ -22,12 +22,16 @@
         android:roundIcon="@mipmap/ic_launcher"
         android:allowBackup="true"
         android:networkSecurityConfig="@xml/network_security_config">
+        <!-- The theme is what makes the launch starting window ours to paint: with
+             "minimal" style extraction and no android:theme, the platform default
+             (white) is used in every theme (system-splash-theme, design D1). -->
         <activity
             android:name=".AurelexActivity"
             android:configChanges="orientation|uiMode|screenLayout|screenSize|smallestScreenSize|layoutDirection|locale|fontScale|keyboard|keyboardHidden|navigation|mcc|mnc|density"
             android:label="@string/app_name"
             android:launchMode="singleInstance"
             android:screenOrientation="unspecified"
+            android:theme="@style/Theme.Aurelex"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />

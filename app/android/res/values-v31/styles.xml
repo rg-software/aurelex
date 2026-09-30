@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- API 31+ has a real splash screen, configured with its own attribute. The
+         theme is redefined (not extended by a new name) so the launcher activity
+         keeps a single `android:theme`, and both attributes deliberately reference
+         the SAME color resource as the base theme's `android:windowBackground`
+         (system-splash-theme, design D1).
+
+         No `android:windowSplashScreenAnimatedIcon`: with the attribute absent the
+         system renders the launcher adaptive icon (@mipmap/ic_launcher) masked and
+         centered, which is the intended result. An override would be a second
+         drawable to re-key on every icon change, cropped by the system to its own
+         container so it would not match the launcher, and it would lose the adaptive
+         icon's monochrome handling (design D2). -->
+    <style name="Theme.Aurelex" parent="@android:style/Theme.DeviceDefault.NoActionBar">
+        <item name="android:windowBackground">@color/app_background</item>
+        <item name="android:windowSplashScreenBackground">@color/app_background</item>
+    </style>
+</resources>

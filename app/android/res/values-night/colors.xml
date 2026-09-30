@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Dark counterpart of the light `app_background` in values/colors.xml:
+         #1C1B1F is Qt 6.6's `backgroundColorDark`, i.e. `Material.background` in the
+         dark theme (system-splash-theme, design D1).
+
+         This qualifier is the *system* night setting, not the app's theme mode. That
+         is deliberate and is the most the platform can do: the starting window is
+         drawn before any app code has run, so it cannot know a forced light/dark
+         preference. A user who forced the app's theme gets the system theme's
+         starting window and the app then switches. -->
+    <color name="app_background">#1C1B1F</color>
+</resources>

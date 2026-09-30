@@ -1,4 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <color name="ic_launcher_background">#FFFFFF</color>
+
+    <!-- The app's light background, in Android resources, so the launch starting
+         window paints the same color the app does. #FFFBFE is Qt 6.6's
+         `backgroundColorLight` (qquickmaterialstyle.cpp), what `Material.background`
+         resolves to, which main.qml aliases as uiBg. The dark counterpart is
+         #1C1B1F in values-night/colors.xml; keep the pair in step with Qt's palette
+         (system-splash-theme, design D1). -->
+    <color name="app_background">#FFFBFE</color>
 </resources>
