@@ -5,6 +5,7 @@
     {
       "id": "kaikki-en-ru",
       "name": "Wiktionary (English → Russian)",
+      "names": { "ru": "Викисловарь (английский → русский)" },
       "langFrom": "en",
       "langTo": "ru",
       "attribution": "Wiktionary contributors, CC BY-SA 4.0",

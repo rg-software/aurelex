@@ -86,6 +86,14 @@ int main(int argc, char **argv) {
             check(dsl->attribution.contains(QStringLiteral("Wiktionary")),
                   "attribution carried through");
             check(dsl->license == QStringLiteral("CC-BY-SA-4.0"), "license carried through");
+            check(dsl->nameFor({QStringLiteral("ru")})
+                      == QStringLiteral("Викисловарь (английский → русский)"),
+                  "a localized name is shown for its language");
+            check(dsl->nameFor({QStringLiteral("ru-RU"), QStringLiteral("ru")})
+                      == QStringLiteral("Викисловарь (английский → русский)"),
+                  "a regional code falls back to its base language");
+            check(dsl->nameFor({QStringLiteral("en")}) == dsl->name,
+                  "an unlisted language shows the default name");
         }
 
         // -- entry 2: mdict PAIR, the multi-file installed-detection case --
@@ -95,6 +103,8 @@ int main(int argc, char **argv) {
             check(mdx->dictionaryFiles().size() == 2,
                   "both .mdx and .mdd are dictionary-role files");
             check(!mdx->hasOptionalFiles(), "mdict entry has no optional bundle");
+            check(mdx->nameFor({QStringLiteral("ru")}) == mdx->name,
+                  "an entry without a names map shows its default name");
             check(!RemoteCatalog::isInstalled(*mdx, {"enwiktionary-en-de.mdx"}),
                   "mdict pair is NOT installed with only the .mdx");
             check(!RemoteCatalog::isInstalled(*mdx, {"enwiktionary-en-de.mdd"}),
@@ -128,6 +138,27 @@ int main(int argc, char **argv) {
         if (dsl)
             check(!RemoteCatalog::isInstalled(*dsl, {"kaikki-en-ru.dsl.dz.files.zip"}),
                   "an entry with only its resources bundle is not installed");
+    }
+
+    // ---- a malformed localized-names map rejects the document ----
+    {
+        const QByteArray notAnObject = QByteArrayLiteral(
+            "{\"schemaVersion\":1,\"entries\":[{\"id\":\"x\",\"name\":\"X\","
+            "\"langFrom\":\"en\",\"langTo\":\"ru\",\"names\":\"ru\","
+            "\"files\":[{\"role\":\"dictionary\",\"required\":true,"
+            "\"name\":\"x.dsl\",\"url\":\"https://e/x.dsl\",\"sizeBytes\":1}]}]}");
+        RemoteCatalog::Manifest badM;
+        QString badErr;
+        check(!RemoteCatalog::parseManifest(notAnObject, &badM, &badErr),
+              "a non-object \"names\" rejects the document");
+
+        const QByteArray nonString = QByteArrayLiteral(
+            "{\"schemaVersion\":1,\"entries\":[{\"id\":\"x\",\"name\":\"X\","
+            "\"langFrom\":\"en\",\"langTo\":\"ru\",\"names\":{\"ru\":5},"
+            "\"files\":[{\"role\":\"dictionary\",\"required\":true,"
+            "\"name\":\"x.dsl\",\"url\":\"https://e/x.dsl\",\"sizeBytes\":1}]}]}");
+        check(!RemoteCatalog::parseManifest(nonString, &badM, &badErr),
+              "a non-string localized name rejects the document");
     }
 
     // ---- contentHash (the staging directory name) ----
