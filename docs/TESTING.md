@@ -97,6 +97,27 @@ accessibility subtree, where the state is the `alt` text: `[+]` collapsed,
 | 18k | Check the accessibility tree while expanded | `content-desc` reads `[-]`, not `[+]` — the alt text is the state flag | ⬜ |
 | 18l | Look up a headword with **no** optional zone | No expander rendered at all (there is nothing to reveal) | ⬜ |
 
+## Article sense-marker icons
+
+The kaikki converter marks common sense tags with four small SVGs
+(`gd_tag_countable/uncountable/initialism/obsolete.svg`), referenced from the
+article as `[s]gd_tag_*.svg[/s]`. Two independent copies exist **on purpose**:
+the converter writes them into every dictionary it builds, and the APK ships its
+own set in `assets/icons/`. The engine emits a dictionary-resource URL for them
+(`bres://<dict>/.svg`, no existence check), which the app rewrites to its own
+asset before it can ever become a resource read — so the app answers from the
+APK and never consults the dictionary for these four names. Only those four are
+rewritten; see `AGENTS.md` for the rule. **Nothing here has been checked on a
+device.**
+
+| # | How to test | Expected | Status |
+| --- | --- | --- | --- |
+| 18m | Import a kaikki dictionary **with** its `.files` bundle, open a headword with a marked sense | The sense icons render inline, sized to the surrounding text (not full-size images) | ⬜ |
+| 18n | Import the **same dictionary's `.dsl.dz` alone**, with no sibling `.files` bundle, and open the same headword | The icons **still render** — the app falls back to its own copy. This is the case that silently regresses if the rewrite is ever tightened; if the icons 404 here, that rewrite broke | ⬜ |
+| 18o | In the same bundle-less dictionary, check the load/scan | The dictionary loads and searches normally despite having no resource bundle | ⬜ |
+| 18p | Look up a word from a dictionary with an **ordinary** image (an `.mdd` picture, or a DSL `<dict>.files` image), and check the log | That image still resolves through `bres://` — the rewrite is bounded to the four `gd_tag_*` names and does not swallow other resources | ⬜ |
+| 18q | Zoom the article (#18a) on a headword showing icons | The icons scale with the text and stay on the text baseline | ⬜ |
+
 ## Theme (dark / light / follow system)
 
 The dock's theme cell cycles **Light → Dark → Follow system → Light**. Its glyph and its
@@ -268,8 +289,8 @@ the pane makes no catalog request. Format, manifest and hosting rules:
 - The remote catalog has **no on-device coverage at all** (#56–#72). It is the
   largest shipped feature with zero device verification, and the only one that
   depends on TLS working in a release build.
-- Article zoom/reflow (#18a–#18g) and the optional-parts expander
-  (#18h–#18l) are likewise unexercised on a device.
+- Article zoom/reflow (#18a–#18g), the optional-parts expander (#18h–#18l) and
+  the sense-marker icons (#18m–#18q) are likewise unexercised on a device.
 - The compiled-in catalog URL is still the maintainer's temporary self-hosted
   share rather than the documented GitHub Pages address, so a released build
   cannot currently fetch the real catalog (`docs/REMOTE-CATALOG.md` § Hosting).
