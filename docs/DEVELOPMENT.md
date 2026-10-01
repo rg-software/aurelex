@@ -105,7 +105,7 @@ foreach ($t in @('article_server_test','index_migration_test','index_cleanup_tes
 | `index_cleanup_test` | index removal on dictionary delete |
 | `dictionary_index_test` | display-order ↔ engine-index mapping |
 | `staged_cleanup_test` | the containment/sharing guards on deleting a staged import directory |
-| `staging_rules_test` | the staging resource-directory rule (DSL `.files`; StarDict `res` only beside a `.ifo`) mirrored by the Java importer |
+| `staging_rules_test` | the staging resource rules mirrored by the Java importer: DSL `.files`; StarDict `res` only beside a `.ifo`; an MDX set's loose assets (`.css`/images/fonts) only beside a `.mdx`, and only the bounded set an article embeds |
 | `catalog_test` | the remote-catalog manifest parser, installed-detection and the free-space preflight constants, against the fixtures in `app/tests/fixtures/` |
 
 Building a single target is often enough while iterating:

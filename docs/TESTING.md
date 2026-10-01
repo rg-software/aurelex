@@ -64,11 +64,47 @@ This adb-installs the result (`-Install`); without it the APK lands in
 | 15 | Tap a suggestion / press return | Combined article renders, dictionaries in group order | ✅ |
 | 16 | Look up an unknown word | "Word not found" indication, no crash | ✅ |
 | 17 | Tap a link inside an article | In-app lookup of the linked word; back returns to previous article | ✅ |
-| 18 | Open an article with images from an `.mdd` | Images render | 🔶 (not exercised on-device — no MDX fixture yet) |
+| 18 | Open an article with images from an `.mdd` | Images render | 🔶 (host-verified — see #18a; on-device pass still open) |
 | 19 | Article references a missing resource | Article still renders; broken item shown, no crash | ✅ |
 | 20 | Tap a pronunciation anchor (ogg/mp3/wav) | Audio plays; speex (`.spx`) is ignored, no crash | 🔶 (speex is silently skipped, not explicitly indicated) |
 | 21 | Look up the same word twice | One history entry (dedupe, moves to front) | ✅ |
 | 22 | Look up a word not in any dict | **Not** added to history | ✅ |
+
+### MDict (`.mdx` / `.mdd`)
+
+MDict had **no** on-device coverage and no CI fixture — its only appearances in
+the smoke tool were a search term inside a StarDict article. Host testing of
+three real dictionaries is recorded below; the device pass is the remaining gap.
+`verify-mdx-import` is the change that covers this.
+
+The smoke tool now dumps the **whole** article and fetches **every** resource it
+references, printing each with its byte count and sniffed magic bytes. That is
+how the rows below were measured, and it is re-runnable:
+
+```
+build-smoke\Release\aurelex_smoke.exe <cfg> <dicts> <word>
+```
+
+| # | How to test | Expected | Status |
+| --- | --- | --- | --- |
+| 18a | Look up `hand` in **Black's Medical Dictionary** (`.mdx` + 14 MB `.mdd`) | The article references `img/fig_ufig-h_1.jpg`; `gd_get_resource` returns **233245 bytes, `magic=jpeg`** — a real JPEG pulled from a nested path inside the `.mdd`. Hide the `.mdd` and it reports `FAILED TO RESOLVE`, so the check has teeth | ✅ host |
+| 18b | Import **collinslaw** (`.mdx` + loose `.css`/`.jpg`, **no `.mdd`**) on device | It is listed, `law` resolves, **and the article is styled** — every article links `collinslaw.css`, which `verify-mdx-import` now stages | 🔶 host-verified, device open |
+| 18c | Import **demo** (`.mdx` + `.mdd`) on device | Listed and headwords resolve. Note this fixture references **no** resources, so it cannot test the resource path — use 18a for that | 🔶 host-verified, device open |
+| 18d | Confirm the staged layout keeps the `.mdd` beside the `.mdx`, and `collinslaw.css` / `collinslaw2ed.jpg` beside theirs | The engine resolves the archive and the loose assets relative to the `.mdx` | 🔶 device open |
+
+Two things that look like bugs and are not:
+
+- **A served CSS can be larger than the file on disk.** `collinslaw.css` is
+  1061 bytes but serves 1684. `mdx.cc:811` runs `isolate_css()`, which rewrites
+  CSS links to rescope them per dictionary. Correct, not corruption.
+- **`collinslaw` references an image it does not ship.**
+  `William J. Stewart, Robert Burgess - Collins Dictionary of Law (2001)/Image_106.png`
+  is absent from the zip, so it legitimately fails to resolve. Note the path
+  contains **spaces and commas** — the smoke tool had to be taught to parse
+  quote-delimited URLs for exactly this reason.
+
+Not yet exercised anywhere: **multi-volume `.mdd`** (`demo.1.mdd` … `demo.n.mdd`).
+The suffix rule should accept it, but no fixture has proven it.
 
 ## Article zoom & reflow
 
@@ -259,7 +295,9 @@ the pane makes no catalog request. Format, manifest and hosting rules:
 
 ## Known gaps
 
-- `.mdd` images not exercised on-device (#18) — needs a real MDict fixture.
+- `.mdd` images not exercised on-device (#18/#18a) — now host-verified against
+  three real MDict dictionaries (`verify-mdx-import`); the on-device pass is all
+  that is left. Multi-volume `.mdd` is untested on either side.
 - QS tile / widget active-group (#37) — inherited from `quick-lookup-shortcuts`.
 - Theme control: the tri-state cycle, both migration paths, live system-switch, the
   article in-place flip, the layout alignment and the glyphs are all verified
