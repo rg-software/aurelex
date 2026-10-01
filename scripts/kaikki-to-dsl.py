@@ -3672,7 +3672,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="kaikki-to-dsl.py",
         description="Build an importable DSL dictionary from a pinned kaikki.org "
-        "Wiktionary snapshot for one language.",
+        "Wiktionary snapshot for one language.\n\n"
+        "Modes (an optional first argument; with no mode word this builds a\n"
+        "dictionary):\n"
+        "  prefetch-audio  Back-fill the audio the archive lacks; --split N writes\n"
+        "                  worker shards\n"
+        "  fetch-list      Fetch one shard file on a worker machine\n"
+        "  bundle-audio    Rebuild a dictionary's resource bundle without re-rendering\n"
+        "Run 'kaikki-to-dsl.py <mode> --help' for a mode's own options.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
             "Notes:\n"
