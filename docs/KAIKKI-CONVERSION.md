@@ -254,6 +254,14 @@ the headword, with an ellipsis on any cut edge. A quote with no headword to
 anchor on falls back to cutting at the last word boundary that fits. A sense with
 no surviving example gets no zone at all rather than an empty one.
 
+A language written without word spaces needs two accommodations. A sentence ends
+at its own full stop — `。`, `！`, `？` for Japanese — not at `.`, and the headword
+is matched as a **substring** rather than as a whitespace token, because a whole
+clause is a single "word" there. Both are confined to CJK scripts, so an English
+headword still cannot match inside `brunch`. Before this, a Japanese example was
+treated as one endless sentence and only survived when the headword happened to
+start a clause.
+
 An example is kept only if it actually contains the headword: an exact token
 match against the headword or one of its listed forms (which catches irregular
 inflections such as `ran`/`children`), or a shared stem of at least three
@@ -282,9 +290,13 @@ register/dialect tag (`archaic`, `obsolete`, `dialectal`, `nonstandard`,
 (`canonical`, and the like) therefore do not silently drop an otherwise ordinary
 form. What the tags mean, and how each is abbreviated, is **per-language** and
 lives in the `LANG_PROFILES` table in the script rather than in the renderer:
-adding a language is a data change, not a code change. `en`, `de` and `ja` are
-populated as examples, and any language without a profile falls back to a
-permissive default and warns.
+adding a language is a data change, not a code change. A profile also carries
+the language's own labels for parts of speech and sense tags, so a monolingual
+dictionary reads in its own language (`ru` → `сущ.`, `ja` → `名詞`), and declares
+whether the language has recordings at all: `ja` sets `has_audio=False`, so a
+Japanese build fetches no audio archive (and `prefetch-audio` refuses).
+`en`, `de`, `ja` and `ru` are populated, and any language without a profile falls
+back to a permissive default and warns.
 
 Pronunciation is likewise driven by the profile: each `sounds[]` field that
 carries a transcription (for English, `ipa` then `enpr`) is shown once, as a bare

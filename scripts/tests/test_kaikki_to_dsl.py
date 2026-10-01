@@ -2169,6 +2169,53 @@ class LangProfileTests(unittest.TestCase):
         self.assertTrue(ja.form_qualifies(("imperfective", "stem")))
         self.assertFalse(ja.has_audio)
 
+    def test_japanese_labels_are_in_japanese(self):
+        ja = TOOL.get_lang_profile("ja")
+        self.assertEqual(ja.pos_labels.get("noun"), "名詞")
+        self.assertEqual(ja.pos_labels.get("adj_noun"), "形容動詞")
+        # a reading is labelled as a reading, and the conjugation-class row tag
+        # that every inflected form carries does not clutter the label
+        self.assertEqual(
+            ja.label_tags(("transliteration", "kan-on", "joyo")), "読み, 漢音, 常用"
+        )
+        self.assertEqual(ja.label_tags(("sa-row", "imperfective")), "未然形")
+        self.assertEqual(ja.sense_short_tags.get("figuratively"), "比喩")
+
+    def test_a_japanese_reading_survives_as_a_form(self):
+        record = {
+            "word": "青", "pos": "noun",
+            "forms": [{"form": "セイ", "tags": ["transliteration", "kan-on", "joyo"]}],
+        }
+        self.assertEqual(
+            TOOL.collect_profile_forms(record, TOOL.get_lang_profile("ja")),
+            ["セイ (読み, 漢音, 常用)"],
+        )
+
+    def test_japanese_has_no_audio_so_no_archive_is_fetched(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            jsonl = os.path.join(tmp, "ja.jsonl")
+            with open(jsonl, "w", encoding="utf-8") as f:
+                f.write(json.dumps({
+                    "word": "青", "lang_code": "ja", "pos": "noun",
+                    "senses": [{"glosses": ["色の一つ。"]}],
+                }) + "\n")
+            args = TOOL.build_parser().parse_args([
+                "--source-lang", "ja", "--jsonl", jsonl,
+                "--out-dir", os.path.join(tmp, "out"),
+            ])
+            args.cache_dir = os.path.join(tmp, "cache")
+            original = TOOL._open_with_retries
+
+            def blocked(*_a, **_k):
+                raise AssertionError("the network was used")
+
+            TOOL._open_with_retries = blocked
+            self.addCleanup(setattr, TOOL, "_open_with_retries", original)
+            # the profile declares no recordings, so no audio archive is opened
+            report = TOOL.build(args)
+            self.assertEqual(report.audio_found, 0)
+            self.assertEqual(report.missing_audio, 0)
+
     def test_russian_profile_keeps_case_and_aspect(self):
         ru = TOOL.get_lang_profile("ru")
         # the profile is registered, so no fallback is used
@@ -2249,9 +2296,11 @@ class LangProfileTests(unittest.TestCase):
             TOOL.collect_profile_forms(record, TOOL.get_lang_profile("en")),
             ["f (past)"],
         )
+        # the renderer follows the profile object, not the language code: the
+        # same tag reads differently in English and Japanese
         self.assertEqual(
             TOOL.collect_profile_forms(record, TOOL.get_lang_profile("ja")),
-            ["f (past)"],
+            ["f (過去)"],
         )
 
 
@@ -2735,6 +2784,15 @@ class CardLayoutTests(unittest.TestCase):
         shortened = TOOL._truncate_example("word " * 80, word="absent", limit=50)
         self.assertTrue(shortened.endswith(" …"))
         self.assertTrue(shortened[:-2].endswith("word"))
+
+    def test_a_cjk_full_stop_bounds_an_example(self):
+        # Japanese ends a sentence with 。, not '.', so without it the whole
+        # quotation counts as one sentence and the window fallback is used.
+        text = "これは前置きの長い文章です。" * 25 + "この文には羊頭狗肉が入っています。"
+        self.assertEqual(
+            TOOL._truncate_example(text, "羊頭狗肉"),
+            "… この文には羊頭狗肉が入っています。",
+        )
 
     def test_example_must_contain_the_headword(self):
         # an example that never uses the word is dropped

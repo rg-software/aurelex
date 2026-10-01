@@ -263,15 +263,60 @@ _DE_SHORT_TAGS = {
     "comparative": "comp.", "superlative": "sup.",
 }
 
-# Japanese has no IPA in this source; readings arrive as forms (`romanization`,
-# `hiragana`, ...) so the pronunciation slot is filled from those instead. Its
-# tag space is broad, so it stays on the permissive default policy.
-_JA_FORM_TAGS: Set[str] = set()
-_JA_NOISE = _FORM_NOISE
+# Japanese readings (on-yomi/kun-yomi) arrive as `forms[]` tagged
+# `transliteration` plus an origin tag (`go-on`, `kan-on`, `kun`, ...); the
+# source has no IPA, so those readings *are* the pronunciation and are labelled
+# as readings. Inflections carry conjugation tags (`sa-row`, `imperfective`,
+# ...): the row tags name the conjugation class rather than the form, so they are
+# kept out of `form_tags` and simply drop from the label.
+_JA_FORM_TAGS: Set[str] = {
+    # readings, and a kana headword's kanji spelling
+    "transliteration", "go-on", "kan-on", "to-on", "kun", "ko-kun", "joyo",
+    "kanji",
+    # the forms a Japanese grammar prints
+    "imperfective", "continuative", "conclusive", "attributive",
+    "hypothetical", "imperative", "negative", "past", "completive",
+    "conditional", "volitional", "polite", "passive", "causative",
+    "potential", "stem", "definitive", "noun-from-verb",
+}
+# Table machinery and register/dialect, plus: the canonical lemma itself, a
+# romanization (the reading is the kana form, not its rōmaji), and transitivity,
+# which describes the verb rather than the form.
+_JA_NOISE = _FORM_NOISE | {"canonical", "romanization", "transitive", "intransitive"}
 _JA_SHORT_TAGS = {
-    "romanization": "romaji", "hiragana": "hiragana", "katakana": "katakana",
-    "kanji": "kanji", "kyūjitai": "kyūjitai", "stem": "stem",
-    "imperfective": "imperf.", "continuative": "cont.", "past": "past",
+    "transliteration": "読み", "go-on": "呉音", "kan-on": "漢音", "to-on": "唐音",
+    "kun": "訓", "ko-kun": "古訓", "joyo": "常用", "kanji": "漢字",
+    "imperfective": "未然形", "continuative": "連用形", "conclusive": "終止形",
+    "attributive": "連体形", "hypothetical": "仮定形", "imperative": "命令形",
+    "negative": "否定", "past": "過去", "completive": "完了",
+    "conditional": "条件", "volitional": "意志", "polite": "丁寧",
+    "passive": "受身", "causative": "使役", "potential": "可能",
+    "stem": "語幹", "definitive": "已然形", "noun-from-verb": "名詞形",
+}
+# Parts of speech as a Japanese dictionary prints them (the source's `pos` codes
+# are English for every edition).
+_JA_POS_LABELS = {
+    "noun": "名詞", "verb": "動詞", "adj": "形容詞", "adj_noun": "形容動詞",
+    "adv": "副詞", "adnominal": "連体詞", "pron": "代名詞", "num": "数詞",
+    "counter": "助数詞", "particle": "助詞", "conj": "接続詞", "intj": "感動詞",
+    "prefix": "接頭辞", "suffix": "接尾辞", "affix": "接辞", "phrase": "成句",
+    "proverb": "諺", "abbrev": "略語", "contraction": "縮約", "name": "固有名詞",
+    "character": "漢字", "symbol": "記号",
+}
+# Register/context tags on a gloss, in Japanese. Countability, the initialism
+# family and the obsolete/dated/archaic trio are drawn as icons (see
+# `_SENSE_TAG_ICONS`), so they need no entry here; `form-of` is structural and
+# says nothing the gloss does not.
+_JA_SENSE_NOISE = {"transitive", "intransitive", "not-comparable", "no-gloss"}
+_JA_SENSE_SHORT = {
+    "figuratively": "比喩", "informal": "口語", "colloquial": "口語",
+    "slang": "俗語", "historical": "歴史", "rare": "稀", "literary": "文語",
+    "euphemistic": "婉曲", "broadly": "広義", "childish": "幼児語",
+    "vulgar": "卑語", "rhetoric": "修辞", "onomatopoeic": "擬音",
+    "Internet": "ネット", "Christian": "キリスト教", "Judaism": "ユダヤ教",
+    "place": "地名", "ordinal": "序数", "cardinal": "基数",
+    "in-compounds": "複合語", "literally": "文字通り", "ironic": "皮肉",
+    "especially": "特に", "regional": "方言", "dialectal": "方言",
 }
 
 # Russian forms are dominated by case/number/gender and, for verbs, aspect and
@@ -352,6 +397,8 @@ LANG_PROFILES: Dict[str, LangProfile] = {
     ),
     "ja": LangProfile(
         "ja", _JA_FORM_TAGS, _JA_NOISE, (), _JA_SHORT_TAGS, has_audio=False,
+        sense_noise_tags=_JA_SENSE_NOISE, sense_short_tags=_JA_SENSE_SHORT,
+        pos_labels=_JA_POS_LABELS,
     ),
     "ru": LangProfile(
         "ru", _RU_FORM_TAGS, _RU_NOISE, ("ipa",), _RU_SHORT_TAGS,
@@ -1874,6 +1921,14 @@ _MIN_STEM = 3
 
 _WORD_RE = re.compile(r"[^\W\d_]+", re.UNICODE)
 
+# CJK text is written without spaces, so the word-token split cannot delimit a
+# headword inside it -- a whole clause is a single token. A headword written in a
+# CJK script is therefore also matched as a plain substring, where a spaced
+# language could not (there, "run" must not match inside "brunch").
+_CJK_RE = re.compile(
+    "[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\uac00-\ud7af]"
+)
+
 # At most this many examples survive on one sense; the shortest are kept, which
 # favours a crisp illustrative phrase over a paragraph-long quotation.
 _EXAMPLE_MAX_PER_SENSE = 1
@@ -1945,6 +2000,13 @@ def _headword_span(
             return match.start(), match.end()
 
     head = str(word or "").strip().lower()
+    # A CJK headword has no space boundary to match against, so try it as a
+    # substring; the length guard keeps the index valid when casefolding could
+    # change the string's length (it cannot for CJK, but be safe).
+    if head and _CJK_RE.search(head) and len(text) == len(text.casefold()):
+        at = text.casefold().find(head)
+        if at != -1:
+            return at, at + len(head)
     if len(head) < _MIN_STEM:
         return None
     candidates = {head, *head.split()}
@@ -1960,8 +2022,10 @@ def _headword_span(
 # Sentence terminators, and the closing punctuation that may follow one before
 # the next sentence starts. Deliberately simple: enough to keep a single
 # sentence rather than a whole quotation when only one sentence names the word.
-_SENTENCE_END = ".!?…"
-_SENTENCE_CLOSERS = "\"'»”)]}"
+# The CJK full stop and full-width marks are included so a Japanese example is
+# bounded the way an English one is.
+_SENTENCE_END = ".!?\u2026\u3002\uff01\uff1f"
+_SENTENCE_CLOSERS = "\"'»”)]}\u300d\u300f\uff09\u3011\u300b\u3009"
 
 
 def _sentence_span(text: str, start: int, end: int) -> Tuple[int, int]:
@@ -1977,7 +2041,7 @@ def _sentence_span(text: str, start: int, end: int) -> Tuple[int, int]:
         if text[i] in _SENTENCE_END:
             left = i + 1
             break
-    while left < start and text[left] in " \t\n\u00a0\"'«“‘":
+    while left < start and text[left] in " \t\n\u00a0\"'\u00ab\u201c\u2018\u300c\u300e\uff08\u3010\u300a\u3008":
         left += 1
     right = len(text)
     for i in range(end, len(text)):
@@ -2587,7 +2651,15 @@ def write_annotation(
 def build(args) -> Report:
     report = Report()
 
-    want_audio = (not args.no_audio) and args.audio_per_word > 0
+    profile = get_lang_profile(args.source_lang)
+
+    # A language whose profile declares no recordings (Japanese, say) downloads
+    # no audio archive and bundles none, exactly as with an explicit --no-audio:
+    # the source has nothing to offer, so fetching the 20 GB archive would only
+    # find that nothing is referenced.
+    want_audio = (
+        (not args.no_audio) and args.audio_per_word > 0 and profile.has_audio
+    )
     snapshot, jsonl_path, audio_path, available, download_dir = _resolve_inputs(
         args, want_audio
     )
@@ -2639,8 +2711,6 @@ def build(args) -> Report:
 
     out_lines: List[str] = []
     header_lines: List[str] = []
-
-    profile = get_lang_profile(args.source_lang)
 
     current_word: Optional[str] = None
     current_records: List[dict] = []
@@ -3465,6 +3535,11 @@ def prefetch_audio(args) -> int:
     want_audio = args.audio_per_word > 0
     if not want_audio:
         raise SystemExit("--audio-per-word 0 disables audio; nothing to prefetch")
+    if not get_lang_profile(args.source_lang).has_audio:
+        raise SystemExit(
+            f"the {args.source_lang!r} profile declares no pronunciation "
+            "recordings; there is nothing to prefetch"
+        )
     if args.split is not None:
         if args.split < 1:
             raise SystemExit("--split needs a shard count of at least 1")
