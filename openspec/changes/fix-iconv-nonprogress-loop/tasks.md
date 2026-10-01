@@ -78,10 +78,14 @@
 - [x] 5.5 Regression fixture: `scripts/make-smoke-mdx.py` generates a synthetic
   MDict dictionary that loads, builds an index, and resolves every headword
   (`smoke`, `blood`, `cafe` all render `gdarticlebody=yes`). MDict had **no**
-  fixture before, which is why this class of bug reached the device. Wired into
-  `engine-smoke.yml` with assertions on load, lookup and body rendering, plus a
-  per-headword loop so a partial index walk is caught rather than passing on the
-  first article alone
+  fixture before, which is why this class of bug reached the device.
+  **Correction:** this was ticked on the strength of a local run against the
+  combined fixture set, and the CI wiring added with it was never green. The
+  smoke tool hard-fails on a folder without a StarDict `.ifo`, and the workflow's
+  `set -e` swallowed the exit code, so the MDX run could not pass and CI went red
+  without saying why. The fixture itself is sound and verified; the *wiring* was
+  not. Tracked as `fix-smoke-fixture-scoping`, which is the work that actually
+  completes this task
 
 ## 6. Documentation
 

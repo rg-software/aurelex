@@ -1,0 +1,8 @@
+schema: spec-driven
+created: 2026-10-02
+
+# Tooling and CI wiring only: the smoke tool is a build-time diagnostic and the
+# workflow is not user-visible behaviour, so no spec requirement changes. The
+# defect is that the tool assumes one fixture layout and the workflow cannot
+# report why it fails.
+skip_specs: true
