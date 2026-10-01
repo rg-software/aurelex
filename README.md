@@ -73,24 +73,14 @@ like one you imported yourself. Nothing is fetched again after that.
 | StarDict | `.ifo`, `.idx`, `.dict` | Does not load yet — see [Limitations](#limitations) |
 
 Anything else — BGL, SDict, XDXF, Aard, SLOB, GLS, Zim, EPWING, LSA — is not read
-natively. Convert it on a computer first, targeting a format Aurelex can read:
-**mdict (`.mdx`) is the safest choice today.**
+natively. If you have dictionaries in one of those formats, convert them on a
+computer with [pyglossary](https://github.com/ilius/pyglossary), then import the
+result.
 
-> ⚠️ Do not convert to StarDict. It is the most common conversion default, and
-> [pyglossary](https://github.com/ilius/pyglossary) writes it — but Aurelex
-> cannot load it yet, so the result will not open. See
-> [Limitations](#limitations).
-
-pyglossary still earns its place as the front half of a conversion, since it
-reads most of the formats above. To produce the `.mdx`, hand its tab-separated
-output to [mdict-utils](https://github.com/liuyug/mdict-utils):
-
-```bash
-pip install mdict-utils
-
-# -a takes a TSV of "headword<TAB>definition", or a directory
-mdict -a dict.txt dict.mdx
-```
+⚠️ Today that means going via `.mdx`. pyglossary can only *write* StarDict, which
+Aurelex does not load yet (see [Limitations](#limitations)), and it cannot write
+mdict or DSL at all — so the working route is pyglossary → text file →
+[mdict-utils](https://github.com/liuyug/mdict-utils) → `.mdx`.
 
 ## Importing dictionaries
 
