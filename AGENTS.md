@@ -12,8 +12,9 @@ engine in-process via the `gd_*` C boundary. We are not a fork of goldendict-ng 
 contribute back; see `docs/ENGINE.md`.
 
 Design is tracked with OpenSpec: the main specs live in `openspec/specs/`, and completed work is
-recorded in `openspec/changes/archive/` (51 changes). Work in progress lives in
-`openspec/changes/` — currently none open.
+recorded in `openspec/changes/archive/` — that archive is the record, so read it before assuming
+something is unbuilt. Work in progress lives in `openspec/changes/`; if it is empty, nothing is
+open.
 
 ## Where to look first
 
