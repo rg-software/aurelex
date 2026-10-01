@@ -6,9 +6,7 @@ Turns a pinned kaikki.org Wiktionary extract into an offline DSL dictionary for
 a chosen language pair (for example `en/en` or `en/ru`), packaged so it imports
 into Aurelex through the existing folder import with article content,
 grammatical forms, bounded pronunciation audio, and required attribution.
-
 ## Requirements
-
 ### Requirement: Reproducible snapshot acquisition
 
 The system SHALL build a dictionary only from a pinned kaikki.org snapshot
@@ -614,7 +612,9 @@ SHALL NOT be kept for a sense that is not marked obsolete, dated or archaic; for
 a sense that is so marked, an archaic example SHALL be shown when no other
 qualifying example exists, so such a sense is illustrated rather than left bare,
 and a modern-readable example SHALL be preferred when one exists. An example
-longer than a fixed bound SHALL be shortened at a word boundary.
+longer than a fixed bound SHALL be shortened at a word boundary to keep the part
+that shows the headword in use: the sentence containing the headword, or, when
+that sentence too exceeds the bound, a window around the headword.
 
 #### Scenario: Example must use the headword
 
@@ -645,6 +645,13 @@ longer than a fixed bound SHALL be shortened at a word boundary.
 - **WHEN** a sense is marked obsolete, dated or archaic and its only example is a
   cross-reference bookkeeping line
 - **THEN** that example is not shown
+
+#### Scenario: An over-long example keeps the headword
+
+- **WHEN** a qualifying example exceeds the length bound and the headword appears
+  past the bound
+- **THEN** the shown text still contains the headword, taken from the sentence
+  that carries it (or a window around it), and an ellipsis marks any cut edge
 
 #### Scenario: An over-long example is shortened
 
@@ -812,3 +819,4 @@ than leaving a broken reference silently.
 
 - **WHEN** the option is not given
 - **THEN** the resource bundle is rebuilt from the cache and archive as before
+
