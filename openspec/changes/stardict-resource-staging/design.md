@@ -90,6 +90,29 @@ Two hazards already met while fixing the companion files:
   StarDict case must be too, or adding resources would produce a second entry for
   the same dictionary.
 
+### Decision: merge the staged temp copy into the final dir, never replace it
+
+Verifying on device (task 6.4) surfaced a data-loss bug that this change
+activates. `StagingService.stageOne` copies into `files/staging-tmp/<id>` with
+`files/staged` as the dedup root, then **deleted** `files/staged/<id>` and
+renamed the temp dir over it. But `stageTreeInto` dedups unchanged files against
+that folder's *own previous* copy in `files/staged`, so they never reach the
+temp dir. On a re-import that adds anything new — here, the newly staged `res/`
+tree — the swap replaced a complete directory with a partial one, deleting the
+dictionary files. Observed: re-importing `isolated-dz` with a `res/` added left
+`files/staged/862e6fff/` holding only `res/dot.gif`; the walk logged
+`deduped=3` for `dzsample.{ifo,idx,dict.dz}`.
+
+This is latent outside StarDict too (any re-import that adds a supported file —
+a `.mdd`, a DSL `.files.zip` — would trigger it); before this change a StarDict
+`res/` was ignored, so the StarDict case was safe by accident.
+
+Fix: overlay the temp tree onto the final dir (move each file into place,
+replacing a same-named file), instead of deleting the final dir and renaming.
+Unchanged files stay; new/changed files are added or replaced. The "nothing new"
+fast path is preserved: an unchanged re-import still dedups everything and
+returns before touching the final dir.
+
 ## Risks / Trade-offs
 
 - **[Unrelated `res/`]** Still possible if a folder genuinely contains both a

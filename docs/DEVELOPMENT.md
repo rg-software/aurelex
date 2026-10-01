@@ -86,13 +86,14 @@ lives in `docs/TESTING.md`.
 of `app/CMakeLists.txt` (that one is Android-only and pulls in the whole carved
 engine). Each target links only the slice of app code it exercises and stubs
 whatever boundary it needs — `article_server_test` links Qt Core + Qt Network and
-stubs `gd_get_resource`/`gd_get_audio`; the other four are Qt Core only against
-header-only code — so these build and run in seconds on a desktop Qt.
+stubs `gd_get_resource`/`gd_get_audio`; the rest link Qt Core only (header-only
+code, plus `RemoteCatalog.cpp` for `catalog_test`) — so these build and run in
+seconds on a desktop Qt.
 
 ```powershell
 cmake -S app/tests -B build-app-tests -DCMAKE_PREFIX_PATH=C:/Qt/6.6.3/msvc2019_64 -G Ninja
 cmake --build build-app-tests --config Release
-foreach ($t in @('article_server_test','index_migration_test','index_cleanup_test','dictionary_index_test','catalog_test')) {
+foreach ($t in @('article_server_test','index_migration_test','index_cleanup_test','dictionary_index_test','staged_cleanup_test','staging_rules_test','catalog_test')) {
   & "build-app-tests/$t.exe"; if ($LASTEXITCODE -ne 0) { throw "$t failed" }
 }
 ```
@@ -103,6 +104,8 @@ foreach ($t in @('article_server_test','index_migration_test','index_cleanup_tes
 | `index_migration_test` | the index-directory path separator and the stray-sweep migration |
 | `index_cleanup_test` | index removal on dictionary delete |
 | `dictionary_index_test` | display-order ↔ engine-index mapping |
+| `staged_cleanup_test` | the containment/sharing guards on deleting a staged import directory |
+| `staging_rules_test` | the staging resource-directory rule (DSL `.files`; StarDict `res` only beside a `.ifo`) mirrored by the Java importer |
 | `catalog_test` | the remote-catalog manifest parser, installed-detection and the free-space preflight constants, against the fixtures in `app/tests/fixtures/` |
 
 Building a single target is often enough while iterating:

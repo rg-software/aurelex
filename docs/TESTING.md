@@ -43,6 +43,9 @@ This adb-installs the result (`-Install`); without it the APK lands in
 | 8e | With a failed import reported, tap its trash ("Remove failed import") in the banner | That import's staged files are deleted, the banner clears, and every other dictionary keeps working | ⬜ |
 | 8f | Re-import the corrected folder after a failed import of the same folder | The dictionary loads and the previous failure is gone, with no manual storage cleanup | ⬜ |
 | 8g | Leave a failed import reported and just restart / rescan | The failure is re-reported and its files are still there — the app never deletes an import on its own | ⬜ |
+| 8h | Import a StarDict dictionary that keeps article images in a sibling `res/` folder (e.g. The World Factbook), then open a country's **Geography** entry | The locator and map GIFs render instead of missing-resource placeholders. `stardict-resource-staging` stages `res/` wholesale; before it, every `res/` file was dropped. On host the engine returns the 10310-byte `af_large_locator.gif` through `gd_get_resource` | ✅ |
+| 8i | Import a folder that has a directory named `res` but **no** StarDict `.ifo` beside it | Nothing from that `res/` is staged — the name alone is not treated as a dictionary's resources | ✅ |
+| 8j | Re-import an already-imported StarDict folder after adding a file to its `res/` tree | The new resource is staged **and** the dictionary's existing files survive. Before the `StagingService` overlay fix the re-import deduped the unchanged files against the folder's own copy and then replaced the directory with the partial temp copy, deleting the dictionary | ✅ |
 
 ## Groups
 

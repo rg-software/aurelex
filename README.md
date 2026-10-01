@@ -70,7 +70,7 @@ like one you imported yourself. Nothing is fetched again after that.
 |---|---|---|
 | mdict | `.mdx`, `.mdd` | Works |
 | ABBYY Lingvo DSL | `.dsl`, `.dsl.dz` | Works (including sounds and images) |
-| StarDict | `.ifo`, `.idx`, `.dict` | Works |
+| StarDict | `.ifo`, `.idx`, `.dict` + `res/` | Works (including article images) |
 
 Anything else — BGL, SDict, XDXF, Aard, SLOB, GLS, Zim, EPWING, LSA — is not read
 natively. If you have dictionaries in one of those formats, convert them on a
@@ -85,8 +85,8 @@ storage permission to read them:
 
 1. Open the **Dictionaries** tab and tap **Add**.
 2. Pick the folder holding your dictionary files. Subfolders are scanned as
-   well, and any sibling `<name>.files` folder (DSL sounds and images) is copied
-   along with the dictionary.
+   well, and any sibling `<name>.files` folder (DSL sounds and images) or `res/`
+   folder (StarDict article images) is copied along with the dictionary.
 
 Once the copy finishes, you can delete the original folder. Importing is
 one-off — there is no "rescan", and **removing a dictionary in the app deletes

@@ -51,6 +51,12 @@ None.
 - `app/RemoteCatalog.cpp` / `.hpp` — `kDictionaryExtensions`, if the `res.zip`
   forms are admitted for catalog entries; must stay in step with the Java list as
   before.
+- `app/android/src/org/aurelex/pocket/dictionary/StagingService.java` — the
+  temp→final step becomes an overlay (see `design.md`), because staging the
+  `res/` tree exposes a re-import data-loss bug: unchanged files are deduped
+  against the folder's own previous copy and were then deleted with it.
+- `app/StagingRules.hpp` (+ `app/tests/StagingRulesTest.cpp`) — the host-tested
+  mirror of the resource-directory rule the Java walk applies.
 - `docs/TESTING.md` — a recipe importing a real StarDict dictionary and checking
   an article image renders.
 - `README.md` — the StarDict row's claim can stand as "Works" once this lands.

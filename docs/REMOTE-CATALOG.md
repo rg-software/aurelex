@@ -138,7 +138,8 @@ Entry-level rules:
 
 Supported `dictionary`-role extensions in this build: `.mdx`, `.mdd`, `.dsl`,
 `.dsl.dz`, `.ifo`, and a StarDict dictionary's companion files `.idx`/`.idx.gz`/
-`.idx.dz`, `.dict`/`.dict.dz`, `.syn`/`.syn.gz`/`.syn.dz`.
+`.idx.dz`, `.dict`/`.dict.dz`, `.syn`/`.syn.gz`/`.syn.dz` plus its resource
+archive forms `res.zip`/`<base>.res.zip`.
 
 A StarDict entry lists its whole set, because the `.ifo` header alone carries no
 content and the reader fails without its companions:
@@ -153,6 +154,16 @@ content and the reader fails without its companions:
 
 Marking all three `required` is what makes installed-detection report the entry
 installed only once they have all landed.
+
+### StarDict resources
+
+StarDict keeps article images in a sibling `res/` folder, which a manifest cannot
+express (file names are bare, no paths). Ship them as a single archive instead
+and list it as an optional `resources` file, named so it lands beside the `.ifo`:
+either `res.zip`, or `<base>.res.zip` (e.g. `word.res.zip` for `word.ifo`). The
+engine opens both forms from the dictionary's folder. Leave it `required: false`
+so it stays opt-in and does not change the entry's content hash; a dictionary is
+usable without its images, just incomplete.
 
 ### mdict pairs
 
