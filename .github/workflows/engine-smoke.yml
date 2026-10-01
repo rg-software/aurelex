@@ -187,6 +187,15 @@ jobs:
             || { echo "SMOKE FAILED: changed dictionary not reloaded on re-scan"; exit 1; }
           printf '%s' "$out" | grep -q "REIMPORT_CONTENT=OK" \
             || { echo "SMOKE FAILED: re-imported content did not take effect"; exit 1; }
+          # StarDict cross-reference links (stardict-bword-link-navigation).
+          # The fixture's "clot" entry cross-references "blood" with the bword:
+          # scheme, which the engine must rewrite into one the app resolves.
+          # Without a fixture entry carrying such a link these would pass
+          # vacuously, which is why make-smoke-stardict.py includes one.
+          printf '%s' "$out" | grep -q "STARDICT_LINK_NO_BWORD=OK" \
+            || { echo "SMOKE FAILED: unhandled bword: link reached the article"; exit 1; }
+          printf '%s' "$out" | grep -q "STARDICT_LINK_REWRITTEN=OK" \
+            || { echo "SMOKE FAILED: StarDict cross-reference was not rewritten to a resolvable link"; exit 1; }
           # --- MDict (.mdx) -----------------------------------------------
           # A separate folder so the fixture's headwords do not collide with
           # the StarDict fixture's. This is the gate for the MDX index build:

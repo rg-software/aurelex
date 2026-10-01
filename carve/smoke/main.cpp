@@ -168,6 +168,7 @@ int main( int argc, char ** argv )
   const bool dedupOk = n2 == 0;
   bool dictOk = true; // refined by the removal block below
   bool optPartsOk = false; // refined by the DSL hidden-zone block below
+  bool stardictLinkOk = false; // refined by the StarDict cross-reference block below
 
   std::vector< char > sug( 1 << 12 );
   const int sugN = gd_suggest( "smok", sug.data(), static_cast< int >( sug.size() ) );
@@ -307,6 +308,30 @@ int main( int argc, char ** argv )
     const bool plainClean = plainSz > 0 && plainHtml.find( "gdExpandOptPart(" ) == std::string::npos;
     std::printf( "OPT_NO_ZONE=%s\n", plainClean ? "OK" : "FAIL" );
     optPartsOk = hasSection && hasZone && hasExpander && !hasOverride && plainClean;
+  }
+
+  // ---- StarDict cross-reference links (stardict-bword-link-navigation) ----
+  // A StarDict article may cross-reference another entry with the bword:
+  // scheme. The engine must rewrite it into a scheme the app resolves: before
+  // the fix it was emitted verbatim and tapping it did nothing, because no
+  // consumer understands bword:. The fixture's "clot" entry carries one.
+  {
+    std::vector< char > linkBuf( 1 << 20 );
+    const int linkSz = gd_lookup( "clot", linkBuf.data(), static_cast< int >( linkBuf.size() ) );
+    const std::string linkHtml( linkBuf.data(), linkSz > 0 ? linkSz : 0 );
+
+    // The unhandled scheme must be gone from the output entirely.
+    const bool noBword = linkHtml.find( "bword:" ) == std::string::npos;
+    std::printf( "STARDICT_LINK_NO_BWORD=%s\n", noBword ? "OK" : "FAIL" );
+
+    // And the cross-reference must have become a link the app resolves. The
+    // linked word is "blood", so require a gdlookup target naming it.
+    const bool rewritten =
+      linkHtml.find( "gdlookup:blood" ) != std::string::npos
+      || linkHtml.find( "gdlookup://" ) != std::string::npos;
+    std::printf( "STARDICT_LINK_REWRITTEN=%s\n", rewritten ? "OK" : "FAIL" );
+
+    stardictLinkOk = noBword && rewritten;
   }
 
   // ---- groups smoke (multi-group-management) ----
@@ -593,7 +618,7 @@ int main( int argc, char ** argv )
 
   gd_cleanup();
   return ( lookSz > 0 && sugN > 0 && ftsOk && dedupOk && dictOk && optPartsOk && groupsOk
-           && resourceThreadOk && reimportOk )
+           && resourceThreadOk && reimportOk && stardictLinkOk )
              ? 0
              : 1;
 }
