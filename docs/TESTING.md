@@ -39,7 +39,10 @@ This adb-installs the result (`-Install`); without it the APK lands in
 | 8a | Import a folder holding a **StarDict** set (`word.ifo` + `word.idx` + `word.dict`, same basename) | All three companions are staged; the dictionary is listed and its headwords resolve. Before `fix-stardict-staging` only the `.ifo` was copied and the entry failed to load | ✅ |
 | 8b | Import a StarDict set packaged with dictzip (`word.dict.dz`) | Loads the same as an uncompressed one | ✅ |
 | 8c | Import a folder holding **only** a StarDict `.ifo` (companions absent) | Reports a failed load rather than listing a broken entry that returns nothing | ✅ |
-| 8d | Remove an imported StarDict dictionary | Its staged companions and its index are deleted together; lookups stop returning its words | ⬜ |
+| 8d | Remove an imported StarDict dictionary | Its staged companions and its index are deleted together; lookups stop returning its words | ✅ |
+| 8e | Remove a dictionary, then **import the same folder again** | The re-import succeeds and the dictionary loads. Before `reclaim-staged-dirs-on-removal` the leftover blocked it: the removal deleted only the primary file, so the directory still held companions without a primary file, and staging does not re-copy files already present | ✅ |
+| 8f | Stage **several dictionaries in one folder**, then remove one of them | Only that dictionary's file is deleted; the staged directory survives and the siblings keep loading. The reclaim only applies when nothing else uses the directory | ✅ |
+| 8g | Import a DSL (`.dsl.dz`) and repeat 8d/8e | Same behaviour as StarDict — the fix is not format-specific. Verified for StarDict and DSL; MDict shares the shape but its removal has not been run on device | ✅ |
 | 8e | With a failed import reported, tap its trash ("Remove failed import") in the banner | That import's staged files are deleted, the banner clears, and every other dictionary keeps working | ⬜ |
 | 8f | Re-import the corrected folder after a failed import of the same folder | The dictionary loads and the previous failure is gone, with no manual storage cleanup | ⬜ |
 | 8g | Leave a failed import reported and just restart / rescan | The failure is re-reported and its files are still there — the app never deletes an import on its own | ⬜ |

@@ -88,21 +88,43 @@
   **verified**: `70549544` is staged again with `stardict.ifo` present alongside
   its `res/`, `.idx`, `.dict.dz` and `.syn`, and its index and `_FTS_x` are
   rebuilt
-- [ ] 5.3 Remove a **DSL** dictionary (`.dsl.dz` + `.dsl.files/`); confirm the
-  same cleanup, **and** that it too can be re-imported. This tests the scope
-  claim rather than assuming the bug is StarDict-only — the reporter's concern
-  that all formats are affected
-- [ ] 5.4 Confirm no dictionary's files were deleted while it was still loaded —
-  the regression this guard exists to prevent. Partly covered: the two surviving
-  dictionaries kept loading throughout, and the host tests pin both directions,
-  but a shared-folder removal on device is still untested
+- [x] 5.3 Remove a **DSL** dictionary (`.dsl.dz` + `.dsl.files/`); confirm the
+  same cleanup, **and** that it too can be re-imported. **Verified on device**,
+  and it answers the format-general concern: `aurelex-basic.dsl.dz` (a different
+  primary extension from StarDict's `.ifo`) behaves identically —
+  `removed staged source file ... ok= true` then `removing staged dir`, and the
+  same folder re-imports with its `.dsl.dz` present and loads. The fix is not
+  StarDict-specific
+- [x] 5.4 Confirm no dictionary's files were deleted while it was still loaded —
+  the regression this guard exists to prevent. **Verified on device**, and this
+  is the check that shows the guard still discriminates: three DSLs were staged
+  in **one** folder (`AurelexTest/shared`), one was removed, and the log reads
+
+  ```
+  removed staged source file ".../d1aff614/aurelex-phrasebook.dsl" ok= true
+  staged dir kept, a loaded dictionary uses it ".../d1aff614"
+  staged copy dir kept (shared by siblings) ".../d1aff614"
+  ```
+
+  The directory survived holding `aurelex-basic.dsl` and `aurelex-lingvo.dsl`,
+  both of which kept working. So the guard reclaims an unshared directory and
+  keeps a shared one — the `staged dir kept` line is now **correct** rather than
+  the bug it was in 1.2, and the two cases are distinguished by the same code
+  path.
 
 ## 6. Documentation
 
-- [ ] 6.1 `docs/TESTING.md`: record the recipe for removal cleanup and re-import,
+- [x] 6.1 `docs/TESTING.md`: record the recipe for removal cleanup and re-import,
   with the measured before/after, so the symptom ("removing a dictionary stops
-  it being re-addable") is searchable
-- [ ] 6.2 Note the format scope: which formats were verified, and which were not
+  it being re-addable") is searchable. Recipe **8d** already existed and was
+  marked unrun — it is now verified — and **8e/8f/8g** were added for
+  re-import, the shared-folder case, and the DSL check
+- [x] 6.2 Note the format scope: which formats were verified, and which were not.
+  Recorded in 8g: **StarDict and DSL verified on device; MDict shares the staged
+  shape but its removal has not been run on device.** The fix is
+  format-agnostic (`isPrimaryDictionaryName` covers all three), and the host
+  tests do not distinguish formats, so the risk is low — but it is stated rather
+  than implied
 
 ## Notes
 
@@ -115,3 +137,24 @@ Originally filed as a disk leak of about 18 MB per removal. Task 1.4 changed
 that assessment: the dictionary cannot be re-added afterwards, which breaks an
 existing scenario. The index side of removal already behaves correctly and is
 deliberately out of scope — this change is about the staged files.
+
+### The measurement that mattered
+
+Four candidate mechanisms for the guard's failure were proposed from reading the
+code, and **all four were wrong**. One instrumented run settled it: the log
+showed `m_unloadedSources: QList()` — empty — because only the
+duplicate-resolution path populated it, not the user's Remove. Task 1.5 existed
+to force that measurement, and the change would have been *wrong* without it.
+
+### What the two device cases prove together
+
+They discriminate on the same code path, which is why both were needed:
+
+| Case | Log | Meaning |
+| --- | --- | --- |
+| Lone dictionary removed | `removing staged dir` | reclaim when nothing else uses it |
+| One of three in a folder removed | `staged dir kept, a loaded dictionary uses it` | keep when a sibling still reads from it |
+
+The `staged dir kept` line was the *bug* in 1.2 and is *correct* in 5.4. Without
+the second case a fix could reclaim everything and look right until it deleted a
+sibling's files.
