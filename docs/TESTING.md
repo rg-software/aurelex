@@ -64,7 +64,7 @@ This adb-installs the result (`-Install`); without it the APK lands in
 | 15 | Tap a suggestion / press return | Combined article renders, dictionaries in group order | ✅ |
 | 16 | Look up an unknown word | "Word not found" indication, no crash | ✅ |
 | 17 | Tap a link inside an article | In-app lookup of the linked word; back returns to previous article | ✅ |
-| 18 | Open an article with images from an `.mdd` | Images render | 🔶 (host-verified — see #18.1; on-device pass still open) |
+| 18 | Open an article with images from an `.mdd` | Images render | ✅ (device-verified — see #18.1) |
 | 19 | Article references a missing resource | Article still renders; broken item shown, no crash | ✅ |
 | 20 | Tap a pronunciation anchor (ogg/mp3/wav) | Audio plays; speex (`.spx`) is ignored, no crash | 🔶 (speex is silently skipped, not explicitly indicated) |
 | 21 | Look up the same word twice | One history entry (dedupe, moves to front) | ✅ |
@@ -320,9 +320,9 @@ the pane makes no catalog request. Format, manifest and hosting rules:
 
 ## Known gaps
 
-- `.mdd` images not exercised on-device (#18/#18.1) — now host-verified against
-  three real MDict dictionaries (`verify-mdx-import`); the on-device pass is all
-  that is left. Multi-volume `.mdd` is untested on either side.
+- Multi-volume `.mdd` (`demo.1.mdd` … `demo.n.mdd`) is untested on either side —
+  the suffix rule should accept it, but no fixture has proven it. Single-file
+  `.mdd` images are verified on device (#18.1, #18.5).
 - QS tile / widget active-group (#37) — inherited from `quick-lookup-shortcuts`.
 - Theme control: the tri-state cycle, both migration paths, live system-switch, the
   article in-place flip, the layout alignment and the glyphs are all verified

@@ -85,8 +85,12 @@
   Law 2ed` is listed, and the index is built at 88402 bytes with an FTS sibling.
   `demo` remains to be imported — it references no resources, so it adds no
   coverage this fixture does not already give.
-- [ ] 5.2 Confirm an MDict article **image renders** in the WebView — recipe
-  #18's known gap
+- [x] 5.2 Confirm an MDict article **image renders** in the WebView. **Verified on
+  device** against Black's Medical Dictionary: the `hand` article's anatomical
+  image renders. The `.mdd`-hosted image is proven two ways — `gd_get_resource`
+  returns 233245 bytes with `magic=jpeg` (and reports `FAILED TO RESOLVE` with the
+  `.mdd` hidden), and the rendered article shows it. Recipe 18's known gap is
+  closed.
 - [x] 5.3 Import `collinslaw` — **this was blocked by an unrelated engine defect,
   now fixed and verified.** Before: the index build hung and the app was killed
   with no crash record and a 0-byte index. The cause was `Iconv::convert()`
@@ -95,7 +99,8 @@
   file. Fixed in `fix-iconv-nonprogress-loop` (patch 0005) and confirmed on
   device: `Writing index…` 147 ms after the file opened, scan complete in
   172 ms.
-- [ ] 5.4 Import Black's on device and confirm a real headword resolves
+- [x] 5.4 Import Black's on device and confirm a real headword resolves.
+  **Verified on device**: `hand` resolves and renders, including its image.
 - [x] 5.5 Confirm the staged layout keeps the `.mdd` beside the `.mdx`, and that
   `collinslaw.css` + `collinslaw2ed.jpg` land beside its `.mdx`. **Verified on
   device**: `files/staged/f804830f/` holds `collinslaw2ed.mdx` (498842),
@@ -108,22 +113,42 @@
 
 ## 6. Close the StarDict leftover in the same sitting
 
-- [ ] 6.1 StarDict recipe 6.3 from the archived `stardict-resource-staging`:
+- [x] 6.1 StarDict recipe 6.3 from the archived `stardict-resource-staging`:
   import factbook on device and confirm a flag/map image renders in the WebView.
-  It is the one unchecked item from that change.
-- [ ] 6.2 `fix-stardict-staging` recipe 5.4: remove a StarDict dictionary and
-  confirm its files and index go. `factbook` serves.
+  **Verified on device** — flags and maps render. Note the entry to open is
+  `Afghanistan Geography`, not `Afghanistan`: The World Factbook splits each
+  country into ten entries, and the images live in the Geography one. The engine
+  serves them as real GIFs (`af-map.gif` 19501 bytes, `af_large_locator.gif`
+  10310 bytes, both `magic=gif`).
+- [x] 6.2 `fix-stardict-staging` recipe 5.4: remove a StarDict dictionary and
+  confirm its files and index go. **Tested on device; the index half passes and
+  the files half does not.** The index is correctly removed (3 → 2, including the
+  `_FTS_x` companion), but the staged directory keeps `.idx`/`.dict.dz`/`.syn`
+  and `res/` because the sharing guard misjudges it. Consequences: about 18 MB
+  retained, and the dictionary **cannot be re-imported** afterwards. Tracked as
+  its own change, `reclaim-staged-dirs-on-removal`; the removal itself works, the
+  cleanup does not.
 
 ## 7. Documentation
 
-- [ ] 7.1 `docs/TESTING.md`: replace recipe #18's `🔶 (not exercised on-device —
-  no MDX fixture yet)` with real recipes and recorded results
-- [ ] 7.2 Remove the `.mdd` entry from the "Known gaps" list if 5.2 passes
-- [ ] 7.3 Record the `isolate_css` transformation so the next person does not
+- [x] 7.1 `docs/TESTING.md`: replace recipe #18's `🔶 (not exercised on-device —
+  no MDX fixture yet)` with real recipes and recorded results. The rows are
+  `18.1`–`18.5`, a dot-numbered range because `18a`–`18q` already belongs to the
+  article-zoom and optional-parts sections and carries cross-references (`#18a`,
+  `#18a–#18g`).
+- [x] 7.2 Remove the `.mdd` entry from the "Known gaps" list if 5.2 passes.
+  **5.2 passed**, so the entry is removed. Multi-volume `.mdd` is called out
+  there instead, since that remains untested on either side.
+- [x] 7.3 Record the `isolate_css` transformation so the next person does not
   re-investigate a CSS whose served size exceeds its size on disk (collinslaw:
-  1061 bytes on disk, 1684 served — correct, not a bug)
-- [ ] 7.4 Confirm the README's mdict "Works" row is now backed by evidence; the
-  intent is to keep the claim, not narrow it
+  1061 bytes on disk, 1684 served — correct, not a bug). Recorded in
+  `docs/TESTING.md` under the MDict section, alongside the other two entries that
+  look like bugs and are not.
+- [x] 7.4 Confirm the README's mdict "Works" row is now backed by evidence; the
+  intent is to keep the claim, not narrow it. **Kept and strengthened**: it now
+  reads "Works (including images from `.mdd` and loose assets beside the
+  `.mdx`)". Both were verified on device — Black's renders an `.mdd`-hosted image,
+  and collinslaw renders styled from a loose stylesheet.
 - [ ] 7.5 Archive
 
 ## Notes

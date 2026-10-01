@@ -68,7 +68,7 @@ like one you imported yourself. Nothing is fetched again after that.
 
 | Format | Files | Status |
 |---|---|---|
-| mdict | `.mdx`, `.mdd` | Works |
+| mdict | `.mdx`, `.mdd` | Works (including images from `.mdd` and loose assets beside the `.mdx`) |
 | ABBYY Lingvo DSL | `.dsl`, `.dsl.dz` | Works (including sounds and images) |
 | StarDict | `.ifo`, `.idx`, `.dict` + `res/` | Works (including article images) |
 
