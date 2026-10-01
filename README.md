@@ -3,9 +3,9 @@
 **A fast, offline dictionary for Android** — a modern successor to the
 discontinued [GoldenDict Mobile](http://goldendict.mobi).
 
-Look up words in your own mdict and DSL dictionaries, or install one from the
-built-in catalog. Everything runs on-device: no account, no ads, no network, no
-tracking.
+Look up words in your own mdict and DSL dictionaries — or install one of our
+free ones straight from the app, with no computer involved. Everything runs
+on-device: no account, no ads, no network, no tracking.
 
 <!-- Add a screenshot: save one as docs/screenshots/main.png and replace this
      comment with:
@@ -27,15 +27,31 @@ The APK is built for **64-bit ARM (`arm64-v8a`)** and needs **Android 6.0 (API 2
 or newer. A Google Play release is in progress; GitHub Releases is the channel
 that is always current.
 
+## Quick start
+
+**You do not need to own any dictionary files to use Aurelex.**
+
+1. Install the app and open it.
+2. Go to the **Dictionaries** tab and tap **Add from remote**.
+3. Install a dictionary from the catalog — a translation pair, or a
+   monolingual one.
+4. Go to **Search** and start typing.
+
+The dictionary downloads once and is then searched entirely on-device, exactly
+like one you imported yourself. Nothing is fetched again after that.
+
 ## Features
 
-- **Offline lookup** in your own dictionary files — no network required, ever.
+- **Offline lookup** — download a dictionary once, then search it entirely
+  on-device. No network required, ever.
+- **Built-in catalog** — install free dictionaries straight from the app, so you
+  can be looking words up minutes after installing, with no computer involved.
+- **Bring your own collection** — mdict and ABBYY Lingvo DSL, the formats large
+  dictionary archives actually ship in.
 - **Groups** — organise dictionaries into scopes (by language pair, by subject)
   and search only the ones you care about.
 - **Full-text search** across every definition in your dictionaries, not just
   headwords.
-- **Bring your own collection** — mdict and ABBYY Lingvo DSL, the formats large
-  dictionary archives actually ship in.
 - **Article rendering** with inline images, pronunciation audio (ogg / mp3 /
   wav) and working cross-reference links.
 - **Search as you type**, with an in-article suggestion panel.
@@ -47,7 +63,6 @@ that is always current.
 - **Light, dark, or follow the system.**
 - **Look up from anywhere** — clipboard, the Quick Settings tile, the home-screen
   widget, the share menu, or Android's text-selection toolbar.
-- **Built-in catalog** to install a dictionary without a computer round-trip.
 
 ## Dictionary formats
 
@@ -58,14 +73,23 @@ that is always current.
 | StarDict | `.ifo`, `.idx`, `.dict` | Does not load yet — see [Limitations](#limitations) |
 
 Anything else — BGL, SDict, XDXF, Aard, SLOB, GLS, Zim, EPWING, LSA — is not read
-natively. Convert it once on a computer with [pyglossary](https://github.com/ilius/pyglossary),
-then copy the result over:
+natively. Convert it on a computer first, targeting a format Aurelex can read:
+**mdict (`.mdx`) is the safest choice today.**
+
+> ⚠️ Do not convert to StarDict. It is the most common conversion default, and
+> [pyglossary](https://github.com/ilius/pyglossary) writes it — but Aurelex
+> cannot load it yet, so the result will not open. See
+> [Limitations](#limitations).
+
+pyglossary still earns its place as the front half of a conversion, since it
+reads most of the formats above. To produce the `.mdx`, hand its tab-separated
+output to [mdict-utils](https://github.com/liuyug/mdict-utils):
 
 ```bash
-pip install pyglossary
+pip install mdict-utils
 
-# Convert one .bgl file to StarDict (produces .ifo/.idx/.dict):
-pyglossary --read-format=BGL --write-format=Stardict mydict.bgl mydict.ifo
+# -a takes a TSV of "headword<TAB>definition", or a directory
+mdict -a dict.txt dict.mdx
 ```
 
 ## Importing dictionaries
@@ -111,8 +135,9 @@ Aurelex is early software (0.3) and the polish is uneven. Known problems:
 - **StarDict dictionaries do not load.** The importer copies the `.ifo` but not
   its `.idx` and `.dict` companions. mdict and DSL are unaffected.
 - **Speex audio (`.spx`) is skipped silently.** ogg, mp3 and wav play.
-- **The built-in catalog is a proof of concept** — a small starter set, meant to
-  get you to a working app rather than to replace your own dictionaries.
+- **The catalog is a starter collection, not a library.** It carries enough
+  dictionaries to be genuinely useful on its own, but a serious dictionary habit
+  will outgrow it — that is what the import path is for.
 - **The release APK is larger than it needs to be**, because it packages the
   whole Qt runtime. Trimming it is planned.
 
@@ -144,3 +169,8 @@ It is an **independent** project built on the
 which is itself derived from the original GoldenDict by Konstantin Isakov. All of
 the dictionary-format parsing is their work, not ours; [`docs/ENGINE.md`](docs/ENGINE.md)
 records exactly which revision Aurelex builds on and how we track it.
+
+The dictionaries offered in the built-in catalog are **not** part of Aurelex and
+are not covered by its licence. Each one carries its own — most are share-alike,
+derived from Wiktionary and similar sources — and the app shows the entry's
+attribution and licence before you install it.
