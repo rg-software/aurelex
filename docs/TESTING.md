@@ -64,7 +64,7 @@ This adb-installs the result (`-Install`); without it the APK lands in
 | 15 | Tap a suggestion / press return | Combined article renders, dictionaries in group order | ✅ |
 | 16 | Look up an unknown word | "Word not found" indication, no crash | ✅ |
 | 17 | Tap a link inside an article | In-app lookup of the linked word; back returns to previous article | ✅ |
-| 18 | Open an article with images from an `.mdd` | Images render | 🔶 (host-verified — see #18a; on-device pass still open) |
+| 18 | Open an article with images from an `.mdd` | Images render | 🔶 (host-verified — see #18.1; on-device pass still open) |
 | 19 | Article references a missing resource | Article still renders; broken item shown, no crash | ✅ |
 | 20 | Tap a pronunciation anchor (ogg/mp3/wav) | Audio plays; speex (`.spx`) is ignored, no crash | 🔶 (speex is silently skipped, not explicitly indicated) |
 | 21 | Look up the same word twice | One history entry (dedupe, moves to front) | ✅ |
@@ -72,14 +72,29 @@ This adb-installs the result (`-Install`); without it the APK lands in
 
 ### MDict (`.mdx` / `.mdd`)
 
-MDict had **no** on-device coverage and no CI fixture — its only appearances in
-the smoke tool were a search term inside a StarDict article. Host testing of
-three real dictionaries is recorded below; the device pass is the remaining gap.
-`verify-mdx-import` is the change that covers this.
+MDict had **no** CI fixture and no on-device coverage. It now has both: a
+generated fixture (`scripts/make-smoke-mdx.py`, wired into `engine-smoke.yml`)
+and a real on-device pass, recorded below. `verify-mdx-import` is the change
+that covered this.
 
-The smoke tool now dumps the **whole** article and fetches **every** resource it
-references, printing each with its byte count and sniffed magic bytes. That is
-how the rows below were measured, and it is re-runnable:
+Two defects were found by doing it, both now fixed, neither specific to MDict
+import:
+
+- **The index build hung forever on device** and the app was killed with no
+  crash record. `Iconv::convert()` retried without consuming input — measured
+  as 517,000 identical iterations with `errno=E2BIG`, `inBytesLeft` stuck at 1.
+  Fixed in `fix-iconv-nonprogress-loop` (`patches/0005`). The import that never
+  completed now logs `Writing index…` 147 ms after opening the file and finishes
+  the scan in 172 ms; its index went from 0 bytes to 88402.
+- **Loose MDX assets were never staged.** A set shipping `.css`/`.jpg` beside
+  its `.mdx` (and no `.mdd`) lost them, so every article rendered unstyled.
+  Fixed by the staging rule in `verify-mdx-import`.
+
+The smoke tool now dumps the **whole** article, fetches **every** resource it
+references with byte counts and sniffed magic bytes, and surfaces the engine's
+own `qWarning`/`qDebug` on stderr, where before they were silently dropped
+(`smoke-surface-engine-diagnostics`). That last one is why the engine's error
+text was finally visible. It is re-runnable:
 
 ```
 build-smoke\Release\aurelex_smoke.exe <cfg> <dicts> <word>
@@ -87,10 +102,11 @@ build-smoke\Release\aurelex_smoke.exe <cfg> <dicts> <word>
 
 | # | How to test | Expected | Status |
 | --- | --- | --- | --- |
-| 18a | Look up `hand` in **Black's Medical Dictionary** (`.mdx` + 14 MB `.mdd`) | The article references `img/fig_ufig-h_1.jpg`; `gd_get_resource` returns **233245 bytes, `magic=jpeg`** — a real JPEG pulled from a nested path inside the `.mdd`. Hide the `.mdd` and it reports `FAILED TO RESOLVE`, so the check has teeth | ✅ host |
-| 18b | Import **collinslaw** (`.mdx` + loose `.css`/`.jpg`, **no `.mdd`**) on device | It is listed, `law` resolves, **and the article is styled** — every article links `collinslaw.css`, which `verify-mdx-import` now stages | 🔶 host-verified, device open |
-| 18c | Import **demo** (`.mdx` + `.mdd`) on device | Listed and headwords resolve. Note this fixture references **no** resources, so it cannot test the resource path — use 18a for that | 🔶 host-verified, device open |
-| 18d | Confirm the staged layout keeps the `.mdd` beside the `.mdx`, and `collinslaw.css` / `collinslaw2ed.jpg` beside theirs | The engine resolves the archive and the loose assets relative to the `.mdx` | 🔶 device open |
+| 18.1 | Look up `hand` in **Black's Medical Dictionary** (`.mdx` + 14 MB `.mdd`) | The article references `img/fig_ufig-h_1.jpg`; `gd_get_resource` returns **233245 bytes, `magic=jpeg`** — a real JPEG pulled from a nested path inside the `.mdd`. Hide the `.mdd` and it reports `FAILED TO RESOLVE`, so the check has teeth | ✅ host |
+| 18.2 | Import **collinslaw** (`.mdx` + loose `.css`/`.jpg`, **no `.mdd`**) on device | It is listed and `law` resolves. This is the shape that used to hang the index build; the same fixture now indexes in 172 ms | ✅ device |
+| 18.3 | Import **demo** (`.mdx` + `.mdd`) on device | Listed and headwords resolve. Note this fixture references **no** resources, so it cannot test the resource path — use 18.1 for that | 🔶 host-verified, device open |
+| 18.4 | Confirm the staged layout keeps the `.mdd` beside the `.mdx`, and `collinslaw.css` / `collinslaw2ed.jpg` beside theirs | `files/staged/<id>/` holds `collinslaw2ed.mdx` (498842), `collinslaw.css` (1061) and `collinslaw2ed.jpg` (18896) together | ✅ device |
+| 18.5 | Open an MDict article that embeds an image and confirm it renders in the WebView | Image renders rather than a missing-resource placeholder. 18.1 proves the engine serves the bytes; this confirms the WebView path | 🔶 device open |
 
 Three things that look like bugs and are not:
 
@@ -304,7 +320,7 @@ the pane makes no catalog request. Format, manifest and hosting rules:
 
 ## Known gaps
 
-- `.mdd` images not exercised on-device (#18/#18a) — now host-verified against
+- `.mdd` images not exercised on-device (#18/#18.1) — now host-verified against
   three real MDict dictionaries (`verify-mdx-import`); the on-device pass is all
   that is left. Multi-volume `.mdd` is untested on either side.
 - QS tile / widget active-group (#37) — inherited from `quick-lookup-shortcuts`.

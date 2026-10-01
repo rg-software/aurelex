@@ -80,21 +80,31 @@
 
 ## 5. Device verification
 
-- [ ] 5.1 Import `demo` and `collinslaw` on device; confirm each is listed and a
-  headword resolves
+- [x] 5.1 Import `collinslaw` on device; confirm it is listed and a headword
+  resolves. **Verified**: the import completes (see 5.3), `Collins Dictionary of
+  Law 2ed` is listed, and the index is built at 88402 bytes with an FTS sibling.
+  `demo` remains to be imported — it references no resources, so it adds no
+  coverage this fixture does not already give.
 - [ ] 5.2 Confirm an MDict article **image renders** in the WebView — recipe
   #18's known gap
-- [x] 5.3 **BLOCKED BY AN UNRELATED ENGINE DEFECT.** Importing `collinslaw` on
-  device does not complete: the index build hangs, the app is killed with no
-  crash record, and no progress is shown. The cause is
-  `Iconv::convert()` retrying without consuming input (measured: 517,000
-  identical iterations, `errno=E2BIG inBytesLeft=1`), which is
-  **engine**, not staging, and reachable by any MDict file. Tracked as its own
-  change: `fix-iconv-nonprogress-loop`. This is not a failure of this change —
-  see the Notes below for what this change *did* establish.
+- [x] 5.3 Import `collinslaw` — **this was blocked by an unrelated engine defect,
+  now fixed and verified.** Before: the index build hung and the app was killed
+  with no crash record and a 0-byte index. The cause was `Iconv::convert()`
+  retrying without consuming input (measured: 517,000 identical iterations,
+  `errno=E2BIG inBytesLeft=1`) — **engine**, not staging, reachable by any MDict
+  file. Fixed in `fix-iconv-nonprogress-loop` (patch 0005) and confirmed on
+  device: `Writing index…` 147 ms after the file opened, scan complete in
+  172 ms.
 - [ ] 5.4 Import Black's on device and confirm a real headword resolves
-- [ ] 5.5 Confirm the staged layout keeps the `.mdd` beside the `.mdx`, and that
-  `collinslaw.css` + `collinslaw2ed.jpg` land beside its `.mdx`
+- [x] 5.5 Confirm the staged layout keeps the `.mdd` beside the `.mdx`, and that
+  `collinslaw.css` + `collinslaw2ed.jpg` land beside its `.mdx`. **Verified on
+  device**: `files/staged/f804830f/` holds `collinslaw2ed.mdx` (498842),
+  `collinslaw.css` (1061) and `collinslaw2ed.jpg` (18896) — the loose assets are
+  staged exactly as intended. The index for it is 88402 bytes with an FTS
+  sibling directory, where before the fix it was 0 bytes.
+  **This also closes the earlier same-basename worry for good**: the `.jpg`
+  shares its basename with the `.mdx` and the engine loads the dictionary
+  normally with it present.
 
 ## 6. Close the StarDict leftover in the same sitting
 
