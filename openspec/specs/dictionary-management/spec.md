@@ -13,7 +13,12 @@ storage blocks direct path reads of the picked folders. A StarDict dictionary is
 a set of sibling files sharing a basename rather than a single file, so staging
 SHALL copy the `.ifo` together with the `.idx` and `.dict` files the engine
 resolves it against, and the optional `.syn` when present, including the
-compressed variants the engine accepts. A StarDict dictionary whose companion
+compressed variants the engine accepts. A StarDict dictionary keeps the images its articles reference in a
+sibling resource location, which the engine reads from a `res` directory
+beside the dictionary, a `res.zip` beside it, or a `<base>.res.zip`;
+staging SHALL copy whichever of those the picked folder provides, so the
+dictionary's article images resolve after import rather than being dropped.
+A StarDict dictionary whose companion
 files were not staged MUST NOT be presented as imported, because the engine
 cannot open it. The system SHALL NOT require system-wide storage access to add
 dictionaries. Unsupported files in a picked location MUST NOT be treated as
@@ -130,6 +135,23 @@ side effect of scanning; it happens only in response to the user's action.
 - **WHEN** a scan reports a load failure and the user takes no action
 - **THEN** the staged files are still present and the failure is still reported;
   the app does not delete an import on its own
+
+#### Scenario: A StarDict dictionary's article images resolve after import
+- **WHEN** the user imports a StarDict dictionary whose articles reference images
+  held in its resource location
+- **THEN** the resource files are staged, and an article that references one
+  renders that image rather than a missing resource
+
+#### Scenario: StarDict resource archives are staged
+- **WHEN** a StarDict dictionary ships its resources as a `res.zip` or a
+  `<base>.res.zip` archive beside it
+- **THEN** that archive is staged, so the engine can read the resources it
+  contains
+
+#### Scenario: An unrelated res directory is not staged as resources
+- **WHEN** a picked folder contains a directory named `res` but no StarDict
+  dictionary beside it
+- **THEN** that directory's contents are not staged as a dictionary's resources
 
 ### Requirement: Index build and validation on device
 The system SHALL build a lookup index for each loaded dictionary on the device when that dictionary's index does not yet exist or is out of date, and SHALL show the user the progress of the build.
