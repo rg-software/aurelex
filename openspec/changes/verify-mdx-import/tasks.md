@@ -1,24 +1,40 @@
 ## 1. Make articles inspectable
 
-- [ ] 1.1 Raise the article dump cap in `carve/smoke/main.cpp` (~line 164), which
+- [x] 1.1 Raise the article dump cap in `carve/smoke/main.cpp` (~line 164), which
   prints only the first 800 characters — enough to see the HTML boilerplate, not
-  an article's `<img src>`. It has now blocked two format investigations.
-- [ ] 1.2 Confirm with a real dictionary that an `<img src="bres://…">` reference
-  is visible in the dump afterwards, and record which headword shows one
+  an article's `<img src>`. Done (`2604e22`): the whole body is dumped, every
+  distinct `bres://`/`gdau://` reference is listed, all of them are fetched
+  rather than just the first, and each payload's magic bytes are sniffed.
+- [x] 1.2 Confirm with a real dictionary that an `<img src="bres://…">` reference
+  is visible in the dump afterwards, and record which headword shows one —
+  Black's `hand` → `img/fig_ufig-h_1.jpg`. Its 800-char cap was also the reason
+  the fetch only ever saw the first reference, which for MDX is always the
+  stylesheet.
+- [x] 1.3 Fix URL parsing for paths containing spaces and commas
+  (`bres://<id>/William J. Stewart, … /Image_106.png`) — the whitespace split
+  truncated them into a bogus URL that read like a broken dictionary (`ea8ce1e`)
+- [x] 1.4 Give the check teeth: hiding a dictionary's `.mdd` makes its resources
+  report `FAILED TO RESOLVE`, and a payload's magic bytes are checked so a
+  wrong-content/right-length answer cannot pass. All 16 existing CI smoke
+  assertions still pass.
 
 ## 2. Host confirmation (re-runnable, no device)
 
-- [ ] 2.1 Re-run all three MDict shapes through the smoke tool and record the
-  results in `docs/TESTING.md`:
-  - `demo.zip` — `.mdx` + `.mdd`
-  - Black's Medical Dictionary — `.mdx` + 14 MB `.mdd`, real headwords
-  - `collinslaw.zip` — `.mdx` + **loose** `.css`/`.jpg`, no `.mdd`
-- [ ] 2.2 Confirm the loose-file path is exercised: collinslaw has no `.mdd`, so
-  its resources resolve only via `mdx.cc:1336` (a file beside the `.mdx`)
-- [ ] 2.3 Confirm an **image** specifically resolves (not only a `.css` or
-  `.ttf`), and record its byte count against the file's real size
-- [ ] 2.4 If a multi-volume `.mdd` can be assembled (or one is found), test it.
-  The suffix rule should accept `demo.1.mdd`; this is unverified
+- [x] 2.1 Re-run all three MDict shapes through the smoke tool:
+  - `demo.zip` — `.mdx` + `.mdd` → loads; **no article references any
+    resource**, so this fixture is too small to exercise the resource path
+  - Black's Medical Dictionary — `.mdx` + 14 MB `.mdd` → loads, `acne` 5576 B,
+    `hand` 4018 B, `blackmed2018.css` 949 B served from the `.mdd`
+  - `collinslaw.zip` — `.mdx` + loose `.css`/`.jpg`, **no `.mdd`** → loads,
+    `law` 3360 B, CSS 1684 B via the loose-file path
+- [x] 2.2 Confirm the loose-file path is exercised: collinslaw has no `.mdd`, so
+  its resources resolve only via `mdx.cc:1336` — confirmed, the CSS serves
+- [x] 2.3 Confirm an **image** specifically resolves — Black's `hand` →
+  `gd_get_resource("…/img/fig_ufig-h_1.jpg")` = **233245 bytes, magic=jpeg**,
+  pulled from a nested path inside the `.mdd`. Magic-byte check confirms real
+  JPEG bytes rather than a truncated or HTML response.
+- [ ] 2.4 Multi-volume `.mdd` (`demo.1.mdd` …) is still unverified — the suffix
+  rule should accept it, but no fixture has exercised it
 
 ## 3. Redistributable fixture
 
@@ -26,54 +42,69 @@
   `examples/dictionaries/` in whatever form fits — unzipped, or archived
 - [ ] 3.2 Record its provenance and licence beside it, following
   `app/openssl/README.md` / `scripts/assets/kaikki-tag-icons/README.md`
-- [ ] 3.3 Decide whether the CI smoke tool should import it. If yes, this closes
-  the gap that let the StarDict import bug ship green — state in the coverage
-  which half is exercised (engine only, or staging too)
+- [ ] 3.3 Decide whether the CI smoke tool should import it, and state plainly in
+  the coverage which half any given check exercises (engine only, or staging
+  too) — the blind spot that let BOTH this bug and the StarDict one ship green
 - [ ] 3.4 Do **not** commit the 15 MB / 16 MB dictionaries; reference them in
   `docs/TESTING.md` as external test material instead
 
-## 4. Device verification
+## 4. Stage an MDX set's loose assets
 
-- [ ] 4.1 Import `demo` and `collinslaw` on device; confirm each is listed and a
+- [x] 4.1 Add `StagingRules::isMdxResourceFileName` — a bounded extension list
+  for assets an article embeds, mirrored in Java as `isMdxResourceFileName`
+- [x] 4.2 Generalise `folderHasStarDictIfo` into `folderPrimaryKinds` (bitmask),
+  so recognising an `.mdx` sibling costs no extra SAF query per folder
+- [x] 4.3 Wire it into `stageTreeInto`: a loose asset counts as a resource when a
+  `.mdx` sits beside it, which also exempts it from `hasStagedCopy` dedup the
+  same way StarDict's `res/` files are (two MDX sets may both ship `style.css`)
+- [x] 4.4 Host tests in `staging_rules_test` — verified to **fail before** the
+  change (the rule does not exist), 14 new assertions incl. the scoping guard
+  and the bound; all 7 host test binaries pass
+- [x] 4.5 Measure the flip with the importer's own rules: collinslaw
+  **1 staged / 2 dropped → 3 / 0**; Black's 2/1 → 3/0; demo 2/0 unchanged
+- [x] 4.6 Android build compiles (`compileDebugJavaWithJavac`, BUILD SUCCESSFUL)
+- [x] 4.7 `dictionary-management` delta added; `skip_specs` removed; 19 → 22
+  scenarios with none dropped
+
+## 5. Device verification
+
+- [ ] 5.1 Import `demo` and `collinslaw` on device; confirm each is listed and a
   headword resolves
-- [ ] 4.2 Confirm an MDict article **image renders** in the WebView — this is
-  recipe #18's known gap and the main open question
-- [ ] 4.3 Import Black's on device and confirm a real headword resolves (host
-  showed `acne` 5576 bytes, `abscess` 6519)
-- [ ] 4.4 Confirm the staged layout keeps the `.mdd` beside the `.mdx` (the
-  engine resolves the archive relative to the `.mdx`)
+- [ ] 5.2 Confirm an MDict article **image renders** in the WebView — recipe
+  #18's known gap
+- [ ] 5.3 **Import `collinslaw` and confirm it is styled** — the actual point of
+  §4. Without this the fix is unverified on the only layer it changes (Java)
+- [ ] 5.4 Import Black's on device and confirm a real headword resolves
+- [ ] 5.5 Confirm the staged layout keeps the `.mdd` beside the `.mdx`, and that
+  `collinslaw.css` + `collinslaw2ed.jpg` land beside its `.mdx`
 
-## 5. Close the StarDict leftover in the same sitting
+## 6. Close the StarDict leftover in the same sitting
 
-- [ ] 5.1 StarDict recipe 6.3 from the archived `stardict-resource-staging`:
+- [ ] 6.1 StarDict recipe 6.3 from the archived `stardict-resource-staging`:
   import factbook on device and confirm a flag/map image renders in the WebView.
-  It is the one unchecked item from that change and belongs with the MDict image
-  check — same fixture, same session.
-- [ ] 5.2 `fix-stardict-staging` recipe 5.4: remove a StarDict dictionary and
+  It is the one unchecked item from that change.
+- [ ] 6.2 `fix-stardict-staging` recipe 5.4: remove a StarDict dictionary and
   confirm its files and index go. `factbook` serves.
 
-## 6. Documentation
+## 7. Documentation
 
-- [ ] 6.1 `docs/TESTING.md`: replace recipe #18's `🔶 (not exercised on-device —
+- [ ] 7.1 `docs/TESTING.md`: replace recipe #18's `🔶 (not exercised on-device —
   no MDX fixture yet)` with real recipes and recorded results
-- [ ] 6.2 Remove the `.mdd` entry from the "Known gaps" list if 4.2 passes
-- [ ] 6.3 Record the `isolate_css` transformation so the next person does not
+- [ ] 7.2 Remove the `.mdd` entry from the "Known gaps" list if 5.2 passes
+- [ ] 7.3 Record the `isolate_css` transformation so the next person does not
   re-investigate a CSS whose served size exceeds its size on disk (collinslaw:
   1061 bytes on disk, 1684 served — correct, not a bug)
-- [ ] 6.4 Confirm the README's mdict "Works" row is now backed by evidence; the
+- [ ] 7.4 Confirm the README's mdict "Works" row is now backed by evidence; the
   intent is to keep the claim, not narrow it
-- [ ] 6.5 Archive, or add a `dictionary-management` delta first if §4 found a
-  defect
+- [ ] 7.5 Archive
 
 ## Notes
 
-Host evidence already in hand before this change started, for the record:
-
-| Fixture | Result |
-| --- | --- |
-| `demo.zip` | loads; `gd_get_resource` served a 20604-byte `.ttf` out of the `.mdd` |
-| Black's | loads; `acne`/`abscess`/`blood` resolve; `blackmed2018.css` served from the `.mdd` |
-| `collinslaw.zip` | loads; `law` resolves (3360 bytes); CSS served via the loose-file path |
-
 The CI smoke tool has **no** `.mdx` fixture; its only "mdx" occurrences are a
-search term found inside a StarDict article body (`carve/smoke/main.cpp:315`).
+search term found inside a StarDict article body. Both bugs this change and
+`fix-stardict-staging` address were invisible to it for the same reason: it feeds
+the engine a complete directory and never runs the Java staging layer.
+
+`collinslaw` additionally references `Image_106.png` under a folder the zip does
+not ship, so that one image legitimately fails to resolve — a property of the
+fixture, not of the app.

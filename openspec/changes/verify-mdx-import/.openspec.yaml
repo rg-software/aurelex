@@ -1,7 +1,8 @@
 schema: spec-driven
 created: 2026-10-01
-# This change verifies behaviour the dictionary-management spec already requires
-# (MDict files are staged and their resources resolve) rather than changing it,
-# so it declares no spec delta. If the device pass uncovers a defect, remove this
-# marker and add the delta in the same change.
-skip_specs: true
+# No longer a verification-only change. Host testing of the real Collins
+# Dictionary of Law 2nd ed found that an MDX set which ships its assets loose
+# (no .mdd at all) loses them on import: staging kept only .mdx/.mdd, so
+# collinslaw.css and collinslaw2ed.jpg were dropped and every article
+# rendered unstyled. That is a dictionary-management behaviour change, so the
+# marker below is gone and specs/dictionary-management carries the delta.

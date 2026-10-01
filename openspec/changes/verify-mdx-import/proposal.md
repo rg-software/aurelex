@@ -25,25 +25,37 @@ What is unproven is the part host testing cannot reach: the **importer's staging
 of an MDict set, and whether an **image** — not a font or a stylesheet — actually
 resolves and renders in the app.
 
+**Host testing then found a real defect, which is now part of this change.**
+`collinslaw` (Collins Dictionary of Law, 2nd ed.) ships `.mdx` + `.css` + `.jpg`
+and **no `.mdd`**. Staging kept only `.mdx`/`.mdd` outside a resource directory,
+so both loose files were dropped — measured as *1 staged / 2 dropped* — and every
+article, each of which links `collinslaw.css`, would render unstyled. It is the
+same defect class as `fix-stardict-staging`: a format's resources live somewhere
+the importer does not look.
+
 ## What Changes
 
+- **Staging an MDX set's loose assets**, bounded to the extensions an article
+  embeds and scoped to files sitting beside a `.mdx`, so an unrelated stylesheet
+  elsewhere in a picked tree is not dragged in. Measured flip: collinslaw
+  *1 staged / 2 dropped → 3 / 0*.
 - **Device verification of MDict import**, on all three shipped shapes, including
   that an article image resolves and renders.
 - **A redistributable MDict fixture in the repository**, so the format has a
   regression fixture in CI rather than depending on dictionaries a contributor
   happens to own. `demo.zip` is small (73 KB) and the user has confirmed it can
   be redistributed; the multi-megabyte dictionaries are not committed.
-- **The smoke tool's article dump cap is raised.** It currently prints only the
-  first 800 characters of an article, which is the HTML boilerplate, so an
-  article's `<img src>` cannot be inspected. This has now blocked two format
-  investigations and is the reason the image question above is still open.
+- **The smoke tool's article dump cap is raised**, and it now fetches every
+  resource an article references instead of only the first. Both limits were
+  invisible until a real MDX dictionary was looked up: the 800 characters stop
+  inside `<head>`, and MDX emits its stylesheet first, so the image an article
+  shows was never requested.
 - `docs/TESTING.md`: recipe #18's known gap is replaced with real recipes and
   real results.
 
-This is a **verification change**. A code fix is expected only if the device pass
-finds one — the staging rules already accept `.mdx` and `.mdd` by suffix,
-including multi-volume `.mdd` (`demo.1.mdd` … `demo.n.mdd`), and the engine's
-resource resolution is confirmed working.
+The staging rules already accept `.mdx` and `.mdd` by suffix, including
+multi-volume `.mdd` (`demo.1.mdd` … `demo.n.mdd`), so no dictionary-file
+handling changes — only what counts as a resource beside one.
 
 ## Capabilities
 
@@ -53,18 +65,23 @@ None.
 
 ### Modified Capabilities
 
-None expected. If the device pass finds a staging defect, a
-`dictionary-management` delta is added at that point — the change deliberately
-does not pre-commit to a spec edit it cannot yet justify.
+- **`dictionary-management`** — staging an MDict set's *loose* assets. This was
+  not expected when the change was opened; host testing of `collinslaw` found
+  the defect described below, and the delta carries it.
 
-> `openspec` rejects a zero-delta change unless `.openspec.yaml` sets
-> `skip_specs: true`; that marker is set, because this change verifies behaviour
-> the spec already requires rather than changing it. If verification uncovers a
-> defect, the marker is removed and a delta added in the same change.
+> Originally this change declared `skip_specs: true`, on the reasoning that it
+> verified behaviour the spec already required. That reasoning was wrong for one
+> MDX shape: an MDX set that ships its stylesheet and images loose, with no
+> `.mdd` at all, silently lost them. The marker is removed and the requirement
+> is modified.
 
 ## Impact
 
-- `carve/smoke/main.cpp` — the 800-character article dump limit.
+- `app/StagingRules.hpp`, `app/tests/StagingRulesTest.cpp` — the new rule and its
+  host tests.
+- `app/android/src/org/aurelex/pocket/dictionary/AurelexActivity.java` — the
+  staging walk, and `folderHasStarDictIfo` generalised to `folderPrimaryKinds`.
+- `carve/smoke/main.cpp` — the article dump limit and the resource fetch.
 - `docs/TESTING.md` — recipe #18 and the "Known gaps" entry for `.mdd` images.
 - A committed MDict fixture (proposed: `examples/dictionaries/`, alongside the
   existing DSL samples) plus whatever generator or script is needed to produce
@@ -80,6 +97,6 @@ does not pre-commit to a spec edit it cannot yet justify.
   kilobytes; `demo.zip` is 73 KB and the others are 15 MB. Only the small,
   explicitly redistributable one is proposed for commit, and its provenance and
   licence must be recorded beside it.
-- **Verification that finds nothing.** The most likely outcome is that MDict
-  works and this change is docs plus a fixture. That is a good outcome, not a
-  wasted one: it converts an unverified claim into a tested one.
+- ~~**Verification that finds nothing.**~~ → **It found something.** The first
+  real dictionary tested shipped its resources loose and lost them; the fix is
+  bounded and scoped, and the measured flip is recorded in `design.md`.

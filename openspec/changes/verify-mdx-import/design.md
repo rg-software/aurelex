@@ -31,13 +31,19 @@ a resource served out of a `.mdd`.
 
 **Non-Goals:**
 
-- Changing any staging or engine code. If that turns out to be necessary, this
-  design is superseded and the change grows a spec delta.
+- Changing any **engine** code, or the boundary. Nothing found so far implicates
+  either; the defect is in staging alone.
 - Committing the large dictionaries. Only `demo.zip` (73 KB, confirmed
   redistributable) is proposed; the 15 MB and 16 MB dictionaries are test
   material, not repository content.
 - Building a general MDict fixture generator. Nothing needs it yet; the StarDict
   generator exists because the smoke tool had no StarDict input at all.
+
+**Superseded:** this design originally listed "changing any staging or engine
+code" as a non-goal, on the basis that the evidence said MDict worked. Host
+testing of `collinslaw` disproved that for one MDX shape — see the decision
+below — so the change now carries a `dictionary-management` delta and
+`skip_specs` is removed.
 
 ## Decisions
 
@@ -52,6 +58,43 @@ worse of it.
 **Alternatives considered:** *Add a defensive MDict staging change now.* Rejected:
 it would be change for its own sake, and would obscure whether the verification
 actually proved anything.
+
+### Decision: stage an MDX set's loose assets, bounded and scoped
+
+**The defect.** `collinslaw` (Collins Dictionary of Law, 2nd ed.) ships
+`collinslaw2ed.mdx`, `collinslaw.css` and `collinslaw2ed.jpg` — and **no `.mdd`
+at all**. Its articles link `collinslaw.css`. Staging kept only `.mdx`/`.mdd`
+outside a resource directory, so both loose files were dropped and every article
+would render unstyled. Measured against the importer's own rules:
+
+| Fixture | before | after |
+| --- | --- | --- |
+| collinslaw | 1 staged / **2 dropped** | 3 staged / 0 dropped |
+| Black's | 2 staged / 1 dropped (cover) | 3 staged / 0 dropped |
+| demo | 2 staged / 0 dropped | unchanged |
+
+This is the same defect class as `fix-stardict-staging`: a format's resources
+live somewhere the importer does not look. It was invisible for the same reason —
+the CI smoke tool feeds the engine a complete directory and never runs the Java
+staging layer.
+
+**The bound.** Recognised only when a `.mdx` sits beside the file, and only for
+extensions an article actually embeds (`.css .js .png .jpg .jpeg .gif .svg .ttf
+.woff .woff2`). Copying everything beside a dictionary was rejected: an
+intersecting pick of a folder holding several dictionaries would drag in
+unrelated media — the over-capture problem `res/` already had. `.otf` and audio
+are left out deliberately; no fixture justifies them yet, and the tests say so,
+so adding them later is a deliberate act rather than an accident.
+
+**Also changed: one pre-scan answers two questions.** `folderHasStarDictIfo`
+became `folderPrimaryKinds`, returning a bitmask, so recognising an `.mdx` costs
+no extra SAF query per folder. Extending the existing listing rather than adding
+a second one keeps the "decision independent of child order" property the
+original comment was written for.
+
+**Resources are exempt from `hasStagedCopy` dedup**, exactly as StarDict's `res/`
+files are. Two MDX sets in an intersecting pick can legitimately both ship a
+`style.css`; deduping the second one away would leave that dictionary unstyled.
 
 ### Decision: raise the smoke tool's article dump cap
 
@@ -79,9 +122,9 @@ state plainly which half any given check covers.
 
 ## Risks / Trade-offs
 
-- **[Verification finds nothing]** The likely outcome is that MDict works and this
-  change is docs plus a fixture. → Accepted and called out in the proposal: it
-  converts an unverified claim into a tested one. Not a wasted change.
+- **[Verification finds nothing]** ~~The likely outcome is that MDict works and
+  this change is docs plus a fixture.~~ → **It did not.** `collinslaw` exposed a
+  real staging defect on its second shape; see the decision below.
 - **[A committed binary fixture]** Provenance can be lost. → Record source,
   licence and digest beside it, as the existing vendored assets do.
 - **[`collinslaw`'s CSS size looked wrong]** Served 1684 bytes for a 1061-byte

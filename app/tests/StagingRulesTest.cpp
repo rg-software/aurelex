@@ -1,9 +1,11 @@
-// Host-side tests for the staging resource-directory rule (StagingRules.hpp,
-// stardict-resource-staging):
+// Host-side tests for the staging resource rules (StagingRules.hpp):
 //   - a DSL "<dict>.files" tree is resources regardless of what else is around;
 //   - a StarDict "res" directory is resources ONLY beside a `.ifo`, so an
 //     unrelated "res" in a picked tree is not copied (the scoping guard);
-//   - the match is exact and case-insensitive.
+//   - the match is exact and case-insensitive;
+//   - an MDX set's loose assets (stylesheet, images, fonts) are recognised, and
+//     the list stays bounded so an intersecting pick does not drag in unrelated
+//     media (verify-mdx-import).
 //
 // Header-only, Qt Core only, no engine. The Java walk this mirrors is not host-
 // runnable; docs/TESTING.md #8e covers the Java copy on device.
@@ -59,6 +61,37 @@ int main(int argc, char **argv) {
           "a directory named res.zip is not the resource tree (the engine wants a file)");
     check(!StagingRules::isResourceDirName(QString(), true),
           "an empty name is never a resource tree");
+
+    // ---- MDX loose assets, as shipped by Collins Dictionary of Law 2nd ed ----
+    check(StagingRules::isMdxResourceFileName(QStringLiteral("collinslaw.css")),
+          "a loose stylesheet beside an .mdx is a dictionary resource");
+    check(StagingRules::isMdxResourceFileName(QStringLiteral("collinslaw2ed.jpg")),
+          "a loose cover image beside an .mdx is a dictionary resource");
+    check(StagingRules::isMdxResourceFileName(QStringLiteral("style.CSS")),
+          "the MDX resource match is case-insensitive");
+
+    // The real references these dictionaries emit, including the shapes that
+    // carry spaces and commas in the path.
+    check(StagingRules::isMdxResourceFileName(
+              QStringLiteral("William J. Stewart, Robert Burgess - Collins Dictionary of Law (2001)"
+                             "/Image_106.png")),
+          "a nested image under a space- and comma-bearing folder is a resource");
+
+    // ---- the bound: only extensions an article embeds ----
+    check(!StagingRules::isMdxResourceFileName(QStringLiteral("notes.txt")),
+          "an unrelated .txt beside a dictionary is NOT staged");
+    check(!StagingRules::isMdxResourceFileName(QStringLiteral("backup.zip")),
+          "an unrelated archive beside a dictionary is NOT staged");
+    check(!StagingRules::isMdxResourceFileName(QStringLiteral("dict.mdx")),
+          "the .mdx itself is a dictionary, not a resource (matched by the name filter)");
+    check(!StagingRules::isMdxResourceFileName(QStringLiteral("dict.mdd")),
+          "the .mdd is a dictionary, not a resource (matched by the name filter)");
+    check(!StagingRules::isMdxResourceFileName(QStringLiteral("cover.otf")),
+          ".otf is deliberately not on the list until a fixture justifies it");
+    check(!StagingRules::isMdxResourceFileName(QStringLiteral("pronounce.mp3")),
+          "loose audio is deliberately not on the list until a fixture justifies it");
+    check(!StagingRules::isMdxResourceFileName(QString()),
+          "an empty name is never an MDX resource");
 
     std::fprintf(stdout, "%s: staging rules\n", g_failures == 0 ? "PASS" : "FAIL");
     return g_failures == 0 ? 0 : 1;

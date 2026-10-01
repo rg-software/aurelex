@@ -13,10 +13,14 @@
 //     but "res" is a common name, so it is resources ONLY when a StarDict .ifo
 //     sits beside it in the same folder. Matching the name alone would copy any
 //     unrelated "res" in a picked tree (see design.md).
+//   - MDX ships some assets LOOSE, beside the .mdx rather than inside a .mdd;
+//     the engine resolves those from the dictionary folder first
+//     (engine/src/dict/mdx.cc:1336). Those files are staged only when a .mdx
+//     sits beside them, for the same over-capture reason as "res".
 //
-// Mirrors isDslResourceDirName / isStardictResDirName and the pre-scan in
-// AurelexActivity.java. The device recipe that exercises the Java copy is
-// docs/TESTING.md #8e; keep the two in step.
+// Mirrors isDslResourceDirName / isStardictResDirName / isMdxResourceFileName and
+// the pre-scan in AurelexActivity.java. The device recipe that exercises the
+// Java copy is docs/TESTING.md #8e; keep the two in step.
 #pragma once
 
 #include <QString>
@@ -33,6 +37,21 @@ inline bool isResourceDirName(const QString &name, bool stardictIfoSibling)
     if (lower.endsWith(QLatin1String(".files")))
         return true;
     return stardictIfoSibling && lower == QLatin1String("res");
+}
+
+// True for an asset an MDX set may ship loose beside its `.mdx` instead of
+// inside a `.mdd`. Bounded to extensions an article actually embeds, so an
+// intersecting pick of a folder holding several dictionaries does not drag in
+// unrelated media. `.otf` and audio are intentionally absent: no real fixture
+// justifies them yet.
+inline bool isMdxResourceFileName(const QString &name)
+{
+    const QString lower = name.toLower();
+    return lower.endsWith(QLatin1String(".css")) || lower.endsWith(QLatin1String(".js"))
+            || lower.endsWith(QLatin1String(".png")) || lower.endsWith(QLatin1String(".jpg"))
+            || lower.endsWith(QLatin1String(".jpeg")) || lower.endsWith(QLatin1String(".gif"))
+            || lower.endsWith(QLatin1String(".svg")) || lower.endsWith(QLatin1String(".ttf"))
+            || lower.endsWith(QLatin1String(".woff")) || lower.endsWith(QLatin1String(".woff2"));
 }
 
 } // namespace StagingRules

@@ -559,15 +559,20 @@ public class AurelexActivity extends QtActivity {
             // forever (the "no supported files staged" / stack-overflow bug).
             final android.net.Uri childrenUri =
                     android.provider.DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, currentDocId);
-            // Pre-scan THIS folder for a StarDict `.ifo`. A directory named "res"
-            // is a dictionary's resource tree only when it sits beside one
-            // (engine/src/dict/stardict.cc:1631 reads <dict-folder>/res/<name>);
-            // matching "res" by name alone would copy ANY unrelated "res" in a
-            // picked tree. Done as its own listing so the decision does not
+            // Pre-scan THIS folder for the primary file of each format whose
+            // resources sit BESIDE that file rather than in a named tree.
+            // A directory named "res" is a StarDict resource tree only when an
+            // `.ifo` sits beside it (engine/src/dict/stardict.cc:1631 reads
+            // <dict-folder>/res/<name>); matching "res" by name alone would copy
+            // ANY unrelated "res" in a picked tree. The same scoping applies to
+            // an MDX set's loose assets, which are kept only beside a `.mdx`.
+            // One listing answers both, so this stays a single extra query per
+            // folder, and it is a separate listing so the decision does not
             // depend on the order children come back in (design.md). Inside a
             // resource tree every file is copied anyway, so it is skipped there.
-            final boolean stardictIfoInParent =
-                    !inResourceDir && folderHasStarDictIfo(cr, childrenUri);
+            final int primaryKinds = inResourceDir ? 0 : folderPrimaryKinds(cr, childrenUri);
+            final boolean stardictIfoInParent = (primaryKinds & PRIMARY_STARDICT) != 0;
+            final boolean mdxInParent = (primaryKinds & PRIMARY_MDX) != 0;
             int sawFiles = 0, supported = 0, deduped = 0, alreadyLocal = 0;
             try (android.database.Cursor c = cr.query(childrenUri, cols, null, null, null)) {
                 if (c == null) {
@@ -605,9 +610,12 @@ public class AurelexActivity extends QtActivity {
                     // Inside a resource tree (DSL "<name>.files" or StarDict
                     // "res"), copy EVERYTHING (sounds are .wav/.ogg/.mp3 next to
                     // images; StarDict's res/ holds .gif/.png/... by convention)
-                    // so pronunciation links and inline assets resolve. Elsewhere
-                    // keep the supported-dictionary filter.
-                    final boolean resource = inResourceDir;
+                    // so pronunciation links and inline assets resolve. An MDX
+                    // set's loose assets are copied the same way when they sit
+                    // beside a `.mdx`. Elsewhere keep the supported-dictionary
+                    // filter.
+                    final boolean resource =
+                            inResourceDir || (mdxInParent && isMdxResourceFileName(name));
                     if (!resource && !isSupportedDictionaryName(name)) continue;
                     supported++;
                     final long srcSize = c.isNull(3) ? -1 : c.getLong(3);
@@ -827,34 +835,68 @@ public class AurelexActivity extends QtActivity {
         return lower.equals("res.zip") || lower.endsWith(".res.zip");
     }
 
+    /** Bit flags returned by {@link #folderPrimaryKinds}. */
+    private static final int PRIMARY_STARDICT = 1;
+    private static final int PRIMARY_MDX = 2;
+
     /**
-     * True when {@code folder}'s children include a StarDict {@code .ifo}. Used
-     * to attribute a sibling "res" directory to a dictionary: "res" is a common
-     * name, so it is treated as resources only beside a StarDict primary file,
-     * never by name alone.
+     * Which dictionary primary files sit in {@code folder}, as a bitmask of
+     * {@link #PRIMARY_STARDICT} / {@link #PRIMARY_MDX}. Used to attribute a
+     * folder's resources to a dictionary: a sibling "res" directory, or a loose
+     * stylesheet or image, is resources only beside the format's primary file —
+     * never by name alone, or an unrelated "res"/"style.css" anywhere in a
+     * picked tree would be copied.
      *
      * <p>This is a second listing of the folder (the walk lists it again for the
      * copy), done so the resource decision is independent of the order the
-     * provider returns children in; see {@code design.md}.
+     * provider returns children in; see {@code design.md}. One listing answers
+     * both formats rather than costing a query each.
      */
-    private static boolean folderHasStarDictIfo(android.content.ContentResolver cr,
-                                                android.net.Uri childrenUri) {
+    private static int folderPrimaryKinds(android.content.ContentResolver cr,
+                                          android.net.Uri childrenUri) {
         final String[] cols = {
                 android.provider.DocumentsContract.Document.COLUMN_DISPLAY_NAME,
                 android.provider.DocumentsContract.Document.COLUMN_MIME_TYPE };
+        int kinds = 0;
         try (android.database.Cursor c = cr.query(childrenUri, cols, null, null, null)) {
-            if (c == null) return false;
+            if (c == null) return 0;
             while (c.moveToNext()) {
                 final String n = c.getString(0);
                 final String m = c.getString(1);
                 if (n == null) continue;
                 if (android.provider.DocumentsContract.Document.MIME_TYPE_DIR.equals(m)) continue;
-                if (n.toLowerCase(java.util.Locale.ROOT).endsWith(".ifo")) return true;
+                final String lower = n.toLowerCase(java.util.Locale.ROOT);
+                if (lower.endsWith(".ifo")) kinds |= PRIMARY_STARDICT;
+                if (lower.endsWith(".mdx")) kinds |= PRIMARY_MDX;
             }
         } catch (Exception e) {
-            android.util.Log.w(TAG, "folderHasStarDictIfo failed: " + e);
+            android.util.Log.w(TAG, "folderPrimaryKinds failed: " + e);
         }
-        return false;
+        return kinds;
+    }
+
+    /**
+     * True for an asset an MDX set may ship LOOSE, beside the {@code .mdx}
+     * rather than inside its {@code .mdd}. The engine resolves those from the
+     * dictionary folder first (engine/src/dict/mdx.cc:1336), so a real set such
+     * as Collins Dictionary of Law 2nd ed — {@code .mdx}, {@code .css} and a
+     * cover {@code .jpg}, no {@code .mdd} at all — loses its stylesheet and its
+     * images unless they are staged.
+     *
+     * <p>The list is deliberately bounded to extensions an article actually
+     * embeds, rather than "copy everything beside a dictionary": an
+     * intersecting pick of a folder holding several dictionaries would otherwise
+     * drag in unrelated media. {@code .otf} and audio are intentionally absent —
+     * no fixture justifies them yet; add them when one does.
+     *
+     * <p>Mirrors {@code StagingRules::isMdxResourceFileName} in
+     * {@code app/StagingRules.hpp}; keep the two in step.
+     */
+    private static boolean isMdxResourceFileName(String lower) {
+        return lower.endsWith(".css") || lower.endsWith(".js")
+                || lower.endsWith(".png") || lower.endsWith(".jpg") || lower.endsWith(".jpeg")
+                || lower.endsWith(".gif") || lower.endsWith(".svg")
+                || lower.endsWith(".ttf") || lower.endsWith(".woff") || lower.endsWith(".woff2");
     }
 
     /**
