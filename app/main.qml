@@ -1045,9 +1045,10 @@ ColumnLayout {
                     // placeholder's largestHeight exceed what Material's
                     // MaterialTextContainer budgets for, so the floating label is
                     // positioned at the unfloated y and lands ON the box border
-                    // (reproduced on desktop Qt 6.6.3 and two Android devices;
-                    // see docs/repro/labelglitch.qml). Material's default size
-                    // keeps the label where the style expects it.
+                    // (reproduced on desktop Qt 6.6.3 and two Android devices).
+                    // Material's default size keeps the label where the style
+                    // expects it. Root cause and fix in the archived
+                    // 2026-10-01-control-state-and-fts-whole-words change.
                     onDisplayTextChanged: searchPane._doSuggest()
                     onAccepted: searchPane._submitSearch()
                     Component.onCompleted: {

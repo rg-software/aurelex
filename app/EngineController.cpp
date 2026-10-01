@@ -169,12 +169,11 @@ EngineController::EngineController(QObject *parent)
     // Smooth in-flight progress: while a batch builds, sample the engine's own
     // per-dictionary percent so the bar fills even for a single huge dict.
     // 1s, VeryCoarse: each tick takes g_engineMutex (pollFtsProgress ->
-    // gd_fts_progress), which the FTS build holds for the whole dictionary. On
-    // the UI thread that means every tick can block behind the build, so a fast
-    // (400ms) cadence was stuttering the UI for no visible benefit. TODO: this
-    // contention is the main "search unusable while indexing" cause — the real
-    // fix is to stop holding g_engineMutex across makeFTSIndex (or move this
-    // poll off the UI thread); see docs/ROADMAP.md.
+    // gd_fts_progress). The build used to hold that lock for the whole
+    // dictionary, which made a fast (400ms) cadence stutter the UI; since
+    // patches/0004-fts-sliced-build the build yields the lock in bounded slices,
+    // so a tick now waits at most about one slice. The slower cadence is kept as
+    // deliberate headroom rather than re-tuned.
     m_ftsProgressTimer.setInterval(1000);
     m_ftsProgressTimer.setTimerType(Qt::VeryCoarseTimer);
     connect(&m_ftsProgressTimer, &QTimer::timeout, this, &EngineController::pollFtsProgress);

@@ -1,14 +1,12 @@
-# TESTING — Aurelex v1 manual verification
+# TESTING — Aurelex manual verification
 
-Living, manual test checklist for the **Qt app** (the v1 feature set). Each item
-is a concrete recipe: how to trigger it, and what to expect. Mark items with
-their status as you verify them so this doc stays the single source of truth for
-"what works".
+Living, manual test checklist for the app. Each item is a concrete recipe: how to
+trigger it, and what to expect. Mark items with their status as you verify them so
+this doc stays the single source of truth for "what works".
 
-Target: `app/` — the Qt Quick/WebView all-Qt UI that drives the
-carved engine in-process via the `gd_*` C boundary. (Earlier iterations of this
-doc described the removed Kotlin/Compose app; the recipes below target the Qt
-UI.)
+Target: `app/` — the Qt Quick/WebView UI that drives the carved engine in-process
+via the `gd_*` C boundary. (Earlier iterations of this doc described the removed
+Kotlin/Compose app; the recipes below target the Qt UI.)
 
 Status legend: ✅ verified on device · ⬜ not yet verified · 🔶 known gap
 

@@ -6,7 +6,7 @@ Aurelex. If you are a user, see the top-level `README.md` instead.
 ## Repo layout
 
 - `engine/` — goldendict-ng submodule, pinned at a release tag, **never edited in place**.
-- `patches/` — the only deviations from upstream (`.patch` files), applied by `scripts/apply-patches.*`.
+- `patches/` — the only deviations from the pinned source (`.patch` files), applied by `scripts/apply-patches.*`.
 - `carve/` — the `gd_*` C boundary (`goldendict.h`, `gd_boundary.cc`) + selected engine
   sources compiled once as an object library, shared by the Qt app and the CI smoke tool.
 - `app/` — the Qt app (QML + WebView, Android) that consumes the carve in-process.
@@ -14,15 +14,11 @@ Aurelex. If you are a user, see the top-level `README.md` instead.
   of truth for scope.
 - `docs/` — in-repo guidance. Start here, then follow the link you need:
   - `DEVELOPMENT.md` — this file: layout, build, tests, workflow.
-  - `UPSTREAM.md` — the engine pin, the four deviation patches, the bump procedure.
+  - `ENGINE.md` — the pinned goldendict-ng source, the four deviation patches, the bump procedure.
   - `TESTING.md` — the on-device verification checklist (what is verified, what is not).
   - `REMOTE-CATALOG.md` — the remote catalog's manifest format, hosting, and free-space rules.
   - `KAIKKI-CONVERSION.md` — building DSL dictionaries from kaikki.org extracts.
-  - `ROADMAP.md` — milestone tracker and the permanent cut register.
   - `SIGNING.md` — signing channels, Play/F-Droid split, app identity.
-  - `repro/` — standalone host repros for rendering bugs; each is referenced from
-    the code comment or archived change that motivated it, and each carries its
-    own run instructions.
 - `scripts/` — `apply-patches.*`, fixture generators, build helpers, and
   `kaikki-to-dsl.py` (build DSL dictionaries from kaikki.org Wiktionary extracts).
 
@@ -128,7 +124,7 @@ python -m unittest discover -s scripts/tests
 `carve/` builds a host smoke tool (`AURELEX_BUILD_SMOKE=ON`) exercised by
 `.github/workflows/engine-smoke.yml` on every engine/patch/carve change: it scans a
 fixture folder (including a nested-subfolder fixture, asserting recursion), looks
-up a known word, and checks FTS + group/remove behavior. **Any upstream bump must
+up a known word, and checks FTS + group/remove behavior. **Any engine release bump must
 keep the smoke green** — it is the gate that catches an engine merge that
 compiles but breaks the boundary.
 
@@ -139,22 +135,44 @@ rendering, audio, groups, FTS, history/favorites, storage, the remote catalog,
 external entry points) with a per-item status. It is the record of what has
 actually been seen on hardware, as opposed to what the tests above prove.
 
-## Upstream & maintenance
+## The engine source
 
-Upstream is pulled in as a Git submodule pinned to a release tag; only a small patch set
-deviates, and the CI smoke verifies each upstream update. See `docs/UPSTREAM.md` for the pin,
-update procedure, and patch-application details.
+Aurelex is not a fork of goldendict-ng; we consume it verbatim from a Git submodule pinned to a
+release tag. Only a small patch set deviates, and the CI smoke verifies each release bump. See
+`docs/ENGINE.md` for the pin, the bump procedure, and the patch set.
 
 ## OpenSpec workflow
 
-Planning artifacts live in `openspec/`. Features/fixes flow through changes:
+Planning artifacts live in `openspec/`. Features and fixes flow through changes:
 
 1. `openspec new change <name>`
 2. Draft proposal → design → specs → tasks (default `spec-driven` schema).
 3. Implement via the OpenSpec apply workflow.
-4. Verify on-device, archive, then update `docs/ROADMAP.md`.
+4. Verify on-device, then archive.
 
-See `docs/ROADMAP.md` for the milestone tracker and cut register.
+The **archive is the record of what shipped** — `openspec/changes/archive/` holds every completed
+change with its tasks and verification notes. Read it before assuming something is unbuilt. There is
+no separate roadmap file; the candidate milestones are in the backlog below.
+
+## Backlog (candidate milestones)
+
+Not scheduled, not proposed, not promised. Each one is picked up by opening an OpenSpec change.
+
+- **Translate-later / word-list export** — extract headwords/definitions to a file or anki.
+- **Pre-built desktop-generated index caches** — copy indexes alongside dictionaries so the phone
+  skips indexing. Boundary work (cache format).
+- **Widget fills search with clipboard** — the widget is currently a styled shortcut (RemoteViews
+  cannot capture typed text). Tapping it could copy the clipboard into the in-app search field,
+  reusing the tile's clipboard-read path. Needs an on-device check that the read happens in the
+  foreground activity (Android 10+), same as the tile.
+- **Tappable group label on history/favorites rows** — the rows already show a group-name line;
+  making it jump to that group and re-run the search is the follow-up.
+- **Close the open archived tasks** — `docs/TESTING.md` lists the unverified items, and several
+  archived changes still carry unchecked verification tasks. Not new features; this is the gap
+  between "shipped" and "known to work".
+
+Engine-touching items (pre-built index caches) go through the patch pipeline (`patches/` + CI
+smoke); pure-QML items (word-list export, widget clipboard) do not.
 
 ## Localization
 

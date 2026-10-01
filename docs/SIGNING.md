@@ -91,8 +91,8 @@ source** and signs with one of:
 - **(b) Reproducible build / signature copying** — F-Droid rebuilds from source
   and, when the build is reproducible, ships the APK signed with our published
   signature. This does **not** require handing over the private keystore; it
-  relies on matching a published APK byte-for-byte (or on F-Droid's upstream
-  signature-copying flow). **Not achieved for v1**: the Qt/NDK carved engine
+  relies on matching a published APK byte-for-byte (or on F-Droid's
+  signature-copying flow). **Not achieved yet**: the Qt/NDK carved engine
   embeds build ids / timestamps, so byte-reproducibility is non-trivial (a
   stretch goal). See `https://f-droid.org/docs/Reproducible_Builds/`.
 - **Never give F-Droid the project's private release keystore.** F-Droid does not
@@ -131,6 +131,7 @@ document the exact fingerprint), not keystore sharing.
 ## App icon & the indexing notification
 
 ### App icon
+
 The launcher icon is an adaptive icon (`mipmap-anydpi-v26/ic_launcher.xml`,
 `app/android/res/`) with background, foreground, and monochrome layers; the
 same vector foreground is reused in the home-screen widget. `minSdk 28` (API 26+)
@@ -141,12 +142,14 @@ the book glyph — it was added to satisfy adaptive-icon schema, but hasn't been
 given a dedicated monochrome shape or verified on a themed launcher.
 
 ### Indexing notification
+
 The engine runs **in-process** in the Qt app (no separate `:engine` process and
 no persistent notification). The only notification is the **bulk FTS indexing**
 foreground service (`IndexingService`) which shows a transient **"Indexing..."**
 notification while a long index build runs, so the build survives the app being
 backgrounded. It posts only while indexing is in progress and stops when the
 build completes; steady-state lookup has no notification.
+
 - Notification builder: `IndexingService` (channel `aurelex_indexing`, low
   importance), small icon `ic_menu_search`.
 - Declared as a foreground service in `AndroidManifest.xml`

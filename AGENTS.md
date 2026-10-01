@@ -4,22 +4,39 @@ This file tells agents and contributors how to work in this repository safely. R
 
 ## What this project is
 
-Aurelex is an Android port of [goldendict-ng](https://github.com/xiaoyifang/goldendict-ng).
-It reuses the upstream C++ dictionary engine (rendered via Android WebView) rather than reimplementing
-dictionary formats. The app is a Qt Quick/WebView Android app (`app/`) that consumes
-the carved engine in-process via the `gd_*` C boundary. Design is tracked with OpenSpec: the main specs
-live in `openspec/specs/` and work-in-progress changes in `openspec/changes/` (see `docs/ROADMAP.md`
-for the milestone tracker).
+Aurelex is an **independent** Android dictionary app built on the
+[goldendict-ng](https://github.com/xiaoyifang/goldendict-ng) engine. It consumes that engine
+verbatim at a pinned release tag (rendered via Android WebView) rather than reimplementing
+dictionary formats. The app is a Qt Quick/WebView Android app (`app/`) that drives the carved
+engine in-process via the `gd_*` C boundary. We are not a fork of goldendict-ng and do not
+contribute back; see `docs/ENGINE.md`.
+
+Design is tracked with OpenSpec: the main specs live in `openspec/specs/`, and completed work is
+recorded in `openspec/changes/archive/` (51 changes). Work in progress lives in
+`openspec/changes/` — currently none open.
+
+## Where to look first
+
+- **Building, testing, running → [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md).** Read it before
+  touching the build; it lists every other doc and what each is for. The short version:
+
+  ```powershell
+  .\scripts\apply-patches.ps1                                 # patch the engine tree first
+  pwsh -File .\app\build.ps1 -Configuration Debug -Install     # build, push, launch
+  ```
+
+- The pinned engine source and the patch set → `docs/ENGINE.md`.
+- What has actually been verified on hardware → `docs/TESTING.md`.
 
 ## Golden rules
 
-1. **Never edit upstream engine code in place.** Upstream lives in the `engine/` Git submodule,
-   pinned at a release *tag*. Any deviation from upstream must live in `patches/` or in the boundary
-   layer outside `engine/`. Long-hand: the goal is that `git diff` between a bump and our tree stays
-   tiny, and a CI smoke test catches breakage.
+1. **Never edit the engine source in place.** The goldendict-ng engine lives in the `engine/` Git
+   submodule, pinned at a release *tag*. Any deviation must live in `patches/` or in the boundary
+   layer outside `engine/`. Long-hand: the goal is that `git diff` across a release bump stays
+   tiny, and a CI smoke test catches breakage. See `docs/ENGINE.md`.
 2. **Do not shim Qt types.** The carve compiles with real Qt 6 (Core/XML/Concurrent) for Android.
    Do not write `QString`/`QList`/`QXmlStreamReader` reimplementations on `std::` — that would make
-   every upstream merge expensive. Reconsidering this is a design decision (see design.md D1), not
+   every engine release expensive. Reconsidering this is a design decision (see design.md D1), not
    something an agent may do to make a build pass. (D1 lives in the archived goldendict-mobile-port
    design under `openspec/changes/archive/`.)
 3. **The boundary is the C API.** The Qt app talks to the engine only through the `gd_*` C boundary
@@ -32,8 +49,8 @@ for the milestone tracker).
 ## Repository layout (target)
 
 - `engine/` — goldendict-ng submodule, pinned at a release tag, never edited.
-- `patches/` — the only deviations from upstream (4 patches: dsl svg-drop, android home,
-  fts wildcard cap, fts sliced build). Keep it small; `docs/UPSTREAM.md` enumerates them.
+- `patches/` — the only deviations from the pinned source (4 patches: dsl svg-drop, android home,
+  fts wildcard cap, fts sliced build). Keep it small; `docs/ENGINE.md` enumerates them.
 - `carve/` — the `gd_*` C boundary (`goldendict.h`, `gd_boundary.cc`) + selected engine sources
   compiled once as an object library, shared by the Qt app and the CI smoke tool.
 - `app/` — the Qt app (QML + WebView, Android) that consumes the carve in-process.
@@ -44,13 +61,16 @@ for the milestone tracker).
 
 ## Scope constraints
 
-- **v1 formats:** mdict (`.mdx`/`.mdd`), DSL (`.dsl`/`.dsl.dz`), StarDict (`.ifo`). Other formats are
-  converted on a computer (e.g. pyglossary) and copied to the phone.
-- **Cut for v1:** network dictionary sources, Zim/EPWING/Aard/SLOB/BGL/SDict/GLS/XDXF natively,
-  scan popup, system tray, global hotkeys, TTS, print/PDF. See the v1 design's cut-scope register
-  (archived `goldendict-mobile-port` design under `openspec/changes/archive/`) and
-  `docs/ROADMAP.md`.
-- **Audio:** ogg/mp3/wav play; speex (`.spx`) is unsupported-but-graceful in v1.
+- **Supported formats:** mdict (`.mdx`/`.mdd`), DSL (`.dsl`/`.dsl.dz`), StarDict (`.ifo`). Other
+  formats are converted on a computer (e.g. pyglossary) and copied to the phone.
+- **Out of scope, permanently:** online *lookup* (network dictionary sources), Zim/EPWING/Aard/
+  SLOB/BGL/SDict/GLS/XDXF natively, scan/hover popup, system tray, global hotkeys, mouse gestures,
+  external-program integration, print/PDF, TTS, and a full desktop preferences surface. The remote
+  *catalog* is in scope — it downloads a dictionary once, then searches it on-device; see
+  `docs/REMOTE-CATALOG.md`. The original cut-scope register is in the archived `goldendict-mobile-port`
+  design under `openspec/changes/archive/`.
+- **Audio:** ogg/mp3/wav play; speex (`.spx`) is unsupported-but-graceful (skipped without an
+  error).
 - **Storage:** dictionaries are imported one-off via folder-scoped SAF pickers:
   supported dictionary files (`.mdx`/`.mdd`/`.dsl`/`.dsl.dz`/`.ifo`) are
   stage-copied into app-private `files/staged/` and scanned recursively, and any
@@ -87,9 +107,9 @@ SHALL/MUST language) — follow the instructions output before writing any artif
   dictionary catalog silently fails with "TLS initialization failed" while everything else
   looks fine, because the WebView brings its own TLS. The CMake configure step fails hard if
   they are missing, and the release workflow asserts they reached the packaged APK/AAB. Provenance
-  (upstream commit, version, per-file digests) is recorded in `app/openssl/README.md`; an upgrade
+  (source commit, version, per-file digests) is recorded in `app/openssl/README.md`; an upgrade
   replaces the files and updates that table in the same commit.
-- Before any upstream bump: build the engine, run the CI smoke test, and update specs only if
+- Before any engine release bump: build the engine, run the CI smoke test, and update specs only if
   observable behavior changed (never massage specs to fit a refactor).
 - Work flows through OpenSpec changes first; implementation does not run ahead of the plan.
 - **Shared article icons live on the app side, not in dictionaries.** Any icon Aurelex itself
@@ -122,7 +142,7 @@ SHALL/MUST language) — follow the instructions output before writing any artif
 ## Accessible element IDs (for automated testing)
 
 Every interactive QML element in `app/main.qml` has `Accessible.name` and `Accessible.role`
-properties (see `openspec/changes/accessibility-annotations/`). These double as stable element
+properties (see `openspec/changes/archive/2026-09-05-accessibility-annotations/`). These double as stable element
 IDs for UIAutomator / Appium-based on-device testing — the Android accessibility tree exposes
 them as `content-desc` (name) and `className` (role). Use the `Accessible.name` values to locate
 elements in automated tests:

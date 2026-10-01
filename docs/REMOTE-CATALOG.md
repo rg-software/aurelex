@@ -110,7 +110,7 @@ Entry fields:
 | `id` | yes | Stable, unique, matching `[A-Za-z0-9._-]+`. Append-only by convention: renaming breaks installed-detection for anyone who already installed the old id. |
 | `name` | yes | Display name in the list. |
 | `langFrom` / `langTo` | yes | Language codes. |
-| `attribution` / `license` | no | Shown next to the entry; required by most upstream data licences. |
+| `attribution` / `license` | no | Shown next to the entry; required by most source-data licences. |
 
 File fields:
 
