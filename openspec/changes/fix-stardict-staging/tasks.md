@@ -69,21 +69,29 @@
 These need a phone; they are recorded here and marked when run. 5.1 and 5.3 were
 cross-checked against the host smoke tool, which drives the same engine code:
 
-- [ ] 5.1 Import a folder containing a real StarDict dictionary and confirm it
+- [x] 5.1 Import a folder containing a real StarDict dictionary and confirm it
   loads, is listed with its display metadata, and is searchable — *(host check
   done: `gd_lookup("smoke") -> 2627 bytes` and `FTS_BODY=OK` on a StarDict
-  fixture; the device pass is still owed)*
-- [ ] 5.2 Import a StarDict dictionary packaged with dictzip (`.dict.dz`) and
-  confirm it loads
-- [ ] 5.3 Import a folder containing only a StarDict `.ifo` (companions absent)
+  fixture; **device-verified** by importing the `full/` fixture — listed and
+  `zebra` resolves)*
+- [x] 5.2 Import a StarDict dictionary packaged with dictzip (`.dict.dz`) and
+  confirm it loads — *(device-verified with `dzsample.*`, a fixture built with a
+  unique basename after the first attempt was invalidated by the importer's
+  intersecting-pick dedup seeing the shared `smoke.ifo`/`smoke.idx` names; the
+  dictzip path itself was never at fault)*
+- [x] 5.3 Import a folder containing only a StarDict `.ifo` (companions absent)
   and confirm the app reports a failed load rather than listing a broken entry —
   *(host check done: `gd_scan_dicts -> 0 dictionary(ies)` and the file is
-  recorded as a scan failure; the device pass is still owed)*
+  recorded as a scan failure; confirmed on device by the half-staged `full/`
+  collision, which produced exactly "No corresponding .dict file was found"
+  and a failure banner rather than a crash)*
 - [ ] 5.4 Remove a StarDict dictionary and confirm its staged files and index are
   deleted and lookups no longer return its words
 - [ ] 5.5 Re-import a previously-failed StarDict folder on a device that already
   had the `.ifo`-only staged copy, and confirm the dictionary now loads without
-  an app restart
+  an app restart — *(this exposed `stale-import-cleanup`: re-importing the fixed
+  folder did NOT clear the failure, because the broken staging directory is only
+  removed by hand. See that change.)*
 - [ ] 5.6 If a StarDict entry exists in the remote catalog, install it and
   confirm installed-detection reports it only after all its files land
 
