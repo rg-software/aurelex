@@ -1926,6 +1926,7 @@ class AnnotationTests(unittest.TestCase):
             TOOL.build(self.args(tmp))
             text = read_dz(os.path.join(tmp, "kaikki-en.dsl.dz"))
             self.assertIn("About kaikki-en", text.splitlines())
+            self.assertIn("\t[com]Entries: 1[/com]", text)
 
     def test_about_headword_uses_the_chosen_name(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1942,6 +1943,7 @@ class AnnotationTests(unittest.TestCase):
             self.assertIn("CC BY-SA 4.0", content)
             self.assertIn("Wiktionary", content)
             self.assertIn("Snapshot dump date", content)
+            self.assertIn("Entries: 1", content)
 
     def test_annotation_is_written_even_when_the_bundle_is_reused(self):
         with tempfile.TemporaryDirectory() as tmp:
