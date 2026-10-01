@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QByteArray>
+#include <QHash>
 #include <QString>
 #include <QStringList>
 #include <QVector>
@@ -36,6 +37,13 @@
 //                breaks installed-detection for anyone who already installed
 //                the old name, so entries are append-only by convention.
 //   name         string, required, non-empty. Display name shown in the list.
+//                The fallback when `names` has no name for the app's language.
+//   names        object, optional. Localized display names: a map from language
+//                code ("en", "ru", "ja", …; keys folded to lowercase) to a
+//                non-empty string. The app shows the name for its active UI
+//                language and falls back to `name`. A malformed map (not an
+//                object, or a non-string value) rejects the document, like every
+//                other field.
 //   langFrom     string, required, non-empty. Source language code.
 //   langTo       string, required, non-empty. Target language code.
 //   attribution  string, optional. Required by the upstream data licence;
@@ -137,6 +145,9 @@ struct File {
 struct Entry {
     QString id;
     QString name;
+    // Localized display names, keyed by lowercase language code ("en", "ru").
+    // Empty when the manifest supplies none; the app then shows `name`.
+    QHash<QString, QString> names;
     QString langFrom;
     QString langTo;
     QString attribution;
@@ -163,6 +174,12 @@ struct Entry {
     // True when the entry can still gain something after it is installed, i.e.
     // it has an optional bundle the user has not asked for yet.
     bool hasOptionalFiles() const { return !optionalFiles().isEmpty(); }
+
+    // The display name for a user whose preferred UI languages are
+    // `uiLanguages` (most preferred first, e.g. {"ru-RU", "ru", "en"}). Returns
+    // the first `names` entry whose key matches a language or its base code
+    // (case-insensitive), else `name`.
+    QString nameFor(const QStringList &uiLanguages) const;
 };
 
 // A parsed, validated document.

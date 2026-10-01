@@ -242,6 +242,23 @@ ApplicationWindow {
         return sz.length > 0 ? pair + " · " + sz : pair
     }
 
+    // The name shown for a dictionary: a catalog entry's name in the app's
+    // active language when the dictionary came from the catalog, else the
+    // dictionary's own name (#NAME). See localized-catalog-names.
+    function dictDisplayName(d) {
+        const src = d.source ? d.source.split("/").pop() : ""
+        const entries = engine.catalogEntries
+        for (let i = 0; i < entries.length; ++i) {
+            const e = entries[i]
+            const files = e.files || []
+            for (let j = 0; j < files.length; ++j) {
+                if (files[j].role === "dictionary" && files[j].name === src)
+                    return e.displayName || e.name
+            }
+        }
+        return d.name
+    }
+
     // All pane switches blur the focused input BEFORE hiding its pane:
     // an IME query arriving at a focused-but-hidden item can spin the
     // Qt tab-focus-chain walker forever (ANR deadlock with the IME's
@@ -1709,18 +1726,36 @@ text: root._stagingActive
                     }
                     Repeater {
                         model: engine.scanFailures
-                        delegate: Label {
+                        delegate: RowLayout {
                             Layout.fillWidth: true
-                            text: modelData.file
-                            font.pixelSize: 11
-                            elide: Text.ElideMiddle
-                            color: root.uiSubFg
-                            wrapMode: Text.Wrap
+                            spacing: 6
+                            Label {
+                                Layout.fillWidth: true
+                                text: modelData.file
+                                font.pixelSize: 11
+                                elide: Text.ElideMiddle
+                                color: root.uiSubFg
+                                wrapMode: Text.Wrap
+                            }
+                            // Remove this failed import: deletes what it staged so
+                            // the failure stops recurring. A failed dictionary is
+                            // not in the dictionary list, so this is the only way
+                            // to reach its files.
+                            Button {
+                                text: root.icon("delete")
+                                font.family: root.iconFontFamily
+                                font.pixelSize: 16
+                                flat: true
+                                Layout.alignment: Qt.AlignVCenter
+                                Accessible.name: "Remove failed import"
+                                Accessible.role: Accessible.Button
+                                onClicked: engine.removeScanFailure(modelData.file)
+                            }
                         }
                     }
                     Label {
                         Layout.fillWidth: true
-                        text: qsTr("The file may be incomplete or corrupt. Tap Add dictionaries and pick the same folder again to re-copy it.")
+                        text: qsTr("The file may be incomplete or corrupt. Remove the failed import, or tap Add dictionaries and pick the folder again to re-copy it.")
                         font.pixelSize: 11
                         color: root.uiSubFg
                         wrapMode: Text.Wrap
@@ -1760,7 +1795,7 @@ text: root._stagingActive
                             Layout.fillWidth: true
                             spacing: 2
                             Label {
-                                text: dictRow.dictData.name
+                                text: root.dictDisplayName(dictRow.dictData)
                                 font.pixelSize: 16
                                 font.bold: true
                                 elide: Text.ElideMiddle
@@ -1860,7 +1895,7 @@ text: root._stagingActive
                                 Layout.fillWidth: true
                                 spacing: 2
                                 Label {
-                                    text: modelData.item.name
+                                    text: root.dictDisplayName(modelData.item)
                                     font.pixelSize: 16
                                     font.bold: true
                                     elide: Text.ElideMiddle
@@ -2090,7 +2125,7 @@ text: root._stagingActive
                                     spacing: 2
                                     Label {
                                         Layout.fillWidth: true
-                                        text: catRow.modelData.name
+                                        text: catRow.modelData.displayName
                                         font.pixelSize: 15
                                         font.bold: true
                                         elide: Text.ElideMiddle

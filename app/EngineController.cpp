@@ -2,6 +2,7 @@
 #include "ArticleServer.hpp"
 #include "DictionaryIndex.hpp"
 #include "IndexCleanup.hpp"
+#include "StagedCleanup.hpp"
 #include "IndexMigration.hpp"
 
 #include <QtConcurrent>
@@ -425,6 +426,14 @@ void EngineController::runScan() {
         // Surface ANY dictionary files that failed to load (corrupt/truncated)
         // so the user knows a dictionary is missing and can re-import the folder.
         collectScanFailures();
+        // A staged directory that produced no loaded dictionary is a failed
+        // import. If the user has since re-imported the folder successfully, the
+        // stale copy is still on disk and would be retried — and re-reported —
+        // forever, which is what made the banner's own advice ("pick the same
+        // folder again") untrue. Sweep those now that the scan has settled, and
+        // re-collect so the banner reflects the result.
+        if (sweepStaleStagedDirs())
+            collectScanFailures();
         if (result.first > 0 || result.second > 0) {
             refreshDictionaries();
             refreshGroups();
@@ -981,6 +990,32 @@ void EngineController::reloadDictionariesForResources(const QStringList &entryId
     w->setFuture(f);
 }
 
+void EngineController::removeScanFailure(const QString &file) {
+    if (file.isEmpty())
+        return;
+    // Drop the reported entry first: the message must clear even when the files
+    // are already gone (removed by hand, or by a previous sweep), otherwise the
+    // banner becomes permanently unclearable again — the exact bug this fixes.
+    QVariantList kept;
+    kept.reserve(m_scanFailures.size());
+    for (const QVariant &v : m_scanFailures) {
+        if (v.toMap().value("file").toString() != file)
+            kept.append(v);
+    }
+
+    const QString stagedDir = stagedAncestor(file, m_stagedDir);
+    if (stagedDir.isEmpty()) {
+        qInfo() << "[aurelex] scan failure not under the staged root; clearing entry only"
+                << file;
+    } else if (removeStagedDirIfUnused(stagedDir)) {
+        qInfo() << "[aurelex] removed failed import" << stagedDir;
+    } else {
+        qInfo() << "[aurelex] failed import left in place (shared or refused)" << stagedDir;
+    }
+
+    setScanFailures(kept);
+}
+
 void EngineController::deleteDictionaryFiles(const QString &sourceFile,
                                              const QString &dictId,
                                              const QString &stagedRoot,
@@ -1011,25 +1046,95 @@ void EngineController::deleteDictionaryFiles(const QString &sourceFile,
     // per-file delete above already removed this dictionary's file.
     if (!sourceFile.isEmpty() && !stagedRoot.isEmpty()) {
         const QString stagedDir = stagedAncestor(sourceFile, stagedRoot);
-        if (!stagedDir.isEmpty()) {
-            bool shared = false;
-            for (const QVariant &v : m_dictionaries) {
-                const QString s = v.toMap().value("source").toString();
-                if (s != sourceFile && (s.startsWith(stagedDir + QLatin1Char('/'))
-                                        || s == stagedDir)) {
-                    shared = true;
-                    break;
-                }
-            }
-            if (!shared) {
-                qInfo() << "[aurelex] removing staged copy dir" << stagedDir;
-                QDir(stagedDir).removeRecursively();
-            } else {
-                qInfo() << "[aurelex] staged copy dir kept (shared by siblings)"
-                        << stagedDir;
-            }
+        // The guard now lives in removeStagedDirIfUnused so the failed-import
+        // cleanup cannot drift from it.
+        if (!stagedDir.isEmpty() && !removeStagedDirIfUnused(stagedDir)) {
+            qInfo() << "[aurelex] staged copy dir kept (shared by siblings)"
+                    << stagedDir;
         }
     }
+}
+
+bool EngineController::removeStagedDirIfUnused(const QString &stagedDir) {
+    if (stagedDir.isEmpty() || m_stagedDir.isEmpty())
+        return false;
+
+    // Containment and sharing are decided in one place so no caller can apply
+    // one guard and forget the other (see app/StagedCleanup.hpp).
+    QStringList loadedSources;
+    loadedSources.reserve(m_dictionaries.size());
+    for (const QVariant &v : m_dictionaries) {
+        const QString s = v.toMap().value("source").toString();
+        if (!s.isEmpty())
+            loadedSources.append(s);
+    }
+
+    if (!StagedCleanup::isDirectChildOf(stagedDir, m_stagedDir)) {
+        qWarning() << "[aurelex] refusing to remove staged dir outside the staged root:"
+                   << stagedDir << "(root" << m_stagedDir << ")";
+        return false;
+    }
+    if (StagedCleanup::isUsedByLoadedDictionary(stagedDir, loadedSources)) {
+        qInfo() << "[aurelex] staged dir kept, a loaded dictionary uses it" << stagedDir;
+        return false;
+    }
+
+    const QString dirAbs = QDir(stagedDir).absolutePath();
+    if (!QFileInfo::exists(dirAbs))
+        return true;
+    qInfo() << "[aurelex] removing staged dir" << dirAbs;
+    return QDir(dirAbs).removeRecursively();
+}
+
+bool EngineController::sweepStaleStagedDirs() {
+    if (m_stagedDir.isEmpty())
+        return false;
+    QDir root(m_stagedDir);
+    if (!root.exists())
+        return false;
+
+    // Directories a loaded dictionary reads from. Anything else under the staged
+    // root produced nothing, i.e. it is a failed import.
+    QStringList live;
+    live.reserve(m_dictionaries.size());
+    for (const QVariant &v : m_dictionaries) {
+        const QString s = v.toMap().value("source").toString();
+        if (!s.isEmpty())
+            live.append(s);
+    }
+
+    const QStringList dirs =
+        root.entryList(QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name);
+    bool removedAny = false;
+    for (const QString &name : dirs) {
+        const QString dirAbs = root.absoluteFilePath(name);
+        bool used = false;
+        for (const QString &s : live) {
+            if (s.startsWith(dirAbs + QLatin1Char('/')) || s == dirAbs) {
+                used = true;
+                break;
+            }
+        }
+        if (used)
+            continue;
+        // Only sweep a directory the scan actually reported as failed. An empty
+        // directory that no scan complained about is not ours to delete (it may
+        // be a staged import still being walked by another code path).
+        bool reported = false;
+        for (const QVariant &v : m_scanFailures) {
+            const QString f = v.toMap().value("file").toString();
+            if (f.startsWith(dirAbs + QLatin1Char('/'))) {
+                reported = true;
+                break;
+            }
+        }
+        if (!reported)
+            continue;
+        qInfo() << "[aurelex] sweeping stale failed import" << dirAbs;
+        if (removeStagedDirIfUnused(dirAbs))
+            removedAny = true;
+    }
+    return removedAny;
 }
 
 void EngineController::purgeStagingTmp(const QStringList &keepHashes) {
@@ -2473,6 +2578,10 @@ void EngineController::refreshCatalogEntries()
             QVariantMap m;
             m.insert(QStringLiteral("id"), e.id);
             m.insert(QStringLiteral("name"), e.name);
+            // The name for the app's active language, or `name` when the entry
+            // provides none; QML shows this one and keeps `name` as the stable
+            // (English) identifier for accessibility/test IDs.
+            m.insert(QStringLiteral("displayName"), e.nameFor(QLocale().uiLanguages()));
             m.insert(QStringLiteral("langFrom"), e.langFrom);
             m.insert(QStringLiteral("langTo"), e.langTo);
             m.insert(QStringLiteral("pair"), e.langFrom + QLatin1Char('/') + e.langTo);

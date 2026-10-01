@@ -216,6 +216,27 @@ QVector<File> Entry::optionalFiles() const
     return out;
 }
 
+QString Entry::nameFor(const QStringList &uiLanguages) const
+{
+    if (names.isEmpty())
+        return name;
+    for (const QString &ui : uiLanguages) {
+        QString key = ui;
+        key.replace(QLatin1Char('_'), QLatin1Char('-'));
+        key = key.toLower();
+        auto it = names.constFind(key);
+        if (it != names.constEnd())
+            return it.value();
+        const int dash = key.indexOf(QLatin1Char('-'));
+        if (dash > 0) {
+            it = names.constFind(key.left(dash));
+            if (it != names.constEnd())
+                return it.value();
+        }
+    }
+    return name;
+}
+
 bool parseManifest(const QByteArray &json, Manifest *out, QString *error)
 {
     Manifest m;
@@ -287,6 +308,27 @@ bool parseManifest(const QByteArray &json, Manifest *out, QString *error)
         if (!err.isEmpty()) { if (error) *error = err; return false; }
         e.attribution = o.value(QStringLiteral("attribution")).toString().trimmed();
         e.license = o.value(QStringLiteral("license")).toString().trimmed();
+
+        // Optional localized display names: an object of language code -> name.
+        const QJsonValue namesValue = o.value(QStringLiteral("names"));
+        if (!namesValue.isUndefined() && !namesValue.isNull()) {
+            if (!namesValue.isObject()) {
+                if (error) *error = QStringLiteral("%1: \"names\" must be an object")
+                                        .arg(entryWhere);
+                return false;
+            }
+            const QJsonObject namesObj = namesValue.toObject();
+            for (auto it = namesObj.begin(); it != namesObj.end(); ++it) {
+                if (!it.value().isString()) {
+                    if (error) *error = QStringLiteral("%1: names[\"%2\"] must be a string")
+                                            .arg(entryWhere, it.key());
+                    return false;
+                }
+                const QString value = it.value().toString().trimmed();
+                if (!value.isEmpty())
+                    e.names.insert(it.key().toLower(), value);
+            }
+        }
 
         const QJsonValue fv = o.value(QStringLiteral("files"));
         if (!fv.isArray()) {

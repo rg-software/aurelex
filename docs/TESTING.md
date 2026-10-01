@@ -36,10 +36,13 @@ This adb-installs the result (`-Install`); without it the APK lands in
 | 6 | Reorder within a group (Groups tab) | Group article order follows membership order | ✅ |
 | 7 | Select dictionaries → "Remove" | Entry removed immediately (no confirmation); search no longer returns its words; its staged copy + index are deleted | ✅ |
 | 8 | No dictionaries / import a folder with none | Empty state / onboarding hint appears; "no supported dictionaries" is shown | ✅ |
-| 8a | Import a folder holding a **StarDict** set (`word.ifo` + `word.idx` + `word.dict`, same basename) | All three companions are staged; the dictionary is listed and its headwords resolve. Before `fix-stardict-staging` only the `.ifo` was copied and the entry failed to load | ⬜ |
-| 8b | Import a StarDict set packaged with dictzip (`word.dict.dz`) | Loads the same as an uncompressed one | ⬜ |
-| 8c | Import a folder holding **only** a StarDict `.ifo` (companions absent) | Reports a failed load rather than listing a broken entry that returns nothing | ⬜ |
+| 8a | Import a folder holding a **StarDict** set (`word.ifo` + `word.idx` + `word.dict`, same basename) | All three companions are staged; the dictionary is listed and its headwords resolve. Before `fix-stardict-staging` only the `.ifo` was copied and the entry failed to load | ✅ |
+| 8b | Import a StarDict set packaged with dictzip (`word.dict.dz`) | Loads the same as an uncompressed one | ✅ |
+| 8c | Import a folder holding **only** a StarDict `.ifo` (companions absent) | Reports a failed load rather than listing a broken entry that returns nothing | ✅ |
 | 8d | Remove an imported StarDict dictionary | Its staged companions and its index are deleted together; lookups stop returning its words | ⬜ |
+| 8e | With a failed import reported, tap its trash ("Remove failed import") in the banner | That import's staged files are deleted, the banner clears, and every other dictionary keeps working | ⬜ |
+| 8f | Re-import the corrected folder after a failed import of the same folder | The dictionary loads and the previous failure is gone, with no manual storage cleanup | ⬜ |
+| 8g | Leave a failed import reported and just restart / rescan | The failure is re-reported and its files are still there — the app never deletes an import on its own | ⬜ |
 
 ## Groups
 

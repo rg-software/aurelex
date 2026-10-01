@@ -165,6 +165,7 @@ elements in automated tests:
 | Dicts | Add dict button | `"Add"` (icon-only folder-open glyph; imports a dictionary folder) |
 | Dicts | By Pair toggle | `"By Pair"` (translate glyph icon; highlighted when on) |
 | Dicts | Delete button | `"Remove"` (icon-only trash glyph; deletes the current multi-selection; the only dict deletion path; gray when nothing selected, magenta when a selection exists) |
+| Dicts | Failed-import remove | `"Remove failed import"` (per-row trash on the scan-failure banner; deletes the staged files of a dictionary that failed to load — such a dictionary is not in the list, so this is the only way to reach them) |
 | Dicts | Flat list | `"Dictionaries list"` |
 | Dicts | Grouped list | `"Dictionaries list by pair"` |
 | Dicts | Pair header | Tapping a pair (section) header selects/unselects all dictionaries in that pair (shows a check when fully selected) |

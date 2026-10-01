@@ -192,6 +192,14 @@ public:
     void setOnboarded(bool v);
     QVariantList scanFailures() const { return m_scanFailures; }
 
+    // Remove a failed import the scan reported. `file` is the path from
+    // scanFailures() (the file the engine could not load); the staged directory
+    // containing it is deleted and the entry is dropped from scanFailures, so a
+    // broken import stops being retried and stops being reported. A file that is
+    // already gone is simply dropped. Deleting outside the staged root is
+    // refused, and a directory a loaded dictionary still uses is kept.
+    Q_INVOKABLE void removeScanFailure(const QString &file);
+
     // Cycle the theme mode Light -> Dark -> Follow-system -> Light. The order is
     // deliberate: leaving Follow-system always lands on an explicit theme, which
     // is by construction different from whatever the system is showing, so no tap
@@ -478,6 +486,19 @@ private:
     // shifted, so operate on captured paths/ids.
     void deleteDictionaryFiles(const QString &sourceFile, const QString &dictId,
                                const QString &stagedRoot, const QString &appDir);
+    // Remove `stagedDir` (a files/staged/<sourceId> directory) and anything it
+    // left behind, but ONLY when it is inside the staged root and no loaded
+    // dictionary still reads a file from it. This is the single place that guard
+    // lives: deleteDictionaryFiles and the failed-import cleanup both go through
+    // it, so a shared import folder (one pick holding several dictionaries) keeps
+    // the members that still work. Returns true when the directory is gone (or
+    // was already absent).
+    bool removeStagedDirIfUnused(const QString &stagedDir);
+    // Remove staged directories that yielded no loaded dictionary (a failed
+    // import) so they are not retried and re-reported on every later scan.
+    // Returns true when it removed anything. Never touches a directory a loaded
+    // dictionary uses, and never runs on its own initiative outside a scan.
+    bool sweepStaleStagedDirs();
     // Remove leftover temporary staging dirs (files/staging-tmp/*) once a
     // scan+index batch has finished and the staged tree is consistent.
     // `keepHashes` are content-hash scratch dirs a live download owns; they are

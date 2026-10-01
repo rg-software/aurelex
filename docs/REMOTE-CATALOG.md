@@ -78,6 +78,7 @@ already-installed entry reuses the same directory.
     {
       "id": "kaikki-en-ru",
       "name": "Wiktionary (English - Russian)",
+      "names": { "ru": "Викисловарь (английский — русский)" },
       "langFrom": "en",
       "langTo": "ru",
       "attribution": "Wiktionary contributors, CC BY-SA 4.0",
@@ -108,7 +109,8 @@ Entry fields:
 | Field | Required | Notes |
 |-------|----------|-------|
 | `id` | yes | Stable, unique, matching `[A-Za-z0-9._-]+`. Append-only by convention: renaming breaks installed-detection for anyone who already installed the old id. |
-| `name` | yes | Display name in the list. |
+| `name` | yes | Display name in the list; the fallback for `names`. |
+| `names` | no | Localized display names: an object from language code (`en`, `ru`, …; keys folded to lowercase) to a non-empty string. The app shows the name for its active UI language and falls back to `name`. A non-object, or a non-string value, rejects the document. |
 | `langFrom` / `langTo` | yes | Language codes. |
 | `attribution` / `license` | no | Shown next to the entry; required by most source-data licences. |
 

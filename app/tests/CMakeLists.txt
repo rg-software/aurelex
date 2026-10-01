@@ -64,6 +64,15 @@ target_include_directories(dictionary_index_test PRIVATE
 )
 target_link_libraries(dictionary_index_test PRIVATE Qt6::Core)
 
+# Staged-import deletion guard tests (stale-import-cleanup). Links only Qt Core;
+# StagedCleanup.hpp is header-only. These are the guards that stand between an
+# untrusted path from the scan-failure report and a filesystem deletion.
+add_executable(staged_cleanup_test StagedCleanupTest.cpp)
+target_include_directories(staged_cleanup_test PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/.."
+)
+target_link_libraries(staged_cleanup_test PRIVATE Qt6::Core)
+
 # Remote-catalog manifest parser tests (remote-dictionary-catalog). Links only
 # Qt Core: RemoteCatalog is the parser + installed-detection + preflight
 # constants, with no network and no engine, so the checked-in fixtures under
