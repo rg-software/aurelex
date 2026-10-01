@@ -575,8 +575,12 @@ files inside the archive; the phone's import stages the whole folder. Use
 - Same snapshot + options ⇒ byte-identical output (dictionary and resource
   archive; the vendored icons are fixed bytes in a sorted archive).
 - The snapshot dump date is embedded in the `#NAME` metadata block and in an
-  **About this dictionary** card inside the file, which also carries the
-  sense-icon legend.
+  **About &lt;name&gt;** card inside the file (named after the dictionary, so
+  several builds are distinguishable), which also carries the sense-icon legend.
+- A sibling `<name>.ann` annotation sits beside the dictionary with the same
+  attribution as plain text. DSL headers have no description field, but a
+  Lingvo-aware reader (goldendict-ng) surfaces `<base>.ann` as the dictionary
+  description; keep it beside the `.dsl.dz` when you copy or redistribute.
 
 ## Licensing
 

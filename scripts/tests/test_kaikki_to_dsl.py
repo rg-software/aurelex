@@ -48,11 +48,12 @@ def read_dz(path):
     return raw.decode("utf-8")
 
 
-def headword_lines(text):
+def headword_lines(text, name="kaikki-en"):
+    """Headword lines, excluding the about article ``About <name>``."""
     return [
         ln for ln in text.splitlines()
         if ln and not ln[0].isspace() and not ln.startswith("#")
-        and ln != "About this dictionary"
+        and ln != f"About {name}"
     ]
 
 
@@ -1903,6 +1904,53 @@ class ArchaicExampleTests(unittest.TestCase):
             self.assertIn("[ex]", old)
             # the modern sense did not: it may not show an archaic example
             self.assertNotIn("[ex]", mod)
+
+
+class AnnotationTests(unittest.TestCase):
+    """The about headword names the dictionary; a sibling .ann carries it."""
+
+    def args(self, tmp, *extra):
+        path = os.path.join(tmp, "in.jsonl")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(json.dumps({
+                "word": "solid", "lang_code": "en", "pos": "noun",
+                "senses": [{"glosses": ["Firm."]}],
+            }) + "\n")
+        return TOOL.build_parser().parse_args([
+            "--source-lang", "en", "--jsonl", path, "--out-dir", tmp,
+            "--no-audio", "--cache-dir", os.path.join(tmp, "cache"), *extra,
+        ])
+
+    def test_about_headword_names_the_dictionary(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            TOOL.build(self.args(tmp))
+            text = read_dz(os.path.join(tmp, "kaikki-en.dsl.dz"))
+            self.assertIn("About kaikki-en", text.splitlines())
+
+    def test_about_headword_uses_the_chosen_name(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            TOOL.build(self.args(tmp, "--name", "webster"))
+            text = read_dz(os.path.join(tmp, "webster.dsl.dz"))
+            self.assertIn("About webster", text.splitlines())
+
+    def test_annotation_sits_beside_the_dictionary(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            TOOL.build(self.args(tmp))
+            with open(os.path.join(tmp, "kaikki-en.ann"), encoding="utf-8") as f:
+                content = f.read()
+            self.assertIn("kaikki-en", content)
+            self.assertIn("CC BY-SA 4.0", content)
+            self.assertIn("Wiktionary", content)
+            self.assertIn("Snapshot dump date", content)
+
+    def test_annotation_is_written_even_when_the_bundle_is_reused(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            TOOL.build(self.args(tmp))
+            ann = os.path.join(tmp, "kaikki-en.ann")
+            os.remove(ann)
+            with contextlib.redirect_stderr(io.StringIO()):
+                TOOL.build(self.args(tmp, "--reuse-bundle"))
+            self.assertTrue(os.path.isfile(ann))
 
 
 class ReuseBundleTests(unittest.TestCase):
