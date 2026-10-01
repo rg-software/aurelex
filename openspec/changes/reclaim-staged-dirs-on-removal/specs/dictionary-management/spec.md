@@ -26,6 +26,10 @@ removing one MUST NOT delete a sibling's files. Equally, a staged directory
 SHALL NOT be retained on behalf of a dictionary that has itself just been
 removed.
 
+Removing a dictionary MUST NOT prevent that dictionary from being imported
+again. A removal SHALL NOT leave anything behind that causes a later import of
+the same dictionary to fail or to produce a dictionary that cannot be loaded.
+
 The dictionary's indexes SHALL be deleted from the app's index directory - the
 directory the engine writes them into, as the dictionary's identifier and its
 `_FTS_*` companions - and no pre-fix index left beside that directory for the
@@ -57,6 +61,18 @@ builds continue unaffected.
   staged directory
 - **THEN** that staged directory is removed rather than left behind, so the
   removal releases the storage the dictionary occupied
+
+#### Scenario: A removed dictionary can be imported again
+- **WHEN** the user removes a dictionary and then imports the same dictionary
+  again
+- **THEN** the import succeeds and the dictionary loads, rather than being
+  blocked by anything the removal left behind
+
+#### Scenario: A leftover from an earlier removal does not block re-import
+- **WHEN** a staged directory left behind by a previous removal still holds that
+  dictionary's companion files but not its primary file
+- **THEN** the dictionary can still be imported and loaded, and that leftover
+  directory is reclaimed rather than reused in its incomplete state
 
 #### Scenario: A staged directory shared with a surviving dictionary is kept
 - **WHEN** one imported folder holds several dictionaries and the user removes
