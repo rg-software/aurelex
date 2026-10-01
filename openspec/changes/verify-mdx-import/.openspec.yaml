@@ -1,0 +1,7 @@
+schema: spec-driven
+created: 2026-10-01
+# This change verifies behaviour the dictionary-management spec already requires
+# (MDict files are staged and their resources resolve) rather than changing it,
+# so it declares no spec delta. If the device pass uncovers a defect, remove this
+# marker and add the delta in the same change.
+skip_specs: true
