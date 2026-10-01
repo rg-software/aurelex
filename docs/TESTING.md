@@ -92,11 +92,20 @@ build-smoke\Release\aurelex_smoke.exe <cfg> <dicts> <word>
 | 18c | Import **demo** (`.mdx` + `.mdd`) on device | Listed and headwords resolve. Note this fixture references **no** resources, so it cannot test the resource path — use 18a for that | 🔶 host-verified, device open |
 | 18d | Confirm the staged layout keeps the `.mdd` beside the `.mdx`, and `collinslaw.css` / `collinslaw2ed.jpg` beside theirs | The engine resolves the archive and the loose assets relative to the `.mdx` | 🔶 device open |
 
-Two things that look like bugs and are not:
+Three things that look like bugs and are not:
 
 - **A served CSS can be larger than the file on disk.** `collinslaw.css` is
   1061 bytes but serves 1684. `mdx.cc:811` runs `isolate_css()`, which rewrites
   CSS links to rescope them per dictionary. Correct, not corruption.
+- **`collinslaw` shows no language pair.** The engine infers the pair from a
+  regex over the dictionary's **filename**, falling back to its title
+  (`langcoder.cc:276`): it looks for a literal `xx-yy` group of 2–3 letter
+  codes. `collinslaw2ed.mdx` / "Collins Dictionary of Law 2ed" contains no such
+  pattern, so it correctly reports none and is absent from By-Pair grouping.
+  The dictionary still loads, indexes and resolves normally. Renaming the file
+  to carry the pair (`…-en-en.mdx`) makes it appear; the content is not
+  involved. Other fixtures are named to match (`Genius_En-Jp`,
+  `UniversalRuEn`).
 - **`collinslaw` references an image it does not ship.**
   `William J. Stewart, Robert Burgess - Collins Dictionary of Law (2001)/Image_106.png`
   is absent from the zip, so it legitimately fails to resolve. Note the path

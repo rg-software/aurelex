@@ -53,8 +53,19 @@
   nine staged directories reports 25/25 dictionaries, `law` 128912 bytes,
   8/8 resources and 147 suggestions, identical to before the fix
 - [x] 5.2 Device: import the dictionary that hung; the index build completes and
-  the dictionary is searchable with its headwords intact. **Not yet run** — this
-  requires the on-device pass and is the one item still open
+  the dictionary is searchable with its headwords intact. **Verified on device**
+  (Motorola ThinkPhone, Android 15, Debug build):
+
+  | | before the fix | after |
+  | --- | --- | --- |
+  | last engine line | `MdictParser: open …` | `Writing index…` 147 ms later |
+  | scan duration | never returned | `gd_scan_dicts took 172 ms` |
+  | index file | 0 bytes | built, dictionary usable |
+  | outcome | watchdog fired at 90 s, process killed | import completes, article resolves |
+
+  The log sequence after the fix is `Building the index` → `MdictParser: open`
+  → `Writing index…` → `gd_scan_dicts took 172 ms` → `Building the full-text
+  index`, i.e. the index build runs to completion and hands off to FTS.
 - [ ] 5.3 Device: confirm the failure path is real — with the bound made
   temporarily strict, the build fails and reports instead of hanging
 - [ ] 5.4 Confirm no other dictionary in the same import is affected
