@@ -6,6 +6,7 @@
 #include "index_path.hpp"
 
 #include <QDir>
+#include <QCoreApplication>
 #include <QFile>
 #include <QFileInfo>
 #include <QThread>
@@ -75,6 +76,23 @@ static int findDictBySuffix( const char * suffix )
 int main( int argc, char ** argv )
 {
   setvbuf( stdout, nullptr, _IONBF, 0 );
+
+  // Qt reports engine problems through qWarning/qDebug. Without an
+  // application object those messages are dropped on the floor on some
+  // platforms, which hides the reason a dictionary failed to load - exactly
+  // the information this tool exists to surface. Install a handler that
+  // prefixes them so they are distinguishable from the tool's own output.
+  QCoreApplication app( argc, argv );
+  qInstallMessageHandler( []( QtMsgType type, const QMessageLogContext &, const QString & msg ) {
+    const char * sev = type == QtDebugMsg      ? "DEBUG"
+                     : type == QtInfoMsg       ? "INFO"
+                     : type == QtWarningMsg    ? "WARN"
+                     : type == QtCriticalMsg   ? "CRIT"
+                                               : "FATAL";
+    // stderr so it never interleaves with the tool's stdout assertions.
+    std::fprintf( stderr, "QT %s: %s\n", sev, msg.toLocal8Bit().constData() );
+    std::fflush( stderr );
+  } );
 
   if ( argc < 3 ) {
     std::fprintf( stderr, "usage: smoke_main <config_dir> <dict_dir> [word]\n" );

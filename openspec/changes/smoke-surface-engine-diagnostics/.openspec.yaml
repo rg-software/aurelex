@@ -1,0 +1,8 @@
+schema: spec-driven
+created: 2026-10-01
+
+# Tooling only: the smoke tool is a build-time diagnostic, not user-visible
+# behaviour, so no spec requirement changes. Qt drops qWarning/qDebug when
+# there is no application object, which hid the engine's own explanation of
+# why a dictionary failed to load.
+skip_specs: true

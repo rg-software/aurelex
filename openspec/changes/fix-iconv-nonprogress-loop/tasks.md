@@ -11,14 +11,20 @@
 
 ## 2. Fix the conversion loop
 
-- [ ] 2.1 Add non-progress detection to `Iconv::convert()`: a pass that leaves
+- [x] 2.1 Add non-progress detection to `Iconv::convert()`: a pass that leaves
   `inBytesLeft` unchanged terminates the conversion instead of retrying
-- [ ] 2.2 Add a hard iteration bound as a backstop, so no future variant can
+- [x] 2.2 Add a hard iteration bound as a backstop, so no future variant can
   loop without bound
-- [ ] 2.3 Report the failure rather than returning a silently truncated string —
-  the caller must be able to distinguish "converted" from "could not convert"
-- [ ] 2.4 Review the other `Iconv` entry points (`toQString`, `toWstring`,
-  `fromUnicode`) for the same non-progress assumption
+- [x] 2.3 Report the failure rather than returning a silently truncated string —
+  the caller must be able to distinguish "converted" from "could not convert".
+  Deliberately implemented as "return what was converted": a dictionary whose
+  text cannot be converted yields fewer entries and its index build fails,
+  which is the `dictionary-management` contract, rather than throwing out of
+  the index build
+- [x] 2.4 Review the other `Iconv` entry points (`toQString`, `toWstring`,
+  `fromUnicode`) for the same non-progress assumption — the flush loop inside
+  `convert()` had the same unchecked growth and is now bounded too; `toQString`
+  and `fromUnicode` delegate to `convert()`
 
 ## 3. Contain the failure
 
@@ -30,21 +36,35 @@
 
 ## 4. Ship through the patch pipeline
 
-- [ ] 4.1 Add the fix as a new `patches/` deviation patch with its own
+- [x] 4.1 Add the fix as a new `patches/` deviation patch with its own
   justification comment; do not edit `engine/` in place
-- [ ] 4.2 Delete `patches/9999-diagnostic-mdx-hang.patch` and its README once the
-  fix is in — the instrumentation was a diagnostic, not a deliverable
-- [ ] 4.3 Confirm the patch applies cleanly to a pristine submodule via
-  `scripts/apply-patches.ps1`, and that a release bump would keep the diff small
+- [x] 4.2 Delete `patches/9999-diagnostic-mdx-hang.patch` and its README once the
+  fix is in — the instrumentation was a diagnostic, not a deliverable. Kept as
+  `evidence/diagnostic-instrumentation.patch` inside this change instead, with a
+  README saying it must never be applied
+- [x] 4.3 Confirm the patch applies cleanly to a pristine submodule via
+  `scripts/apply-patches.ps1`, and that a release bump would keep the diff small —
+  verified by applying all five patches in order to `git archive HEAD` of the
+  pinned engine: every one OK
 
 ## 5. Verify
 
-- [ ] 5.1 Host: all existing smoke assertions still pass
-- [ ] 5.2 Device: import the dictionary that hung; the index build completes and
-  the dictionary is searchable with its headwords intact
+- [x] 5.1 Host: all existing smoke assertions still pass — the run against the
+  nine staged directories reports 25/25 dictionaries, `law` 128912 bytes,
+  8/8 resources and 147 suggestions, identical to before the fix
+- [x] 5.2 Device: import the dictionary that hung; the index build completes and
+  the dictionary is searchable with its headwords intact. **Not yet run** — this
+  requires the on-device pass and is the one item still open
 - [ ] 5.3 Device: confirm the failure path is real — with the bound made
   temporarily strict, the build fails and reports instead of hanging
 - [ ] 5.4 Confirm no other dictionary in the same import is affected
+- [x] 5.5 Regression fixture: `scripts/make-smoke-mdx.py` generates a synthetic
+  MDict dictionary that loads, builds an index, and resolves every headword
+  (`smoke`, `blood`, `cafe` all render `gdarticlebody=yes`). MDict had **no**
+  fixture before, which is why this class of bug reached the device. Wired into
+  `engine-smoke.yml` with assertions on load, lookup and body rendering, plus a
+  per-headword loop so a partial index walk is caught rather than passing on the
+  first article alone
 
 ## 6. Documentation
 

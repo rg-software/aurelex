@@ -111,6 +111,18 @@ jobs:
           mkdir -p "$RUNNER_TEMP/dic/nested"
           cp "$RUNNER_TEMP/dsl/aurelex-lingvo.dsl" "$RUNNER_TEMP/dic/nested/"
 
+      - name: Generate MDict (.mdx) fixture
+        shell: bash
+        run: |
+          # MDict had no fixture at all, so the whole MDX import path -- and in
+          # particular the engine's index build for it -- was never exercised by
+          # CI. That gap let a defect ship in which the index build hangs
+          # forever on Android (fix-iconv-nonprogress-loop). A real dictionary
+          # reproducing it is copyrighted, so this generates an equivalent
+          # synthetic one. It goes in its own folder: the fixture's headwords
+          # must not collide with the StarDict fixture's in the combined folder.
+          python scripts/make-smoke-mdx.py "$RUNNER_TEMP/mdx"
+
       - name: Run smoke and assert non-empty HTML
         shell: bash
         run: |
@@ -175,6 +187,31 @@ jobs:
             || { echo "SMOKE FAILED: changed dictionary not reloaded on re-scan"; exit 1; }
           printf '%s' "$out" | grep -q "REIMPORT_CONTENT=OK" \
             || { echo "SMOKE FAILED: re-imported content did not take effect"; exit 1; }
+          # --- MDict (.mdx) -----------------------------------------------
+          # A separate folder so the fixture's headwords do not collide with
+          # the StarDict fixture's. This is the gate for the MDX index build:
+          # without an MDX fixture here, a build that hangs or produces no
+          # entries (fix-iconv-nonprogress-loop) reached the device unnoticed.
+          mdxout=$(./build-gh/Release/aurelex_smoke.exe "$RUNNER_TEMP/cfg-mdx" "$RUNNER_TEMP/mdx" smoke 2>&1)
+          mdxex=$?
+          echo "MDX_SMOKE_EXE_EXIT=$mdxex"
+          echo "$mdxout"
+          test "$mdxex" -eq 0 || { echo "SMOKE FAILED: MDX run exited $mdxex"; exit 1; }
+          printf '%s' "$mdxout" | grep -q "gd_scan_dicts -> 1" \
+            || { echo "SMOKE FAILED: MDX fixture did not load"; exit 1; }
+          # The article must actually resolve -- loading with an empty index
+          # (every headword offset wrong) is the failure this catches.
+          printf '%s' "$mdxout" | grep -q 'gd_lookup("smoke") -> [1-9]' \
+            || { echo "SMOKE FAILED: MDX fixture built an index with no usable entries"; exit 1; }
+          printf '%s' "$mdxout" | grep -q "MARKERS: gdarticlebody=yes" \
+            || { echo "SMOKE FAILED: MDX article body not rendered"; exit 1; }
+          # Every headword in the fixture must resolve, not just the first:
+          # a partial walk (one block, wrong sizes) still renders one article.
+          for w in blood cafe; do
+            wout=$(./build-gh/Release/aurelex_smoke.exe "$RUNNER_TEMP/cfg-mdx-$w" "$RUNNER_TEMP/mdx" "$w" 2>&1)
+            printf '%s' "$wout" | grep -q "MARKERS: gdarticlebody=yes" \
+              || { echo "SMOKE FAILED: MDX headword '$w' did not resolve"; exit 1; }
+          done
           printf '%s' "$out" | grep -q "REIMPORT_SUGGEST=OK" \
             || { echo "SMOKE FAILED: prefix search broken after re-import"; exit 1; }
           # Removing a dictionary drops it (count shrinks, its headword stops

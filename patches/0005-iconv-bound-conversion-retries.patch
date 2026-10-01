@@ -1,0 +1,81 @@
+diff --git a/src/common/iconv.cc b/src/common/iconv.cc
+index 4e7a24bf..f6ba5c32 100644
+--- a/src/common/iconv.cc
++++ b/src/common/iconv.cc
+@@ -74,14 +74,57 @@ QString Iconv::convert( const void *& inBuf, size_t & inBytesLeft )
+ 
+   void * outBufPtr = &outBuf.front();
+ 
+-  size_t outBufLeft = outBuf.size();
+-  size_t result     = (size_t)( -1 );
++  // Conversion retry guard (fix-iconv-nonprogress-loop).
++  //
++  // The retry below grows the output buffer when iconv reports E2BIG. That
++  // assumes a retry with more room makes progress, which is not guaranteed:
++  // on Android's charset backend iconv can report E2BIG for an input and
++  // return WITHOUT consuming a single byte, however much room it is given.
++  // The loop then repeats with byte-identical state forever while the
++  // allocation grows - observed as 517000 consecutive iterations with
++  // inBytesLeft stuck at 1, which hangs the caller and eventually gets the
++  // process killed with no crash record. glibc does not reach that state for
++  // the same input, so the defect was invisible on the Windows host.
++  //
++  // Two independent guards, because either alone can be defeated:
++  //
++  //  1. Progress check. If an iteration leaves inBytesLeft unchanged, no
++  //     amount of retrying can succeed, so stop. This does not depend on
++  //     knowing which backend misbehaves, or on interpreting errno.
++  //  2. Hard iteration bound, as a backstop against a variant of this bug
++  //     that does consume a byte per pass. Far above real conversions, which
++  //     finish in a handful of iterations; it exists to turn "hangs forever"
++  //     into "fails visibly", not to tune performance.
++  //
++  // On either guard the conversion is abandoned and reported by the shorter
++  // returned string, matching the function's existing "return what was
++  // converted" contract - a caller cannot distinguish a guard trip from a
++  // clean conversion, which is deliberate here: a dictionary whose text
++  // cannot be converted should yield fewer/empty entries and let its index
++  // build fail, rather than hang the scan for every other dictionary.
++  const size_t kMaxConversionIterations = 4096;
++
++  size_t outBufLeft    = outBuf.size();
++  size_t result        = (size_t)( -1 );
++  size_t iterations    = 0;
+   while ( inBytesLeft > 0 ) {
++    const size_t bytesBefore = inBytesLeft;
+     result = iconv( state, (char **)&inBuf, &inBytesLeft, (char **)&outBufPtr, &outBufLeft );
++
++    if ( ++iterations > kMaxConversionIterations ) {
++      break;
++    }
++
+     if ( result == (size_t)-1 ) {
+       if ( errno == E2BIG || outBufLeft == 0 ) {
+ 
+         if ( inBytesLeft > 0 ) {
++          // No progress => this input cannot be converted by retrying. Stop
++          // rather than grow the buffer and repeat identical work forever.
++          if ( inBytesLeft == bytesBefore ) {
++            break;
++          }
++
+           // Grow the buffer and retry
+           // The pointer may get invalidated so we save the diff and restore it
+           size_t offset = (char *)outBufPtr - &outBuf.front();
+@@ -98,6 +141,7 @@ QString Iconv::convert( const void *& inBuf, size_t & inBytesLeft )
+   //flush output
+   if ( result != (size_t)( -1 ) ) {
+     /* flush the shift-out sequences */
++    size_t flushIterations = 0;
+     for ( ;; ) {
+       result = iconv( state, NULL, NULL, (char **)&outBufPtr, &outBufLeft );
+ 
+@@ -105,7 +149,7 @@ QString Iconv::convert( const void *& inBuf, size_t & inBytesLeft )
+         break;
+       }
+ 
+-      if ( errno == E2BIG ) {
++      if ( errno == E2BIG && ++flushIterations <= kMaxConversionIterations ) {
+         size_t offset = (char *)outBufPtr - &outBuf.front();
+         outBuf.resize( outBuf.size() + 256 );
+         outBufPtr = &outBuf.front() + offset;
