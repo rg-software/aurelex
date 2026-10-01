@@ -131,6 +131,43 @@ up a known word, and checks FTS + group/remove behavior. **Any engine release bu
 keep the smoke green** — it is the gate that catches an engine merge that
 compiles but breaks the boundary.
 
+#### Run it locally against both layouts
+
+The tool asserts across several fixtures, and CI runs it against **two** folders.
+A local run against only one of them is how the tool came to be green locally and
+red in CI, so run both:
+
+```powershell
+# build once
+cmake --build build-smoke --config Release --target aurelex_smoke
+
+# 1. combined folder (StarDict + .dsl.dz + nested .dsl) — no block skips
+python scripts/make-smoke-stardict.py          $env:TEMP\dic
+python scripts/make-example-dicts.py           $env:TEMP\dsl
+copy $env:TEMP\dsl\aurelex-basic.dsl.dz        $env:TEMP\dic\
+xcopy /E /I $env:TEMP\dsl\aurelex-basic.dsl.files $env:TEMP\dic\aurelex-basic.dsl.files
+mkdir $env:TEMP\dic\nested
+copy $env:TEMP\dsl\aurelex-lingvo.dsl          $env:TEMP\dic\nested\
+.\build-smoke\Release\aurelex_smoke.exe $env:TEMP\cfg $env:TEMP\dic smoke
+
+# 2. MDX-only folder — the format-specific blocks must report =SKIP
+python scripts/make-smoke-mdx.py               $env:TEMP\mdx
+.\build-smoke\Release\aurelex_smoke.exe $env:TEMP\cfg-mdx $env:TEMP\mdx smoke
+```
+
+Both must exit **0**. Each run prints `FIXTURES: …` naming what it found, and a
+block whose fixture is absent prints `=SKIP` instead of `=FAIL`.
+
+**A `=SKIP` is not a pass.** CI asserts the *expected* skips per invocation, so a
+fixture that silently stops being generated fails the run that expects it rather
+than skipping everywhere and passing vacuously. If you add a fixture layout, add
+its expected skips too.
+
+**CI runs bash with `-e`.** Never capture a command's exit code as
+`out=$(cmd)` followed by `ex=$?`: the substitution aborts the step first, taking
+the exit code *and* the output with it, and the run reports a bare exit 1 with no
+reason. Use `if out=$(cmd 2>&1); then ex=0; else ex=$?; fi`.
+
 ## On-device verification
 
 `docs/TESTING.md` holds the manual recipes (build/install, lookup, article

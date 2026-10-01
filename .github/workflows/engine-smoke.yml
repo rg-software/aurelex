@@ -150,8 +150,15 @@ jobs:
           echo "=== staged tool dir ==="
           ls -1 build-gh/Release
           export QT_DEBUG_PLUGINS=1
-          out=$(./build-gh/Release/aurelex_smoke.exe "$RUNNER_TEMP/cfg" "$RUNNER_TEMP/dic" smoke 2>&1)
-          ex=$?
+          # Capture the exit code without a bare substitution: under `set -e` a
+          # failing `out=$(cmd)` aborts before `ex=$?`, discarding both the code
+          # and the output, which is how a red smoke run came to report nothing
+          # (fix-smoke-fixture-scoping).
+          if out=$(./build-gh/Release/aurelex_smoke.exe "$RUNNER_TEMP/cfg" "$RUNNER_TEMP/dic" smoke 2>&1); then
+            ex=0
+          else
+            ex=$?
+          fi
           echo "SMOKE_EXE_EXIT=$ex"
           echo "$out"
           test "$ex" -eq 0 || { echo "SMOKE FAILED: exe exited $ex"; exit 1; }
@@ -201,8 +208,17 @@ jobs:
           # the StarDict fixture's. This is the gate for the MDX index build:
           # without an MDX fixture here, a build that hangs or produces no
           # entries (fix-iconv-nonprogress-loop) reached the device unnoticed.
-          mdxout=$(./build-gh/Release/aurelex_smoke.exe "$RUNNER_TEMP/cfg-mdx" "$RUNNER_TEMP/mdx" smoke 2>&1)
-          mdxex=$?
+          #
+          # The exit-code capture must NOT be a bare `out=$(cmd)` followed by
+          # `ex=$?`: GitHub runs bash with `-e`, which aborts the step at the
+          # substitution before `ex=` is reached. That swallowed both the code
+          # and the output, so this run failed silently as a bare exit 1 with no
+          # SMOKE FAILED line (fix-smoke-fixture-scoping).
+          if mdxout=$(./build-gh/Release/aurelex_smoke.exe "$RUNNER_TEMP/cfg-mdx" "$RUNNER_TEMP/mdx" smoke 2>&1); then
+            mdxex=0
+          else
+            mdxex=$?
+          fi
           echo "MDX_SMOKE_EXE_EXIT=$mdxex"
           echo "$mdxout"
           test "$mdxex" -eq 0 || { echo "SMOKE FAILED: MDX run exited $mdxex"; exit 1; }
@@ -214,13 +230,45 @@ jobs:
             || { echo "SMOKE FAILED: MDX fixture built an index with no usable entries"; exit 1; }
           printf '%s' "$mdxout" | grep -q "MARKERS: gdarticlebody=yes" \
             || { echo "SMOKE FAILED: MDX article body not rendered"; exit 1; }
+          # This folder holds ONLY the MDX fixture, so the format-specific blocks
+          # must report SKIP -- and that skip is asserted, not merely tolerated.
+          # A skip that is only allowed would let a folder missing every fixture
+          # pass vacuously, which is the failure mode this whole change is about.
+          printf '%s' "$mdxout" | grep -q "^FIXTURES: mdx$" \
+            || { echo "SMOKE FAILED: MDX run did not report an mdx-only inventory"; exit 1; }
+          for skip in OPT_ZONE OPT_NO_ZONE STARDICT_LINK_NO_BWORD \
+                      STARDICT_LINK_REWRITTEN FTS_INDEX RESOURCE_ON_MAIN_THREAD \
+                      RESOURCE_ON_WORKER_THREAD REIMPORT_RELOAD REIMPORT_CONTENT \
+                      REIMPORT_SUGGEST REMOVE_DICT REMOVE_READD; do
+            printf '%s' "$mdxout" | grep -q "^${skip}=SKIP" \
+              || { echo "SMOKE FAILED: ${skip} should be SKIP in an MDX-only folder"; exit 1; }
+          done
+          # The format-agnostic gates must still run here. Without this the MDX
+          # folder would be gated on nothing, since every format block skips.
+          for gate in "INDEX_PLACEMENT=OK" "MARKERS: gdarticlebody=yes"; do
+            printf '%s' "$mdxout" | grep -q "$gate" \
+              || { echo "SMOKE FAILED: MDX run did not enforce $gate"; exit 1; }
+          done
           # Every headword in the fixture must resolve, not just the first:
           # a partial walk (one block, wrong sizes) still renders one article.
           for w in blood cafe; do
-            wout=$(./build-gh/Release/aurelex_smoke.exe "$RUNNER_TEMP/cfg-mdx-$w" "$RUNNER_TEMP/mdx" "$w" 2>&1)
+            if wout=$(./build-gh/Release/aurelex_smoke.exe "$RUNNER_TEMP/cfg-mdx-$w" "$RUNNER_TEMP/mdx" "$w" 2>&1); then
+              wex=0
+            else
+              wex=$?
+            fi
+            echo "MDX_HEADWORD_${w}_EXIT=$wex"
+            test "$wex" -eq 0 || { echo "SMOKE FAILED: MDX run for '$w' exited $wex"; echo "$wout"; exit 1; }
             printf '%s' "$wout" | grep -q "MARKERS: gdarticlebody=yes" \
-              || { echo "SMOKE FAILED: MDX headword '$w' did not resolve"; exit 1; }
+              || { echo "SMOKE FAILED: MDX headword '$w' did not resolve"; echo "$wout"; exit 1; }
           done
+          # The combined folder must NOT skip anything: every block's fixture is
+          # present there, so a skip means a fixture stopped being generated.
+          if printf '%s' "$out" | grep -q "=SKIP"; then
+            echo "SMOKE FAILED: a block skipped in the combined folder, where every fixture is present:"
+            printf '%s' "$out" | grep "=SKIP"
+            exit 1
+          fi
           printf '%s' "$out" | grep -q "REIMPORT_SUGGEST=OK" \
             || { echo "SMOKE FAILED: prefix search broken after re-import"; exit 1; }
           # Removing a dictionary drops it (count shrinks, its headword stops

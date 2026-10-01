@@ -11,62 +11,65 @@
 - [x] 1.4 Note why it went unnoticed: the workflow triggers only on
   `engine/**`, `patches/**`, `carve/**`, `.github/workflows/**`, and the pushes
   since the last green run touched none of those
-- [ ] 1.5 Establish whether `set -e` is the *only* swallow at those call sites,
-  or whether the `for w in blood cafe` loop fails for a second reason too
+- [x] 1.5 Establish whether `set -e` is the *only* swallow at those call sites.
+  **It is the same hazard at both**: the combined run at line 153 had it too,
+  identically latent. The `for w in blood cafe` loop's headwords do exist, so its
+  only problem was the swallow
 
 ## 2. Scope the smoke tool's blocks
 
-- [ ] 2.1 Detect the fixtures present in the scanned folder and print an
-  inventory line (`FIXTURES: mdx` / `FIXTURES: stardict dsl`), so a skip is
-  readable from the log rather than inferred
-- [ ] 2.2 Make each format-specific block print `=SKIP` when its fixture is
-  absent, and stop counting a skip as a failure
-- [ ] 2.3 Remove the hard `return 1` for a missing StarDict fixture, so the walk
-  continues to whichever blocks do have their fixtures
-- [ ] 2.4 Keep the format-agnostic gates unconditional: scan, `INDEX_PLACEMENT`,
-  dedup on re-scan, a non-empty lookup, the article markers. The MDX run must
-  still gate what it was added to gate
-- [ ] 2.5 Decide each block's disposition explicitly — format-agnostic, scoped,
-  or meaningless outside the combined folder (the FTS block indexes the StarDict
-  fixture specifically). Record the disposition so a future fixture does not get
-  guessed at
+- [x] 2.1 Detect the fixtures present and print an inventory line — a
+  `FixturePresence` derived from the **loaded dictionaries** rather than the
+  filesystem, so detection and use cannot disagree
+- [x] 2.2 Format-specific blocks print `=SKIP (no <fixture> fixture)` when their
+  fixture is absent, and a skip no longer fails the run
+- [x] 2.3 The hard `return 1` is gone; the walk now continues into the blocks
+  whose fixtures **are** present, which is why re-import, removal and the
+  resource-thread blocks finally run in the MDX folder
+- [x] 2.4 Format-agnostic gates stay unconditional: scan, `INDEX_PLACEMENT`,
+  dedup on re-scan, a non-empty lookup, the article markers
+- [x] 2.5 Each block's disposition recorded in the source: the **FTS** block
+  indexes the StarDict fixture specifically, so it is scoped to it and skips in
+  an MDX folder — the one block where "meaningful here" is genuinely no
 
 ## 3. Make the workflow able to report
 
-- [ ] 3.1 Capture exit codes so `set -e` cannot short-circuit:
-  `if out=$(cmd 2>&1); then ex=0; else ex=$?; fi`, at **every** such call site
-  including the `for w in blood cafe` loop
-- [ ] 3.2 Print the captured output on the failure path, so a red run names the
-  assertion that failed instead of a bare exit code
-- [ ] 3.3 Induce a deliberate assertion failure and confirm the message reaches
-  the CI log — verifying the reporting path rather than assuming it
+- [x] 3.1 Exit codes captured so `set -e` cannot short-circuit, at **every**
+  call site including the combined run and the per-headword loop
+- [x] 3.2 Captured output printed on the failure path
+- [x] 3.3 Induced a deliberate assertion failure and confirmed the message
+  reaches the log. **Verified**: before the fix the same scenario printed
+  *nothing* and exited 1; after it prints `SMOKE_EXE_EXIT=1`, the tool's output
+  including the failing assertion, and `SMOKE FAILED: exe exited 1`
 
 ## 4. Stop skips from rotting into vacuous passes
 
-- [ ] 4.1 The MDX-only run asserts its **expected** skips (StarDict and DSL
-  blocks) as well as its `=OK` gates
-- [ ] 4.2 The combined run asserts **no** skips
-- [ ] 4.3 Confirm a folder missing a fixture fails the invocation that expects
-  it, rather than skipping everywhere and passing. A SKIP that is merely
-  tolerated is a hole: a fixture that silently stops being generated would pass
-  in every invocation
+- [x] 4.1 The MDX-only run asserts its **expected** skips — all twelve — as well
+  as its `=OK` gates
+- [x] 4.2 The combined run asserts **no** skips: a skip there means a fixture
+  stopped being generated
+- [x] 4.3 A folder missing a fixture now fails the invocation that expects it.
+  Both directions verified: MDX-only reports 12 skips and passes; combined
+  reports 0 skips and passes; each asserts the other's state would be a failure
 
 ## 5. Make the local/CI difference visible
 
-- [ ] 5.1 `docs/DEVELOPMENT.md`: document the invocation for each fixture layout,
-  since a local run currently uses the combined folder while CI also runs the
-  MDX-only one — which is how the tool was green locally and red in CI
-- [ ] 5.2 Run both invocations locally as part of the documented procedure, so a
-  change is checked against the layout CI uses
+- [x] 5.1 `docs/DEVELOPMENT.md` documents running the tool against **both**
+  layouts, with the commands, plus two rules the incident produced: a `=SKIP` is
+  not a pass, and never capture an exit code as `out=$(cmd)` under `set -e`
+- [x] 5.2 Both invocations run locally as part of the documented procedure
 
 ## 6. Verify end to end
 
-- [ ] 6.1 The MDX-only run passes: expected skips and `=OK` gates
-- [ ] 6.2 The combined run passes with no skips
-- [ ] 6.3 The existing 16-plus assertions still pass unchanged in the combined
-  folder — no block was weakened to make the MDX run green
-- [ ] 6.4 Push and confirm the workflow is green, which is the only proof that
-  matters and the step that was skipped last time
+- [x] 6.1 The MDX-only run passes: **EXIT=0, zero FAILs**, 12 expected skips,
+  `FIXTURES: mdx`
+- [x] 6.2 The combined run passes with **no skips**: EXIT=0, zero FAILs,
+  `FIXTURES: stardict dsl`
+- [x] 6.3 All existing assertions still pass unchanged in the combined folder —
+  15 `_OK` results including the StarDict link, FTS, resource-thread, re-import
+  and removal blocks. No block was weakened to make the MDX run green
+- [ ] 6.4 Push and confirm the workflow is green — the only proof that matters,
+  and the step that was skipped last time
 
 ## Notes
 

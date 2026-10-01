@@ -73,6 +73,74 @@ static int findDictBySuffix( const char * suffix )
   return -1;
 }
 
+// ---- fixture presence ------------------------------------------------------
+//
+// This tool asserts everything about the engine in one walk, and it is run
+// against more than one fixture folder: the combined CI folder (StarDict +
+// .dsl.dz + nested .dsl) and an MDX-only folder. A block whose fixture is not
+// present cannot test anything, so it reports SKIP rather than FAIL - but the
+// skip is *asserted* per invocation in the workflow, because a folder missing
+// everything must not pass vacuously (fix-smoke-fixture-scoping).
+//
+// Detected from the loaded dictionaries rather than the filesystem: this is the
+// same "which fixture did the engine actually load" question the blocks ask, so
+// detection and use cannot disagree.
+struct FixturePresence
+{
+  bool stardict = false; // a StarDict primary file (.ifo)
+  bool dsl = false;      // a DSL file (.dsl or .dsl.dz)
+  bool mdx = false;      // an MDict primary file (.mdx)
+
+  bool any() const { return stardict || dsl || mdx; }
+};
+
+static FixturePresence detectFixtures()
+{
+  FixturePresence p;
+  const int n = gd_dict_count();
+  for ( int i = 0; i < n; ++i ) {
+    char name[ 512 ] = { 0 }, file[ 1024 ] = { 0 };
+    if ( gd_dict_info( i, name, sizeof name, file, sizeof file ) != 0 )
+      continue;
+    const std::string f( file );
+    auto endsWith = [ &f ]( const char * s ) {
+      const size_t sl = std::strlen( s );
+      return f.size() >= sl && f.compare( f.size() - sl, sl, s ) == 0;
+    };
+    if ( endsWith( ".ifo" ) )
+      p.stardict = true;
+    if ( endsWith( ".dsl" ) || endsWith( ".dsl.dz" ) )
+      p.dsl = true;
+    if ( endsWith( ".mdx" ) )
+      p.mdx = true;
+  }
+  return p;
+}
+
+/// Print the inventory so a skip is readable from the log rather than inferred
+/// from which assertion is missing.
+static void printFixtures( const FixturePresence & p )
+{
+  std::printf( "FIXTURES:" );
+  if ( p.stardict )
+    std::printf( " stardict" );
+  if ( p.dsl )
+    std::printf( " dsl" );
+  if ( p.mdx )
+    std::printf( " mdx" );
+  if ( !p.any() )
+    std::printf( " none" );
+  std::printf( "\n" );
+}
+
+/// A skipped block's result. Named so the workflow can assert it, and worded so
+/// it reads as "not tested here" rather than "tested and passed".
+static void reportSkip( const char * block, const char * fixture )
+{
+  std::printf( "%s=SKIP (no %s fixture)\n", block, fixture );
+}
+
+
 int main( int argc, char ** argv )
 {
   setvbuf( stdout, nullptr, _IONBF, 0 );
@@ -123,6 +191,12 @@ int main( int argc, char ** argv )
     return 1;
   }
 
+  // Which fixtures this folder actually holds. Printed so a later SKIP is
+  // readable from the log; the blocks below consult it instead of failing on a
+  // fixture the invocation was never given.
+  const FixturePresence fixtures = detectFixtures();
+  printFixtures( fixtures );
+
   // ---- index placement (fix-index-directory-path-separator, design.md D4) ----
   // The engine writes a dictionary's index at `indexDir + dictId` (see
   // index_path.hpp). Assert every loaded dictionary's index actually landed
@@ -167,8 +241,11 @@ int main( int argc, char ** argv )
   std::printf( "gd_scan_dicts(again) -> %d new (expect 0)\n", n2 );
   const bool dedupOk = n2 == 0;
   bool dictOk = true; // refined by the removal block below
-  bool optPartsOk = false; // refined by the DSL hidden-zone block below
-  bool stardictLinkOk = false; // refined by the StarDict cross-reference block below
+  // Blocks whose fixture may be absent start satisfied and are only lowered by a
+  // real failure, so a SKIP cannot make the run fail. Their skip is asserted
+  // separately in the workflow, where the expected fixture set is known.
+  bool optPartsOk = true;      // DSL hidden-zone block; set false on failure
+  bool stardictLinkOk = true;  // StarDict cross-reference block; set false on failure
 
   std::vector< char > sug( 1 << 12 );
   const int sugN = gd_suggest( "smok", sug.data(), static_cast< int >( sug.size() ) );
@@ -281,7 +358,16 @@ int main( int argc, char ** argv )
   // gd-article-controls.js); this pins the engine-side markup that handler
   // depends on, so an upstream bump that stops emitting it fails CI here
   // instead of shipping a dead control.
-  {
+  //
+  // Needs the DSL fixture ("sun" and "water" are DSL headwords). Scoped rather
+  // than assumed, so an MDX-only run skips it instead of failing on a fixture it
+  // was never given; the workflow asserts this SKIP so the block cannot silently
+  // stop being tested.
+  if ( !fixtures.dsl ) {
+    reportSkip( "OPT_ZONE", "dsl" );
+    reportSkip( "OPT_NO_ZONE", "dsl" );
+  }
+  else {
     const int dslDzIdx = findDictBySuffix( ".dsl.dz" );
     std::vector< char > opt( 1 << 20 );
     const int sz = gd_lookup( "sun", opt.data(), static_cast< int >( opt.size() ) );
@@ -315,7 +401,14 @@ int main( int argc, char ** argv )
   // scheme. The engine must rewrite it into a scheme the app resolves: before
   // the fix it was emitted verbatim and tapping it did nothing, because no
   // consumer understands bword:. The fixture's "clot" entry carries one.
-  {
+  //
+  // Needs the StarDict fixture. Scoped like the DSL block above; the workflow
+  // asserts this SKIP so the check cannot silently stop running.
+  if ( !fixtures.stardict ) {
+    reportSkip( "STARDICT_LINK_NO_BWORD", "stardict" );
+    reportSkip( "STARDICT_LINK_REWRITTEN", "stardict" );
+  }
+  else {
     std::vector< char > linkBuf( 1 << 20 );
     const int linkSz = gd_lookup( "clot", linkBuf.data(), static_cast< int >( linkBuf.size() ) );
     const std::string linkHtml( linkBuf.data(), linkSz > 0 ? linkSz : 0 );
@@ -418,15 +511,22 @@ int main( int argc, char ** argv )
   // only occurs inside the "smoke" article); expect the article's headword
   // back. The dictionary index is located by suffix because scan order is not
   // guaranteed (Stardict is not necessarily first).
-  bool ftsOk = false;
+  //
+  // This block indexes the StarDict fixture specifically, so it cannot run
+  // without it. It used to `return 1` here, which aborted the whole walk — every
+  // block after it (resource-thread, re-import, removal) never ran in a folder
+  // that had no StarDict, and that made the MDX-only run impossible to pass
+  // (fix-smoke-fixture-scoping). Skipping is the honest outcome: this folder
+  // cannot test this, and the workflow asserts the skip.
+  bool ftsOk = true; // satisfied unless the block runs and fails
   const int sdIdx = findDictBySuffix( ".ifo" );
   std::printf( "gd_suffix(.ifo) -> %d\n", sdIdx );
   if ( sdIdx < 0 ) {
-    std::fprintf( stderr, "StarDict fixture not found (no .ifo primary)\n" );
-    gd_cleanup();
-    return 1;
+    std::printf( "FTS_INDEX=SKIP (no stardict fixture)\n" );
+    ftsOk = true;
   }
-  {
+  else {
+    ftsOk = false;
     int st = -1;
     if ( gd_fts_index_state( sdIdx, &st ) == 0 )
       std::printf( "gd_fts_index_state(%d) -> %d\n", sdIdx, st );
@@ -486,8 +586,16 @@ int main( int argc, char ** argv )
   // This is the gate for D1: if a dictionary backend keeps thread-affine state,
   // a load from a foreign thread fails here (wrong rc, or a payload that is not
   // the SVG) even though the same load on the constructing thread succeeds.
-  bool resourceThreadOk = false;
-  {
+  //
+  // Needs the DSL fixture, whose resource bundle holds the SVG. Scoped so an
+  // MDX-only run skips it; the workflow asserts the skip.
+  bool resourceThreadOk = true; // satisfied unless the block runs and fails
+  if ( !fixtures.dsl ) {
+    reportSkip( "RESOURCE_ON_MAIN_THREAD", "dsl" );
+    reportSkip( "RESOURCE_ON_WORKER_THREAD", "dsl" );
+  }
+  else {
+    resourceThreadOk = false;
     const int resIdx = findDictBySuffix( ".dsl.dz" );
     char dictId[ 128 ] = { 0 };
     const int idRc = resIdx >= 0 ? gd_dict_id( resIdx, dictId, sizeof dictId ) : -1;
@@ -535,8 +643,18 @@ int main( int argc, char ** argv )
   // dictionary's searches failing ("Error reading from the file") and wedged
   // gd_suggest for its whole timeout (the on-device 2026-09-28 report).
   // Appending a newline changes the file's size + mtime without breaking the DSL.
-  bool reimportOk = false;
-  {
+  //
+  // Needs the DSL fixture: it appends DSL markup to the nested .dsl and re-scans,
+  // so an MDX-only folder cannot exercise it. Scoped; the workflow asserts the
+  // skip.
+  bool reimportOk = true; // satisfied unless the block runs and fails
+  if ( !fixtures.dsl ) {
+    reportSkip( "REIMPORT_RELOAD", "dsl" );
+    reportSkip( "REIMPORT_CONTENT", "dsl" );
+    reportSkip( "REIMPORT_SUGGEST", "dsl" );
+  }
+  else {
+    reimportOk = false;
     const int dslIdx = findDictBySuffix( ".dsl" ); // the nested, uncompressed fixture
     char nameBuf[ 256 ]  = { 0 };
     char fileBuf[ 1024 ] = { 0 };
@@ -591,7 +709,14 @@ int main( int argc, char ** argv )
   // The DSL (.dsl.dz, found by suffix) has the headword "book"; remove it,
   // confirm the count drops and "book" stops resolving, then re-scan re-adds
   // it (removal is in-memory; dedup does not block a removed id).
-  {
+  //
+  // Needs the DSL fixture ("book" is a DSL headword). Scoped; the workflow
+  // asserts the skip.
+  if ( !fixtures.dsl ) {
+    reportSkip( "REMOVE_DICT", "dsl" );
+    reportSkip( "REMOVE_READD", "dsl" );
+  }
+  else {
     const int dslDzIdx = findDictBySuffix( ".dsl.dz" );
     std::vector< char > b( 1 << 20 );
     const int before = gd_dict_count();
