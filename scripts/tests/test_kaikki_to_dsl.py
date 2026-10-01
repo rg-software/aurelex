@@ -2196,23 +2196,38 @@ class LangProfileTests(unittest.TestCase):
         ja = TOOL.get_lang_profile("ja")
         self.assertEqual(ja.pos_labels.get("noun"), "名詞")
         self.assertEqual(ja.pos_labels.get("adj_noun"), "形容動詞")
-        # a reading is labelled as a reading, and the conjugation-class row tag
-        # that every inflected form carries does not clutter the label
-        self.assertEqual(
-            ja.label_tags(("transliteration", "kan-on", "joyo")), "読み, 漢音, 常用"
-        )
+        # the conjugation-class row tag that every inflected form carries does not
+        # clutter the label
         self.assertEqual(ja.label_tags(("sa-row", "imperfective")), "未然形")
+        self.assertEqual(ja.label_tags(("kanji",)), "漢字")
         self.assertEqual(ja.sense_short_tags.get("figuratively"), "比喩")
 
-    def test_a_japanese_reading_survives_as_a_form(self):
+    def test_japanese_readings_are_grouped_by_mark(self):
+        ja = TOOL.get_lang_profile("ja")
         record = {
-            "word": "青", "pos": "noun",
-            "forms": [{"form": "セイ", "tags": ["transliteration", "kan-on", "joyo"]}],
+            "word": "座", "pos": "suffix",
+            "forms": [
+                {"form": "ザ", "tags": ["transliteration", "go-on", "joyo"]},
+                {"form": "サ", "tags": ["transliteration", "kan-on"]},
+                {"form": "すわ-る", "tags": ["transliteration", "kun", "joyo"]},
+                {"form": "くら", "tags": ["transliteration", "kun"]},
+            ],
         }
+        # the on strata collapse to 音 and the kun ones to 訓, printed once each
         self.assertEqual(
-            TOOL.collect_profile_forms(record, TOOL.get_lang_profile("ja")),
-            ["セイ (読み, 漢音, 常用)"],
+            TOOL.collect_profile_readings(record, ja),
+            "音: ザ, サ\u3000訓: すわ-る, くら",
         )
+        # and a reading is not an inflected form
+        self.assertEqual(TOOL.collect_profile_forms(record, ja), [])
+
+    def test_a_reading_with_no_origin_prints_under_the_default_mark(self):
+        ja = TOOL.get_lang_profile("ja")
+        record = {
+            "word": "保護", "pos": "noun",
+            "forms": [{"form": "ほご", "tags": ["transliteration"]}],
+        }
+        self.assertEqual(TOOL.collect_profile_readings(record, ja), "読み: ほご")
 
     def test_a_language_without_recordings_skips_the_archive(self):
         # The mechanism a profile uses to say "this language has no recordings":

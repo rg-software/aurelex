@@ -7,7 +7,7 @@ from typing import Dict, List, Optional, Sequence, Set, Tuple
 
 from .audio import AudioPlan
 from .dsltext import _USAGE_TAGS, _audio_ref, _link_form_targets, _sense_markers, _strip_relation_prefix, _unescape_dsl, escape_dsl
-from .profiles import LangProfile, collect_profile_forms
+from .profiles import LangProfile, collect_profile_forms, collect_profile_readings
 from .source import _NOTATION_MISMATCH_TAGS, _PRON_LABEL, _UNLABELLED_PRON_FIELDS
 
 
@@ -458,7 +458,7 @@ def render_card(
     A card is one headword whose records are its parts of speech (``run`` is a
     verb and a noun). Records that share a part of speech are merged into one
     block, so an interleaved ``noun, verb, noun`` reads ``noun, verb``. The
-    visible article is part of speech → forms → senses; examples and
+    visible article is part of speech → readings → forms → senses; examples and
     cross-references go into the DSL optional zone (``[*]…[/*]``), which the
     reader expands on demand.
 
@@ -475,6 +475,7 @@ def render_card(
     # plan's referenced set), so plan for all of them before laying anything
     # out and share the result between the hoisted and per-POS layouts.
     transcriptions = [_record_transcription(record, profile) for record in records]
+    readings = [collect_profile_readings(record, profile) for record in records]
     record_audio = [list(audio.plan(record)) for record in records]
 
     blocks = _group_by_pos(records)
@@ -486,6 +487,12 @@ def render_card(
     # whose parts of speech share one recording prints it once.
     distinct_tr = {t for t in transcriptions if t}
     hoist = len(distinct_tr) == 1
+
+    # Readings (a profile-declared kind of form, e.g. Japanese on/kun-yomi) are
+    # hoisted the same way: one line for the card when every record agrees, else
+    # one under each part of speech.
+    distinct_readings = {r for r in readings if r}
+    hoist_readings = len(distinct_readings) == 1
 
     form_lines: List[List[str]] = []
     words: List[str] = []
@@ -534,6 +541,8 @@ def render_card(
         if hoisted_audio:
             pron += "  " + "  ".join(hoisted_audio)
         lines.append("\t[com]" + pron + "[/com]")
+    if hoist_readings:
+        lines.append("\t[com]" + escape_dsl(next(iter(distinct_readings))) + "[/com]")
 
     # A blank line separates consecutive parts of speech, so their sections read
     # as blocks rather than one list. It goes strictly between them: no blank
@@ -546,6 +555,13 @@ def render_card(
                 lines.append("")
             first_pos_seen = True
             lines.append(f"\t[p]{escape_dsl(profile.pos_labels.get(pos, pos))}[/p]")
+        # readings: the block's first record that carries any, unless the whole
+        # card shares one line (then it was hoisted above the first POS)
+        if not hoist_readings:
+            for i in idxs:
+                if readings[i]:
+                    lines.append("\t[com]" + escape_dsl(readings[i]) + "[/com]")
+                    break
         # forms: first record of the block that carries any
         for i in idxs:
             if form_lines[i]:

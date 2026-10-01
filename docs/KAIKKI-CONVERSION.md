@@ -285,6 +285,22 @@ headword still cannot match inside `brunch`. Before this, a Japanese example was
 treated as one endless sentence and only survived when the headword happened to
 start a clause.
 
+**Japanese readings** arrive as `forms[]` entries tagged `transliteration`, but
+they are not inflections, so they leave the forms line for one of their own,
+grouped under the conventional mark:
+
+```
+座
+	[com]音: ザ, サ　訓: すわ-る, くら[/com]
+```
+
+The profile declares which tags are readings (`reading_tags`), what each origin
+tag groups under (`reading_marks`: `go-on`/`kan-on`/`to-on` → 音, `kun`/`ko-kun`
+→ 訓) and the mark for a reading the source does not classify (`reading_default`
+→ 読み). A card whose parts of speech agree on their readings shows the line
+once, above the first part of speech. That is a profile-driven concept, not a
+Japanese branch — the other profiles declare no reading tags and are unaffected.
+
 An example is kept only if it actually contains the headword: an exact token
 match against the headword or one of its listed forms (which catches irregular
 inflections such as `ran`/`children`), or a shared stem of at least three

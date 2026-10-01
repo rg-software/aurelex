@@ -21,6 +21,12 @@ class LangProfile:
     ``short_tags``      - compact labels for the common grammatical tags.
     ``has_audio``       - whether the language has pronunciation recordings.
     ``strip_forms``     - whether article "Forms:" lines are meaningful.
+    ``reading_tags``    - form tags that mark a *reading* rather than an
+                          inflected form (Japanese's ``transliteration``); such a
+                          form is shown on its own grouped line, not as a form.
+    ``reading_marks``   - the mark each reading sub-tag prints under (``go-on``
+                          and friends all being the on reading); a reading with
+                          none prints under ``reading_default``.
     """
 
     def __init__(
@@ -36,6 +42,9 @@ class LangProfile:
         sense_noise_tags: Optional[Set[str]] = None,
         sense_short_tags: Optional[Dict[str, str]] = None,
         pos_labels: Optional[Dict[str, str]] = None,
+        reading_tags: Optional[Set[str]] = None,
+        reading_marks: Optional[Dict[str, str]] = None,
+        reading_default: str = "",
     ) -> None:
         self.code = code
         self.form_tags = form_tags
@@ -53,6 +62,11 @@ class LangProfile:
         # Part-of-speech display labels, so a part of speech reads in the
         # dictionary's language. Empty means the source code is shown as-is.
         self.pos_labels = dict(pos_labels or {})
+        # Readings (Japanese on-yomi/kun-yomi) arrive as forms but are not
+        # inflections: they are grouped under a mark and shown on their own line.
+        self.reading_tags = set(reading_tags or ())
+        self.reading_marks = dict(reading_marks or {})
+        self.reading_default = reading_default
 
     def form_qualifies(self, tags: Sequence[str]) -> bool:
         """Whether a form belongs in the article's forms line.
@@ -155,16 +169,21 @@ _DE_SHORT_TAGS = {
 }
 
 # Japanese readings (on-yomi/kun-yomi) arrive as `forms[]` tagged
-# `transliteration` plus an origin tag (`go-on`, `kan-on`, `kun`, ...); the
-# source has no IPA, so those readings *are* the pronunciation and are labelled
-# as readings. Inflections carry conjugation tags (`sa-row`, `imperfective`,
-# ...): the row tags name the conjugation class rather than the form, so they are
-# kept out of `form_tags` and simply drop from the label.
+# `transliteration` plus an origin tag (`go-on`, `kan-on`, `kun`, ...). They are
+# not inflections, so they leave the forms line for one of their own:
+# `reading_tags` names the marker, and every origin tag collapses to the
+# conventional 音 (on) or 訓 (kun) mark. A reading the source does not classify
+# prints under 読み. Inflections carry conjugation tags (`sa-row`,
+# `imperfective`, ...): the row tags name the conjugation class rather than the
+# form, so they are kept out of `form_tags` and simply drop from the label.
+_JA_READING_TAGS: Set[str] = {"transliteration"}
+_JA_READING_MARKS = {
+    "go-on": "音", "kan-on": "音", "to-on": "音", "kun": "訓", "ko-kun": "訓",
+}
+_JA_READING_DEFAULT = "読み"
 _JA_FORM_TAGS: Set[str] = {
-    # readings, and a kana headword's kanji spelling
-    "transliteration", "go-on", "kan-on", "to-on", "kun", "ko-kun", "joyo",
+    # a kana headword's kanji spelling, and the forms a Japanese grammar prints
     "kanji",
-    # the forms a Japanese grammar prints
     "imperfective", "continuative", "conclusive", "attributive",
     "hypothetical", "imperative", "negative", "past", "completive",
     "conditional", "volitional", "polite", "passive", "causative",
@@ -175,8 +194,7 @@ _JA_FORM_TAGS: Set[str] = {
 # which describes the verb rather than the form.
 _JA_NOISE = _FORM_NOISE | {"canonical", "romanization", "transitive", "intransitive"}
 _JA_SHORT_TAGS = {
-    "transliteration": "読み", "go-on": "呉音", "kan-on": "漢音", "to-on": "唐音",
-    "kun": "訓", "ko-kun": "古訓", "joyo": "常用", "kanji": "漢字",
+    "kanji": "漢字",
     "imperfective": "未然形", "continuative": "連用形", "conclusive": "終止形",
     "attributive": "連体形", "hypothetical": "仮定形", "imperative": "命令形",
     "negative": "否定", "past": "過去", "completive": "完了",
@@ -290,6 +308,8 @@ LANG_PROFILES: Dict[str, LangProfile] = {
         "ja", _JA_FORM_TAGS, _JA_NOISE, ("ipa",), _JA_SHORT_TAGS, has_audio=True,
         sense_noise_tags=_JA_SENSE_NOISE, sense_short_tags=_JA_SENSE_SHORT,
         pos_labels=_JA_POS_LABELS,
+        reading_tags=_JA_READING_TAGS, reading_marks=_JA_READING_MARKS,
+        reading_default=_JA_READING_DEFAULT,
     ),
     "ru": LangProfile(
         "ru", _RU_FORM_TAGS, _RU_NOISE, ("ipa",), _RU_SHORT_TAGS,
@@ -330,6 +350,10 @@ def collect_profile_forms(record: dict, profile: LangProfile, limit: int = 8) ->
         if not text:
             continue
         tags = tuple(str(t) for t in (form.get("tags") or []))
+        if profile.reading_tags.intersection(tags):
+            # A reading, not an inflection: it is collected onto the readings
+            # line instead (see `collect_profile_readings`).
+            continue
         if not profile.form_qualifies(tags):
             continue
         key = (str(text), tags)
@@ -345,3 +369,40 @@ def collect_profile_forms(record: dict, profile: LangProfile, limit: int = 8) ->
         if len(forms) >= limit:
             break
     return forms
+
+
+def collect_profile_readings(record: dict, profile: LangProfile) -> str:
+    """One card's readings, grouped by mark, as a line (or "").
+
+    Japanese readings are *forms* in the source but not inflections, and printing
+    one label per reading ("ザ (音), サ (音), ...") is not how a dictionary reads.
+    They are grouped under their conventional mark instead -- ``音: ザ, サ　訓:
+    すわ-る, くら`` -- with a reading the source does not classify under the
+    profile's default. A language with no ``reading_tags`` yields "".
+    """
+    groups: List[Tuple[str, List[str]]] = []
+    bucket_by_mark: Dict[str, List[str]] = {}
+    for form in record.get("forms") or []:
+        if not isinstance(form, dict):
+            continue
+        text = form.get("form")
+        if not text:
+            continue
+        tags = [str(t) for t in (form.get("tags") or [])]
+        if not profile.reading_tags.intersection(tags):
+            continue
+        mark = profile.reading_default
+        for tag in tags:
+            if tag in profile.reading_marks:
+                mark = profile.reading_marks[tag]
+                break
+        bucket = bucket_by_mark.get(mark)
+        if bucket is None:
+            bucket = []
+            bucket_by_mark[mark] = bucket
+            groups.append((mark, bucket))
+        if str(text) not in bucket:
+            bucket.append(str(text))
+    if not groups:
+        return ""
+    return "\u3000".join(f"{mark}: " + ", ".join(words) for mark, words in groups)
