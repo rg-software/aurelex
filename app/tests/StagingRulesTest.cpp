@@ -93,6 +93,36 @@ int main(int argc, char **argv) {
     check(!StagingRules::isMdxResourceFileName(QString()),
           "an empty name is never an MDX resource");
 
+    // ---- primary dictionary files (reclaim-staged-dirs-on-removal) ----
+    // A staged directory holding one of these is a dictionary; one holding only
+    // companions is the orphan the sweep must reclaim.
+    check(StagingRules::isPrimaryDictionaryName(QStringLiteral("collinslaw2ed.mdx")),
+          "an .mdx is a primary dictionary file");
+    check(StagingRules::isPrimaryDictionaryName(QStringLiteral("aurelex-basic.dsl")),
+          "a .dsl is a primary dictionary file");
+    check(StagingRules::isPrimaryDictionaryName(QStringLiteral("aurelex-basic.dsl.dz")),
+          "a compressed .dsl.dz is a primary dictionary file");
+    check(StagingRules::isPrimaryDictionaryName(QStringLiteral("stardict.ifo")),
+          "a StarDict .ifo is a primary dictionary file");
+    check(StagingRules::isPrimaryDictionaryName(QStringLiteral("DICT.IFO")),
+          "the primary match is case-insensitive");
+
+    // The orphan case, exactly as measured on device: after removing a StarDict
+    // dictionary these files remain, its .ifo is gone, and the directory looked
+    // populated while loading nothing.
+    check(!StagingRules::isPrimaryDictionaryName(QStringLiteral("stardict.idx")),
+          "a StarDict .idx is a companion, not a primary file");
+    check(!StagingRules::isPrimaryDictionaryName(QStringLiteral("stardict.dict.dz")),
+          "a StarDict .dict.dz is a companion, not a primary file");
+    check(!StagingRules::isPrimaryDictionaryName(QStringLiteral("stardict.syn")),
+          "a StarDict .syn is a companion, not a primary file");
+    check(!StagingRules::isPrimaryDictionaryName(QStringLiteral("demo.mdd")),
+          "an .mdd is an MDict resource archive, not a primary file");
+    check(!StagingRules::isPrimaryDictionaryName(QStringLiteral("aa-lgflag.gif")),
+          "a resource image is not a primary file");
+    check(!StagingRules::isPrimaryDictionaryName(QString()),
+          "an empty name is never a primary file");
+
     std::fprintf(stdout, "%s: staging rules\n", g_failures == 0 ? "PASS" : "FAIL");
     return g_failures == 0 ? 0 : 1;
 }

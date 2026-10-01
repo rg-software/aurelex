@@ -3,6 +3,7 @@
 #include "DictionaryIndex.hpp"
 #include "IndexCleanup.hpp"
 #include "StagedCleanup.hpp"
+#include "StagingRules.hpp"
 #include "IndexMigration.hpp"
 
 #include <QtConcurrent>
@@ -974,7 +975,20 @@ void EngineController::removeDictionaries(const QVariantList &indices) {
                 continue;
             }
             // Permanent delete: remove the app's copy + its index cache.
-            deleteDictionaryFiles(m.value("source").toString(), dictId, stagedRoot, appDir);
+            //
+            // Record the source as unloaded FIRST. The engine object is gone, but
+            // m_dictionaries still lists it until refreshDictionaries() runs below,
+            // so without this the sharing guard counts the removed dictionary as a
+            // remaining user of its own staged directory and keeps it - leaving the
+            // dictionary's companion files and resource tree on disk, and blocking
+            // its re-import (reclaim-staged-dirs-on-removal). The duplicate path
+            // (removeDuplicates) already does this; this user-initiated path did
+            // not, which is why the guard misjudged removals made from the UI.
+            const QString removedSource = m.value("source").toString();
+            if (!removedSource.isEmpty() && !m_unloadedSources.contains(removedSource))
+                m_unloadedSources.append(removedSource);
+
+            deleteDictionaryFiles(removedSource, dictId, stagedRoot, appDir);
             // Also drop the id from the still-running FTS queue so a removed
             // dictionary is never indexed by a worker that already popped it.
             if (!dictId.isEmpty()) {
@@ -1359,6 +1373,12 @@ bool EngineController::removeStagedDirIfUnused(const QString &stagedDir) {
 bool EngineController::sweepStaleStagedDirs() {
     if (m_stagedDir.isEmpty())
         return false;
+    // Never sweep while an import is being copied: a directory mid-copy can
+    // transiently hold companion files before its primary file lands, and would
+    // read as an orphan. Staging has finished by the time this normally runs
+    // (it is invoked after the scan settles), so this only guards the overlap.
+    if (m_stagingActive)
+        return false;
     QDir root(m_stagedDir);
     if (!root.exists())
         return false;
@@ -1381,9 +1401,39 @@ bool EngineController::sweepStaleStagedDirs() {
         }
         if (used)
             continue;
-        // Only sweep a directory the scan actually reported as failed. An empty
-        // directory that no scan complained about is not ours to delete (it may
-        // be a staged import still being walked by another code path).
+
+        // An orphan: a staged directory that holds no primary dictionary file.
+        // The dictionary it belonged to was removed (its primary file deleted)
+        // or its import never produced one, so nothing will ever load from it.
+        // It must be reclaimed here rather than left forever - nothing else
+        // collects it, and while it remains it also blocks re-importing that
+        // dictionary (reclaim-staged-dirs-on-removal).
+        //
+        // Checked BEFORE the failed-import test, because such a directory
+        // produces no scan failure to be reported: it yields no dictionary and
+        // no error, which is exactly why the old condition never matched it.
+        bool hasPrimary = false;
+        {
+            const QDir d(dirAbs);
+            const QStringList entries =
+                d.entryList(QDir::Files | QDir::NoDotAndDotDot, QDir::Name);
+            for (const QString &f : entries) {
+                if (StagingRules::isPrimaryDictionaryName(f)) {
+                    hasPrimary = true;
+                    break;
+                }
+            }
+        }
+        if (!hasPrimary) {
+            qInfo() << "[aurelex] sweeping staged dir holding no dictionary" << dirAbs;
+            if (removeStagedDirIfUnused(dirAbs))
+                removedAny = true;
+            continue;
+        }
+
+        // Otherwise only sweep a directory the scan actually reported as failed.
+        // A populated directory no scan complained about is not ours to delete
+        // (it may be a staged import still being walked by another code path).
         bool reported = false;
         for (const QVariant &v : m_scanFailures) {
             const QString f = v.toMap().value("file").toString();

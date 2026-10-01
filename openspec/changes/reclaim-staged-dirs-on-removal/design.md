@@ -44,28 +44,55 @@ permanent until this is fixed.
 
 Two things, because either alone leaves a hole.
 
-**1. The guard must not count the dictionary being removed.** A dictionary that
-has just been unloaded is still listed until the async refresh lands; the code
-already tries to account for this via `m_unloadedSources`, and that accounting is
-not effective here. The exact reason is **not yet established** — candidates
-include the source path recorded at unload differing from the one compared
-against, and a stale entry matching by prefix. This must be determined by
-measurement (instrument the guard, remove one dictionary, read the log) before a
-fix is chosen; three plausible mechanisms have already been ruled out by reading
-the code, which is the reason to stop reading and start measuring.
+**1. Record the removal in the user's path.** A dictionary that has just been
+unloaded is still listed until the async refresh lands, and the code already has
+a mechanism for that — `m_unloadedSources`, consulted by `liveDictionarySources`.
+It was being populated by only **one** of the two removal paths:
+
+| Path | Appended to `m_unloadedSources`? |
+| --- | --- |
+| `removeDuplicates` (scan-time repair) | yes — `EngineController.cpp:1174` |
+| `removeDictionaries` (**the user's Remove**) | **no** |
+
+So a user-initiated removal left the removed dictionary counting as a live user
+of its own directory, and the guard kept it. The fix appends the removed source
+in `removeDictionaries` **before** deleting files, matching what the duplicate
+path already did.
+
+**This was established by measurement, not by reading.** The instrumented build
+printed:
+
+```
+DIAG liveDict source: ".../70549544/stardict.ifo" excluded= false
+DIAG m_unloadedSources: QList()                       <- empty
+DIAG MATCHING SOURCE: ".../70549544/stardict.ifo"
+```
+
+`m_unloadedSources` empty at that moment is the whole answer. Note what it
+rules out: the paths are byte-identical, so the candidate "the excluded value
+and the compared value differ" was wrong, and so were the three others
+considered from reading the code. Four plausible mechanisms, none of them the
+real one — which is exactly why this task required an instrumented run rather
+than a patch based on inspection.
 
 **2. A directory holding no primary file must be reclaimable.** Even with the
 guard fixed, a directory orphaned by an older removal — including one already on
-a real device — has no owner and no failure report. The sweep must recognise
-"holds no primary file any dictionary loads" and reclaim it. This is both the
-repair for existing installations and the reason a previously-removed dictionary
-can be re-added without the user deleting anything by hand.
+a real device — has no owner and no failure report. The sweep now checks for a
+primary file first, using `StagingRules::isPrimaryDictionaryName`
+(`.mdx`/`.dsl`/`.dsl.dz`/`.ifo`). That is deliberately **not**
+`isSupportedDictionaryName`, which also accepts companions and resource
+archives: a directory holding only companions is precisely the orphan to detect.
+The check runs **before** the failed-import test, because such a directory
+produces no scan failure to match — it yields no dictionary and no error, which
+is why the old condition never caught it.
 
 **Sibling safety is non-negotiable.** The sharing guard must keep working: one
 import folder can hold several dictionaries, and removing one must never delete
 a surviving sibling's files. The `stale-import-cleanup` design calls this the one
 place an externally-supplied path becomes a filesystem deletion, which is why it
-has two guards. Nothing here may weaken the containment guard.
+has two guards. Nothing here weakens the containment guard, and the sweep now
+also declines to run while staging is active, since a directory mid-copy can
+transiently hold companions before its primary file lands.
 
 ## Scope is probably not StarDict-only
 

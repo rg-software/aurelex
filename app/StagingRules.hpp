@@ -54,4 +54,23 @@ inline bool isMdxResourceFileName(const QString &name)
             || lower.endsWith(QLatin1String(".woff")) || lower.endsWith(QLatin1String(".woff2"));
 }
 
+// True when `name` is a PRIMARY dictionary file - the file a format is
+// identified by, the one whose presence makes a staged directory a dictionary
+// at all.
+//
+//   MDict    .mdx      (not .mdd: that is its resource archive)
+//   DSL      .dsl, .dsl.dz
+//   StarDict .ifo      (not .idx/.dict/.syn: those are its companions)
+//
+// This is deliberately NOT RemoteCatalog::isSupportedDictionaryName, which also
+// accepts companions and resource archives: a directory holding only companions
+// is exactly the orphan this exists to detect. Used by the staged-directory
+// sweep to tell "an import produced nothing" from "a dictionary lives here".
+inline bool isPrimaryDictionaryName(const QString &name)
+{
+    const QString lower = name.toLower();
+    return lower.endsWith(QLatin1String(".mdx")) || lower.endsWith(QLatin1String(".dsl"))
+            || lower.endsWith(QLatin1String(".dsl.dz")) || lower.endsWith(QLatin1String(".ifo"));
+}
+
 } // namespace StagingRules

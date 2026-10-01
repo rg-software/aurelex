@@ -105,6 +105,19 @@ int main(int argc, char **argv) {
     const QString failed = QDir(root).filePath(QStringLiteral("deadbeef"));
     check(StagedCleanup::mayRemoveStagedDir(failed, root, loaded),
           "a failed import inside the root, unused, may be removed");
+
+    // ---- reclaim-staged-dirs-on-removal ------------------------------------
+    // The directory is reclaimable once the removed dictionary has been dropped
+    // from the loaded set. The bug was that the removal path never dropped it, so
+    // the guard still saw the dictionary it had just deleted. This pins the
+    // predicate's side of that contract: given the right list, the answer is yes.
+    check(StagedCleanup::mayRemoveStagedDir(child, root, QStringList{}),
+          "a directory whose only owner is gone may be removed");
+
+    // And the sibling case must still hold, with the removed one excluded:
+    // one member left loaded keeps the whole directory.
+    check(!StagedCleanup::mayRemoveStagedDir(child, root, QStringList{ sharedFile }),
+          "a directory still read by a survivor is kept, even after one removal");
     check(!StagedCleanup::mayRemoveStagedDir(child, root, loaded),
           "an in-use import is not removable even though it is inside the root");
     check(!StagedCleanup::mayRemoveStagedDir(sibling, root, QStringList()),
