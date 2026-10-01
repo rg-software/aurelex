@@ -2333,7 +2333,25 @@ def render_preview(name: str, dsl_text: str, dest_html: str) -> None:
 # Build pipeline
 # ---------------------------------------------------------------------------
 
+# English names for the languages the tool is likely to build in, so metadata is
+# canonical English whatever edition the extract came from (a non-English edition
+# names the language in its own language, e.g. "Русский"). An unlisted language
+# falls back to the source's own name. Extend the table, not the call sites.
+LANGUAGE_NAMES = {
+    "en": "English", "ru": "Russian", "de": "German", "ja": "Japanese",
+    "fr": "French", "es": "Spanish", "it": "Italian", "pt": "Portuguese",
+    "zh": "Chinese", "la": "Latin", "nl": "Dutch", "pl": "Polish",
+    "uk": "Ukrainian", "sv": "Swedish", "fi": "Finnish", "ca": "Catalan",
+    "ar": "Arabic", "he": "Hebrew", "hi": "Hindi", "tr": "Turkish",
+    "el": "Greek", "cs": "Czech", "ro": "Romanian", "hu": "Hungarian",
+    "ko": "Korean", "vi": "Vietnamese", "fa": "Persian", "da": "Danish",
+    "no": "Norwegian", "bg": "Bulgarian", "sr": "Serbo-Croatian",
+}
+
+
 def _language_name(record: Optional[dict], code: str) -> str:
+    if code in LANGUAGE_NAMES:
+        return LANGUAGE_NAMES[code]
     if record and record.get("lang"):
         return str(record["lang"])
     return code.upper()
@@ -2417,7 +2435,7 @@ def description_lines(
     ``[com]…[/com]`` and adds the sense-icon legend, the annotation uses it as is.
     """
     return [
-        f"{title}: a Wiktionary-based {language_name} dictionary",
+        f"{title}: a Wiktionary-based dictionary",
         "",
         f"This is a derivative work, based on Wiktionary / kaikki.org, snapshot {dump_date or 'unknown'}",
         f"See also: {WIKTEXTRACT_CITATION}",

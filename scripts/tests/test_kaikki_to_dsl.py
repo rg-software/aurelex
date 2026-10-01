@@ -1969,6 +1969,30 @@ class AnnotationTests(unittest.TestCase):
                 TOOL.build(self.args(tmp, "--reuse-bundle"))
             self.assertTrue(os.path.isfile(ann))
 
+    def test_metadata_names_the_language_in_english(self):
+        # a non-English edition names the language in its own language ("Русский")
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "in.jsonl")
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(json.dumps({
+                    "word": "собака", "lang_code": "ru", "lang": "Русский",
+                    "pos": "noun", "senses": [{"glosses": ["dog"]}],
+                }) + "\n")
+            TOOL.build(TOOL.build_parser().parse_args([
+                "--source-lang", "ru", "--jsonl", path, "--out-dir", tmp,
+                "--no-audio", "--cache-dir", os.path.join(tmp, "cache"),
+            ]))
+            text = read_dz(os.path.join(tmp, "kaikki-ru.dsl.dz"))
+            self.assertIn('#INDEX_LANGUAGE "Russian"', text)
+            self.assertIn('#CONTENTS_LANGUAGE "Russian"', text)
+            self.assertIn("a Wiktionary-based dictionary", text)
+            with open(os.path.join(tmp, "kaikki-ru.ann"), encoding="utf-8") as f:
+                self.assertIn("Language: Russian (ru)", f.read())
+
+    def test_an_unlisted_language_falls_back_to_its_source_name(self):
+        self.assertEqual(TOOL._language_name({"lang": "Klingon"}, "tlh"), "Klingon")
+        self.assertEqual(TOOL._language_name(None, "tlh"), "TLH")
+
 
 class ReuseBundleTests(unittest.TestCase):
     """--reuse-bundle renders the dictionary and reuses the existing bundle."""
