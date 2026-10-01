@@ -2056,6 +2056,47 @@ class LangProfileTests(unittest.TestCase):
         self.assertTrue(ja.form_qualifies(("imperfective", "stem")))
         self.assertFalse(ja.has_audio)
 
+    def test_russian_profile_keeps_case_and_aspect(self):
+        ru = TOOL.get_lang_profile("ru")
+        # the profile is registered, so no fallback is used
+        self.assertIs(ru, TOOL.LANG_PROFILES["ru"])
+        self.assertTrue(ru.form_qualifies(("genitive", "singular")))
+        self.assertTrue(ru.form_qualifies(("imperfective", "past", "feminine")))
+        # table machinery, the canonical lemma entry and transliterations are not
+        # inflected forms
+        self.assertFalse(ru.form_qualifies(("table-tags",)))
+        self.assertFalse(ru.form_qualifies(("canonical", "singular")))
+        self.assertFalse(ru.form_qualifies(("romanization",)))
+        # a derived lemma (a relational adjective, a diminutive) is not a form
+        self.assertFalse(ru.form_qualifies(("relational",)))
+        self.assertFalse(ru.form_qualifies(("diminutive",)))
+
+    def test_russian_labels_use_the_conventional_abbreviations(self):
+        ru = TOOL.get_lang_profile("ru")
+        self.assertEqual(ru.label_tags(("genitive", "singular")), "gen., sg.")
+        self.assertEqual(
+            ru.label_tags(("third-person", "singular", "present")), "3rd, pres."
+        )
+        self.assertEqual(ru.label_tags(("imperfective",)), "impf.")
+
+    def test_russian_sense_noise_drops_indicative_but_keeps_aspect(self):
+        ru = TOOL.get_lang_profile("ru")
+        self.assertIn("indicative", ru.sense_noise_tags)
+        self.assertNotIn("imperfective", ru.sense_noise_tags)
+
+    def test_a_form_with_no_recognised_label_is_dropped(self):
+        record = {
+            "word": "w", "pos": "noun",
+            "forms": [
+                {"form": "bare", "tags": ["adverb"]},
+                {"form": "wfs", "tags": ["genitive", "singular"]},
+            ],
+        }
+        self.assertEqual(
+            TOOL.collect_profile_forms(record, TOOL.get_lang_profile("ru")),
+            ["wfs (gen., sg.)"],
+        )
+
     def test_compact_labels_are_per_language(self):
         self.assertEqual(TOOL.get_lang_profile("en").label_tags(("past",)), "past")
         self.assertEqual(

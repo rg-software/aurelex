@@ -270,6 +270,52 @@ _JA_SHORT_TAGS = {
     "imperfective": "imperf.", "continuative": "cont.", "past": "past",
 }
 
+# Russian forms are dominated by case/number/gender and, for verbs, aspect and
+# person. This vocabulary is measured from the snapshot's `ru` records.
+_RU_FORM_TAGS: Set[str] = {
+    "singular", "plural",
+    "nominative", "genitive", "dative", "accusative", "instrumental",
+    "prepositional", "locative", "partitive",
+    "masculine", "feminine", "neuter",
+    "animate", "inanimate",
+    "present", "past", "future", "imperative", "infinitive",
+    "participle", "adverbial", "active", "passive",
+    "imperfective", "perfective",
+    "first-person", "second-person", "third-person",
+    "comparative", "superlative", "short-form",
+    "reflexive", "irregular", "personal", "indeclinable", "plural-only",
+}
+# Table machinery and register/dialect, plus: the canonical entry is the headword
+# itself, a romanization is a transliteration (Russian has IPA), `class`/`error-*`
+# are bookkeeping, and the derivational tags name *other* lemmas (a relational
+# adjective, a diminutive) rather than an inflected form of this one.
+_RU_NOISE = _FORM_NOISE | {
+    "canonical", "romanization", "class", "error-unknown-tag",
+    "error-unrecognized-form",
+    "relational", "diminutive", "augmentative", "abstract-noun",
+    "noun-from-verb", "collective", "possessive", "emphatic",
+}
+_RU_SHORT_TAGS = {
+    "singular": "sg.", "plural": "pl.",
+    "nominative": "nom.", "genitive": "gen.", "dative": "dat.",
+    "accusative": "acc.", "instrumental": "instr.", "prepositional": "prep.",
+    "locative": "loc.", "partitive": "part.",
+    "masculine": "m.", "feminine": "f.", "neuter": "n.",
+    "animate": "anim.", "inanimate": "inan.",
+    "present": "pres.", "past": "past", "future": "fut.",
+    "imperative": "imper.", "infinitive": "inf.",
+    "participle": "part.", "adverbial": "adv.",
+    "active": "act.", "passive": "pass.",
+    "imperfective": "impf.", "perfective": "pf.",
+    "first-person": "1st", "second-person": "2nd", "third-person": "3rd",
+    "comparative": "comp.", "superlative": "sup.", "short-form": "short",
+    "reflexive": "refl.",
+}
+# Indicative is the unmarked mood, and transitive/intransitive/not-comparable say
+# nothing a Russian entry does not already carry. Aspect is *kept* -- unlike
+# these, it is meaningful for Russian.
+_RU_SENSE_NOISE = {"indicative", "transitive", "intransitive", "not-comparable"}
+
 LANG_PROFILES: Dict[str, LangProfile] = {
     "en": LangProfile(
         "en", _EN_FORM_TAGS, _EN_NOISE, ("ipa", "enpr"), _EN_SHORT_TAGS,
@@ -280,6 +326,10 @@ LANG_PROFILES: Dict[str, LangProfile] = {
     ),
     "ja": LangProfile(
         "ja", _JA_FORM_TAGS, _JA_NOISE, (), _JA_SHORT_TAGS, has_audio=False,
+    ),
+    "ru": LangProfile(
+        "ru", _RU_FORM_TAGS, _RU_NOISE, ("ipa",), _RU_SHORT_TAGS,
+        sense_noise_tags=_RU_SENSE_NOISE, sense_short_tags=_EN_SENSE_SHORT,
     ),
 }
 
@@ -324,7 +374,11 @@ def collect_profile_forms(record: dict, profile: LangProfile, limit: int = 8) ->
             continue
         seen.add(key)
         label = profile.label_tags(tags)
-        forms.append(f"{text} ({label})" if label else str(text))
+        if not label:
+            # No grammatical label the profile recognises (the lemma itself, a
+            # transliteration, a derivation, an unknown tag): not a form to list.
+            continue
+        forms.append(f"{text} ({label})")
         if len(forms) >= limit:
             break
     return forms
