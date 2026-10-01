@@ -3631,8 +3631,14 @@ def build_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
             "Notes:\n"
-            "  This builds a monolingual explanatory dictionary: headwords and\n"
-            "  definitions are both in --source-lang.\n\n"
+            "  This builds a monolingual explanatory dictionary: the indexed\n"
+            "  headwords and their glosses are in the same language, taken from\n"
+            "  the data edition for that language. The default edition is the\n"
+            "  English Wiktionary, so --source-lang selects which language's\n"
+            "  words are indexed but the glosses are English. To build another\n"
+            "  language, point --jsonl-url at that language's edition, e.g.\n"
+            "    --source-lang ru --jsonl-url \\\n"
+            "      https://kaikki.org/ruwiktionary/raw-wiktextract-data.jsonl.gz\n\n"
             "  Base forms are the only indexed headwords by default. With\n"
             "  --include-inflections a base word's inflected forms are added as\n"
             "  extra headword lines on its card; in DSL every indexed word also\n"

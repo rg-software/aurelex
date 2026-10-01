@@ -318,6 +318,45 @@ A faithful translation dictionary would need alignment or AI-assisted work
 over these sources, which is a separate project. Until then the tool builds
 what the data supports well: complete, well-formed monolingual articles.
 
+### Choosing the language: build from the right edition
+
+kaikki publishes one extract per Wiktionary edition
+(`kaikki.org/<edition>wiktionary/rawdata.html`), and every gloss in an extract is
+in that edition's language. This tool builds from one edition at a time:
+
+- The default edition is the **English Wiktionary**
+  (`kaikki.org/dictionary/raw-wiktextract-data.jsonl.gz`), whose glosses are
+  English. `--source-lang en` is therefore a monolingual English dictionary; a
+  non-English `--source-lang` still indexes that language's words but keeps the
+  English glosses, which is not a monolingual dictionary of that language.
+- To build another language monolingually, point `--jsonl-url` at its edition,
+  for example Russian:
+  `--source-lang ru --jsonl-url https://kaikki.org/ruwiktionary/raw-wiktextract-data.jsonl.gz`.
+
+Give each edition its own `--dump-date` (or `--cache-dir`): every edition's raw
+file shares the name `raw-wiktextract-data.jsonl.gz`, so the dump date is what
+keeps their caches apart.
+
+## Future: a translation dictionary
+
+**Not built, not scheduled** — recorded here so the intent and the source
+assessment are not lost. A translation dictionary needs two things Wiktionary
+does not provide well: **sense alignment** (its definitions and its translation
+tables use different sense inventories) and **word/phrase equivalents** (its
+translation coverage is thin; see the numbers above). Candidate sources, with the
+coverage and license that decide whether we can ship them:
+
+| Source | What it gives | Coverage | License |
+| --- | --- | --- | --- |
+| **WordNet / Open Multilingual WordNet** | synsets (a sense grouping) and, through OMW, each synset's members across languages — i.e. sense-aligned equivalents | broad for English and, via OMW, many languages; nouns/verbs/adjectives, weak on phrases and collocations | Princeton WordNet license (permissive, attribution); individual OMW wordnets vary (often the WordNet license or CC BY) |
+| **Tatoeba** | pairs of translated sentences, per language | thousands of languages; sentences, not lemmas or senses | sentences CC BY 2.0 FR (attribution), a subset CC0; audio varies per contributor |
+| **BabelNet** | a multilingual semantic network linking WordNet, Wikipedia and Wikidata — the highest coverage, at sense level | the largest of the three; encyclopedic and lexical | **non-commercial / research only**; commercial use needs a Babelscape licence — a blocker for a shipped app |
+
+The decision to pick up later: whether a permissively licensed base
+(WordNet/OMW + Tatoeba) is enough, or the app takes a BabelNet commercial
+licence. Either way the alignment problem is the same one that makes the kaikki
+cross-language data unusable on its own.
+
 ## Audio
 
 Audio comes from the bulk archive, so there are no per-file network requests to

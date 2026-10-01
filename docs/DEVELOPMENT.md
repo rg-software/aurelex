@@ -170,6 +170,10 @@ Not scheduled, not proposed, not promised. Each one is picked up by opening an O
 - **Close the open archived tasks** — `docs/TESTING.md` lists the unverified items, and several
   archived changes still carry unchecked verification tasks. Not new features; this is the gap
   between "shipped" and "known to work".
+- **Translation dictionary** — the kaikki converter builds monolingual dictionaries only; a real
+  translation dictionary needs sense alignment and word/phrase equivalents that Wiktionary lacks.
+  Candidate sources and their coverage/licenses (WordNet / Open Multilingual WordNet, Tatoeba,
+  BabelNet) are recorded in `docs/KAIKKI-CONVERSION.md` under "Future: a translation dictionary".
 
 Engine-touching items (pre-built index caches) go through the patch pipeline (`patches/` + CI
 smoke); pure-QML items (word-list export, widget clipboard) do not.
