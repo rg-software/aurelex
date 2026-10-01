@@ -3,21 +3,26 @@
 ### Requirement: Dictionary display metadata
 The system SHALL show each dictionary in the Dicts list with its source/target
 language pair and an approximate size, instead of its raw file path, so the
-list is readable without exposing storage details. Language names SHALL be shown
-in the app's active language when the app knows the language, falling back to the
-name in the dictionary's metadata. When a dictionary is still being indexed and
-its size is not yet known, the size SHALL be omitted (shown once known). When a
-source or target language is not known, it SHALL be shown as `?`.
+list is readable without exposing storage details. For a dictionary installed
+from the catalog, the row SHALL show that entry's display name in the app's
+active language when it provides one, falling back to the dictionary's own name.
+When a dictionary is still being indexed and its size is not yet known, the size
+SHALL be omitted (shown once known). When a source or target language is not
+known, it SHALL be shown as `?`.
 
 #### Scenario: Row shows language pair and size
 - **WHEN** the user opens the Dicts tab
 - **THEN** each dictionary row shows its name, then `Source/Target` and an
   approximate size (e.g. `English/Russian · 145 MB`), and never the file path
 
-#### Scenario: Language names follow the app's language
-- **WHEN** the app's active language is Russian and a dictionary's metadata names
-  its language in English
-- **THEN** the row and the By-Pair captions show that language's Russian name
+#### Scenario: A catalog-installed dictionary uses its localized name
+- **WHEN** a dictionary installed from the catalog has an entry that provides a
+  display name for the app's active language
+- **THEN** the row shows that name instead of the dictionary's own name
+
+#### Scenario: A dictionary without a catalog entry keeps its own name
+- **WHEN** a dictionary has no catalog entry (it was imported from a folder)
+- **THEN** the row shows the dictionary's own name
 
 #### Scenario: Unknown language pair
 - **WHEN** a dictionary's source or target language is not known
