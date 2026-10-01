@@ -1318,6 +1318,8 @@ class AudioPlan:
         enabled: bool,
         available: Optional[Set[str]] = None,
         downloader=None,
+        dead: Optional[Set[str]] = None,
+        on_gone=None,
     ) -> None:
         self.per_word = per_word
         self.preferred_lang = preferred_lang
@@ -1328,6 +1330,15 @@ class AudioPlan:
         self.downloader = downloader or (
             lambda url, dest: download_cached(url, dest)
         )
+        # Recordings an earlier run found permanently gone, by match key. A
+        # definitive refusal is not worth repeating, so such a candidate is
+        # neither requested nor allowed to consume a per-word slot; the next
+        # candidate fills it, exactly as if the fetch had just failed. The keys
+        # are folded when loaded, matching how they are looked up.
+        self.dead: Set[str] = {_audio_match_key(name) for name in (dead or ())}
+        # ``on_gone(dest, url, reason)`` records a newly-dead file so a later run
+        # can skip it; without one the build cannot learn across runs.
+        self.on_gone = on_gone
         self._owner: Dict[str, str] = {}   # final_name -> source url
         self.referenced: Set[str] = set()
         self.aliases: Dict[str, List[str]] = {}  # final_name -> archive match keys
@@ -1366,6 +1377,10 @@ class AudioPlan:
             return True
         return any(key in self.available for key in keys)
 
+    def _is_gone(self, source: str) -> bool:
+        """Whether an earlier run found this recording permanently gone."""
+        return _audio_match_key(self._final_name(source)) in self.dead
+
     def _fetch(self, source: str, sound: dict) -> Optional[str]:
         """Download a recording the archive lacks from its Wikimedia URL.
 
@@ -1398,7 +1413,17 @@ class AudioPlan:
                     else:
                         print(f"audio downloaded: {source} (from {url})", file=sys.stderr)
             except Exception as exc:  # network errors must not abort the run
-                print(f"audio download failed for {source}: {exc}", file=sys.stderr)
+                if failure_is_permanent(exc):
+                    # A definitive answer: the file is gone, not merely refused,
+                    # so record it and let no later run ask for it again.
+                    reason = describe_failure(exc)
+                    self.dead.add(_audio_match_key(name))
+                    if self.on_gone is not None:
+                        self.on_gone(dest, str(url), reason)
+                    else:
+                        print(f"audio gone ({reason}): {source}", file=sys.stderr)
+                else:
+                    print(f"audio download failed for {source}: {exc}", file=sys.stderr)
         self._fetched[source] = path
         return path
 
@@ -1430,13 +1455,20 @@ class AudioPlan:
                 continue
             seen.add(source)
             keys = self._archive_keys(source, sound)
-            if not self._is_available(keys) and self._fetch(source, sound) is None:
-                # Unresolvable: note it and let the next recording fill the
-                # slot instead of emitting a link to a file we do not have.
-                if source not in self.missing:
+            if not self._is_available(keys):
+                if self._is_gone(source):
+                    # Known permanently gone: still counted as missing, so the
+                    # article's shortfall is reported the same every run, but
+                    # never requested again -- the next recording fills the slot.
                     self.missing.add(source)
-                    print(f"audio missing: {source}", file=sys.stderr)
-                continue
+                    continue
+                if self._fetch(source, sound) is None:
+                    # Unresolvable: note it and let the next recording fill the
+                    # slot instead of emitting a link to a file we do not have.
+                    if source not in self.missing:
+                        self.missing.add(source)
+                        print(f"audio missing: {source}", file=sys.stderr)
+                    continue
             name = self._final_name(source)
             aliases = self.aliases.setdefault(name, [])
             for key in keys:
@@ -2567,8 +2599,25 @@ def build(args) -> Report:
         def downloader(url: str, dest: str) -> str:  # type: ignore[misc]
             return download_cached(url, dest, timeout=timeout)
 
+    # The dead record is cache state shared with 'prefetch-audio': a recording
+    # Wikimedia says is gone will be gone on every later run too, so the build
+    # skips what an earlier run found gone and appends what it finds gone now.
+    # Without this a 404 would be re-attempted on every build, forever.
+    dead_log = None
+    if download_dir is not None:
+        dead_log = TabularLog(
+            os.path.join(snapshot.dir, "audio-dead.tsv"), download_dir, truncate=False
+        )
+
+    def on_gone(dest: str, url: str, reason: str) -> None:
+        if dead_log is not None:
+            dead_log.add(dest, url, reason)
+        print(f"audio gone ({reason}): {os.path.basename(dest)}", file=sys.stderr)
+
     audio = AudioPlan(
-        args.audio_per_word, args.audio_lang, want_audio, available, downloader
+        args.audio_per_word, args.audio_lang, want_audio, available, downloader,
+        dead=(dead_log.names if dead_log is not None else None),
+        on_gone=on_gone,
     )
     audio.download_dir = download_dir
 
@@ -2837,6 +2886,8 @@ def build(args) -> Report:
 
     report.missing_audio = len(audio.missing)
     report.audio_cached = audio.cached_hits
+    if dead_log is not None:
+        dead_log.close()
     print(f"wrote {dz_path}", file=sys.stderr)
     return report
 
@@ -2873,8 +2924,11 @@ class AudioWishlist:
         # A private copy of the archive's names: a wanted-but-absent recording is
         # added to it so it counts against the per-word cap (see ``consider``).
         self.reachable: Set[str] = set(available or ())
-        # recordings a previous run found permanently gone, by match key
-        self.dead: Set[str] = set(dead or ())
+        # recordings a previous run found permanently gone, by match key. The
+        # dead file holds the written file names (case and all), so they are
+        # folded here to match the way they are looked up below; a name that is
+        # not folded would never equal a match key and the skip would never fire.
+        self.dead: Set[str] = {_audio_match_key(name) for name in (dead or ())}
         self.probed: Dict[str, str] = {}  # destination path -> url, in file order
         self.satisfied: Set[str] = set()  # already in the cache before this run
         # A destination is offered once per run. A failure is left for the next
@@ -3273,6 +3327,7 @@ class FetchTally:
         self.fetched = 0
         self.already = 0  # skipped: present and verified before this run
         self.gone: Dict[str, int] = {}  # reason -> how many are permanently gone
+        self.gone_held = 0  # skipped: already recorded gone by an earlier run
         self.transient = 0
         self.complete = True
         self._dead_label = dead_label
@@ -3298,6 +3353,11 @@ class FetchTally:
             lines.append(
                 f"  {sum(self.gone.values()):,} permanently gone ({breakdown}) -- "
                 f"recorded in {self._dead_label}, never requested again"
+            )
+        if self.gone_held:
+            lines.append(
+                f"  {self.gone_held:,} already known gone (recorded in "
+                f"{self._dead_label}) -- not requested again"
             )
         if self.transient:
             lines.append(
@@ -3590,8 +3650,16 @@ def fetch_list(args) -> int:
         file=sys.stderr,
     )
     fetching = Progress("fetching audio", every=25)
+    # Names an earlier run of this shard found permanently gone are not asked
+    # for again: the worker's own dead file is the record, and honouring it is
+    # what makes a re-run over the same shard cheap rather than a re-attempt of
+    # every 404 it already classified.
+    dead_keys = {_audio_match_key(name) for name in dead_log.names}
     try:
         for name, url in iter_list_entries(args.list):
+            if _audio_match_key(name) in dead_keys:
+                tally.gone_held += 1
+                continue
             dest = os.path.join(into, *name.split("/"))
             if not fetch_one(url, dest, args, tally, dead_log):
                 # --limit bounds attempts, so the rest of the list is left for

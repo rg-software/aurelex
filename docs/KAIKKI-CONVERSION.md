@@ -448,6 +448,11 @@ Notes:
   - **Rate-limited, blocked or interrupted.** A refusal or a dropped connection is
     a statement about the moment, not the file, so it is left for the next run
     and is *not* written to the dead list.
+- **The build keeps the same dead list.** A recording a *build* finds permanently
+  gone is appended to the same `<cache>/<dump-date>/audio-dead.tsv`, and the next
+  build skips it without a request, so a 404 costs one attempt ever rather than
+  one per rebuild. It is still reported as missing — it is — it is just not asked
+  for again. `--no-audio-download` writes nothing and asks for nothing.
 - **A failed recording is replaced, not left as a gap.** The plan is built
   assuming every file it considered will land, so a failure invalidates it; the
   headword is replanned with the hole known and the next candidate is fetched
@@ -519,7 +524,9 @@ indistinguishable from files this machine fetched itself, and it accepts a plain
 manifest too (`prefetch-audio --list` can be handed to a worker as-is). It
 bounds `--limit`, `--spacing`, `--retries` and `--max-backoff` the same way, and
 a permanently-gone file is recorded in `<shard>.dead.tsv` — next to the shard,
-never inside the directory. One thing it does **not** do is substitute a missing
+never inside the directory — and a re-run of the same shard skips the names that
+file holds rather than re-attempting every 404 it already classified. One thing
+it does **not** do is substitute a missing
 candidate: with no records to choose the next one from, a worker records the
 404 and lets the build slot-fill past it. A build run with `--no-audio-download`
 is the one case that shows the difference — there the affected headword may

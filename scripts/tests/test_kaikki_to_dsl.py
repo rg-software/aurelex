@@ -967,6 +967,58 @@ class AudioPrefetchTests(unittest.TestCase):
             self.assertEqual(report.audio_found, 2)
             self.assertEqual(report.missing_audio, 1)
 
+    def test_the_build_records_a_gone_recording_and_the_next_build_skips_it(self):
+        # A 404 is a verdict about the file, not about the moment, so a rebuild
+        # must not re-discover it. The build keeps the same dead record the
+        # prefetcher does: it appends what it finds gone and, on the next run,
+        # skips it without touching the network. Wikimedia names are capitalised,
+        # which is exactly the case the match has to fold.
+        with tempfile.TemporaryDirectory() as tmp:
+            jsonl = os.path.join(tmp, "gone.jsonl")
+            with open(jsonl, "w", encoding="utf-8") as f:
+                f.write(json.dumps({
+                    "word": "alpha", "lang_code": "en", "pos": "noun",
+                    "senses": [{"glosses": ["Something."]}],
+                    "sounds": [{
+                        "audio": "alpha.ogg",
+                        "ogg_url": "https://upload.wikimedia.org/w/commons/a/a1/En-us-gone.ogg",
+                    }],
+                }) + "\n")
+            tar_path = os.path.join(tmp, "audios.tar")
+            make_tar(tar_path, ["audios/En-au-limitword.ogg"])
+
+            calls = []
+
+            def gone_404(url, dest, *args, **kwargs):
+                calls.append(os.path.basename(dest))
+                raise urllib.error.HTTPError(url, 404, "Not Found", None, None)
+
+            self.with_stubbed_downloads(gone_404)
+
+            def build_args():
+                parsed = TOOL.build_parser().parse_args([
+                    "--source-lang", "en", "--jsonl", jsonl, "--out-dir",
+                    os.path.join(tmp, "out"), "--audio-tar", tar_path,
+                    "--audio-per-word", "1",
+                ])
+                parsed.cache_dir = os.path.join(tmp, "cache")
+                return parsed
+
+            with self.captured() as out:
+                report = TOOL.build(build_args())
+            self.assertEqual(report.missing_audio, 1)
+            self.assertIn("audio gone (HTTP 404)", out.getvalue())
+            self.assertEqual(calls, ["En-us-gone.ogg"])
+            self.assertEqual(self.dead_names(tmp), ["En-us-gone.ogg"])
+
+            # the rebuild asks for nothing, and reports the same shortfall
+            calls.clear()
+            with self.captured() as out:
+                report = TOOL.build(build_args())
+            self.assertEqual(calls, [])
+            self.assertEqual(report.missing_audio, 1)
+            self.assertNotIn("audio gone", out.getvalue())
+
 
     @contextlib.contextmanager
     def captured(self):
@@ -993,7 +1045,7 @@ class AudioPrefetchTests(unittest.TestCase):
         # and the run is allowed to call itself done.
         with tempfile.TemporaryDirectory() as tmp:
             jsonl = os.path.join(tmp, "gone.jsonl")
-            gone = "https://upload.wikimedia.org/w/commons/a/a1/gone.ogg"
+            gone = "https://upload.wikimedia.org/w/commons/a/a1/En-us-gone.ogg"
             with open(jsonl, "w", encoding="utf-8") as f:
                 for word in ("alpha", "beta"):
                     f.write(json.dumps({
@@ -1032,8 +1084,8 @@ class AudioPrefetchTests(unittest.TestCase):
             self.assertIn("done:", out.getvalue())
             # the replacement for each headword was fetched in the same run, so
             # no article is left short, and the dead file is on the record
-            self.assertEqual(sorted(calls), ["alpha-alt.ogg", "beta-alt.ogg", "gone.ogg"])
-            self.assertEqual(self.dead_names(tmp), ["gone.ogg"])
+            self.assertEqual(sorted(calls), ["En-us-gone.ogg", "alpha-alt.ogg", "beta-alt.ogg"])
+            self.assertEqual(self.dead_names(tmp), ["En-us-gone.ogg"])
 
             # the next run asks for nothing at all, and is still finished
             calls.clear()
@@ -1041,7 +1093,15 @@ class AudioPrefetchTests(unittest.TestCase):
                 self.assertEqual(TOOL.prefetch_audio(args), 0)
             self.assertEqual(calls, [])
             self.assertIn("done:", out.getvalue())
-            self.assertEqual(self.dead_names(tmp), ["gone.ogg"])
+            self.assertEqual(self.dead_names(tmp), ["En-us-gone.ogg"])
+
+    def test_a_capitalised_dead_name_is_matched_case_insensitively(self):
+        # The dead file holds the name as written ('En-us-...'), while the lookup
+        # is a folded match key ('en-us-...'). Loading the set without folding it
+        # would make the skip never fire for any real Wikimedia name, so a run
+        # would re-request every 404 it had already classified.
+        wishlist = TOOL.AudioWishlist("/tmp/cache", 1, None, set(), {"En-us-gone.ogg"})
+        self.assertIn(TOOL._audio_match_key("En-us-gone.ogg"), wishlist.dead)
 
     def test_a_rate_limited_file_is_left_for_later_and_the_run_says_not_finished(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1465,6 +1525,35 @@ class AudioShardTests(unittest.TestCase):
                 self.shard_names(shard + ".dead.tsv"), ["sub/gone.ogg"]
             )
             self.assertIn("permanently gone", out.getvalue())
+            self.assertIn("done:", out.getvalue())
+
+    def test_worker_does_not_re_request_a_name_its_dead_file_holds(self):
+        # A re-run over the same shard must not re-attempt the 404s the first run
+        # already classified: the dead file beside the shard is the record, and
+        # honouring it is what makes the second pass cheap rather than a repeat
+        # of every file that can never be fetched.
+        with tempfile.TemporaryDirectory() as tmp:
+            shard = os.path.join(tmp, "one.tsv")
+            base = "https://upload.wikimedia.org/w/commons/a/a1/"
+            with open(shard, "w", encoding="utf-8") as f:
+                f.write(f"En-us-gone.ogg\t{base}En-us-gone.ogg\n")
+            with open(shard + ".dead.tsv", "w", encoding="utf-8") as f:
+                f.write(f"En-us-gone.ogg\t{base}En-us-gone.ogg\tHTTP 404\n")
+            fill = os.path.join(tmp, "fill")
+            os.makedirs(fill, exist_ok=True)
+
+            calls = []
+            original = TOOL.download_cached
+            TOOL.download_cached = self.stub_writer(calls)
+            self.addCleanup(setattr, TOOL, "download_cached", original)
+
+            args = TOOL.fetch_list_parser().parse_args(
+                [shard, "--into", fill, "--spacing", "0"]
+            )
+            with self.captured() as out:
+                self.assertEqual(TOOL.fetch_list(args), 0)
+            self.assertEqual(calls, [])
+            self.assertIn("already known gone", out.getvalue())
             self.assertIn("done:", out.getvalue())
 
     def test_worker_limits_attempts_and_a_repeat_finishes(self):
