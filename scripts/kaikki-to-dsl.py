@@ -3671,6 +3671,7 @@ def bundle_audio(args) -> int:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="kaikki-to-dsl.py",
+        usage="kaikki-to-dsl.py [<mode>] [options]",
         description="Build an importable DSL dictionary from a pinned kaikki.org "
         "Wiktionary snapshot for one language.\n\n"
         "Modes (an optional first argument; with no mode word this builds a\n"
