@@ -2624,6 +2624,29 @@ class CardLayoutTests(unittest.TestCase):
     def test_short_example_is_untouched(self):
         self.assertEqual(TOOL._truncate_example("I run every morning."), "I run every morning.")
 
+    def test_over_long_example_keeps_the_sentence_with_the_headword(self):
+        # The word's own sentence sits past the bound; keeping the head of the
+        # quote would show the lead-in and drop the words that prove the sense.
+        text = ("Женя Баринов часто говаривал: «Сильным характером отважный мой "
+                "дядя обязан своему деду, В. В. Баринову, который в бытность "
+                "свою личным денщиком барона Маннергейма на коне перевалил "
+                "Шишалдинский хребет и вышел к озеру Хан».")
+        shortened = TOOL._truncate_example(text, "Хан")
+        self.assertIn("к озеру Хан", shortened)
+        self.assertNotIn("говаривал", shortened)
+
+    def test_over_long_example_without_a_break_windows_around_the_headword(self):
+        text = "aaa " * 40 + "target " + "bbb " * 40
+        shortened = TOOL._truncate_example(text, "target", limit=40)
+        self.assertIn("target", shortened)
+        self.assertTrue(shortened.startswith("…"))
+        self.assertTrue(shortened.endswith("…"))
+
+    def test_over_long_example_without_a_headword_falls_back_to_a_head_cut(self):
+        shortened = TOOL._truncate_example("word " * 80, word="absent", limit=50)
+        self.assertTrue(shortened.endswith(" …"))
+        self.assertTrue(shortened[:-2].endswith("word"))
+
     def test_example_must_contain_the_headword(self):
         # an example that never uses the word is dropped
         self.assertTrue(TOOL._example_shows_word("I run every morning.", "run"))

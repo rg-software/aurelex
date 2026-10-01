@@ -1887,17 +1887,126 @@ def _example_is_usable(text: str) -> bool:
     return not _example_is_bookkeeping(text) and not _example_is_archaic(text)
 
 
-def _truncate_example(text: str, limit: int = _EXAMPLE_MAX_CHARS) -> str:
-    """Shorten an over-long example at a word boundary.
+def _headword_span(
+    text: str, word: str, forms: Sequence[str] = ()
+) -> Optional[Tuple[int, int]]:
+    """The character span of the first token in ``text`` that matches ``word``.
+
+    Accepts the two matches :func:`_example_shows_word` describes: an exact token
+    match against the headword or any listed ``forms[]``, or a shared stem of at
+    least ``_MIN_STEM`` characters against the headword alone. Returns ``None``
+    when no token matches.
+    """
+    tokens = list(_WORD_RE.finditer(text))
+    if not tokens:
+        return None
+
+    def strip_label(form: str) -> str:
+        return re.split(r"\s+\(", form, maxsplit=1)[0].strip().lower()
+
+    exact = {strip_label(str(word or ""))}
+    exact.discard("")
+    exact.update(f for f in (strip_label(v) for v in forms) if f)
+
+    for match in tokens:
+        if match.group(0).lower() in exact:
+            return match.start(), match.end()
+
+    head = str(word or "").strip().lower()
+    if len(head) < _MIN_STEM:
+        return None
+    candidates = {head, *head.split()}
+    for match in tokens:
+        token = match.group(0).lower()
+        if len(token) >= _MIN_STEM and any(
+            candidate[:_MIN_STEM] == token[:_MIN_STEM] for candidate in candidates
+        ):
+            return match.start(), match.end()
+    return None
+
+
+# Sentence terminators, and the closing punctuation that may follow one before
+# the next sentence starts. Deliberately simple: enough to keep a single
+# sentence rather than a whole quotation when only one sentence names the word.
+_SENTENCE_END = ".!?…"
+_SENTENCE_CLOSERS = "\"'»”)]}"
+
+
+def _sentence_span(text: str, start: int, end: int) -> Tuple[int, int]:
+    """The span of the sentence in ``text`` that contains ``[start, end)``.
+
+    The left edge is the first non-space after the last sentence terminator
+    before the match (opening quotes skipped); the right edge is the first
+    terminator at or after the match, with any closing quote or bracket that
+    follows it. Text with no terminator is treated as one sentence.
+    """
+    left = 0
+    for i in range(start - 1, -1, -1):
+        if text[i] in _SENTENCE_END:
+            left = i + 1
+            break
+    while left < start and text[left] in " \t\n\u00a0\"'«“‘":
+        left += 1
+    right = len(text)
+    for i in range(end, len(text)):
+        if text[i] in _SENTENCE_END:
+            right = i + 1
+            while right < len(text) and text[right] in _SENTENCE_CLOSERS:
+                right += 1
+            break
+    return left, right
+
+
+def _window_span(text: str, start: int, end: int, limit: int) -> Tuple[int, int]:
+    """A ``limit``-wide span of ``text`` that contains ``[start, end)``.
+
+    Centred on the match as far as the text allows, then pulled in from either
+    edge to a word boundary so a word is never cut in half.
+    """
+    span = end - start
+    left = max(0, min(start - (limit - span) // 2, len(text) - limit))
+    right = left + limit
+    if left > 0 and text[left - 1] != " ":
+        space = text.find(" ", left, start)
+        if space != -1:
+            left = space + 1
+    if right < len(text) and text[right] != " ":
+        space = text.rfind(" ", end, right)
+        if space != -1:
+            right = space
+    return left, right
+
+
+def _truncate_example(
+    text: str, word: str = "", forms: Sequence[str] = (),
+    limit: int = _EXAMPLE_MAX_CHARS,
+) -> str:
+    """Shorten an over-long example so it still shows the word in use.
 
     Wiktionary quotes can run to a whole paragraph; a learner wants the phrase
-    that shows the word in use, not the surrounding essay, so an example longer
-    than ``limit`` is cut at the last space that fits and an ellipsis appended.
+    that shows the word, not the surrounding essay. A quote that fits the bound
+    is returned unchanged. A longer one keeps the sentence that contains the
+    headword (or a listed form); when even that sentence is too long, a window
+    of ``limit`` characters is centred on the headword. Trimmed edges get an
+    ellipsis. With no headword to anchor on it falls back to cutting at the last
+    word boundary that fits.
     """
     if len(text) <= limit:
         return text
-    cut = text[:limit].rsplit(" ", 1)[0].rstrip(" ,;:")
-    return cut + " …"
+
+    span = _headword_span(text, word, forms) if word else None
+    if span is None:
+        cut = text[:limit].rsplit(" ", 1)[0].rstrip(" ,;:")
+        return cut + " …"
+
+    left, right = _sentence_span(text, span[0], span[1])
+    if right - left > limit:
+        left, right = _window_span(text, span[0], span[1], limit)
+
+    piece = text[left:right].strip(" \t\n\u00a0").rstrip(" ,;:")
+    prefix = "… " if left > 0 else ""
+    suffix = " …" if right < len(text) else ""
+    return prefix + piece + suffix
 
 
 def _example_shows_word(text: str, word: str, forms: Sequence[str] = ()) -> bool:
@@ -1913,32 +2022,7 @@ def _example_shows_word(text: str, word: str, forms: Sequence[str] = ()) -> bool
       alone, which pairs it with a regular inflection the ``forms[]`` may not
       list (``swop``/``swopping``, ``run``/``running``).
     """
-    tokens = [t.lower() for t in _WORD_RE.findall(text)]
-    if not tokens:
-        return False
-    token_set = set(tokens)
-
-    def strip_label(form: str) -> str:
-        return re.split(r"\s+\(", form, maxsplit=1)[0].strip().lower()
-
-    exact = {strip_label(str(word or ""))}
-    exact.discard("")
-    exact.update(
-        f for f in (strip_label(v) for v in forms) if f
-    )
-    if exact & token_set:
-        return True
-
-    head = str(word or "").strip().lower()
-    if len(head) < _MIN_STEM:
-        return False
-    for candidate in {head, *head.split()}:
-        if len(candidate) < _MIN_STEM:
-            continue
-        n = _MIN_STEM
-        if any(candidate[:n] == token[:n] for token in tokens):
-            return True
-    return False
+    return _headword_span(text, word, forms) is not None
 
 
 def _sense_examples(
@@ -1966,7 +2050,7 @@ def _sense_examples(
     chosen = readable if readable else (candidates if allow_archaic else [])
     chosen.sort(key=len)
     return [
-        f"\t[ex]{escape_dsl(_truncate_example(text))}[/ex]"
+        f"\t[ex]{escape_dsl(_truncate_example(text, word, forms))}[/ex]"
         for text in chosen[:_EXAMPLE_MAX_PER_SENSE]
     ]
 

@@ -248,8 +248,11 @@ icon to its meaning.
 A sense keeps at most **one** example, the shortest that qualifies, so the zone
 is a crisp illustrative phrase rather than a wall of quotations. Example
 sentences can run to a whole paragraph in Wiktionary; anything longer than 200
-characters is cut at the last word boundary that fits and given an ellipsis. A
-sense with no surviving example gets no zone at all rather than an empty one.
+characters is shortened so the word stays visible — the sentence containing the
+headword is kept, or, when even that sentence is too long, a window centred on
+the headword, with an ellipsis on any cut edge. A quote with no headword to
+anchor on falls back to cutting at the last word boundary that fits. A sense with
+no surviving example gets no zone at all rather than an empty one.
 
 An example is kept only if it actually contains the headword: an exact token
 match against the headword or one of its listed forms (which catches irregular
