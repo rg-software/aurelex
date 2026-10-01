@@ -36,17 +36,29 @@
 - [ ] 2.4 Multi-volume `.mdd` (`demo.1.mdd` …) is still unverified — the suffix
   rule should accept it, but no fixture has exercised it
 
-## 3. Redistributable fixture
+## 3. Regression fixture for MDict (superseded: synthetic, not a committed zip)
 
-- [ ] 3.1 Add `demo.zip` (73 KB, confirmed redistributable) under
-  `examples/dictionaries/` in whatever form fits — unzipped, or archived
-- [ ] 3.2 Record its provenance and licence beside it, following
-  `app/openssl/README.md` / `scripts/assets/kaikki-tag-icons/README.md`
-- [ ] 3.3 Decide whether the CI smoke tool should import it, and state plainly in
-  the coverage which half any given check exercises (engine only, or staging
-  too) — the blind spot that let BOTH this bug and the StarDict one ship green
-- [ ] 3.4 Do **not** commit the 15 MB / 16 MB dictionaries; reference them in
-  `docs/TESTING.md` as external test material instead
+- [x] 3.1 ~~Add `demo.zip` under `examples/dictionaries/`~~ → **superseded**.
+  MDict now has a generated fixture instead of a committed binary:
+  `scripts/make-smoke-mdx.py` (in `fix-iconv-nonprogress-loop`) writes a
+  synthetic `.mdx` at build time. That is better on every axis — deterministic,
+  no binary in the repo, no provenance/licence question, and it exercises the
+  engine's own index build rather than shipping a pre-built artifact. `demo.zip`
+  is therefore **not** committed and has been removed from the repo root along
+  with the other external test material.
+- [x] 3.2 ~~Record its provenance and licence~~ → not applicable; nothing is
+  committed to have provenance
+- [x] 3.3 Decide whether CI imports it: **yes, a generated MDX fixture**, wired
+  into `engine-smoke.yml` with assertions on load, lookup, and article-body
+  rendering, plus a per-headword loop so a partial index walk is caught. This
+  closes the blind spot named here: MDict previously had *no* fixture at all,
+  which is why both this bug and the StarDict one shipped green. The coverage is
+  stated plainly — the smoke tool drives the engine directly and does **not** run
+  the Java staging layer, so staging is covered separately by
+  `staging_rules_test` and the device recipes in `docs/TESTING.md`
+- [x] 3.4 Do **not** commit the 15 MB / 16 MB dictionaries; they are external
+  test material referenced from `docs/TESTING.md`. The 75 KB `demo.zip` is not
+  committed either, now that a generated fixture covers the format
 
 ## 4. Stage an MDX set's loose assets
 
