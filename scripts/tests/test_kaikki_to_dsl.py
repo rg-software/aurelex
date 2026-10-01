@@ -1942,8 +1942,23 @@ class AnnotationTests(unittest.TestCase):
             self.assertIn("kaikki-en", content)
             self.assertIn("CC BY-SA 4.0", content)
             self.assertIn("Wiktionary", content)
-            self.assertIn("Snapshot dump date", content)
+            self.assertIn("derivative work", content)
             self.assertIn("Entries: 1", content)
+
+    def test_title_is_separate_from_the_file_name(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            TOOL.build(self.args(
+                tmp, "--name", "au_kaikki_en-en", "--title", "Aurelex Kaikki En"
+            ))
+            # files use the output name
+            self.assertTrue(os.path.isfile(
+                os.path.join(tmp, "au_kaikki_en-en.dsl.dz")))
+            # the metadata, the about headword and the description use the title
+            text = read_dz(os.path.join(tmp, "au_kaikki_en-en.dsl.dz"))
+            self.assertIn('#NAME "Aurelex Kaikki En"', text)
+            self.assertIn("About Aurelex Kaikki En", text.splitlines())
+            with open(os.path.join(tmp, "au_kaikki_en-en.ann"), encoding="utf-8") as f:
+                self.assertIn("Aurelex Kaikki En: a Wiktionary-based", f.read())
 
     def test_annotation_is_written_even_when_the_bundle_is_reused(self):
         with tempfile.TemporaryDirectory() as tmp:

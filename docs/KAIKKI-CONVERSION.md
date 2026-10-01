@@ -83,7 +83,8 @@ phone (same folder) and add that folder in Aurelex.
 | `--skip-date-check` | Do not verify the pinned dump date against kaikki.org. Needed for any date kaikki has since rotated away. |
 | `--cache-dir DIR` | Download cache (default `~/.cache/aurelex-kaikki`). |
 | `--out-dir DIR` | Output directory (default `dist`). |
-| `--name NAME` | Output base name (default `kaikki-<source>`). |
+| `--name NAME` | Output base name (default `kaikki-<source>`); names the output files. |
+| `--title TITLE` | Display name (default `--name`); used for `#NAME`, the `About …` headword and the description. |
 | `--include-inflections` | Also index inflected forms (see below). |
 | `--audio-per-word N` | Max audio files per headword (default 3; `0` disables). |
 | `--no-audio` | No audio and no audio download. |
@@ -574,11 +575,14 @@ files inside the archive; the phone's import stages the whole folder. Use
 
 - Same snapshot + options ⇒ byte-identical output (dictionary and resource
   archive; the vendored icons are fixed bytes in a sorted archive).
-- The snapshot dump date is embedded in the `#NAME` metadata block and in an
-  **About &lt;name&gt;** card inside the file (named after the dictionary, so
-  several builds are distinguishable), which also carries the sense-icon legend.
-- A sibling `<name>.ann` annotation sits beside the dictionary with the same
-  attribution and the entry count as plain text. DSL headers have no description
+- The dictionary's `#NAME` metadata, its **About &lt;title&gt;** card, and the
+  description (in the card and the sibling `.ann`) all use the display **title**
+  (`--title`, defaulting to `--name`), while the output file names — the
+  `.dsl.dz`, its `.files.zip` and the `.ann` — use the output **name**. So a
+  human-readable title can coexist with a clean file name. The about card also
+  carries the snapshot date, the wiktextract reference and the sense-icon legend.
+- A sibling `<name>.ann` annotation sits beside the dictionary carrying the same
+  description and entry count as plain text. DSL headers have no description
   field, but a Lingvo-aware reader (goldendict-ng) surfaces `<base>.ann` as the
   dictionary description; keep it beside the `.dsl.dz` when you copy or
   redistribute.
