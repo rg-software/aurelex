@@ -93,7 +93,7 @@
     </message>
     <message>
         <location filename="../main.qml" line="1156"/>
-        <location filename="../main.qml" line="3500"/>
+        <location filename="../main.qml" line="3523"/>
         <source>engine error: %1</source>
         <translation>エンジンエラー: %1</translation>
     </message>
@@ -158,188 +158,188 @@
         <translation>「追加」をタップして辞書ファイル（.mdx、.dsl、.dsl.dz、.ifo）を含むフォルダーをインポートするか、クラウドボタンでリモートカタログから選択します。どちらの場合もファイルはアプリ内に一度だけコピーされ、デバイス全体のストレージへのアクセスは不要です。</translation>
     </message>
     <message>
-        <location filename="../main.qml" line="1758"/>
-        <source>The file may be incomplete or corrupt. Remove the failed import, or tap Add dictionaries and pick the folder again to re-copy it.</source>
-        <translation>ファイルが壊れているか不完全な可能性があります。失敗したインポートを削除するか、「追加」をタップして同じフォルダーをもう一度選び、コピーし直してください。</translation>
-    </message>
-    <message>
-        <location filename="../main.qml" line="1969"/>
+        <location filename="../main.qml" line="1992"/>
         <source>Dictionary catalog</source>
         <translation>辞書カタログ</translation>
     </message>
     <message>
-        <location filename="../main.qml" line="1976"/>
+        <location filename="../main.qml" line="1999"/>
         <source>Checking for updates…</source>
         <translation>更新を確認しています…</translation>
     </message>
     <message>
-        <location filename="../main.qml" line="1978"/>
+        <location filename="../main.qml" line="2001"/>
         <source>Using the saved catalog — the update check failed.</source>
         <translation>保存済みのカタログを使用しています — 更新の確認に失敗しました。</translation>
     </message>
     <message>
-        <location filename="../main.qml" line="1980"/>
+        <location filename="../main.qml" line="2003"/>
         <source>Updated %1</source>
         <translation>更新日時 %1</translation>
     </message>
     <message>
-        <location filename="../main.qml" line="1981"/>
+        <location filename="../main.qml" line="2004"/>
         <source>Not checked yet</source>
         <translation>未確認</translation>
     </message>
     <message>
-        <location filename="../main.qml" line="2013"/>
+        <location filename="../main.qml" line="2036"/>
         <source>The catalog could not be loaded.
 %1</source>
         <translation>カタログを読み込めませんでした。
 %1</translation>
     </message>
     <message>
-        <location filename="../main.qml" line="2014"/>
+        <location filename="../main.qml" line="2037"/>
         <source>The catalog has no dictionaries yet.</source>
         <translation>カタログにはまだ辞書がありません。</translation>
     </message>
     <message>
-        <location filename="../main.qml" line="2029"/>
+        <location filename="../main.qml" line="2052"/>
         <source>Showing the last saved catalog. Downloads need a connection to the catalog host.</source>
         <translation>最後に保存されたカタログを表示しています。ダウンロードにはカタログの配信元への接続が必要です。</translation>
     </message>
     <message>
-        <location filename="../main.qml" line="2058"/>
+        <location filename="../main.qml" line="2081"/>
         <source>Downloading %1 (%2 of %3 files)</source>
         <translation>%1 をダウンロード中（%3 件中 %2 件）</translation>
     </message>
     <message>
-        <location filename="../main.qml" line="2062"/>
+        <location filename="../main.qml" line="2085"/>
         <source>Downloading %1</source>
         <translation>%1 をダウンロード中</translation>
     </message>
     <message>
-        <location filename="../main.qml" line="2071"/>
+        <location filename="../main.qml" line="2094"/>
         <source>Download cancelled.</source>
         <translation>ダウンロードをキャンセルしました。</translation>
     </message>
     <message>
-        <location filename="../main.qml" line="2074"/>
+        <location filename="../main.qml" line="2097"/>
         <source>Some downloads failed.</source>
         <translation>一部のダウンロードに失敗しました。</translation>
     </message>
     <message>
-        <location filename="../main.qml" line="2139"/>
+        <location filename="../main.qml" line="2162"/>
         <source>Installed</source>
         <translation>インストール済み</translation>
     </message>
     <message>
-        <location filename="../main.qml" line="2140"/>
+        <location filename="../main.qml" line="2163"/>
         <source>%1 to download</source>
         <translation>ダウンロード %1</translation>
     </message>
     <message>
-        <location filename="../main.qml" line="2148"/>
+        <location filename="../main.qml" line="2171"/>
         <source>This dictionary&apos;s format is not supported by this app version.</source>
         <translation>この辞書の形式はこのアプリのバージョンでは対応していません。</translation>
     </message>
     <message>
-        <location filename="../main.qml" line="2673"/>
-        <location filename="../main.qml" line="2726"/>
+        <location filename="../main.qml" line="2696"/>
+        <location filename="../main.qml" line="2749"/>
         <source>Cancel</source>
         <translation>キャンセル</translation>
     </message>
     <message>
-        <location filename="../main.qml" line="2679"/>
+        <location filename="../main.qml" line="2702"/>
         <source>Create</source>
         <translation>作成</translation>
     </message>
     <message>
-        <location filename="../main.qml" line="2732"/>
+        <location filename="../main.qml" line="2755"/>
         <source>Rename</source>
         <translation>名前を変更</translation>
     </message>
     <message>
-        <location filename="../main.qml" line="2850"/>
+        <location filename="../main.qml" line="2873"/>
         <source>Article order: drag to set which dictionary&apos;s results come first.</source>
         <translation>記事の順序：ドラッグして、どの辞書の結果を先に表示するかを設定します。</translation>
     </message>
     <message>
-        <location filename="../main.qml" line="2968"/>
+        <location filename="../main.qml" line="2991"/>
         <source>Add dictionaries</source>
         <translation>辞書を追加</translation>
     </message>
     <message>
-        <location filename="../main.qml" line="1721"/>
+        <location filename="../main.qml" line="1727"/>
         <source>%1 dictionary file(s) failed to load</source>
         <translation>%1 個の辞書ファイルを読み込めませんでした</translation>
     </message>
     <message>
-        <location filename="../main.qml" line="2254"/>
+        <location filename="../main.qml" line="2277"/>
         <source>Welcome to Aurelex</source>
         <translation>Aurelex へようこそ</translation>
     </message>
     <message>
-        <location filename="../main.qml" line="2262"/>
+        <location filename="../main.qml" line="2285"/>
         <source>Add dictionaries by tapping Add dictionaries below and picking a folder with dictionary files (.mdx, .dsl, .dsl.dz, .ifo) — the folder is copied into the app once (no system-wide storage access needed). Use the bottom bar to switch between Search, Dictionaries, Groups, FTS and Favorites.</source>
         <translation>下の「辞書を追加」をタップして、辞書ファイル（.mdx、.dsl、.dsl.dz、.ifo）を含むフォルダーを選ぶことで辞書を追加できます。フォルダーは一度だけアプリにコピーされます（ストレージ全体へのアクセスは不要です）。下部のバーで検索・辞書・グループ・全文検索・お気に入りを切り替えます。</translation>
     </message>
     <message>
-        <location filename="../main.qml" line="2272"/>
+        <location filename="../main.qml" line="2295"/>
         <source>Get started</source>
         <translation>始める</translation>
     </message>
     <message>
-        <location filename="../main.qml" line="2655"/>
+        <location filename="../main.qml" line="2678"/>
         <source>New group name</source>
         <translation>新しいグループ名</translation>
     </message>
     <message>
-        <location filename="../main.qml" line="2598"/>
+        <location filename="../main.qml" line="2621"/>
         <source>%1 (%2)</source>
         <translation>%1 (%2)</translation>
     </message>
     <message>
-        <location filename="../main.qml" line="2444"/>
-        <location filename="../main.qml" line="2462"/>
-        <location filename="../main.qml" line="2500"/>
-        <location filename="../main.qml" line="2504"/>
+        <location filename="../main.qml" line="1781"/>
+        <source>The file may be incomplete or corrupt. Remove it and import the folder again.</source>
+        <translation>ファイルが壊れているか不完全な可能性があります。削除して、フォルダーを再度インポートしてください。</translation>
+    </message>
+    <message>
+        <location filename="../main.qml" line="2467"/>
+        <location filename="../main.qml" line="2485"/>
+        <location filename="../main.qml" line="2523"/>
+        <location filename="../main.qml" line="2527"/>
         <source>A group named &quot;%1&quot; already exists</source>
         <translation>「%1」という名前のグループは既に存在します</translation>
     </message>
     <message>
-        <location filename="../main.qml" line="2645"/>
+        <location filename="../main.qml" line="2668"/>
         <source>Add group</source>
         <translation>グループを追加</translation>
     </message>
     <message>
-        <location filename="../main.qml" line="2699"/>
+        <location filename="../main.qml" line="2722"/>
         <source>Rename group</source>
         <translation>グループ名を変更</translation>
     </message>
     <message>
-        <location filename="../main.qml" line="2759"/>
+        <location filename="../main.qml" line="2782"/>
         <source>Delete group</source>
         <translation>グループを削除</translation>
     </message>
     <message>
-        <location filename="../main.qml" line="2768"/>
+        <location filename="../main.qml" line="2791"/>
         <source>Delete group &quot;%1&quot;?</source>
         <translation>グループ「%1」を削除しますか？</translation>
     </message>
     <message>
-        <location filename="../main.qml" line="2774"/>
+        <location filename="../main.qml" line="2797"/>
         <source>The group and its dictionary order are removed. The dictionaries themselves are not deleted.</source>
         <translation>グループと辞書の並び順が削除されます。辞書自体は削除されません。</translation>
     </message>
     <message>
-        <location filename="../main.qml" line="2851"/>
+        <location filename="../main.qml" line="2874"/>
         <source>In this group (%1)</source>
         <translation>このグループ内 (%1)</translation>
     </message>
     <message>
-        <location filename="../main.qml" line="3382"/>
+        <location filename="../main.qml" line="3405"/>
         <source>Full-text search</source>
         <translation>全文検索</translation>
     </message>
     <message>
-        <location filename="../main.qml" line="3556"/>
+        <location filename="../main.qml" line="3579"/>
         <source>Select group</source>
         <translation>グループを選択</translation>
     </message>

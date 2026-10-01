@@ -1701,25 +1701,31 @@ text: root._stagingActive
 
             // Dictionaries that failed to load in the last scan (corrupt or
             // truncated source files). Surface them so the user knows a
-            // dictionary is missing; the fix is to re-add the folder, which
-            // wipes the old copy and re-stages it.
+            // dictionary is missing, and give each one a way out: a failed
+            // dictionary is not in the loaded list, so without the remove action
+            // its staged files would be unreachable (stale-import-cleanup).
+            //
+            // Deliberately compact: this is a status strip, not a dialog. The
+            // rows stay one line each (the path elides rather than wrapping) and
+            // the remove control is a bare glyph, not a Material Button, whose
+            // 48dp minimum height otherwise dominates the banner.
             Rectangle {
                 Layout.fillWidth: true
                 visible: engine.scanFailures.length > 0
                 color: Material.color(Material.Red, Material.Shade50)
                 radius: 4
-                height: failuresCol.implicitHeight + 16
+                height: failuresCol.implicitHeight + 12
 
                 ColumnLayout {
                     id: failuresCol
-                    anchors { left: parent.left; right: parent.right; top: parent.top; topMargin: 8 }
+                    anchors { left: parent.left; right: parent.right; top: parent.top; topMargin: 6 }
                     anchors.leftMargin: 10; anchors.rightMargin: 10
-                    spacing: 4
+                    spacing: 2
 
                     Label {
                         Layout.fillWidth: true
                         text: qsTr("%1 dictionary file(s) failed to load").arg(engine.scanFailures.length)
-                        font.pixelSize: 13
+                        font.pixelSize: 12
                         font.bold: true
                         color: Material.color(Material.Red)
                         wrapMode: Text.Wrap
@@ -1728,34 +1734,51 @@ text: root._stagingActive
                         model: engine.scanFailures
                         delegate: RowLayout {
                             Layout.fillWidth: true
-                            spacing: 6
+                            spacing: 4
                             Label {
                                 Layout.fillWidth: true
-                                text: modelData.file
+                                // Basename only: the full staged path is long,
+                                // meaningless to read, and what made this row
+                                // wrap. The directory underneath is an opaque id.
+                                text: modelData.file.replace(/^.*[\\/]/, "")
                                 font.pixelSize: 11
                                 elide: Text.ElideMiddle
                                 color: root.uiSubFg
-                                wrapMode: Text.Wrap
                             }
                             // Remove this failed import: deletes what it staged so
-                            // the failure stops recurring. A failed dictionary is
-                            // not in the dictionary list, so this is the only way
-                            // to reach its files.
-                            Button {
-                                text: root.icon("delete")
-                                font.family: root.iconFontFamily
-                                font.pixelSize: 16
-                                flat: true
+                            // the failure stops recurring. A small glyph rather
+                            // than a Button, whose minimum height would size the
+                            // whole row.
+                            Item {
+                                implicitWidth: 28
+                                implicitHeight: 28
+                                // A RowLayout stretches children along the cross
+                                // axis to the tallest row member; pin both axes so
+                                // the tap target stays the glyph's size instead of
+                                // growing the row.
+                                Layout.preferredWidth: 28
+                                Layout.preferredHeight: 28
+                                Layout.fillHeight: false
                                 Layout.alignment: Qt.AlignVCenter
-                                Accessible.name: "Remove failed import"
-                                Accessible.role: Accessible.Button
-                                onClicked: engine.removeScanFailure(modelData.file)
+                                Text {
+                                    anchors.centerIn: parent
+                                    text: root.icon("delete")
+                                    font.family: root.iconFontFamily
+                                    font.pixelSize: 15
+                                    color: root.uiSubFg
+                                }
+                                MouseArea {
+                                    anchors.fill: parent
+                                    Accessible.name: "Remove failed import"
+                                    Accessible.role: Accessible.Button
+                                    onClicked: engine.removeScanFailure(modelData.file)
+                                }
                             }
                         }
                     }
                     Label {
                         Layout.fillWidth: true
-                        text: qsTr("The file may be incomplete or corrupt. Remove the failed import, or tap Add dictionaries and pick the folder again to re-copy it.")
+                        text: qsTr("The file may be incomplete or corrupt. Remove it and import the folder again.")
                         font.pixelSize: 11
                         color: root.uiSubFg
                         wrapMode: Text.Wrap
