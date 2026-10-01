@@ -17,8 +17,10 @@
 #include <QSet>
 
 #include <atomic>
+#include <functional>
 
 #include "RemoteCatalog.hpp"
+#include "DictIdentity.hpp"
 
 class ArticleServer;
 class QNetworkAccessManager;
@@ -523,6 +525,46 @@ private:
     void pollFtsProgress();
     void setScanFailures(const QVariantList &list);
     void collectScanFailures();
+
+    // ---- dictionary identity + duplicate resolution ----
+    // (openspec/changes/resolve-duplicate-dictionaries)
+    //
+    // Read every loaded dictionary's name + source-file set off the UI thread
+    // (gd_dict_identity takes g_engineMutex, which a running FTS build holds for
+    // its whole duration) and hand the inventory to `done` on the UI thread. The
+    // returned vector is in engine order, so "keep the first of a group" is a
+    // stable rule.
+    void fetchIdentityInventory(
+        const std::function<void(const QVector<DictIdentity::Identity> &)> &done);
+    // Fold the inventory by match key, drop identities we cannot attribute
+    // (unnamed, or a name that lost a race with a concurrent removal), and hand
+    // on only the groups with more than one member - a group of one cannot be a
+    // duplicate, and there is no need to build those.
+    QVector<QVector<DictIdentity::Identity>>
+    duplicateGroups(const QVector<DictIdentity::Identity> &inventory) const;
+    // Fold the inventory by match key and resolve every group of two or more
+    // (design.md D5). A group whose members are all identical is collapsed
+    // silently, which is the one automatic deletion in the app and the step that
+    // repairs an installation that already holds duplicates. A group whose members
+    // DIFFER is left completely alone and recorded as a name clash: a scan expresses
+    // no intent, and the comparison cannot tell a newer build from an unrelated
+    // dictionary, so the user removes one. `done` runs on the UI thread after the
+    // collapse, so the caller's scan chain keeps its order.
+    void resolveDuplicateDictionaries(const std::function<void()> &done);
+    // Remove every engine dictionary in `drop`, deleting each one's staged files.
+    // Each id is read BEFORE its unload, because the engine id is an MD5 over the
+    // absolute source paths and cannot be recovered afterwards. Returns the number
+    // actually removed; a dictionary the engine refuses to unload keeps its files,
+    // because deleting them would leave a live engine object unreadable.
+    // The survivors are never touched, so they keep their object, list position,
+    // group membership and built indexes.
+    int unloadAndDelete(const QVector<DictIdentity::Identity> &drop);
+    // Delete one already-unloaded dictionary's staged file set: every file of the
+    // set (not just the primary — an .mdx plus its .mdd volumes is one
+    // dictionary), its DSL `<name>.dsl.files` resource tree, and its engine index
+    // cache; then the staged directory ONLY if no surviving dictionary still reads
+    // from it. Refuses any path outside the staged root.
+    void deleteIdentityFiles(const DictIdentity::Identity &id, const QString &dictId);
     void setHistory(const QVariantList &list);
     void setFavorites(const QVariantList &list);
     void loadHistory();
@@ -579,6 +621,22 @@ private:
     // UI thread: gd_remove_dict/gd_scan_dicts serialize on g_engineMutex, which
     // a running FTS build holds for its whole duration.
     void reloadDictionariesForResources(const QStringList &entryIds);
+    // The sources of every dictionary the engine currently has loaded, MINUS any
+    // this session has unloaded but whose list entry has not been re-read yet
+    // (m_unloadedSources). This is the input to every "is this staged directory
+    // still in use?" decision, so a stale entry cannot make a directory that now
+    // holds nothing look occupied.
+    QStringList liveDictionarySources() const;
+    // Source files of dictionaries this session has unloaded but whose
+    // m_dictionaries entry is still stale. Valid only until the next
+    // refreshDictionaries applies a fresh list, which is where it is cleared.
+    QStringList m_unloadedSources;
+
+    // Name clashes found by the last resolveDuplicateDictionaries pass, as
+    // {name, count}. Rendered by the report-import-results surface, which is not
+    // built yet; nothing reads this member for now.
+    QVariantList m_nameClashes;
+
     // The staging scratch dirs (files/staging-tmp/<contentHash>) a live download
     // owns, so purgeStagingTmp never deletes a transfer in flight.
     QStringList liveDownloadHashes() const;

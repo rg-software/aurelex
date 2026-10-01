@@ -976,6 +976,53 @@ int gd_dict_meta( int index, char * lang_from, int lang_from_size,
   return 0;
 }
 
+// Identity for duplicate resolution (design.md D2 in
+// openspec/changes/resolve-duplicate-dictionaries): display name, primary source
+// file, and the complete source-file set as (basename, size, mtimeMs).
+//
+// Two deliberate choices, both about making the CALLER's comparison correct:
+//
+//   - The directory is stripped to basename. Identity is name + content, so the
+//     same dictionary in two staged roots must compare equal. Including the path
+//     would make every duplicate undetectable, which is the bug this exists for.
+//   - The file records are emitted raw rather than digested. The caller compares
+//     them with the same mtime tolerance the importer uses when it skips unchanged
+//     files, and a digest cannot express a tolerance. The set is small by
+//     construction (resource trees are not in getDictionaryFilenames()), so a
+//     component-wise comparison costs nothing.
+//
+// -1 for a missing file's size/mtime matches stampSourceFiles(), so the two
+// signals agree on what "absent" looks like.
+int gd_dict_identity( int index, char * out, int out_size )
+{
+  if ( !g_state || !out || out_size <= 0 )
+    return -1;
+  std::lock_guard< std::recursive_mutex > lock( g_engineMutex );
+
+  if ( index < 0 || index >= static_cast< int >( g_state->dictionaries.size() ) )
+    return -2;
+
+  Dictionary::Class & d = *g_state->dictionaries[ index ];
+  const auto & files = d.getDictionaryFilenames();
+
+  QString rec = QStringLiteral( "D\t" ) + QString::fromStdString( d.getName() ) + QLatin1Char( '\t' )
+                + ( files.empty() ? QString() : QString::fromStdString( files.front() ) );
+
+  for ( const auto & f : files ) {
+    const QFileInfo fi( QString::fromStdString( f ) );
+    const bool exists = fi.exists();
+    rec += QLatin1Char( '\n' ) + QStringLiteral( "F\t" ) + fi.fileName() + QLatin1Char( '\t' )
+           + QString::number( exists ? fi.size() : -1 ) + QLatin1Char( '\t' )
+           + QString::number( exists ? fi.lastModified().toMSecsSinceEpoch() : -1 );
+  }
+
+  const QByteArray bytes = rec.toUtf8();
+  if ( bytes.size() + 1 > out_size )
+    return -1;
+  std::memcpy( out, bytes.constData(), bytes.size() + 1 );
+  return 0;
+}
+
 int gd_move_dict( int from, int to )
 {
   if ( !g_state )

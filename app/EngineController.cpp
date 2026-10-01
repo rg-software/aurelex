@@ -426,6 +426,13 @@ void EngineController::runScan() {
         // Surface ANY dictionary files that failed to load (corrupt/truncated)
         // so the user knows a dictionary is missing and can re-import the folder.
         collectScanFailures();
+        // Resolve duplicates ALREADY on disk before anything else reads the
+        // dictionary list, so a cold start repairs an installation that holds two
+        // copies instead of loading both and reporting them on every restart
+        // (design.md D5). This runs on every scan, not just after an import:
+        // at startup there is no "candidate" — the scan simply loads the staged
+        // tree, and both copies come back.
+        resolveDuplicateDictionaries([this, result]{
         // A staged directory that produced no loaded dictionary is a failed
         // import. If the user has since re-imported the folder successfully, the
         // stale copy is still on disk and would be retried — and re-reported —
@@ -442,8 +449,65 @@ void EngineController::runScan() {
         // search + FTS work without a manual per-dict "Index" button. Runs
         // sequentially off-thread; the UI's buildingFts progress bar covers it.
         autoIndexMissing();
+        });
     });
     w->setFuture(f);
+}
+
+// ---------------------------------------------------------------------------
+// Dictionary identity + duplicate resolution
+// (openspec/changes/resolve-duplicate-dictionaries; logic in DictIdentity.hpp)
+// ---------------------------------------------------------------------------
+
+void EngineController::fetchIdentityInventory(
+    const std::function<void(const QVector<DictIdentity::Identity> &)> &done) {
+    // Off the UI thread on purpose: gd_dict_identity takes g_engineMutex, which a
+    // running FTS build holds for its whole duration, so calling it inline would
+    // freeze the app behind a long index build for a bookkeeping read.
+    QFuture<QVector<DictIdentity::Identity>> f = QtConcurrent::run([]{
+        QVector<DictIdentity::Identity> out;
+        const int count = gd_dict_count();
+        char buf[16384];
+        for (int i = 0; i < count; ++i) {
+            const int rc = gd_dict_identity(i, buf, static_cast<int>(sizeof(buf)));
+            if (rc == -2)
+                break; // count was stale: a concurrent removal shortened the vector
+            if (rc != 0) {
+                qWarning() << "[aurelex] gd_dict_identity failed for index" << i
+                           << "rc =" << rc << "- skipping it rather than deduping blind";
+                continue;
+            }
+            DictIdentity::Identity id = DictIdentity::parseRecord(QString::fromUtf8(buf));
+            if (id.name.isEmpty())
+                continue;
+            id.engineIndex = i;
+            out.append(id);
+        }
+        return out;
+    });
+    auto *w = new QFutureWatcher<QVector<DictIdentity::Identity>>(this);
+    connect(w, &QFutureWatcher<QVector<DictIdentity::Identity>>::finished, this,
+            [this, done, w] {
+                done(w->result());
+                w->deleteLater();
+            });
+    w->setFuture(f);
+}
+
+QVector<QVector<DictIdentity::Identity>> EngineController::duplicateGroups(
+    const QVector<DictIdentity::Identity> &inventory) const {
+    QVector<QVector<DictIdentity::Identity>> out;
+    const QMap<QString, QVector<DictIdentity::Identity>> groups =
+        DictIdentity::groupByName(inventory);
+    for (auto it = groups.constBegin(); it != groups.constEnd(); ++it) {
+        // A group of one is not a duplicate. Nor is a group whose members all hold
+        // different content: that is a name clash, reported rather than resolved
+        // (design.md D5) - the scan cannot know which build the user wants.
+        if (it.value().size() < 2)
+            continue;
+        out.append(it.value());
+    }
+    return out;
 }
 
 void EngineController::autoIndexMissing()
@@ -782,6 +846,14 @@ void EngineController::refreshDictionaries() {
     connect(w, &QFutureWatcher<QVariantList>::finished, this, [this, w]{
         const QVariantList list = w->result();
         setDictionaries(list);
+        // The list now matches the engine, so the "unloaded but not yet re-read"
+        // exclusions are satisfied and must not leak into later decisions - they
+        // would keep a staged directory alive that nothing reads from.
+        if (!m_unloadedSources.isEmpty()) {
+            qInfo() << "[aurelex] clearing" << m_unloadedSources.size()
+                    << "stale unloaded-source entries after refresh";
+            m_unloadedSources.clear();
+        }
         // Keep the catalog's installed badges honest: a download that just got
         // scanned in (or a removal) changes which entries are installed, and the
         // badge is derived from the loaded sources.
@@ -990,6 +1062,195 @@ void EngineController::reloadDictionariesForResources(const QStringList &entryId
     w->setFuture(f);
 }
 
+void EngineController::resolveDuplicateDictionaries(const std::function<void()> &done) {
+    fetchIdentityInventory([this, done](const QVector<DictIdentity::Identity> &inv) {
+        const QVector<QVector<DictIdentity::Identity>> groups = duplicateGroups(inv);
+
+        QVector<DictIdentity::Identity> toDrop;
+        QVariantList clashes;
+        for (const QVector<DictIdentity::Identity> &group : groups) {
+            // All-or-nothing within a group. If ANY pair differs, collapse nothing:
+            // the signature cannot say which build the user wants, so removing any
+            // of them here would be the app guessing (design.md D5).
+            bool allIdentical = true;
+            for (int i = 1; i < group.size(); ++i) {
+                if (!DictIdentity::sameContent(group.at(0), group.at(i))) {
+                    allIdentical = false;
+                    break;
+                }
+            }
+            if (allIdentical) {
+                // Keep the first in ENGINE order and drop the rest: the survivor's
+                // object, list position, groups and indexes are all left alone, so
+                // nothing has to be migrated (design.md D3).
+                for (int i = 1; i < group.size(); ++i)
+                    toDrop.append(group.at(i));
+                qInfo().noquote() << "[aurelex] collapsing identical duplicates of"
+                                  << group.at(0).name << "x" << group.size();
+                continue;
+            }
+            QVariantMap clash;
+            clash.insert("name", group.at(0).name);
+            clash.insert("count", group.size());
+            clashes.append(clash);
+            qWarning().noquote()
+                << "[aurelex] name clash:" << group.at(0).name << "is present"
+                << group.size() << "times with different content - left in place; the"
+                << "user removes one";
+        }
+
+        m_nameClashes = clashes;
+        if (!toDrop.isEmpty()) {
+            const int removed = unloadAndDelete(toDrop);
+            qInfo() << "[aurelex] duplicate resolution removed" << removed
+                    << "identical duplicate dictionary(s)";
+        }
+        done();
+    });
+}
+
+int EngineController::unloadAndDelete(
+    const QVector<DictIdentity::Identity> &drop) {
+    if (drop.isEmpty())
+        return 0;
+
+    // DESCENDING engine index: each gd_remove_dict renumbers the dictionaries
+    // after it, so removing high-to-low leaves every index still to be removed
+    // pointing at the dictionary it was read from.
+    QVector<DictIdentity::Identity> ordered = drop;
+    std::sort(ordered.begin(), ordered.end(),
+              [](const DictIdentity::Identity &a, const DictIdentity::Identity &b) {
+                  return a.engineIndex > b.engineIndex;
+              });
+
+    // Read the ids off-thread with the unload: gd_dict_id and gd_remove_dict take
+    // g_engineMutex, the lock a running FTS build holds for its whole duration, so
+    // this must not sit on the UI thread. The id must be read BEFORE the unload -
+    // it is an MD5 over the source paths, which are gone afterwards.
+    //
+    // waitForFinished() below blocks the UI thread for the duration. That is a
+    // deliberate trade: the file deletions that follow must see the engine's FINAL
+    // dictionary set, and keeping the loop on the UI thread is what makes the
+    // order (unload -> delete files -> refresh) enforceable at all. The wait is
+    // bounded by one dict_remove per collapsed duplicate, on a path that runs once
+    // per scan with no user action pending.
+    QFuture<QVector<QPair<int, QString>>> f = QtConcurrent::run([ordered] {
+        QVector<QPair<int, QString>> results;
+        for (const DictIdentity::Identity &id : ordered) {
+            char idBuf[64] = {0};
+            QString dictId;
+            if (gd_dict_id(id.engineIndex, idBuf, static_cast<int>(sizeof(idBuf))) == 0)
+                dictId = QString::fromUtf8(idBuf);
+            else
+                qWarning() << "[aurelex] could not read dict id for index"
+                           << id.engineIndex << "- its index cache will be left behind";
+            results.append(qMakePair(gd_remove_dict(id.engineIndex), dictId));
+        }
+        return results;
+    });
+    f.waitForFinished();
+
+    const QVector<QPair<int, QString>> results = f.result();
+    int removed = 0;
+    for (int i = 0; i < results.size(); ++i) {
+        const int rc = results.at(i).first;
+        const DictIdentity::Identity &id = ordered.at(i);
+        qInfo().noquote() << "[aurelex] duplicate unloaded: name=" << id.name
+                          << "id=" << results.at(i).second << "rc=" << rc;
+        if (rc != 0) {
+            // The engine kept it. Delete its files anyway and the next scan reads a
+            // loaded object from a missing file — strictly worse than a duplicate,
+            // so the files stay and the duplicate is reported instead.
+            qWarning() << "[aurelex] unload refused for" << id.name
+                       << "- its files kept rather than orphaning a live dictionary";
+            continue;
+        }
+        ++removed;
+        // The engine object is gone, but m_dictionaries still lists it until the
+        // async refresh lands. Record it so the sharing guard does not treat its
+        // staged directory as occupied and keep a directory that now holds
+        // nothing (nothing else would ever reclaim it).
+        if (!id.primaryFile.isEmpty())
+            m_unloadedSources.append(id.primaryFile);
+        // Only once the engine object is gone is it safe to reclaim the files.
+        deleteIdentityFiles(id, results.at(i).second);
+    }
+
+    // The list and the group membership both changed. Groups are stored by
+    // dictionary id and the survivors' ids are untouched, so their membership
+    // survives this wholesale.
+    refreshDictionaries();
+    refreshGroups();
+    return removed;
+}
+
+void EngineController::deleteIdentityFiles(const DictIdentity::Identity &id,
+                                           const QString &dictId) {
+    const QString stagedRoot = m_stagedDir;
+    const QString primary = id.primaryFile;
+    if (primary.isEmpty())
+        return;
+
+    // The index cache first: it is keyed by the engine id and needs no path
+    // checks, and leaving it behind would let a later import of the same content
+    // adopt a stale index.
+    if (!dictId.isEmpty() && !m_appDir.isEmpty()) {
+        for (const QString &full : IndexCleanup::removeIndexEntries(m_appDir, dictId))
+            qInfo() << "[aurelex] removed index entry" << full;
+    }
+
+    const QString stagedDir = stagedAncestor(primary, stagedRoot);
+    if (stagedDir.isEmpty()) {
+        // Not under the staged root: refuse rather than delete a path the app does
+        // not own. Nothing in the app stages a dictionary anywhere else.
+        qWarning() << "[aurelex] refusing to delete a dictionary outside the staged"
+                      " root:"
+                   << primary;
+        return;
+    }
+
+    // Delete the whole file SET, not just the primary: an .mdx plus its .mdd
+    // volumes, a StarDict .ifo plus .idx/.dict, is one dictionary, and leaving the
+    // companions behind means a later import of the same folder builds a broken
+    // one. Only basenames, resolved inside this dictionary's staged directory, so
+    // nothing outside it can be named.
+    const QDir sd(stagedDir);
+    for (const DictIdentity::SourceFile &sf : id.files) {
+        const QString victim = sd.filePath(sf.baseName);
+        if (!StagedCleanup::isDirectChildOf(victim, stagedRoot)) {
+            qWarning() << "[aurelex] refusing to delete outside the staged root:"
+                       << victim;
+            continue;
+        }
+        if (QFileInfo::exists(victim) && !QFile::remove(victim))
+            qWarning() << "[aurelex] could not delete" << victim;
+    }
+
+    // A DSL keeps its sounds and images in a sibling `<name>.dsl.files/` tree. It
+    // is not in the engine's file set (design.md D2), so the loop above never saw
+    // it. Remove it by name so no orphaned audio tree survives the dictionary.
+    QString tree = primary;
+    if (tree.endsWith(QLatin1String(".dz")))
+        tree.chop(3); // .dsl.dz -> .dsl
+    if (tree.endsWith(QLatin1String(".dsl")))
+        tree += QLatin1String(".files");
+    if (tree != primary) {
+        const QString treeDir = sd.filePath(QFileInfo(tree).fileName());
+        if (StagedCleanup::isDirectChildOf(treeDir, stagedRoot) &&
+            QFileInfo::exists(treeDir)) {
+            qInfo() << "[aurelex] removing staged resource tree" << treeDir;
+            QDir(treeDir).removeRecursively();
+        }
+    }
+
+    // Reclaim the staged directory ONLY when nothing still reads from it: one
+    // import folder holds many dictionaries, so removing one must not delete its
+    // siblings. removeStagedDirIfUnused re-checks that against the live list and
+    // removes the directory once its last user is gone.
+    if (!removeStagedDirIfUnused(stagedDir))
+        qInfo() << "[aurelex] staged dir kept (shared by siblings)" << stagedDir;
+}
+
 void EngineController::removeScanFailure(const QString &file) {
     if (file.isEmpty())
         return;
@@ -1055,19 +1316,28 @@ void EngineController::deleteDictionaryFiles(const QString &sourceFile,
     }
 }
 
+QStringList EngineController::liveDictionarySources() const {
+    QStringList sources;
+    sources.reserve(m_dictionaries.size());
+    for (const QVariant &v : m_dictionaries) {
+        const QString s = v.toMap().value("source").toString();
+        // A source unloaded moments ago is still in m_dictionaries until the
+        // async refresh lands; counting it would keep its staged directory alive
+        // with nothing in it, and sweepStaleStagedDirs only reclaims a directory a
+        // scan reported as FAILED, so it would never be cleaned up again.
+        if (!s.isEmpty() && !m_unloadedSources.contains(s))
+            sources.append(s);
+    }
+    return sources;
+}
+
 bool EngineController::removeStagedDirIfUnused(const QString &stagedDir) {
     if (stagedDir.isEmpty() || m_stagedDir.isEmpty())
         return false;
 
     // Containment and sharing are decided in one place so no caller can apply
     // one guard and forget the other (see app/StagedCleanup.hpp).
-    QStringList loadedSources;
-    loadedSources.reserve(m_dictionaries.size());
-    for (const QVariant &v : m_dictionaries) {
-        const QString s = v.toMap().value("source").toString();
-        if (!s.isEmpty())
-            loadedSources.append(s);
-    }
+    const QStringList loadedSources = liveDictionarySources();
 
     if (!StagedCleanup::isDirectChildOf(stagedDir, m_stagedDir)) {
         qWarning() << "[aurelex] refusing to remove staged dir outside the staged root:"
@@ -1095,13 +1365,7 @@ bool EngineController::sweepStaleStagedDirs() {
 
     // Directories a loaded dictionary reads from. Anything else under the staged
     // root produced nothing, i.e. it is a failed import.
-    QStringList live;
-    live.reserve(m_dictionaries.size());
-    for (const QVariant &v : m_dictionaries) {
-        const QString s = v.toMap().value("source").toString();
-        if (!s.isEmpty())
-            live.append(s);
-    }
+    const QStringList live = liveDictionarySources();
 
     const QStringList dirs =
         root.entryList(QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name);

@@ -141,6 +141,30 @@ int gd_dict_id( int index, char * out, int out_size );
 // invalid args / out-of-range / buffer too small.
 int gd_dict_meta( int index, char * lang_from, int lang_from_size,
                   char * lang_to, int lang_to_size, long long * size_bytes );
+// Return the dictionary's IDENTITY for duplicate resolution: its display name, its
+// primary source file path, and its COMPLETE source-file set. Fills `out` (capacity
+// out_size) with NUL-terminated, newline-separated records and returns 0 on
+// success. The first record is "D<TAB>name<TAB>primaryFilePath"; each following
+// record is "F<TAB>basename<TAB>sizeBytes<TAB>mtimeMs", one per source file, in the
+// engine's order (the primary file first). A missing file reports -1 for both size
+// and mtime. 16384 bytes is a comfortable buffer; -1 is returned if it does not fit.
+//
+// The file records carry BASENAME, never the directory, and that is the point:
+// identity is name + content, so the same dictionary stored in two different
+// staged roots must compare equal. The caller compares the records file-by-file
+// (and applies its own mtime tolerance) rather than hashing them, because a digest
+// cannot express a tolerance - and tolerating a drifted mtime is specified
+// behaviour, not an optimisation.
+//
+// Sibling resource trees (<dict>.dsl.files/, StarDict res/) are NOT part of the
+// engine's source-file list and are deliberately excluded: they carry no entries,
+// and a file-by-file comparison would otherwise run over tens of thousands of
+// sound files.
+//
+// Returns -1 on invalid args / uninitialized / buffer too small, -2 if `index` is
+// out of range (so a caller can tell "no such dictionary" from "buffer too small"
+// and drop the entry rather than retrying forever).
+int gd_dict_identity( int index, char * out, int out_size );
 int gd_move_dict( int from, int to );
 int gd_remove_dict( int dict_index );
 int gd_group_count();

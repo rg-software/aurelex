@@ -83,6 +83,16 @@ target_include_directories(staging_rules_test PRIVATE
 )
 target_link_libraries(staging_rules_test PRIVATE Qt6::Core)
 
+# Dictionary identity + duplicate comparison (resolve-duplicate-dictionaries).
+# Links only Qt Core; DictIdentity.hpp is header-only. This decides whether two
+# copies of one dictionary are the same dictionary, and it is deliberately
+# location-independent - the whole point of it.
+add_executable(dict_identity_test DictIdentityTest.cpp)
+target_include_directories(dict_identity_test PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/.."
+)
+target_link_libraries(dict_identity_test PRIVATE Qt6::Core)
+
 # Remote-catalog manifest parser tests (remote-dictionary-catalog). Links only
 # Qt Core: RemoteCatalog is the parser + installed-detection + preflight
 # constants, with no network and no engine, so the checked-in fixtures under
