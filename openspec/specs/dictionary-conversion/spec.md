@@ -63,10 +63,13 @@ parts of speech, the tags that disqualify a form, the pronunciation fields to
 prefer, and how its sense tags are presented (their abbreviations, and the ones
 that are not shown). A profile SHALL also declare whether the language has
 pronunciation recordings at all; a language without them SHALL NOT cause the
-audio archive to be fetched, in the build or in the pre-fetcher. A source
-language without a profile SHALL fall back to a permissive default and SHALL
-report that it is doing so. English, German, Japanese and Russian SHALL have
-profiles.
+audio archive to be fetched, in the build or in the pre-fetcher. A profile MAY
+declare which form tags are readings rather than inflections, the mark each
+reading's origin tag groups under, and the mark a reading with no origin prints
+under, so a language whose readings are recorded as forms (Japanese) does not
+show them as inflections. A source language without a profile SHALL fall back to
+a permissive default and SHALL report that it is doing so. English, German,
+Japanese and Russian SHALL have profiles.
 
 #### Scenario: A language with a profile needs no fallback
 
@@ -100,6 +103,11 @@ profiles.
 - **WHEN** a form's tags are outside the profile's grammatical vocabulary and are
   not disqualifying tags either
 - **THEN** that form is not listed on the article
+
+#### Scenario: A language whose readings are forms declares them
+
+- **WHEN** the profile declares which form tags are readings
+- **THEN** those forms are treated as readings and not listed as inflections
 
 #### Scenario: Russian uses its own profile
 
@@ -380,7 +388,9 @@ soft redirects and romanizations, SHALL be excluded from the output.
 
 A rendered headword card SHALL present its parts of speech in first-seen order,
 each with the grammatical forms of the base word and the senses of that part of
-speech. Records that share a part of speech SHALL be merged into one block, so an
+speech, and, where the profile declares reading forms, the word's readings
+grouped under the profile's marks on a line of their own. Records that share a
+part of speech SHALL be merged into one block, so an
 interleaved `noun, verb, noun` reads as one noun block followed by one verb
 block. Each part of speech SHALL be separated from the one before it by a blank
 line, so the sections read as distinct blocks; no blank line SHALL precede the first part of speech. When the whole card carries a
@@ -403,6 +413,17 @@ first part of speech that references it.
 - **WHEN** a headword's records include a noun, a verb, and another noun
 - **THEN** the card shows a single noun block (containing both noun records'
   senses) followed by a single verb block
+
+#### Scenario: Readings are grouped and left off the forms line
+
+- **WHEN** a card's records carry reading forms the profile declares
+- **THEN** the readings appear grouped under their marks on their own line, and
+  the forms line holds only inflections
+
+#### Scenario: Readings shared across a card are shown once
+
+- **WHEN** every record of a card carries the same readings
+- **THEN** the readings line appears once, above the first part of speech
 
 #### Scenario: Shared transcription is hoisted
 
