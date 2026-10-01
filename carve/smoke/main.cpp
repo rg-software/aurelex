@@ -176,9 +176,22 @@ int main( int argc, char ** argv )
     for ( const char * scheme : { "bres://", "gdau://" } ) {
       for ( std::size_t p = html.find( scheme ); p != std::string::npos && refs.size() < kMaxRefs;
             p = html.find( scheme, p + std::strlen( scheme ) ) ) {
-        const std::size_t end = html.find_first_of( "\"'() \t\r\n", p );
-        std::string url = html.substr( p, ( end == std::string::npos ? html.size() : end ) - p );
-        if ( std::find( refs.begin(), refs.end(), url ) == refs.end() )
+        // These URLs are quote-delimited in the markup, and they routinely
+        // contain spaces and commas -- dictionary resource paths look like
+        // "William J. Stewart, .../Image_106.png". Splitting on whitespace
+        // truncated them into a bogus URL that then "failed to resolve" and
+        // looked like a broken dictionary. Honour the surrounding quote when
+        // there is one, and only fall back to delimiters for a bare scheme.
+        std::size_t end;
+        const char quote = ( p > 0 && ( html[ p - 1 ] == '"' || html[ p - 1 ] == '\'' ) ) ? html[ p - 1 ] : 0;
+        if ( quote )
+          end = html.find( quote, p );
+        else
+          end = html.find_first_of( "\"'() \t\r\n", p );
+        if ( end == std::string::npos )
+          end = html.size();
+        std::string url = html.substr( p, end - p );
+        if ( !url.empty() && std::find( refs.begin(), refs.end(), url ) == refs.end() )
           refs.push_back( url );
       }
     }
