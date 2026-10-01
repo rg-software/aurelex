@@ -1711,10 +1711,15 @@ text: root._stagingActive
             // 48dp minimum height otherwise dominates the banner.
             Rectangle {
                 Layout.fillWidth: true
+                // Size to the content, and never stretch: `Layout.fillHeight`
+                // defaults true for a Rectangle inside a ColumnLayout when an
+                // explicit height is also set, which made the banner swallow all
+                // the leftover vertical space. `implicitHeight` + no fill wins.
+                Layout.fillHeight: false
+                implicitHeight: failuresCol.implicitHeight + 12
                 visible: engine.scanFailures.length > 0
                 color: Material.color(Material.Red, Material.Shade50)
                 radius: 4
-                height: failuresCol.implicitHeight + 12
 
                 ColumnLayout {
                     id: failuresCol
