@@ -559,6 +559,15 @@ public class AurelexActivity extends QtActivity {
             // forever (the "no supported files staged" / stack-overflow bug).
             final android.net.Uri childrenUri =
                     android.provider.DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, currentDocId);
+            // Pre-scan THIS folder for a StarDict `.ifo`. A directory named "res"
+            // is a dictionary's resource tree only when it sits beside one
+            // (engine/src/dict/stardict.cc:1631 reads <dict-folder>/res/<name>);
+            // matching "res" by name alone would copy ANY unrelated "res" in a
+            // picked tree. Done as its own listing so the decision does not
+            // depend on the order children come back in (design.md). Inside a
+            // resource tree every file is copied anyway, so it is skipped there.
+            final boolean stardictIfoInParent =
+                    !inResourceDir && folderHasStarDictIfo(cr, childrenUri);
             int sawFiles = 0, supported = 0, deduped = 0, alreadyLocal = 0;
             try (android.database.Cursor c = cr.query(childrenUri, cols, null, null, null)) {
                 if (c == null) {
@@ -582,14 +591,21 @@ public class AurelexActivity extends QtActivity {
                             android.util.Log.w(TAG, "stageTreeInto: cannot mkdir " + sub);
                             continue;
                         }
+                        // A child is a resource tree when it is a DSL
+                        // "<name>.files" directory, or a StarDict "res"
+                        // directory sitting beside a `.ifo`.
+                        final boolean childResource = inResourceDir
+                                || isDslResourceDirName(name)
+                                || (stardictIfoInParent && isStardictResDirName(name));
                         copied += stageTreeInto(treeUri, docId, cr, sub, stageRoot,
-                                depth + 1, state, inResourceDir || isResourceDirName(name));
+                                depth + 1, state, childResource);
                         continue;
                     }
                     sawFiles++;
-                    // Inside a "<name>.files" resource tree, copy EVERYTHING (DSL
-                    // sounds are .wav/.ogg/.mp3 next to images, etc.) so
-                    // pronunciation links and inline assets resolve. Elsewhere
+                    // Inside a resource tree (DSL "<name>.files" or StarDict
+                    // "res"), copy EVERYTHING (sounds are .wav/.ogg/.mp3 next to
+                    // images; StarDict's res/ holds .gif/.png/... by convention)
+                    // so pronunciation links and inline assets resolve. Elsewhere
                     // keep the supported-dictionary filter.
                     final boolean resource = inResourceDir;
                     if (!resource && !isSupportedDictionaryName(name)) continue;
@@ -765,6 +781,7 @@ public class AurelexActivity extends QtActivity {
                 || lower.endsWith(".dsl") || lower.endsWith(".dsl.dz")
                 || lower.endsWith(".ifo")
                 || isStardictCompanionName(lower)
+                || isStardictResourceArchiveName(lower)
                 // DSL resource archive (sounds/images); the engine opens it via
                 // findFirstExistingFile("<name>.dsl.files.zip").
                 || lower.endsWith(".files.zip");
@@ -797,13 +814,67 @@ public class AurelexActivity extends QtActivity {
     }
 
     /**
+     * True for the archive forms a StarDict dictionary ships its resources in
+     * (engine/src/dict/stardict.cc:1911): {@code res.zip} beside the dictionary,
+     * or {@code <base>.res.zip} (the third accepted form, {@code res/res.zip},
+     * is inside the resource directory and is copied with that tree). The
+     * archive is staged like any other supported file; the engine opens it.
+     *
+     * <p><b>Keep in sync with {@code kDictionaryExtensions} in
+     * {@code app/RemoteCatalog.cpp}</b>, as for the companions above.
+     */
+    private static boolean isStardictResourceArchiveName(String lower) {
+        return lower.equals("res.zip") || lower.endsWith(".res.zip");
+    }
+
+    /**
+     * True when {@code folder}'s children include a StarDict {@code .ifo}. Used
+     * to attribute a sibling "res" directory to a dictionary: "res" is a common
+     * name, so it is treated as resources only beside a StarDict primary file,
+     * never by name alone.
+     *
+     * <p>This is a second listing of the folder (the walk lists it again for the
+     * copy), done so the resource decision is independent of the order the
+     * provider returns children in; see {@code design.md}.
+     */
+    private static boolean folderHasStarDictIfo(android.content.ContentResolver cr,
+                                                android.net.Uri childrenUri) {
+        final String[] cols = {
+                android.provider.DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+                android.provider.DocumentsContract.Document.COLUMN_MIME_TYPE };
+        try (android.database.Cursor c = cr.query(childrenUri, cols, null, null, null)) {
+            if (c == null) return false;
+            while (c.moveToNext()) {
+                final String n = c.getString(0);
+                final String m = c.getString(1);
+                if (n == null) continue;
+                if (android.provider.DocumentsContract.Document.MIME_TYPE_DIR.equals(m)) continue;
+                if (n.toLowerCase(java.util.Locale.ROOT).endsWith(".ifo")) return true;
+            }
+        } catch (Exception e) {
+            android.util.Log.w(TAG, "folderHasStarDictIfo failed: " + e);
+        }
+        return false;
+    }
+
+    /**
      * DSL keeps a dictionary's sounds and inline images in a sibling tree named
      * "&lt;dictionary file&gt;.files" (the engine's resourceDir1/resourceDir2).
      * Its contents are copied wholesale so gd_get_audio (pronunciations) and
      * gd_get_resource (images) can resolve them.
      */
-    private static boolean isResourceDirName(String name) {
+    private static boolean isDslResourceDirName(String name) {
         return name.toLowerCase(java.util.Locale.ROOT).endsWith(".files");
+    }
+
+    /**
+     * A StarDict dictionary's resource directory is conventionally named "res"
+     * (engine/src/dict/stardict.cc:1631). The name is generic, so the caller
+     * must additionally have seen a StarDict {@code .ifo} in the same folder:
+     * see {@link #folderHasStarDictIfo}. Contents are copied wholesale.
+     */
+    private static boolean isStardictResDirName(String name) {
+        return "res".equalsIgnoreCase(name);
     }
 
     @Override

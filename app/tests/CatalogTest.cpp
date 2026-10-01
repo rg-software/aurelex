@@ -312,7 +312,8 @@ int main(int argc, char **argv) {
     // The engine's StarDict reader resolves .idx/.dict/.syn by basename off the
     // .ifo header, so the app must classify those companions as dictionary files
     // or the importer drops them and the reader fails with "No corresponding
-    // .idx file was found". Mirrors isStardictCompanionName in AurelexActivity.
+    // .idx file was found". Its resource archive (res.zip / <base>.res.zip) is
+    // part of the set too. Mirrors the helpers in AurelexActivity.
     {
         const QStringList accepted{
             QStringLiteral("word.ifo"),
@@ -320,10 +321,13 @@ int main(int argc, char **argv) {
             QStringLiteral("word.idx.dz"), QStringLiteral("word.dict"),
             QStringLiteral("word.dict.dz"), QStringLiteral("word.syn"),
             QStringLiteral("word.syn.gz"), QStringLiteral("word.syn.dz"),
+            // The resource archive forms the engine opens (stardict.cc:1911):
+            // the bare res.zip and the <base>.res.zip sibling.
+            QStringLiteral("res.zip"), QStringLiteral("word.res.zip"),
             // Case-insensitive, as the reader's findFirstExistingFile tries
             // upper-case spellings too.
             QStringLiteral("WORD.IDX"), QStringLiteral("WORD.DICT"),
-            QStringLiteral("WORD.DICT.DZ"),
+            QStringLiteral("WORD.DICT.DZ"), QStringLiteral("RES.ZIP"),
         };
         for (const QString &n : accepted)
             check(RemoteCatalog::isSupportedDictionaryName(n),
@@ -343,6 +347,10 @@ int main(int argc, char **argv) {
             // Not a real StarDict form: the reader accepts dictzip (.dict.dz)
             // only, never gzip, for the definitions file.
             QStringLiteral("word.dict.gz"),
+            // Resource-archive look-alikes: the bare "res.zip" is exact and the
+            // sibling form requires the ".<base>" dot, so neither matches.
+            QStringLiteral("xres.zip"),
+            QStringLiteral("res.zip.bak"),
             QStringLiteral("word.txt"),
         };
         for (const QString &n : rejected)

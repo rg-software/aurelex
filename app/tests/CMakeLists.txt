@@ -73,6 +73,16 @@ target_include_directories(staged_cleanup_test PRIVATE
 )
 target_link_libraries(staged_cleanup_test PRIVATE Qt6::Core)
 
+# Staging resource-directory classification (stardict-resource-staging). Links
+# only Qt Core; StagingRules.hpp is header-only. The Java staging walk is not
+# host-runnable, so this pins the rule it mirrors (the .files tree, and "res"
+# only beside a StarDict .ifo).
+add_executable(staging_rules_test StagingRulesTest.cpp)
+target_include_directories(staging_rules_test PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/.."
+)
+target_link_libraries(staging_rules_test PRIVATE Qt6::Core)
+
 # Remote-catalog manifest parser tests (remote-dictionary-catalog). Links only
 # Qt Core: RemoteCatalog is the parser + installed-detection + preflight
 # constants, with no network and no engine, so the checked-in fixtures under

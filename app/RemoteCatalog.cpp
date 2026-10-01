@@ -20,21 +20,28 @@ namespace RemoteCatalog {
 // carries no content (the reader fails with "No corresponding .idx file was
 // found"). The suffixes are the lower-cased set engine/src/dict/stardict.cc
 // resolves by basename; note there is no `.dict.gz` (dictzip is the only
-// compressed definitions form).
+// compressed definitions form). The resource archive forms the reader opens
+// (res.zip / <base>.res.zip) join the list too.
 //
-// Keep in sync with isStardictCompanionName in
-// app/android/src/org/aurelex/pocket/dictionary/AurelexActivity.java — that
-// list gates what the SAF importer copies, and the two must not drift.
+// Keep in sync with isStardictCompanionName and isStardictResourceArchiveName
+// in app/android/src/org/aurelex/pocket/dictionary/AurelexActivity.java — those
+// gate what the SAF importer copies, and the two must not drift.
 const char *const kDictionaryExtensions[] = {
     ".mdx", ".mdd", ".dsl", ".dsl.dz", ".ifo",
     ".idx", ".idx.gz", ".idx.dz", ".dict", ".dict.dz",
     ".syn", ".syn.gz", ".syn.dz",
+    ".res.zip",
     nullptr // sentinel: lets a test assert the table and the count agree
 };
 
 bool isSupportedDictionaryName(const QString &name)
 {
     const QString lower = name.toLower();
+    // The bare "res.zip" the engine tries first (stardict.cc:1911) has no
+    // leading dot, so endsWith(".res.zip") would miss it. The sibling
+    // "<base>.res.zip" matches the table entry below.
+    if (lower == QLatin1String("res.zip"))
+        return true;
     for (int i = 0; i < kDictionaryExtensionCount; ++i)
         if (lower.endsWith(QLatin1String(kDictionaryExtensions[i])))
             return true;
