@@ -10,6 +10,7 @@
 #include <QFileInfo>
 #include <QThread>
 
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -160,12 +161,43 @@ int main( int argc, char ** argv )
   std::vector< char > out( 1 << 20 );
   const int lookSz = gd_lookup( word, out.data(), static_cast< int >( out.size() ) );
   std::printf( "gd_lookup(\"%s\") -> %d bytes\n", word, lookSz );
+  const std::string html( out.data(), lookSz > 0 ? lookSz : 0 );
+
+  // Collect every distinct resource URL the article references, so that the
+  // fetch below exercises all of them rather than only the first. That
+  // distinction decides whether the smoke tool can see an image at all: MDX
+  // emits its stylesheet first, so "first bres://" is always the .css and the
+  // .jpg/.png the article actually shows was never fetched.
+  std::vector< std::string > refs;
+  {
+    // Bounded: an article referencing hundreds of resources is not the case
+    // this exists to catch, and each ref costs a read through the engine.
+    const size_t kMaxRefs = 40;
+    for ( const char * scheme : { "bres://", "gdau://" } ) {
+      for ( std::size_t p = html.find( scheme ); p != std::string::npos && refs.size() < kMaxRefs;
+            p = html.find( scheme, p + std::strlen( scheme ) ) ) {
+        const std::size_t end = html.find_first_of( "\"'() \t\r\n", p );
+        std::string url = html.substr( p, ( end == std::string::npos ? html.size() : end ) - p );
+        if ( std::find( refs.begin(), refs.end(), url ) == refs.end() )
+          refs.push_back( url );
+      }
+    }
+  }
+
   if ( lookSz > 0 ) {
-    std::printf( "BEGIN\\%.*s\nEND\n", lookSz < 800 ? lookSz : 800, out.data() );
-    const std::string html( out.data(), lookSz );
+    // Dump the whole body, not a head fragment. The old 800-char cap stopped
+    // inside <head>, so an article's own <img src="bres://…"> references were
+    // never visible and two resource investigations (StarDict res/, MDict mdd)
+    // could not be settled from this output. A real article is a few KiB; the
+    // buffer above is 1 MiB, so printing it whole is fine. The cap is a
+    // visibility limit only — the engine still returns everything either way.
+    std::printf( "BEGIN\\%.*s\nEND\n", lookSz, out.data() );
     std::printf( "MARKERS: gdarticlebody=%s gdarticle=%s\n",
                  html.find( "gdarticlebody" ) != std::string::npos ? "yes" : "no",
                  html.find( "gdarticle" ) != std::string::npos ? "yes" : "no" );
+    for ( const std::string & r : refs )
+      std::printf( "REF: %s\n", r.c_str() );
+    std::printf( "REFS: %d\n", static_cast< int >( refs.size() ) );
   }
 
   // Optional dark-mode check: set dark mode and re-lookup, asserting the
@@ -181,24 +213,33 @@ int main( int argc, char ** argv )
                  darkHtml.find( "darkreader.js" ) != std::string::npos ? "yes" : "no" );
   }
 
-  // Exercise the resource/audio fetch: pick the first bres:// or gdau:// URL
-  // the article references (if any) and stream it back through the boundary.
-  const std::string html( out.data(), lookSz > 0 ? lookSz : 0 );
-  for ( const char * scheme : { "bres://", "gdau://" } ) {
-    const size_t pos = html.find( scheme );
-    if ( pos == std::string::npos )
-      continue;
-    size_t end = pos;
-    while ( end < html.size() && html[ end ] != '"' && html[ end ] != '>' && html[ end ] != '\n' )
-      ++end;
-    const std::string url = html.substr( pos, end - pos );
+  // Exercise the resource/audio fetch: stream back through the boundary every
+  // distinct URL the article references. Fetching only the first one meant a
+  // dictionary's stylesheet was the only resource ever read, so a broken image
+  // inside the .mdd or a StarDict res/ tree still reported a clean run.
+  for ( const std::string & url : refs ) {
     std::vector< char > res( 1 << 20 );
     const int resSz = gd_get_resource( url.c_str(), res.data(), static_cast< int >( res.size() ) );
-    std::printf( "gd_get_resource(\"%s\") -> %d bytes (used as audio: gd_get_audio same path)\n",
+    // Sniff the payload's magic bytes. A resource route that answers with the
+    // right *count* but wrong *content* — a truncated archive read, an HTML
+    // error page, a stray index — still looks like a pass on length alone, and
+    // in the WebView that is a broken image rather than a missing one.
+    const char * magic = "n/a";
+    if ( resSz >= 3 && static_cast< unsigned char >( res[ 0 ] ) == 0xFF
+         && static_cast< unsigned char >( res[ 1 ] ) == 0xD8 )
+      magic = "jpeg";
+    else if ( resSz >= 8 && res[ 0 ] == '\x89' && res[ 1 ] == 'P' && res[ 2 ] == 'N' && res[ 3 ] == 'G' )
+      magic = "png";
+    else if ( resSz >= 3 && res[ 0 ] == 'G' && res[ 1 ] == 'I' && res[ 2 ] == 'F' )
+      magic = "gif";
+    else if ( resSz >= 4 && res[ 0 ] == '<' )
+      magic = "html-or-text";
+    std::printf( "gd_get_resource(\"%s\") -> %d bytes [magic=%s]%s\n",
                  url.c_str(),
-                 resSz );
+                 resSz,
+                 magic,
+                 resSz <= 0 ? "  ** FAILED TO RESOLVE **" : "" );
     (void)res;
-    break;
   }
 
   // ---- DSL optional/hidden-zone expander smoke (dsl-optional-parts-toggle) ----
