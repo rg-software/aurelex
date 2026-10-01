@@ -14,8 +14,22 @@ namespace RemoteCatalog {
 // The formats the engine loads natively (v1 scope). Anything else in a
 // `dictionary`-role file makes the entry not installable rather than failing
 // the download.
+//
+// A StarDict dictionary is a SET of sibling files sharing a basename, so its
+// companions are listed here alongside the `.ifo` header: the header alone
+// carries no content (the reader fails with "No corresponding .idx file was
+// found"). The suffixes are the lower-cased set engine/src/dict/stardict.cc
+// resolves by basename; note there is no `.dict.gz` (dictzip is the only
+// compressed definitions form).
+//
+// Keep in sync with isStardictCompanionName in
+// app/android/src/org/aurelex/pocket/dictionary/AurelexActivity.java — that
+// list gates what the SAF importer copies, and the two must not drift.
 const char *const kDictionaryExtensions[] = {
-    ".mdx", ".mdd", ".dsl", ".dsl.dz", ".ifo"
+    ".mdx", ".mdd", ".dsl", ".dsl.dz", ".ifo",
+    ".idx", ".idx.gz", ".idx.dz", ".dict", ".dict.dz",
+    ".syn", ".syn.gz", ".syn.dz",
+    nullptr // sentinel: lets a test assert the table and the count agree
 };
 
 bool isSupportedDictionaryName(const QString &name)

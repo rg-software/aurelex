@@ -70,17 +70,13 @@ like one you imported yourself. Nothing is fetched again after that.
 |---|---|---|
 | mdict | `.mdx`, `.mdd` | Works |
 | ABBYY Lingvo DSL | `.dsl`, `.dsl.dz` | Works (including sounds and images) |
-| StarDict | `.ifo`, `.idx`, `.dict` | Does not load yet — see [Limitations](#limitations) |
+| StarDict | `.ifo`, `.idx`, `.dict` | Works |
 
 Anything else — BGL, SDict, XDXF, Aard, SLOB, GLS, Zim, EPWING, LSA — is not read
 natively. If you have dictionaries in one of those formats, convert them on a
 computer with [pyglossary](https://github.com/ilius/pyglossary), then import the
-result.
-
-⚠️ Today that means going via `.mdx`. pyglossary can only *write* StarDict, which
-Aurelex does not load yet (see [Limitations](#limitations)), and it cannot write
-mdict or DSL at all — so the working route is pyglossary → text file →
-[mdict-utils](https://github.com/liuyug/mdict-utils) → `.mdx`.
+result. pyglossary's StarDict output (`.ifo`/`.idx`/`.dict`) imports directly;
+its other output formats do not.
 
 ## Importing dictionaries
 
@@ -122,8 +118,6 @@ Everything happens on-device.
 
 Aurelex is early software (0.3) and the polish is uneven. Known problems:
 
-- **StarDict dictionaries do not load.** The importer copies the `.ifo` but not
-  its `.idx` and `.dict` companions. mdict and DSL are unaffected.
 - **Speex audio (`.spx`) is skipped silently.** ogg, mp3 and wav play.
 - **The catalog is a starter collection, not a library.** It carries enough
   dictionaries to be genuinely useful on its own, but a serious dictionary habit

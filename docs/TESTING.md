@@ -36,6 +36,10 @@ This adb-installs the result (`-Install`); without it the APK lands in
 | 6 | Reorder within a group (Groups tab) | Group article order follows membership order | ✅ |
 | 7 | Select dictionaries → "Remove" | Entry removed immediately (no confirmation); search no longer returns its words; its staged copy + index are deleted | ✅ |
 | 8 | No dictionaries / import a folder with none | Empty state / onboarding hint appears; "no supported dictionaries" is shown | ✅ |
+| 8a | Import a folder holding a **StarDict** set (`word.ifo` + `word.idx` + `word.dict`, same basename) | All three companions are staged; the dictionary is listed and its headwords resolve. Before `fix-stardict-staging` only the `.ifo` was copied and the entry failed to load | ⬜ |
+| 8b | Import a StarDict set packaged with dictzip (`word.dict.dz`) | Loads the same as an uncompressed one | ⬜ |
+| 8c | Import a folder holding **only** a StarDict `.ifo` (companions absent) | Reports a failed load rather than listing a broken entry that returns nothing | ⬜ |
+| 8d | Remove an imported StarDict dictionary | Its staged companions and its index are deleted together; lookups stop returning its words | ⬜ |
 
 ## Groups
 
@@ -268,9 +272,6 @@ the pane makes no catalog request. Format, manifest and hosting rules:
   the earlier sun/moon candidates (`0xe2c8`/`0xf6f0`) were really `folder_open`/`match_word`.
   Use the Material Symbols `.codepoints` file as the authority and keep every name passed to
   `icon()`/`symbolIcon()` backed by a map key — `icon()` now warns when it is not.
-- StarDict import stages the `.ifo` but not its required sibling `.idx`/`.dict`
-  files (`isSupportedDictionaryName`), so StarDict dictionaries do not currently
-  load; the intended contract remains in `dictionary-management`.
 - External lookup can be dropped after a failed lookup: `_showArticle` rejects a
   reply whose word no longer matches `_requestedWord`.
 - Article Back/Forward can lose the group scope it was opened in.

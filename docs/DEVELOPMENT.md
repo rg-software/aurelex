@@ -175,8 +175,75 @@ Not scheduled, not proposed, not promised. Each one is picked up by opening an O
   Candidate sources and their coverage/licenses (WordNet / Open Multilingual WordNet, Tatoeba,
   BabelNet) are recorded in `docs/KAIKKI-CONVERSION.md` under "Future: a translation dictionary".
 
-Engine-touching items (pre-built index caches) go through the patch pipeline (`patches/` + CI
-smoke); pure-QML items (word-list export, widget clipboard) do not.
+### Dictionary format coverage
+
+Context and effort estimates for these were worked out while fixing StarDict
+(`openspec/changes/fix-stardict-staging`). The short version: **pyglossary is the
+converter for almost everything** — it reads BGL, EPWING, SLOB, MDict, XDXF,
+AppleDict, Lingoes and more, and StarDict is its one writable target — so a native
+reader is usually redundant once StarDict import works. Only a format users cannot
+reasonably convert is worth engine work.
+
+- **EPWING (native)** — the strongest candidate on *value*, and the reason is not
+  convenience: it is *the* format serious Japanese dictionaries ship in, and the
+  app already ships a Japanese UI, so a JA-localised app that cannot load a JA
+  dictionary is a mismatch. But it is **not** cheap, and it is weaker than it
+  first looks on build cost:
+  - It depends on the **`eb` (libeb) library** (`engine/src/dict/epwing_book.hh`
+    includes `<eb/eb.h>`), which the original design **dropped** — EPWING's `eb`
+    submodule is listed among the cut dependencies in the archived
+    `goldendict-mobile-port` design (§ D6), because getting it to cross-compile for
+    Android was a known wall. So this is a cross-compile project first and a wiring
+    project second, unlike BGL/GLS.
+  - It is a **directory** format keyed on a `CATALOGS` file, which does not fit the
+    boundary's one-primary-file-at-a-time loader (`loadPrimary` in `gd_boundary.cc`
+    deliberately isolates each file for crash safety) — that loader needs real
+    work, as it does for Dictd.
+  - Expect variant risk (JIS X 0208 charsets, several compression schemes;
+    `epwing_charmap.cc` covers the charmap side) and no cheap test fixture — there
+    is no EPWING equivalent of `make-smoke-stardict.py`, since real EPWING sets are
+    CD-ROM-derived.
+  Deliberately deferred from the first release. If pursued, scope the variant
+  matrix explicitly, treat the `eb` cross-compile as its own spike, and give it a
+  release of its own rather than riding along.
+- **XDXF (native)** — nearly free: `xdxf.cc` and `xdxf2html.cc` are **already
+  compiled into the carve** and simply not wired into the scan filter or dispatch.
+  Low value on its own (XDXF is an interchange format, not one people distribute
+  dictionaries in, and pyglossary covers it), so do it only as a warm-up or if the
+  wiring is being touched anyway.
+- **Babylon `.bgl`, GLS `.gls`** — no new dependencies (zlib is already linked).
+  Mechanical to add, but pyglossary already converts them, so the argument for
+  native support is weak.
+- **Aard2 `.slob`, SDict `.dct`, Dictd, LSA `.lsa`** — same reasoning; LSA would add
+  libvorbisfile, Dictd is another multi-file format with the `loadPrimary` problem.
+  Aard2 and SLOB matter slightly more than the rest because they are the native
+  formats of Android dictionary apps, so users may already have them on the phone.
+- **Zim `.zim` / Hunspell** — probably not, on purpose. Zim is an offline HTML
+  archive rather than a headword dictionary (a different product category, and it
+  needs libzim); Hunspell is spellchecking/morphology, not definitions. Hunspell
+  was cut in the original design for a *build* reason rather than a product one
+  (its autotools cross-compile fails on Android NDK r23; see that design's § D6),
+  so it is only worth revisiting if the toolchain problem disappears or someone
+  actually wants "close words" morphology.
+- **Wiring cost, if a reader is ever added** — the format knowledge is currently
+  spread across **three** places, not one:
+  1. the scan filter and the per-file dispatch in `carve/gd_boundary.cc`
+     (`filters` near the top of `gd_scan_dicts`, and the `else if` chain below it);
+  2. the importer's staging filter in Java (`AurelexActivity.isSupportedDictionaryName`
+     / `isStardictCompanionName`), which decides what is copied in the first place;
+  3. `kDictionaryExtensions` in `app/RemoteCatalog.cpp`, which drives catalog
+     install validation and installed-detection.
+
+  Adding a format means touching all three, plus compiling the reader into
+  `carve/CMakeLists.txt`. The Java/C++ pair is the recurring trap and the one that
+  caused the StarDict bug, because only the boundary was exercised by the smoke
+  test. Consider unifying that pair before adding a fourth copy of the knowledge —
+  `catalog_test` already covers the C++ side and could cover a shared source.
+- **Conversion guidance lives in the README** — the user-facing "convert it
+  yourself" path is documented there, and it should stay in sync with this list.
+
+Engine-touching items (pre-built index caches, any native format reader) go through the patch
+pipeline (`patches/` + CI smoke); pure-QML items (word-list export, widget clipboard) do not.
 
 ## Localization
 

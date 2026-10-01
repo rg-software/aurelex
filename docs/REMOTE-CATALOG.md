@@ -135,7 +135,22 @@ Entry-level rules:
   disables the feature instead of producing a silently-wrong list.
 
 Supported `dictionary`-role extensions in this build: `.mdx`, `.mdd`, `.dsl`,
-`.dsl.dz`, `.ifo`.
+`.dsl.dz`, `.ifo`, and a StarDict dictionary's companion files `.idx`/`.idx.gz`/
+`.idx.dz`, `.dict`/`.dict.dz`, `.syn`/`.syn.gz`/`.syn.dz`.
+
+A StarDict entry lists its whole set, because the `.ifo` header alone carries no
+content and the reader fails without its companions:
+
+```json
+"files": [
+  { "role": "dictionary", "required": true, "name": "word.ifo",  "url": "https://…", "sizeBytes": 1 },
+  { "role": "dictionary", "required": true, "name": "word.idx",  "url": "https://…", "sizeBytes": 1 },
+  { "role": "dictionary", "required": true, "name": "word.dict", "url": "https://…", "sizeBytes": 1 }
+]
+```
+
+Marking all three `required` is what makes installed-detection report the entry
+installed only once they have all landed.
 
 ### mdict pairs
 

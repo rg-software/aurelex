@@ -764,9 +764,36 @@ public class AurelexActivity extends QtActivity {
         return lower.endsWith(".mdx") || lower.endsWith(".mdd")
                 || lower.endsWith(".dsl") || lower.endsWith(".dsl.dz")
                 || lower.endsWith(".ifo")
+                || isStardictCompanionName(lower)
                 // DSL resource archive (sounds/images); the engine opens it via
                 // findFirstExistingFile("<name>.dsl.files.zip").
                 || lower.endsWith(".files.zip");
+    }
+
+    /**
+     * True for a StarDict dictionary's companion files.
+     *
+     * <p>A StarDict dictionary is a SET of sibling files sharing a basename: the
+     * {@code .ifo} is only a header naming an {@code .idx} (index) and a
+     * {@code .dict} (definitions), plus an optional {@code .syn}. Staging the
+     * {@code .ifo} alone leaves the reader with no content, and it fails with
+     * "No corresponding .idx file was found" — so the companions must be copied
+     * too.
+     *
+     * <p>The suffixes below are exactly the lower-cased set
+     * {@code engine/src/dict/stardict.cc} resolves by basename
+     * (findFirstExistingFile over idx/dict/syn and their compressed forms). Note
+     * there is no {@code .dict.gz}: dictzip ({@code .dict.dz}) is the only
+     * compressed form of the definitions file.
+     *
+     * <p><b>Keep in sync with {@code kDictionaryExtensions} in
+     * {@code app/RemoteCatalog.cpp}</b> — the same knowledge gates catalog
+     * installs and installed-detection, and the two lists must not drift.
+     */
+    private static boolean isStardictCompanionName(String lower) {
+        return lower.endsWith(".idx") || lower.endsWith(".idx.gz") || lower.endsWith(".idx.dz")
+                || lower.endsWith(".dict") || lower.endsWith(".dict.dz")
+                || lower.endsWith(".syn") || lower.endsWith(".syn.gz") || lower.endsWith(".syn.dz");
     }
 
     /**

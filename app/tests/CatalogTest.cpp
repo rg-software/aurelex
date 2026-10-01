@@ -277,6 +277,57 @@ int main(int argc, char **argv) {
               "a missing schemaVersion is rejected");
     }
 
+    // ---- format classification: a StarDict dictionary is a SET, not one file ----
+    // The engine's StarDict reader resolves .idx/.dict/.syn by basename off the
+    // .ifo header, so the app must classify those companions as dictionary files
+    // or the importer drops them and the reader fails with "No corresponding
+    // .idx file was found". Mirrors isStardictCompanionName in AurelexActivity.
+    {
+        const QStringList accepted{
+            QStringLiteral("word.ifo"),
+            QStringLiteral("word.idx"),  QStringLiteral("word.idx.gz"),
+            QStringLiteral("word.idx.dz"), QStringLiteral("word.dict"),
+            QStringLiteral("word.dict.dz"), QStringLiteral("word.syn"),
+            QStringLiteral("word.syn.gz"), QStringLiteral("word.syn.dz"),
+            // Case-insensitive, as the reader's findFirstExistingFile tries
+            // upper-case spellings too.
+            QStringLiteral("WORD.IDX"), QStringLiteral("WORD.DICT"),
+            QStringLiteral("WORD.DICT.DZ"),
+        };
+        for (const QString &n : accepted)
+            check(RemoteCatalog::isSupportedDictionaryName(n),
+                  QStringLiteral("a StarDict companion is a dictionary file: %1").arg(n));
+
+        // A bare extension match, NOT a basename-sibling rule: the importer's
+        // walker is single-pass, so `w.idx` is accepted regardless of whether
+        // `w.ifo` was seen. Benign — the engine only discovers .ifo/.mdx/.dsl
+        // primaries, so a stray file never becomes a dictionary.
+        check(RemoteCatalog::isSupportedDictionaryName(QStringLiteral("orphan.idx")),
+              "a companion extension is accepted on its own (deliberate)");
+
+        const QStringList rejected{
+            QStringLiteral("word.bgl"),  QStringLiteral("word.xdxf"),
+            QStringLiteral("word.slob"), QStringLiteral("word.zim"),
+            QStringLiteral("word.epwing"), QStringLiteral("word.dct"),
+            // Not a real StarDict form: the reader accepts dictzip (.dict.dz)
+            // only, never gzip, for the definitions file.
+            QStringLiteral("word.dict.gz"),
+            QStringLiteral("word.txt"),
+        };
+        for (const QString &n : rejected)
+            check(!RemoteCatalog::isSupportedDictionaryName(n),
+                  QStringLiteral("an unsupported format is still rejected: %1").arg(n));
+
+        // The table and its count must agree: a mistyped count silently drops
+        // the final entries from every classification (the loop stops early).
+        int extCount = 0;
+        while (RemoteCatalog::kDictionaryExtensions[extCount] != nullptr)
+            ++extCount;
+        check(extCount == RemoteCatalog::kDictionaryExtensionCount,
+              QStringLiteral("kDictionaryExtensionCount (%1) matches the extension table (%2)")
+                  .arg(RemoteCatalog::kDictionaryExtensionCount).arg(extCount));
+    }
+
     // ---- free-space preflight tiers are one place and are what we think ----
     check(RemoteCatalog::kMinHeadroomBytes == 512LL * 1024 * 1024,
           "refuse tier is 512 MiB of headroom");

@@ -178,8 +178,11 @@ struct Manifest {
 inline constexpr int kSchemaVersion = 1;
 
 // Dictionary file extensions the engine loads, lowercase and WITH the dot.
+// Includes a StarDict dictionary's companion files (see the comment on the
+// definition in RemoteCatalog.cpp): a StarDict entry is a set, not one file.
+// The array is nullptr-terminated so a test can assert this count matches it.
 extern const char *const kDictionaryExtensions[];
-inline constexpr int kDictionaryExtensionCount = 5;
+inline constexpr int kDictionaryExtensionCount = 13;
 
 /** True when `name` ends in a format this build can install. */
 bool isSupportedDictionaryName(const QString &name);
