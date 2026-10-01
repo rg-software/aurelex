@@ -31,33 +31,19 @@ data that is already present locally.
 - **WHEN** the tool runs with audio disabled
 - **THEN** it does not download the Wiktionary audio archive
 
-### Requirement: Language-pair selection
+### Requirement: Language selection
 
-The system SHALL accept a source language, which is the language of the indexed
-headwords, and a target language, which is the language of the rendered glosses
-and translations. The source language MAY equal the target language, which
-denotes a monolingual dictionary. For a pair that the snapshot cannot satisfy,
-the system SHALL report the pair as unsupported instead of producing an empty or
-misleading dictionary. Only records of the source language SHALL contribute to
-the output.
+The system SHALL build a monolingual dictionary: the indexed headwords and their
+glosses SHALL be in the same language, taken from the data edition for that
+language. The language SHALL be selected explicitly, and only records of that
+language SHALL contribute to the output. A language the snapshot cannot satisfy
+SHALL be reported as unsupported rather than producing an empty or misleading
+dictionary.
 
-#### Scenario: Monolingual pair
+#### Scenario: Monolingual dictionary
 
-- **WHEN** the user requests source equal to target (for example `en/en`)
-- **THEN** the output indexes base-form headwords of that language with their
-  definitions in that language
-
-#### Scenario: Bilingual pair
-
-- **WHEN** the user requests a distinct target language (for example `en/ru`)
-- **THEN** the output includes the target-language translations available for
-  each rendered sense
-
-#### Scenario: Unsupported pair
-
-- **WHEN** the user requests a pair for which the snapshot has no matching
-  headwords
-- **THEN** the tool reports the pair as unsupported and produces no dictionary
+- **WHEN** the tool builds for a language from that language's data edition
+- **THEN** the indexed headwords and their glosses are in the same language
 
 #### Scenario: Records of another language are excluded
 
@@ -65,6 +51,11 @@ the output.
   language alongside the source-language one (even when the other record carries
   nested data that names the source language)
 - **THEN** only the source-language record contributes to the article
+
+#### Scenario: Unsupported language
+
+- **WHEN** the snapshot has no records for the requested language
+- **THEN** the tool reports the language as unsupported and produces no dictionary
 
 ### Requirement: Source-language profiles
 
@@ -144,21 +135,17 @@ mode adds those forms to the headword suggestion list.
 - **WHEN** the tool runs without the inflected-form option
 - **THEN** inflected forms are not indexed and do not appear in suggestions
 
-### Requirement: Article content
+### Requirement: Article body
 
 Each indexed headword article SHALL include the word's parts of speech and its
 glosses, the grammatical forms of the base word, and, where the source provides
-them, examples. For a bilingual pair it SHALL also include the target-language
-translations associated with the rendered senses.
+them, examples.
 
-#### Scenario: Monolingual article content
-- **WHEN** an article is rendered for a monolingual pair
+#### Scenario: Article content
+
+- **WHEN** an article is rendered
 - **THEN** it shows the word's parts of speech, glosses, examples where present,
   and its grammatical forms
-
-#### Scenario: Bilingual article content
-- **WHEN** an article is rendered for a bilingual pair
-- **THEN** it additionally shows the target-language translations for its senses
 
 ### Requirement: Bounded pronunciation audio
 
