@@ -23,11 +23,13 @@ import androidx.core.content.ContextCompat;
  * backgrounded and is not silently killed, and to give the user visible
  * feedback that processing is happening.
  *
- * Files land in {@code files/staging-tmp/<sourceId>} and are atomically
- * renamed to {@code files/staged/<sourceId>} only when the copy is complete,
- * so a killed copy never leaves a half-copied tree that the engine would
- * (re)scan. Only then is the source registered via {@code source.xml} for the
- * C++ poller (EngineController) to ingest and scan.
+ * Files land in {@code files/staging-tmp/<sourceId>} and are merged into
+ * {@code files/staged/<sourceId>} only when the copy is complete, so a killed
+ * copy never leaves a half-copied tree that the engine would (re)scan. The merge
+ * is an OVERLAY, not a replace: the staging walk dedups unchanged files against
+ * this folder's previous copy, so those files never reach the temp dir and must
+ * not be deleted with it. Only then is the source registered via
+ * {@code source.xml} for the C++ poller (EngineController) to ingest and scan.
  */
 public class StagingService extends Service {
     private static final String TAG = "Aurelex";
@@ -159,13 +161,25 @@ public class StagingService extends Service {
                 if (tmpDir.exists()) AurelexActivity.deleteRecursively(tmpDir);
                 return 0;
             }
-            // Swap temp -> final; a stale final dir is only our snapshot.
-            if (stagedDir.exists()) AurelexActivity.deleteRecursively(stagedDir);
-            if (!tmpDir.renameTo(stagedDir)) {
-                android.util.Log.e(TAG, "stage rename failed, discarding " + tmpDir);
+            // Merge temp -> final. A plain replace is WRONG here: stageTreeInto
+            // dedups unchanged files against this folder's OWN previous copy in
+            // files/staged, so they never reach the temp dir. Deleting the final
+            // dir and renaming the (partial) temp over it would drop every file
+            // that was skipped as a duplicate — e.g. re-importing a StarDict
+            // folder after adding its res/ tree destroyed dzsample.{ifo,idx,dict}
+            // and left only res/ (data loss). Overlay instead: unchanged files
+            // stay in the final dir, new/changed files are moved over them.
+            if (!stagedDir.exists() && !stagedDir.mkdirs()) {
+                android.util.Log.e(TAG, "cannot create " + stagedDir + ", discarding " + tmpDir);
                 AurelexActivity.deleteRecursively(tmpDir);
                 return 0;
             }
+            if (!overlayTree(tmpDir, stagedDir)) {
+                android.util.Log.e(TAG, "stage overlay failed, discarding " + tmpDir);
+                AurelexActivity.deleteRecursively(tmpDir);
+                return 0;
+            }
+            AurelexActivity.deleteRecursively(tmpDir);
             // One-off import: no source.xml registration (that was the old
             // "persistent sources" model). Clearing the staging marker below is
             // the C++ poller's signal to scan the staged root.
@@ -175,6 +189,46 @@ public class StagingService extends Service {
         } catch (Exception e) {
             android.util.Log.w(TAG, "stageOne failed for " + display + ": " + e);
             return 0;
+        }
+    }
+
+    /**
+     * Moves every file under {@code src} to the same relative path under
+     * {@code dst}, creating directories and replacing a same-named file. Both
+     * trees live under {@code getFilesDir()}, so a move is a rename; a copy is
+     * the fallback if the rename is refused. Returns false on the first failure
+     * (the caller then discards the temp tree).
+     */
+    private static boolean overlayTree(java.io.File src, java.io.File dst) {
+        final java.io.File[] children = src.listFiles();
+        if (children == null) return true;
+        if (!dst.exists() && !dst.mkdirs()) return false;
+        for (java.io.File child : children) {
+            final java.io.File target = new java.io.File(dst, child.getName());
+            if (child.isDirectory()) {
+                if (!overlayTree(child, target)) return false;
+                continue;
+            }
+            if (target.exists() && !target.delete()) return false;
+            if (!child.renameTo(target)) {
+                if (!copyFile(child, target)) return false;
+                child.delete();
+            }
+        }
+        return true;
+    }
+
+    /** Byte copy fallback for {@link #overlayTree}; returns false on failure. */
+    private static boolean copyFile(java.io.File src, java.io.File dst) {
+        try (java.io.InputStream in = new java.io.FileInputStream(src);
+             java.io.FileOutputStream out = new java.io.FileOutputStream(dst)) {
+            final byte[] buf = new byte[64 * 1024];
+            int n;
+            while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
+            return true;
+        } catch (Exception e) {
+            android.util.Log.w(TAG, "copyFile failed for " + src + ": " + e);
+            return false;
         }
     }
 
