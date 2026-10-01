@@ -61,9 +61,12 @@ The system SHALL carry a profile for each supported source language, describing
 its grammatical form vocabulary and short labels, the display labels for its
 parts of speech, the tags that disqualify a form, the pronunciation fields to
 prefer, and how its sense tags are presented (their abbreviations, and the ones
-that are not shown). A source language without a profile SHALL fall back to a
-permissive default and SHALL report that it is doing so. English, German,
-Japanese and Russian SHALL have profiles.
+that are not shown). A profile SHALL also declare whether the language has
+pronunciation recordings at all; a language without them SHALL NOT cause the
+audio archive to be fetched, in the build or in the pre-fetcher. A source
+language without a profile SHALL fall back to a permissive default and SHALL
+report that it is doing so. English, German, Japanese and Russian SHALL have
+profiles.
 
 #### Scenario: A language with a profile needs no fallback
 
@@ -103,6 +106,17 @@ Japanese and Russian SHALL have profiles.
 - **WHEN** the tool builds with `--source-lang ru`
 - **THEN** no missing-profile fallback is reported, and Russian parts of speech,
   forms and sense tags are labelled with the Russian profile's terms
+
+#### Scenario: Japanese uses its own profile
+
+- **WHEN** the tool builds with `--source-lang ja`
+- **THEN** no missing-profile fallback is reported, and Japanese parts of speech,
+  forms and sense tags are labelled with the Japanese profile's terms
+
+#### Scenario: A language with no recordings skips the archive
+
+- **WHEN** the language's profile declares no pronunciation recordings
+- **THEN** the build does not download the audio archive and bundles no audio
 
 #### Scenario: A language without a profile falls back and reports it
 
@@ -614,7 +628,10 @@ qualifying example exists, so such a sense is illustrated rather than left bare,
 and a modern-readable example SHALL be preferred when one exists. An example
 longer than a fixed bound SHALL be shortened at a word boundary to keep the part
 that shows the headword in use: the sentence containing the headword, or, when
-that sentence too exceeds the bound, a window around the headword.
+that sentence too exceeds the bound, a window around the headword. In a language
+written without word spaces, the headword SHALL be matched as a substring of the
+example, and a sentence SHALL end at that language's own sentence punctuation as
+well as at `.`.
 
 #### Scenario: Example must use the headword
 
@@ -657,6 +674,18 @@ that sentence too exceeds the bound, a window around the headword.
 
 - **WHEN** a qualifying example exceeds the length bound
 - **THEN** it is cut at a word boundary that fits the bound
+
+#### Scenario: A CJK headword is matched without word boundaries
+
+- **WHEN** an example in a language written without word spaces contains the
+  headword in the middle of a clause
+- **THEN** the example qualifies, and the headword is located inside the clause
+
+#### Scenario: A CJK example is bounded by its own full stop
+
+- **WHEN** an example in a language written without word spaces runs past the
+  bound and the headword's sentence ends with that language's full stop
+- **THEN** the shown text is that sentence, and its leading clauses are dropped
 
 ### Requirement: Linked related headwords
 
