@@ -2173,7 +2173,24 @@ class LangProfileTests(unittest.TestCase):
         ja = TOOL.get_lang_profile("ja")
         self.assertTrue(ja.form_qualifies(("continuative",)))
         self.assertTrue(ja.form_qualifies(("imperfective", "stem")))
-        self.assertFalse(ja.has_audio)
+        # Japanese has few recordings and few IPA values, but it has both
+        self.assertTrue(ja.has_audio)
+        self.assertEqual(ja.pron_fields, ("ipa",))
+
+    def test_a_sound_tagged_as_another_notation_is_not_shown_as_ipa(self):
+        # wiktextract files X-SAMPA under `ipa` on some entries; printing it as
+        # IPA would be a lie, so it is skipped
+        ja = TOOL.get_lang_profile("ja")
+        record = {
+            "word": "日本", "pos": "noun",
+            "sounds": [{"ipa": "/n'ip:o_HN/", "tags": ["X-SAMPA"]}],
+        }
+        self.assertEqual(TOOL._record_transcription(record, ja), "")
+
+    def test_a_real_japanese_ipa_is_shown_bare(self):
+        ja = TOOL.get_lang_profile("ja")
+        record = {"word": "ち", "pos": "noun", "sounds": [{"ipa": "/t͡ɕi/"}]}
+        self.assertEqual(TOOL._record_transcription(record, ja), "/t͡ɕi/")
 
     def test_japanese_labels_are_in_japanese(self):
         ja = TOOL.get_lang_profile("ja")
@@ -2197,16 +2214,23 @@ class LangProfileTests(unittest.TestCase):
             ["セイ (読み, 漢音, 常用)"],
         )
 
-    def test_japanese_has_no_audio_so_no_archive_is_fetched(self):
+    def test_a_language_without_recordings_skips_the_archive(self):
+        # The mechanism a profile uses to say "this language has no recordings":
+        # the build takes the --no-audio path and never opens the archive.
         with tempfile.TemporaryDirectory() as tmp:
-            jsonl = os.path.join(tmp, "ja.jsonl")
+            jsonl = os.path.join(tmp, "xx.jsonl")
             with open(jsonl, "w", encoding="utf-8") as f:
                 f.write(json.dumps({
-                    "word": "青", "lang_code": "ja", "pos": "noun",
-                    "senses": [{"glosses": ["色の一つ。"]}],
+                    "word": "w", "lang_code": "xx", "pos": "noun",
+                    "senses": [{"glosses": ["A thing."]}],
                 }) + "\n")
+            TOOL.LANG_PROFILES["xx"] = TOOL.LangProfile(
+                "xx", set(), set(), (), {}, has_audio=False
+            )
+            self.addCleanup(TOOL.LANG_PROFILES.pop, "xx", None)
+
             args = TOOL.build_parser().parse_args([
-                "--source-lang", "ja", "--jsonl", jsonl,
+                "--source-lang", "xx", "--jsonl", jsonl,
                 "--out-dir", os.path.join(tmp, "out"),
             ])
             args.cache_dir = os.path.join(tmp, "cache")
@@ -2217,7 +2241,6 @@ class LangProfileTests(unittest.TestCase):
 
             TOOL._open_with_retries = blocked
             self.addCleanup(setattr, TOOL, "_open_with_retries", original)
-            # the profile declares no recordings, so no audio archive is opened
             report = TOOL.build(args)
             self.assertEqual(report.audio_found, 0)
             self.assertEqual(report.missing_audio, 0)

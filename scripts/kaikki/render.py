@@ -8,7 +8,7 @@ from typing import Dict, List, Optional, Sequence, Set, Tuple
 from .audio import AudioPlan
 from .dsltext import _USAGE_TAGS, _audio_ref, _link_form_targets, _sense_markers, _strip_relation_prefix, _unescape_dsl, escape_dsl
 from .profiles import LangProfile, collect_profile_forms
-from .source import _PRON_LABEL, _UNLABELLED_PRON_FIELDS
+from .source import _NOTATION_MISMATCH_TAGS, _PRON_LABEL, _UNLABELLED_PRON_FIELDS
 
 
 class Report:
@@ -415,15 +415,19 @@ def _record_transcription(record: dict, profile: LangProfile) -> str:
 
     The common IPA value is emitted without a name — the line it lands on is
     always a transcription — while a less common notation (enPR) keeps its label
-    so the two are distinguishable.
+    so the two are distinguishable. A sound tagged as a different notation
+    (wiktextract files X-SAMPA under ``ipa``) is skipped, so the label is true.
     """
     for field in profile.pron_fields:
         for sound in record.get("sounds") or []:
-            if isinstance(sound, dict) and sound.get(field):
-                value = escape_dsl(str(sound[field]))
-                if field in _UNLABELLED_PRON_FIELDS:
-                    return value
-                return f"{_PRON_LABEL.get(field, field.upper())}: {value}"
+            if not isinstance(sound, dict) or not sound.get(field):
+                continue
+            if _NOTATION_MISMATCH_TAGS.intersection(sound.get("tags") or []):
+                continue
+            value = escape_dsl(str(sound[field]))
+            if field in _UNLABELLED_PRON_FIELDS:
+                return value
+            return f"{_PRON_LABEL.get(field, field.upper())}: {value}"
     return ""
 
 def _group_by_pos(records: Sequence[dict]) -> List[Tuple[str, List[int]]]:

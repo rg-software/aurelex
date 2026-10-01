@@ -202,3 +202,8 @@ def sample_headwords(
 # value is emitted bare; a second notation (enPR) keeps its name.
 _PRON_LABEL = {"ipa": "IPA", "enpr": "enPR"}
 _UNLABELLED_PRON_FIELDS = {"ipa"}
+
+# A ``sounds[]`` entry can carry a value that is not the notation its field names:
+# wiktextract files X-SAMPA under ``ipa`` on some entries. A sound tagged with a
+# different notation is skipped rather than shown as IPA, which would be wrong.
+_NOTATION_MISMATCH_TAGS = {"X-SAMPA"}

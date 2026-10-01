@@ -287,7 +287,7 @@ LANG_PROFILES: Dict[str, LangProfile] = {
         "de", _DE_FORM_TAGS, _DE_NOISE, ("ipa", "enpr"), _DE_SHORT_TAGS,
     ),
     "ja": LangProfile(
-        "ja", _JA_FORM_TAGS, _JA_NOISE, (), _JA_SHORT_TAGS, has_audio=False,
+        "ja", _JA_FORM_TAGS, _JA_NOISE, ("ipa",), _JA_SHORT_TAGS, has_audio=True,
         sense_noise_tags=_JA_SENSE_NOISE, sense_short_tags=_JA_SENSE_SHORT,
         pos_labels=_JA_POS_LABELS,
     ),

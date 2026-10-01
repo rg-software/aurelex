@@ -316,10 +316,10 @@ lives in the `LANG_PROFILES` table in the script rather than in the renderer:
 adding a language is a data change, not a code change. A profile also carries
 the language's own labels for parts of speech and sense tags, so a monolingual
 dictionary reads in its own language (`ru` → `сущ.`, `ja` → `名詞`), and declares
-whether the language has recordings at all: `ja` sets `has_audio=False`, so a
-Japanese build fetches no audio archive (and `prefetch-audio` refuses).
-`en`, `de`, `ja` and `ru` are populated, and any language without a profile falls
-back to a permissive default and warns.
+whether the language has recordings at all: a profile with `has_audio=False`
+makes the build take the `--no-audio` path (no archive is fetched, and
+`prefetch-audio` refuses). `en`, `de`, `ja` and `ru` are populated, and any
+language without a profile falls back to a permissive default and warns.
 
 Pronunciation is likewise driven by the profile: each `sounds[]` field that
 carries a transcription (for English, `ipa` then `enpr`) is shown once, as a bare
@@ -331,7 +331,9 @@ transcription it is printed once at the top; where parts of speech differ, each
 is printed under its own part of speech. A recording whose part of speech has no
 transcription still gets its own line. Each audio file appears exactly once per
 card regardless, so a word whose parts of speech share a recording does not
-repeat it.
+repeat it. A `sounds[]` entry whose tags name a **different notation** is skipped
+— wiktextract files X-SAMPA under `ipa` on some entries — so a value is never
+presented as IPA when it is not.
 
 ## Why monolingual only
 
