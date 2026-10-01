@@ -143,6 +143,7 @@ class LangProfile:
         strict_tags: bool = False,
         sense_noise_tags: Optional[Set[str]] = None,
         sense_short_tags: Optional[Dict[str, str]] = None,
+        pos_labels: Optional[Dict[str, str]] = None,
     ) -> None:
         self.code = code
         self.form_tags = form_tags
@@ -157,6 +158,9 @@ class LangProfile:
         # abbreviated through ``sense_short_tags``.
         self.sense_noise_tags = set(sense_noise_tags or ())
         self.sense_short_tags = dict(sense_short_tags or {})
+        # Part-of-speech display labels, so a part of speech reads in the
+        # dictionary's language. Empty means the source code is shown as-is.
+        self.pos_labels = dict(pos_labels or {})
 
     def form_qualifies(self, tags: Sequence[str]) -> bool:
         """Whether a form belongs in the article's forms line.
@@ -316,6 +320,27 @@ _RU_SHORT_TAGS = {
 # these, it is meaningful for Russian.
 _RU_SENSE_NOISE = {"indicative", "transitive", "intransitive", "not-comparable"}
 
+# Part-of-speech labels as a Russian dictionary prints them (the source's `pos`
+# codes are English for every edition).
+_RU_POS_LABELS = {
+    "noun": "сущ.", "verb": "гл.", "adj": "прил.", "adv": "нареч.",
+    "pron": "мест.", "num": "числ.", "prep": "предл.", "conj": "союз",
+    "particle": "част.", "intj": "межд.", "phrase": "фразеол.",
+    "name": "собств.", "abbrev": "сокр.", "onomatopeia": "звукоподр.",
+}
+# Sense-tag abbreviations in Russian (the source tags are English). An unmapped
+# tag still falls back to its English text.
+_RU_SENSE_SHORT = {
+    "figuratively": "перен.", "colloquial": "разг.", "informal": "разг.",
+    "slang": "жарг.", "dated": "устар.", "archaic": "арх.", "obsolete": "устар.",
+    "historical": "ист.", "humorous": "шутл.", "ironic": "ирон.",
+    "vulgar": "вульг.", "offensive": "оскорб.", "derogatory": "пренебр.",
+    "rare": "редк.", "literary": "лит.", "poetic": "поэт.", "medicine": "мед.",
+    "law": "юр.", "Internet": "интернет", "neologism": "неол.",
+    "dialectal": "диал.", "regional": "обл.", "endearing": "ласк.",
+    "childish": "детск.", "euphemistic": "эвф.",
+}
+
 LANG_PROFILES: Dict[str, LangProfile] = {
     "en": LangProfile(
         "en", _EN_FORM_TAGS, _EN_NOISE, ("ipa", "enpr"), _EN_SHORT_TAGS,
@@ -329,7 +354,8 @@ LANG_PROFILES: Dict[str, LangProfile] = {
     ),
     "ru": LangProfile(
         "ru", _RU_FORM_TAGS, _RU_NOISE, ("ipa",), _RU_SHORT_TAGS,
-        sense_noise_tags=_RU_SENSE_NOISE, sense_short_tags=_EN_SENSE_SHORT,
+        sense_noise_tags=_RU_SENSE_NOISE, sense_short_tags=_RU_SENSE_SHORT,
+        pos_labels=_RU_POS_LABELS,
     ),
 }
 
@@ -2077,7 +2103,7 @@ def render_card(
             if first_pos_seen:
                 lines.append("")
             first_pos_seen = True
-            lines.append(f"\t[p]{escape_dsl(pos)}[/p]")
+            lines.append(f"\t[p]{escape_dsl(profile.pos_labels.get(pos, pos))}[/p]")
         # forms: first record of the block that carries any
         for i in idxs:
             if form_lines[i]:

@@ -2097,6 +2097,26 @@ class LangProfileTests(unittest.TestCase):
             ["wfs (gen., sg.)"],
         )
 
+    def test_english_part_of_speech_is_unchanged(self):
+        self.assertEqual(TOOL.get_lang_profile("en").pos_labels, {})
+
+    def test_russian_pos_and_sense_labels_render_in_russian(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "in.jsonl")
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(json.dumps({
+                    "word": "собака", "lang_code": "ru", "lang": "Russian",
+                    "pos": "noun",
+                    "senses": [{"glosses": ["собака."], "tags": ["colloquial"]}],
+                }) + "\n")
+            TOOL.build(TOOL.build_parser().parse_args([
+                "--source-lang", "ru", "--jsonl", path, "--out-dir", tmp,
+                "--no-audio", "--cache-dir", os.path.join(tmp, "cache"),
+            ]))
+            text = read_dz(os.path.join(tmp, "kaikki-ru.dsl.dz"))
+            self.assertIn("[p]сущ.[/p]", text)
+            self.assertIn("(разг.)", text)
+
     def test_compact_labels_are_per_language(self):
         self.assertEqual(TOOL.get_lang_profile("en").label_tags(("past",)), "past")
         self.assertEqual(
