@@ -14,6 +14,29 @@ into Aurelex through the normal folder import — no app or engine changes.
   (`--source-lang`). Cross-language translation data is not used; see
   [Why monolingual only](#why-monolingual-only).
 
+`scripts/kaikki-to-dsl.py` is only a launcher; the implementation is the
+`scripts/kaikki/` package, split by concern so a change lands in one file:
+
+| module | what lives there |
+| --- | --- |
+| `constants.py` | URLs, licenses, download-policy numbers, path anchors |
+| `profiles.py` | `LangProfile` and every per-language table |
+| `dictzip.py` | the dictzip writer, DSL encoding |
+| `dsltext.py` | DSL escaping, inline markup, icon and audio references |
+| `snapshot.py` | snapshot paths, cached/sidecar downloads, retry policy, logs |
+| `source.py` | JSONL iteration, record filtering, headword selection |
+| `audio.py` | audio naming, planning, archive indexing/extraction, bundling |
+| `render.py` | senses, forms, examples, `render_card` |
+| `preview.py` | the standalone HTML preview |
+| `inputs.py` | resolving the snapshot and archive the build and prefetcher read |
+| `build.py` | the build pipeline and the annotation |
+| `prefetch.py` | `prefetch-audio`, `fetch-list`, `bundle-audio` |
+| `cli.py` | the parsers and mode dispatch |
+
+`kaikki` re-exports every name at its top level (a flat facade), and writing an
+attribute on it reaches the modules that bound that name — so tests and callers
+patch `kaikki.download_cached` exactly as they did when this was one file.
+
 ## Requirements
 
 - Python 3.9+ (standard library only; no third-party packages).

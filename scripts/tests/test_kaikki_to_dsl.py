@@ -6,7 +6,6 @@ Run with:  python -m unittest discover -s scripts/tests
 
 import gzip
 import contextlib
-import importlib.util
 import io
 import json
 import os
@@ -31,10 +30,17 @@ AUDIO_LIMIT_FIXTURE = os.path.join(HERE, "fixtures", "kaikki-audio-limit.jsonl")
 
 
 def load_tool():
-    spec = importlib.util.spec_from_file_location("kaikki_to_dsl", TOOL_PATH)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    """The ``kaikki`` package the single-file tool became.
+
+    The suite addresses it exactly as before: ``kaikki.<name>`` is the flat
+    facade over the modules, and writing an attribute on it reaches the modules
+    that bound that name, so the download stubs below still take effect.
+    """
+    if SCRIPTS not in sys.path:
+        sys.path.insert(0, SCRIPTS)
+    import kaikki
+
+    return kaikki
 
 
 TOOL = load_tool()
