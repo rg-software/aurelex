@@ -86,14 +86,22 @@ cross-checked against the host smoke tool, which drives the same engine code:
   collision, which produced exactly "No corresponding .dict file was found"
   and a failure banner rather than a crash)*
 - [ ] 5.4 Remove a StarDict dictionary and confirm its staged files and index are
-  deleted and lookups no longer return its words
+  deleted and lookups no longer return its words — **deferred at archive time**.
+  The removal path is format-independent and covered by the existing recipes
+  (#7, #8d); nothing StarDict-specific is left to observe, but it was not
+  exercised on this pass.
 - [ ] 5.5 Re-import a previously-failed StarDict folder on a device that already
   had the `.ifo`-only staged copy, and confirm the dictionary now loads without
-  an app restart — *(this exposed `stale-import-cleanup`: re-importing the fixed
-  folder did NOT clear the failure, because the broken staging directory is only
-  removed by hand. See that change.)*
+  an app restart — **superseded**: this exposed `stale-import-cleanup`, which
+  implemented the re-import-supersedes-a-failure behaviour. Verified there
+  (device: a repaired directory became a loaded dictionary, 30 → 31) rather
+  than here.
 - [ ] 5.6 If a StarDict entry exists in the remote catalog, install it and
-  confirm installed-detection reports it only after all its files land
+  confirm installed-detection reports it only after all its files land —
+  **deferred at archive time**: no StarDict entry exists in the catalog yet.
+  The installed-detection rule itself (every dictionary-role basename must be
+  present) is asserted in `catalog_test` and documented in
+  `docs/REMOTE-CATALOG.md`.
 
 ## 6. Record
 
