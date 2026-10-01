@@ -109,6 +109,7 @@ phone (same folder) and add that folder in Aurelex.
 | `--name NAME` | Output base name (default `kaikki-<source>`); names the output files. |
 | `--title TITLE` | Display name (default `--name`); used for `#NAME`, the `About …` headword and the description. |
 | `--include-inflections` | Also index inflected forms (see below). |
+| `--index-readings` | Also index a language's readings as hiragana, for kana lookup (see below). |
 | `--audio-per-word N` | Max audio files per headword (default 3; `0` disables). |
 | `--no-audio` | No audio and no audio download. |
 | `--audio-lang TAG` | Prefer audio whose tags match this language/accent (e.g. `US`). |
@@ -153,6 +154,15 @@ article. **Trade-off:** in DSL every indexed word also appears in the suggestion
 list — there is no hidden-alias concept — so enabling this adds inflected forms
 to suggestions as well. Leave it off for clean suggestions; enable it when
 direct lookup of inflected forms matters more.
+
+`--index-readings` is the same idea for a language whose profile declares
+readings. Japanese cards index their readings too, so typing the kana reaches the
+kanji article — `ほご` → `保護`. A reading is indexed in **hiragana**, the form a
+kana lookup is typed as, so a katakana on-yomi (`ベイ`) also answers `べい`, and
+the source's stem hyphen is dropped (`すわ-る` → `すわる`). It is off by default: it
+adds ~1 reading per card to the suggestion list (measured: 200 random headwords
+produced 302 headwords), and ambiguous readings fan out to several articles, as
+they do in any Japanese dictionary.
 
 ## Article shape
 

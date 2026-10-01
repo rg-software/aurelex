@@ -40,7 +40,10 @@ def build_parser() -> argparse.ArgumentParser:
             "  --include-inflections a base word's inflected forms are added as\n"
             "  extra headword lines on its card; in DSL every indexed word also\n"
             "  appears in the suggestion list (there is no hidden-alias concept),\n"
-            "  so enable it only when direct lookup of inflected forms is wanted.\n\n"
+            "  so enable it only when direct lookup of inflected forms is wanted.\n"
+            "  --index-readings does the same for the readings of a language whose\n"
+            "  profile declares them (Japanese: ほご reaches 保護), indexing each\n"
+            "  in hiragana, what a kana lookup is typed as.\n\n"
             "  Audio is bundled at most --audio-per-word times per headword,\n"
             "  de-duplicated. A recording the archive lacks is fetched from its\n"
             "  Wikimedia URL and cached (--no-audio-download disables that); one\n"
@@ -95,6 +98,12 @@ def build_parser() -> argparse.ArgumentParser:
              "while the output files keep the --name base",
     )
     parser.add_argument("--include-inflections", action="store_true", help="also index inflected forms (adds them to suggestions)")
+    parser.add_argument(
+        "--index-readings",
+        action="store_true",
+        help="also index the readings of a language whose profile declares them "
+             "(Japanese: type ほご to reach 保護); adds them to suggestions",
+    )
     parser.add_argument("--audio-per-word", type=int, default=3, help="max audio files per headword (default 3)")
     parser.add_argument("--no-audio", action="store_true", help="do not bundle audio (and do not download the archive)")
     parser.add_argument("--audio-lang", help="prefer audio whose tags match this language/accent (e.g. US)")

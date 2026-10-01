@@ -14,7 +14,7 @@ from .dictzip import encode_dsl, make_dictzip
 from .dsltext import _ICON_ASSET_DIR, _ICON_FILES, _ICON_LEGEND, _icon_ref, _unescape_dsl, clean_headword, escape_dsl, header_arg
 from .inputs import _resolve_inputs
 from .preview import render_preview
-from .profiles import collect_profile_forms, get_lang_profile
+from .profiles import collect_profile_forms, get_lang_profile, reading_words
 from .render import Report, _CROSS_REF_RE, render_card, unlink_absent_refs
 from .snapshot import Progress, TabularLog, download_cached
 from .source import is_inflected, is_lexical, iter_records, sample_headwords, select_headwords_and_splits
@@ -171,6 +171,13 @@ def build(args) -> Report:
                 form_word = re.split(r"\s+\(", form, maxsplit=1)[0].strip()
                 if form_word and form_word != word:
                     headwords.append(clean_headword(form_word))
+        if args.index_readings:
+            # A reading is how the word is looked up by sound (Japanese kana for
+            # a kanji entry), so it becomes an extra headword of the same card.
+            for reading in reading_words(record, profile):
+                reading_head = clean_headword(reading)
+                if reading_head and reading_head not in headwords:
+                    headwords.append(reading_head)
         body = render_card(records, audio, profile, known)
         if not body:
             return

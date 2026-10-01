@@ -166,6 +166,33 @@ class ConverterTests(unittest.TestCase):
             text = read_dz(os.path.join(tmp, "kaikki-en.dsl.dz"))
             self.assertIn("ran", headword_lines(text))
 
+    def test_index_readings_indexes_a_kana_reading(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            jsonl = os.path.join(tmp, "ja.jsonl")
+            with open(jsonl, "w", encoding="utf-8") as f:
+                f.write(json.dumps({
+                    "word": "保護", "lang_code": "ja", "pos": "noun",
+                    "senses": [{"glosses": ["守ること。"]}],
+                    "forms": [{"form": "ほご", "tags": ["transliteration"]}],
+                }) + "\n")
+
+            def heads(*extra):
+                args = TOOL.build_parser().parse_args([
+                    "--source-lang", "ja", "--jsonl", jsonl, "--out-dir", tmp,
+                    "--no-audio", *extra,
+                ])
+                args.cache_dir = os.path.join(tmp, "cache")
+                TOOL.build(args)
+                return headword_lines(
+                    read_dz(os.path.join(tmp, "kaikki-ja.dsl.dz")), "kaikki-ja"
+                )
+
+            # off by default, and a reading is not an inflection either
+            self.assertEqual(heads(), ["保護"])
+            self.assertEqual(heads("--include-inflections"), ["保護"])
+            # opt in, and the kana the word is typed as reaches its article
+            self.assertEqual(heads("--index-readings"), ["保護", "ほご"])
+
     def test_sample_mode_random_is_deterministic(self):
         with tempfile.TemporaryDirectory() as tmp:
             def build(out):
@@ -2228,6 +2255,23 @@ class LangProfileTests(unittest.TestCase):
             "forms": [{"form": "ほご", "tags": ["transliteration"]}],
         }
         self.assertEqual(TOOL.collect_profile_readings(record, ja), "読み: ほご")
+
+    def test_readings_are_a_flat_kana_list_for_indexing(self):
+        ja = TOOL.get_lang_profile("ja")
+        record = {
+            "word": "青", "pos": "noun",
+            "forms": [
+                {"form": "ショウ", "tags": ["transliteration", "go-on"]},
+                {"form": "あお", "tags": ["transliteration", "kun"]},
+                {"form": "あお-い", "tags": ["transliteration", "kun"]},
+                {"form": "あお", "tags": ["transliteration", "kun"]},  # duplicate
+                {"form": "せい (formal)", "tags": ["transliteration"]},  # annotated
+            ],
+        }
+        # the stem hyphen is a separator, an annotated form is not something a
+        # lookup is typed as, the list is de-duplicated, and a katakana on-yomi
+        # is indexed in the hiragana it is typed as
+        self.assertEqual(TOOL.reading_words(record, ja), ["しょう", "あお", "あおい"])
 
     def test_a_language_without_recordings_skips_the_archive(self):
         # The mechanism a profile uses to say "this language has no recordings":

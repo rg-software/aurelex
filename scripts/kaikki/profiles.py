@@ -4,6 +4,7 @@ Anything specific to one language (its form-tag vocabulary, transcription fields
 
 from __future__ import annotations
 
+import re
 import sys
 from typing import Dict, List, Optional, Sequence, Set, Tuple
 
@@ -371,14 +372,11 @@ def collect_profile_forms(record: dict, profile: LangProfile, limit: int = 8) ->
     return forms
 
 
-def collect_profile_readings(record: dict, profile: LangProfile) -> str:
-    """One card's readings, grouped by mark, as a line (or "").
+def _reading_groups(record: dict, profile: LangProfile) -> List[Tuple[str, List[str]]]:
+    """The record's readings, grouped under their mark, in first-seen order.
 
-    Japanese readings are *forms* in the source but not inflections, and printing
-    one label per reading ("ザ (音), サ (音), ...") is not how a dictionary reads.
-    They are grouped under their conventional mark instead -- ``音: ザ, サ　訓:
-    すわ-る, くら`` -- with a reading the source does not classify under the
-    profile's default. A language with no ``reading_tags`` yields "".
+    A reading's mark is the first of its tags the profile maps (``go-on`` → 音),
+    or the profile's default when it maps none (→ 読み).
     """
     groups: List[Tuple[str, List[str]]] = []
     bucket_by_mark: Dict[str, List[str]] = {}
@@ -403,6 +401,52 @@ def collect_profile_readings(record: dict, profile: LangProfile) -> str:
             groups.append((mark, bucket))
         if str(text) not in bucket:
             bucket.append(str(text))
+    return groups
+
+
+def collect_profile_readings(record: dict, profile: LangProfile) -> str:
+    """One card's readings, grouped by mark, as a line (or "").
+
+    Japanese readings are *forms* in the source but not inflections, and printing
+    one label per reading ("ザ (音), サ (音), ...") is not how a dictionary reads.
+    They are grouped under their conventional mark instead -- ``音: ザ, サ　訓:
+    すわ-る, くら`` -- with a reading the source does not classify under the
+    profile's default. A language with no ``reading_tags`` yields "".
+    """
+    groups = _reading_groups(record, profile)
     if not groups:
         return ""
     return "\u3000".join(f"{mark}: " + ", ".join(words) for mark, words in groups)
+
+
+# A reading as a person would type it: kana only (the middle dot and the source's
+# stem hyphen are separators between kana, not part of the word).
+_KANA_READING = re.compile(r"^[\u3040-\u309f\u30a0-\u30ff\u30fc]+$")
+
+
+def _to_hiragana(text: str) -> str:
+    """Katakana to its hiragana equivalent (the shared ー is left alone)."""
+    return "".join(
+        chr(ord(ch) - 0x60) if "\u30a1" <= ch <= "\u30f6" else ch for ch in text
+    )
+
+
+def reading_words(record: dict, profile: LangProfile) -> List[str]:
+    """The record's readings as lookupable kana words, de-duplicated, in order.
+
+    For indexing a reading as an extra headword: separators are removed
+    (``すわ-る`` → ``すわる``), and the reading is folded to **hiragana** — the
+    form a lookup is typed in — so a katakana on-yomi (``ベイ``) also answers
+    ``べい``. Only a kana-only reading is returned; a romanization or an annotated
+    form is not something a lookup is typed as.
+    """
+    words: List[str] = []
+    seen: Set[str] = set()
+    for _mark, group in _reading_groups(record, profile):
+        for text in group:
+            word = _to_hiragana(text.replace("-", "").replace("\u30fb", "").strip())
+            if not word or word in seen or not _KANA_READING.match(word):
+                continue
+            seen.add(word)
+            words.append(word)
+    return words
