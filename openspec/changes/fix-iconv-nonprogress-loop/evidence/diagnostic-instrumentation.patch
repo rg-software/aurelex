@@ -1,0 +1,348 @@
+diff --git a/src/common/iconv.cc b/src/common/iconv.cc
+index 4e7a24bf..7ee458c8 100644
+--- a/src/common/iconv.cc
++++ b/src/common/iconv.cc
+@@ -76,8 +76,24 @@ QString Iconv::convert( const void *& inBuf, size_t & inBytesLeft )
+ 
+   size_t outBufLeft = outBuf.size();
+   size_t result     = (size_t)( -1 );
++  qint64 diagIconvIter = 0;
++  qWarning( "DIAG: iconv convert enter inBytesLeft=%lld outBuf=%lld",
++            (long long)inBytesLeft, (long long)outBuf.size() );
+   while ( inBytesLeft > 0 ) {
++    int savedErrno = errno;
++    errno = 0;
+     result = iconv( state, (char **)&inBuf, &inBytesLeft, (char **)&outBufPtr, &outBufLeft );
++    ++diagIconvIter;
++    if ( diagIconvIter <= 3 || ( diagIconvIter % 1000 ) == 0 ) {
++      qWarning( "DIAG: iconv iter=%lld result=%lld errno=%d inBytesLeft=%lld outBufLeft=%lld",
++                (long long)diagIconvIter, (long long)result, errno,
++                (long long)inBytesLeft, (long long)outBufLeft );
++    }
++    if ( diagIconvIter > 2000000 ) {
++      qWarning( "DIAG: iconv IMPLAUSIBLE iters=%lld inBytesLeft=%lld outBuf=%lld -- aborting",
++                (long long)diagIconvIter, (long long)inBytesLeft, (long long)outBuf.size() );
++      break;
++    }
+     if ( result == (size_t)-1 ) {
+       if ( errno == E2BIG || outBufLeft == 0 ) {
+ 
+@@ -91,9 +107,15 @@ QString Iconv::convert( const void *& inBuf, size_t & inBytesLeft )
+           continue;
+         }
+       }
++      else {
++        qWarning( "DIAG: iconv breaking on errno=%d (not E2BIG, outBufLeft=%lld)",
++                  errno, (long long)outBufLeft );
++      }
+       break;
+     }
+   }
++  qWarning( "DIAG: iconv convert exit iters=%lld inBytesLeft=%lld",
++            (long long)diagIconvIter, (long long)inBytesLeft );
+ 
+   //flush output
+   if ( result != (size_t)( -1 ) ) {
+diff --git a/src/dict/mdictparser.cc b/src/dict/mdictparser.cc
+index ae8b61d8..c148255b 100644
+--- a/src/dict/mdictparser.cc
++++ b/src/dict/mdictparser.cc
+@@ -28,6 +28,7 @@
+ #include <QByteArray>
+ #include <QDataStream>
+ #include <QDomDocument>
++#include <QFileInfo>
+ #include <QStringList>
+ #include <QTextDocumentFragment>
+ #include <QtEndian>
+@@ -110,49 +111,78 @@ bool MdictParser::open( const char * filename )
+     return false;
+   }
+ 
++  qWarning( "DIAG: open() filename=%s fileSize=%lld",
++            filename, (long long)QFileInfo( QString::fromUtf8( filename ) ).size() );
++
+   QDataStream in( file_ );
+   in.setByteOrder( QDataStream::BigEndian );
+ 
++  qWarning( "DIAG: readHeader() begin pos=%lld", (long long)file_->pos() );
+   if ( !readHeader( in ) ) {
++    qWarning( "DIAG: readHeader() FAILED" );
+     return false;
+   }
++  qWarning( "DIAG: readHeader() ok pos=%lld", (long long)file_->pos() );
+ 
++  qWarning( "DIAG: readHeadWordBlockInfos() begin pos=%lld", (long long)file_->pos() );
+   if ( !readHeadWordBlockInfos( in ) ) {
++    qWarning( "DIAG: readHeadWordBlockInfos() FAILED" );
+     return false;
+   }
++  qWarning( "DIAG: readHeadWordBlockInfos() ok numHeadWordBlocks=%lld wordCount=%lld "
++            "headWordBlockInfoSize=%lld headWordBlockSize=%lld decoded=%d",
++            (long long)numHeadWordBlocks_, (long long)wordCount_,
++            (long long)headWordBlockInfoSize_, (long long)headWordBlockSize_,
++            (int)headWordBlockInfos_.size() );
+ 
++  qWarning( "DIAG: readRecordBlockInfos() begin pos=%lld", (long long)file_->pos() );
+   if ( !readRecordBlockInfos() ) {
++    qWarning( "DIAG: readRecordBlockInfos() FAILED" );
+     return false;
+   }
++  qWarning( "DIAG: readRecordBlockInfos() ok recordBlockInfos=%d recordPos_=%lld",
++            (int)recordBlockInfos_.size(), (long long)recordPos_ );
+ 
++  qWarning( "DIAG: open() returning true" );
+   return true;
+ }
+ 
+ bool MdictParser::readNextHeadWordIndex( MdictParser::HeadWordIndex & headWordIndex )
+ {
++  qWarning( "DIAG: rNHWI enter" );
+   if ( headWordBlockInfosIter_ == headWordBlockInfos_.end() ) {
++    qWarning( "DIAG: rNHWI iter==end -> false" );
+     return false;
+   }
+ 
+   qint64 compressedSize   = headWordBlockInfosIter_->first;
+   qint64 decompressedSize = headWordBlockInfosIter_->second;
+ 
++  qWarning( "DIAG: rNHWI compressedSize=%lld decompressedSize=%lld headWordPos_=%lld",
++            (long long)compressedSize, (long long)decompressedSize, (long long)headWordPos_ );
++
+   if ( compressedSize < 8 ) {
++    qWarning( "DIAG: rNHWI compressedSize<8 -> false" );
+     return false;
+   }
+ 
+   ScopedMemMap compressed( *file_, headWordPos_, compressedSize );
+   if ( !compressed.startAddress() ) {
++    qWarning( "DIAG: rNHWI mmap FAILED" );
+     return false;
+   }
++  qWarning( "DIAG: rNHWI mmap ok" );
+ 
+   headWordPos_ += compressedSize;
+   QByteArray decompressed;
+   if ( !parseCompressedBlock( compressedSize, (char *)compressed.startAddress(), decompressedSize, decompressed ) ) {
++    qWarning( "DIAG: rNHWI parseCompressedBlock FAILED" );
+     return false;
+   }
++  qWarning( "DIAG: rNHWI decompressed -> %lld", (long long)decompressed.size() );
+ 
+   headWordIndex = splitHeadWordBlock( decompressed );
++  qWarning( "DIAG: rNHWI split -> %d entries", (int)headWordIndex.size() );
+   ++headWordBlockInfosIter_;
+   return true;
+ }
+@@ -210,6 +240,9 @@ bool MdictParser::parseCompressedBlock( qint64 compressedBlockSize,
+   const char * buf = compressedBlockPtr + 8;
+   qint64 size      = compressedBlockSize - 8;
+ 
++  qWarning( "DIAG: pCB enter type=0x%08X compressedBlockSize=%lld decompressedBlockSize=%lld",
++            (unsigned)type, (long long)compressedBlockSize, (long long)decompressedBlockSize );
++
+   switch ( type ) {
+     case 0x00000000:
+       // No compression
+@@ -419,6 +452,12 @@ bool MdictParser::readHeadWordBlockInfos( QDataStream & in )
+ 
+   headWordBlockInfoPos_ = file_->pos();
+ 
++  qWarning( "DIAG: HWI numHeadWordBlocks=%lld wordCount=%lld decompressedSize=%lld "
++            "headWordBlockInfoSize=%lld headWordBlockSize=%lld pos=%lld",
++            (long long)numHeadWordBlocks_, (long long)wordCount_, (long long)decompressedSize,
++            (long long)headWordBlockInfoSize_, (long long)headWordBlockSize_,
++            (long long)headWordBlockInfoPos_ );
++
+   // read headword block info
+   QByteArray headWordBlockInfo = file_->read( headWordBlockInfoSize_ );
+   if ( headWordBlockInfo.size() != headWordBlockInfoSize_ ) {
+@@ -433,10 +472,13 @@ bool MdictParser::readHeadWordBlockInfos( QDataStream & in )
+       }
+     }
+ 
++    qWarning( "DIAG: HWI about to decompress size=%lld decompressedSize=%lld",
++              (long long)headWordBlockInfo.size(), (long long)decompressedSize );
+     QByteArray decompressed;
+     if ( !parseCompressedBlock( headWordBlockInfo.size(), headWordBlockInfo.data(), decompressedSize, decompressed ) ) {
+       return false;
+     }
++    qWarning( "DIAG: HWI decompressed -> %lld bytes", (long long)decompressed.size() );
+ 
+     headWordBlockInfos_ = decodeHeadWordBlockInfo( decompressed );
+   }
+@@ -446,6 +488,9 @@ bool MdictParser::readHeadWordBlockInfos( QDataStream & in )
+ 
+   headWordPos_            = file_->pos();
+   headWordBlockInfosIter_ = headWordBlockInfos_.begin();
++
++  qWarning( "DIAG: HWI ok blocks=%d headWordPos_=%lld",
++            (int)headWordBlockInfos_.size(), (long long)headWordPos_ );
+   return true;
+ }
+ 
+@@ -453,6 +498,10 @@ bool MdictParser::readRecordBlockInfos()
+ {
+   file_->seek( headWordBlockInfoPos_ + headWordBlockInfoSize_ + headWordBlockSize_ );
+ 
++  qWarning( "DIAG: RBI seek=%lld fileSize=%lld",
++            (long long)( headWordBlockInfoPos_ + headWordBlockInfoSize_ + headWordBlockSize_ ),
++            (long long)file_->size() );
++
+   QDataStream in( file_ );
+   in.setByteOrder( QDataStream::BigEndian );
+   qint64 numRecordBlocks = readNumber( in );
+@@ -461,6 +510,19 @@ bool MdictParser::readRecordBlockInfos()
+   totalRecordsSize_     = readNumber( in );
+   recordPos_            = file_->pos() + recordInfoSize;
+ 
++  qWarning( "DIAG: RBI numRecordBlocks=%lld recordInfoSize=%lld totalRecordsSize_=%lld recordPos_=%lld",
++            (long long)numRecordBlocks, (long long)recordInfoSize,
++            (long long)totalRecordsSize_, (long long)recordPos_ );
++
++  // DIAGNOSTIC: numRecordBlocks is read from the file and trusted. An
++  // implausible count would spin this loop reading past EOF. Refuse it so we
++  // learn the number rather than hang again.
++  if ( numRecordBlocks < 0 || numRecordBlocks > 10000000 ) {
++    qWarning( "DIAG: RBI IMPLAUSIBLE numRecordBlocks=%lld -- aborting build",
++              (long long)numRecordBlocks );
++    return false;
++  }
++
+   // Build record block index
+   recordBlockInfos_.reserve( numRecordBlocks );
+ 
+@@ -478,8 +540,14 @@ bool MdictParser::readRecordBlockInfos()
+ 
+     acc1 = r.endPos;
+     acc2 = r.shadowEndPos;
++
++    if ( i < 3 || ( i % 100000 ) == 0 ) {
++      qWarning( "DIAG: RBI i=%lld compressedSize=%lld decompressedSize=%lld",
++                (long long)i, (long long)r.compressedSize, (long long)r.decompressedSize );
++    }
+   }
+ 
++  qWarning( "DIAG: RBI loop done, built %d recordBlockInfos", (int)recordBlockInfos_.size() );
+   return true;
+ }
+ 
+@@ -537,6 +605,10 @@ MdictParser::HeadWordIndex MdictParser::splitHeadWordBlock( const QByteArray & b
+   const char * p   = block.constData();
+   const char * end = p + block.size();
+ 
++  qWarning( "DIAG: sHWB enter blockSize=%d numberTypeSize_=%lld encoding_=%s",
++            (int)block.size(), (long long)numberTypeSize_, encoding_.toUtf8().constData() );
++
++  qint64 diagCount = 0;
+   while ( p < end ) {
+     qint64 headWordId = ( numberTypeSize_ == 8 ) ? qFromBigEndian< qint64 >( (const uchar *)p ) :
+                                                    qFromBigEndian< quint32 >( (const uchar *)p );
+@@ -554,8 +626,22 @@ MdictParser::HeadWordIndex MdictParser::splitHeadWordBlock( const QByteArray & b
+     p += headWordBuf.size();
+     QString headWord = toUtf16( encoding_, headWordBuf.constBegin(), headWordBuf.size() );
+     index.emplace_back( headWordId, headWord );
++
++    ++diagCount;
++    if ( diagCount <= 5 || ( diagCount % 500 ) == 0 ) {
++      qWarning( "DIAG: sHWB i=%lld p=%lld word=%s",
++                (long long)diagCount, (long long)( p - block.constData() ),
++                headWord.left( 32 ).toUtf8().constData() );
++    }
++    if ( diagCount > 2000000 ) {
++      qWarning( "DIAG: sHWB IMPLAUSIBLE count=%lld p=%lld -- aborting", (long long)diagCount,
++                (long long)( p - block.constData() ) );
++      break;
++    }
+   }
+ 
++  qWarning( "DIAG: sHWB done entries=%d", (int)index.size() );
++
+   return index;
+ }
+ 
+@@ -564,10 +650,15 @@ bool MdictParser::readRecordBlock( MdictParser::HeadWordIndex & headWordIndex,
+ {
+   // cache the index, the headWordIndex is already sorted
+   size_t idx = 0;
++  qWarning( "DIAG: rRB enter entries=%d recordBlockInfos_=%d",
++            (int)headWordIndex.size(), (int)recordBlockInfos_.size() );
+ 
+   for ( HeadWordIndex::const_iterator i = headWordIndex.begin(); i != headWordIndex.end(); ++i ) {
+     if ( recordBlockInfos_[ idx ].shadowEndPos <= i->first ) {
++      qWarning( "DIAG: rRB bsearch for offset=%lld (cached idx=%d)",
++                (long long)i->first, (int)idx );
+       idx = RecordIndex::bsearch( recordBlockInfos_, i->first );
++      qWarning( "DIAG: rRB bsearch -> %d", (int)idx );
+     }
+ 
+     if ( idx == (size_t)( -1 ) ) {
+@@ -594,6 +685,7 @@ bool MdictParser::readRecordBlock( MdictParser::HeadWordIndex & headWordIndex,
+     recordHandler.handleRecord( i->second, recordInfo );
+   }
+ 
++  qWarning( "DIAG: rRB done" );
+   return true;
+ }
+ 
+diff --git a/src/dict/mdx.cc b/src/dict/mdx.cc
+index e4e2729a..b078728a 100644
+--- a/src/dict/mdx.cc
++++ b/src/dict/mdx.cc
+@@ -1483,12 +1483,17 @@ vector< sptr< Dictionary::Class > > makeDictionaries( const vector< string > & f
+       MdictParser parser;
+       list< sptr< MdictParser > > mddParsers;
+ 
++      qWarning( "DIAG: MDX about to open() %s", fileName.c_str() );
+       if ( !parser.open( fileName.c_str() ) ) {
++        qWarning( "DIAG: MDX open() returned FALSE for %s", fileName.c_str() );
+         continue;
+       }
++      qWarning( "DIAG: MDX open() ok for %s", fileName.c_str() );
+ 
+       string title = parser.title().toStdString();
++      qWarning( "DIAG: MDX title obtained" );
+       initializing.indexingDictionary( title );
++      qWarning( "DIAG: MDX indexingDictionary returned" );
+ 
+       for ( vector< string >::const_iterator mddIter = dictFiles.begin() + 1; mddIter != dictFiles.end(); ++mddIter ) {
+         if ( Utils::Fs::exists( *mddIter ) ) {
+@@ -1500,8 +1505,10 @@ vector< sptr< Dictionary::Class > > makeDictionaries( const vector< string > & f
+           mddParsers.push_back( mddParser );
+         }
+       }
++      qWarning( "DIAG: MDX mdd loop done (dictFiles=%d)", (int)dictFiles.size() );
+ 
+       File::Index idx( indexFile, QIODevice::WriteOnly );
++      qWarning( "DIAG: MDX index file opened for write" );
+       IdxHeader idxHeader;
+       memset( &idxHeader, 0, sizeof( idxHeader ) );
+       // We write a dummy header first. At the end of the process the header
+@@ -1540,10 +1547,27 @@ vector< sptr< Dictionary::Class > > makeDictionaries( const vector< string > & f
+       ArticleHandler articleHandler( chunks, indexedWords );
+       MdictParser::HeadWordIndex headWordIndex;
+ 
++      qWarning( "DIAG: MDX entering headword loop" );
++
+       // enumerating word and its definition
++      qint64 diagBlocks = 0;
+       while ( parser.readNextHeadWordIndex( headWordIndex ) ) {
++        if ( diagBlocks < 3 ) {
++          qWarning( "DIAG: MDX block %lld -> readRecordBlock(%d entries)",
++                    (long long)diagBlocks, (int)headWordIndex.size() );
++        }
+         parser.readRecordBlock( headWordIndex, articleHandler );
++        ++diagBlocks;
++        if ( diagBlocks < 3 || ( diagBlocks % 1000 ) == 0 ) {
++          qWarning( "DIAG: MDX headword blocks processed=%lld", (long long)diagBlocks );
++        }
++        if ( diagBlocks > 5000000 ) {
++          qWarning( "DIAG: MDX headword loop IMPLAUSIBLE at %lld -- aborting",
++                    (long long)diagBlocks );
++          break;
++        }
+       }
++      qWarning( "DIAG: MDX headword loop finished after %lld blocks", (long long)diagBlocks );
+ 
+       // enumerating resources if there's any
+       vector< sptr< IndexedWords > > mddIndices;

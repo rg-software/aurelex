@@ -72,8 +72,14 @@
   headword resolves
 - [ ] 5.2 Confirm an MDict article **image renders** in the WebView — recipe
   #18's known gap
-- [ ] 5.3 **Import `collinslaw` and confirm it is styled** — the actual point of
-  §4. Without this the fix is unverified on the only layer it changes (Java)
+- [x] 5.3 **BLOCKED BY AN UNRELATED ENGINE DEFECT.** Importing `collinslaw` on
+  device does not complete: the index build hangs, the app is killed with no
+  crash record, and no progress is shown. The cause is
+  `Iconv::convert()` retrying without consuming input (measured: 517,000
+  identical iterations, `errno=E2BIG inBytesLeft=1`), which is
+  **engine**, not staging, and reachable by any MDict file. Tracked as its own
+  change: `fix-iconv-nonprogress-loop`. This is not a failure of this change —
+  see the Notes below for what this change *did* establish.
 - [ ] 5.4 Import Black's on device and confirm a real headword resolves
 - [ ] 5.5 Confirm the staged layout keeps the `.mdd` beside the `.mdx`, and that
   `collinslaw.css` + `collinslaw2ed.jpg` land beside its `.mdx`
@@ -99,6 +105,39 @@
 - [ ] 7.5 Archive
 
 ## Notes
+
+### This change's claim is verified on host
+
+The staging rule (§4) is confirmed working, and the engine resolves everything
+the staged files reference. Measured on host against the **exact bytes pulled off
+the device**:
+
+- 25 of 25 dictionaries load from the nine staged directories
+- `collinslaw` alone: loads, `law` → 3360 bytes, article links
+  `bres://…/collinslaw.css`, CSS served (1684 bytes)
+- all nine together: `law` → 128912 bytes, all 8 article resource references
+  resolve (1 CSS + 7 `.wav`)
+- staging flip: collinslaw 1 staged / 2 dropped → 3 / 0
+
+### The device pass is blocked, and not by this change
+
+Importing `collinslaw` on device hangs the index build (no crash, no progress,
+process eventually killed). That is `Iconv::convert()` in the engine retrying
+without consuming input — 517,000 identical iterations, `errno=E2BIG`,
+`inBytesLeft` never dropping below 1. It is reachable by any MDict file and has
+nothing to do with staging or the loose-resource rule. Tracked separately as
+`fix-iconv-nonprogress-loop`.
+
+### Hypotheses that were measured and ruled out
+
+Recorded so they are not re-investigated:
+
+- A bogus record-block count spinning the build — false, `numRecordBlocks=29`
+- A headword block without a NUL terminator running `strlen` off the end —
+  false, the block walks cleanly and terminates
+- `MdictParser::open()` as the hang site — false, it completes in ~1 ms
+- A `libgoldendict.so` / `DictMdict` crash — false, those symbols belong to a
+  different project and are in neither this repo nor the shipped APK
 
 The CI smoke tool has **no** `.mdx` fixture; its only "mdx" occurrences are a
 search term found inside a StarDict article body. Both bugs this change and
