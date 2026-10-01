@@ -2073,11 +2073,11 @@ class LangProfileTests(unittest.TestCase):
 
     def test_russian_labels_use_the_conventional_abbreviations(self):
         ru = TOOL.get_lang_profile("ru")
-        self.assertEqual(ru.label_tags(("genitive", "singular")), "gen., sg.")
+        self.assertEqual(ru.label_tags(("genitive", "singular")), "род., ед.")
         self.assertEqual(
-            ru.label_tags(("third-person", "singular", "present")), "3rd, pres."
+            ru.label_tags(("third-person", "singular", "present")), "3-е л., наст."
         )
-        self.assertEqual(ru.label_tags(("imperfective",)), "impf.")
+        self.assertEqual(ru.label_tags(("imperfective",)), "несов.")
 
     def test_russian_sense_noise_drops_indicative_but_keeps_aspect(self):
         ru = TOOL.get_lang_profile("ru")
@@ -2094,7 +2094,7 @@ class LangProfileTests(unittest.TestCase):
         }
         self.assertEqual(
             TOOL.collect_profile_forms(record, TOOL.get_lang_profile("ru")),
-            ["wfs (gen., sg.)"],
+            ["wfs (род., ед.)"],
         )
 
     def test_english_part_of_speech_is_unchanged(self):
