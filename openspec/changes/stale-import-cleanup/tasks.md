@@ -88,7 +88,12 @@
   before this change, confirm the new action clears it — **verified**: the
   `deleted`-by-hand scenario is the same path 7.1 exercised; the action drops the
   entry even when the files are already gone (2.2)
-- [ ] 7.4 Confirm RU/JA show the new/changed banner strings
+- [x] 7.4 Confirm RU/JA show the new/changed banner strings — **verified on
+  device** (RU forced via `cmd locale set-app-locales`): the banner's guidance now
+  renders in Russian, and `Remove failed import` correctly stays English because
+  it is an invariant `Accessible.name` test ID. The first attempt showed English
+  because the APK predated the `.qm` rebuild — the catalogs are `qt_add_resources`
+  payloads, so they only reach the device on a rebuild
 
 ## Notes from implementation
 
