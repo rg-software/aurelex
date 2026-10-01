@@ -389,7 +389,9 @@ the first part of speech rather than repeated; when parts of speech differ, each
 SHALL keep its own transcription under its own heading. A transcription SHALL be
 shown without a notation name where it is the dictionary's primary notation (for
 example IPA), because the line already reads as a transcription; a second
-notation SHALL keep its name so the two are distinguishable. A headword's audio
+notation SHALL keep its name so the two are distinguishable. A sound whose tags
+name a different notation SHALL NOT be shown as the notation its field claims. A
+headword's audio
 SHALL be shown on the same line as the transcription of the part of speech it
 belongs to — the transcription and its playback controls together — and where a
 part of speech has audio but no transcription, that audio SHALL still be shown.
@@ -423,6 +425,12 @@ first part of speech that references it.
 - **WHEN** an article shows the dictionary's primary transcription (IPA for the
   English profile)
 - **THEN** the transcription appears on its own without an "IPA" label
+
+#### Scenario: A sound in another notation is not shown as this one
+
+- **WHEN** a record carries a value under the primary notation's field but the
+  sound's tags name a different notation
+- **THEN** that value is not shown as the primary notation
 
 #### Scenario: Audio sits on the transcription line
 
