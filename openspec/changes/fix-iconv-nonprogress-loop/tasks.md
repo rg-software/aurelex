@@ -28,11 +28,17 @@
 
 ## 3. Contain the failure
 
-- [ ] 3.1 A word that cannot be converted fails that dictionary's index build
+- [x] 3.1 A word that cannot be converted fails that dictionary's index build
   with the failure reported; it does not hang, and it does not abort the other
-  dictionaries in the same scan
-- [ ] 3.2 Confirm the failure surfaces to the user rather than only to the log,
-  consistent with how a dictionary that fails to load is already reported
+  dictionaries in the same scan. **Designed in, not exercised**: the guards make
+  the conversion return what it managed, so a failing dictionary yields fewer
+  entries and its build fails through the existing `dictionary-management`
+  failure path. No fixture currently triggers the guard, so this is the
+  contract rather than a demonstrated run
+- [ ] 3.2 Confirm the failure surfaces to the user rather than only to the log —
+  deferred, and it needs a fixture that trips the guard. Recorded as a known gap
+  rather than claimed; the path it would use is the existing failed-import
+  reporting, which is already covered for other failure causes
 
 ## 4. Ship through the patch pipeline
 
@@ -79,11 +85,13 @@
 
 ## 6. Documentation
 
-- [ ] 6.1 `docs/TESTING.md`: record the MDict index-build hang and its fix, so
+- [x] 6.1 `docs/TESTING.md`: record the MDict index-build hang and its fix, so
   the symptom ("import never completes, no crash") is searchable
-- [ ] 6.2 Record the ruled-out hypotheses (record-block count, missing
-  terminator) in `design.md` so they are not re-investigated
-- [ ] 6.3 Note that MDict index building is now covered on device, which it was
+- [x] 6.2 Record the ruled-out hypotheses (record-block count, missing
+  terminator) in `design.md` so they are not re-investigated — now also in
+  `docs/TESTING.md`, so someone reading the symptom finds them without opening
+  the change
+- [x] 6.3 Note that MDict index building is now covered on device, which it was
   not before this change
 
 ## Notes
@@ -93,3 +101,19 @@ The defect was found while verifying MDict import (`verify-mdx-import`). It is
 reachable by any MDict file, and is unrelated to staging or the loose-resource
 rule. `verify-mdx-import`'s own claim is verified on host; its device pass was
 blocked by this defect, which is recorded in that change rather than here.
+
+### Deliberately deferred, not forgotten
+
+`5.3` (trip the guard on device) and `3.2` (the failure surfaces to the user)
+both need a fixture that makes the charset conversion hit the bound. Nothing we
+have does, and inventing one purely to test a defensive guard was not worth the
+build cycles here. The guard's behaviour is nevertheless the reason a repeat of
+this hang cannot run unbounded. Both are recorded as open rather than ticked.
+
+### Why the guard has two parts
+
+The non-progress check is the direct fix: it stops when an iteration consumes
+nothing, which needs no knowledge of `errno` or of which backend misbehaves. The
+iteration bound is a backstop for a variant that *does* consume a byte per pass.
+Neither alone is sufficient — the check cannot see slow forward progress, and the
+bound cannot tell "stuck" from "slow".

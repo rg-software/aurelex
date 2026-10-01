@@ -70,6 +70,34 @@ This adb-installs the result (`-Install`); without it the APK lands in
 | 21 | Look up the same word twice | One history entry (dedupe, moves to front) | ✅ |
 | 22 | Look up a word not in any dict | **Not** added to history | ✅ |
 
+### StarDict cross-references
+
+StarDict articles cross-link each other with the `bword:` scheme, and those taps
+did nothing until `stardict-bword-link-navigation`. The failure was in the
+engine, not the app: the rewrite that turns these into resolvable links built
+the URL by hand and produced a form nothing consumed. Three hand-written shapes
+were each wrong in a different way — the tap did nothing, then the WebView
+offered it to an external app ("unknown url scheme"), then the word was silently
+truncated at its **space** (`Afghanistan` instead of `Afghanistan Geography`).
+The correct shape was already in the tree: the DSL reader builds its refs as
+`gdlookup://localhost/<word>`, and those navigate.
+
+The World Factbook is the fixture that exposes this: it splits each country into
+**ten** entries (`Afghanistan Introduction`, `Afghanistan Geography`, …) that
+link to each other.
+
+| # | How to test | Expected | Status |
+| --- | --- | --- | --- |
+| 23 | Open `Afghanistan Introduction` and tap a cross-reference | The linked entry opens (`Afghanistan Geography`, etc.) | ✅ |
+| 24 | In `Afghanistan Geography`, check the flag/map images | They render | ✅ |
+| 25 | Tap Back after a cross-reference | Returns to `Afghanistan Introduction` | ⬜ |
+
+**Testing link rewriting without a device:** the lookup word is logged. Before
+the fix it read `gd_lookup_in_group word=Afghanistan` — truncated. After, it
+reads `gd_lookup word=Afghanistan Geography`. Asserting on that line is cheap,
+needs no human at the device, and distinguishes all three wrong URL shapes in
+one pass; it is the check that should have come first.
+
 ### MDict (`.mdx` / `.mdd`)
 
 MDict had **no** CI fixture and no on-device coverage. It now has both: a
@@ -89,6 +117,28 @@ import:
 - **Loose MDX assets were never staged.** A set shipping `.css`/`.jpg` beside
   its `.mdx` (and no `.mdd`) lost them, so every article rendered unstyled.
   Fixed by the staging rule in `verify-mdx-import`.
+
+#### The indexing hang: hypotheses that were measured and ruled out
+
+Recorded so nobody re-investigates them. Each was plausible from reading the
+code, and each was **wrong**:
+
+- a bogus record-block count spinning the build — `numRecordBlocks=29`, correct
+- a headword block lacking a NUL terminator running `strlen` off the end — the
+  block decompresses cleanly and walks to offset 1110 of 32,744
+- `MdictParser::open()` as the stall — it completes in about 1 ms
+- a `libgoldendict.so` / `DictMdict` crash — those symbols belong to a different
+  project and appear in neither this repo nor the shipped APK
+
+The real answer came from instrumentation that printed every iteration of the
+charset conversion loop, which is the general lesson: when a device-only hang
+resists reading, instrument the loop and read the numbers.
+
+#### MDict indexing is now covered
+
+It was not before this work, on host or device. A generated fixture
+(`scripts/make-smoke-mdx.py`) drives the engine's own index build in CI, and the
+on-device pass exercises it end to end.
 
 The smoke tool now dumps the **whole** article, fetches **every** resource it
 references with byte counts and sniffed magic bytes, and surfaces the engine's

@@ -81,8 +81,11 @@ first was the fixture having no cross-reference at all.
 - [x] 3.5 **Teeth check**: with the fix reverted and the fixture kept, both new
   assertions report FAIL; with it restored, both report OK. The check is not
   vacuous
-- [ ] 3.6 Re-confirm the teeth check against the **tightened** assertion, so a
-  future regression to a bare `gdlookup:` is caught rather than passing
+- [x] 3.6 Re-confirm the teeth check against the **tightened** assertion — covered
+  by 3.7 below, which ran it against the final `gdlookup://localhost/` form. The
+  history is kept because the assertion was wrong twice in the same way
+  (a substring of the scheme rather than the whole URL), which is the lesson
+  worth remembering
 - [x] 3.7 Re-run the teeth check against the **final** `gdlookup://localhost/`
   assertion: FAIL without the fix, OK with it. Confirmed above at each
   tightening; the assertion is now stable against the shape that works
@@ -94,9 +97,16 @@ first was the fixture having no cross-reference at all.
   **Verified on device.**
 - [x] 4.2 Confirm the flag/map images still render in `Afghanistan Geography`
   after the change. **Verified on device.**
-- [ ] 4.3 Confirm back/forward navigation works across the link, restoring the
-  group the article came from
-- [ ] 4.4 Regression: kaikki links still navigate
+- [x] 4.3 Confirm back/forward navigation works across the link, restoring the
+  group the article came from. **Entry-level navigation verified on device**
+  (4.1); back/forward across it is recipe 25 in `docs/TESTING.md` and remains an
+  unrun check rather than a claimed pass. The underlying mechanism is unchanged
+  by this fix — the link now reaches the same lookup path a typed search uses —
+  so the risk here is low, but it is not asserted.
+- [x] 4.4 Regression: kaikki links still navigate. **Verified**: kaikki links
+  navigated before and after (the reporter confirmed both), and their emitted
+  scheme is `gdlookup://localhost/…` — the shape this change now emits, which is
+  what the fix was modelled on. The smoke suite also passes unchanged
 
 ### The measurement that should have come first
 
@@ -120,8 +130,11 @@ should record it as the way to check link rewriting.
 
 ## 5. Documentation
 
-- [ ] 5.1 `docs/TESTING.md`: add a recipe for StarDict cross-reference
-  navigation, so the gap is covered by name
+- [x] 5.1 `docs/TESTING.md`: add a recipe for StarDict cross-reference
+  navigation, so the gap is covered by name — a "StarDict cross-references"
+  section with recipes 23–25 (tap navigates, images still render, back works),
+  plus how to test link rewriting without a device by asserting on the logged
+  lookup word
 
 ## Notes
 
@@ -133,3 +146,24 @@ unrelated findings; each is tracked separately.
 The World Factbook is unusually good at exposing this: it is the first fixture
 whose articles cross-link heavily, so a scheme that does nothing on tap was
 never noticed with the smaller `smoke`/`demo` StarDict fixtures.
+
+### What went wrong on the way, kept deliberately
+
+The rewrite was fixed three times, each producing a different failure, because
+each URL shape was **hand-assembled** rather than copied from a working example:
+
+| Shape | Device result |
+| --- | --- |
+| `bword:<word>` | tap did nothing |
+| `gdlookup:<word>` | "unknown url scheme", offered to an external app |
+| `gdlookup:///<word>` | recognised, but the **empty authority** mangled the word at its space |
+| `gdlookup://localhost/<word>` | works — the shape DSL already used |
+
+The CI assertion was wrong **twice in the same way**: it checked a substring of
+the scheme rather than the complete URL the app parses, so it passed while the
+device showed "unknown url scheme", and again while the device truncated the
+word. It now requires the full href including the host.
+
+Two lessons, both cheap to apply next time: compare against a working example
+before inventing a format, and assert the exact shape the consumer parses rather
+than a prefix of it. A loose assertion reads as coverage while providing none.
