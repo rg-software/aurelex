@@ -37,19 +37,38 @@ wrong in two ways (`engine/src/dict/stardict.cc`):
 2. Even when it did match, the rewrite wrote the link back as **`bword:`** —
    a scheme nothing consumes. So the output could never be tapped either way.
 
-The fix strips either `bword://` or `bword:` prefix, then rewrites to
-`gdlookup:`, which the boundary and the QML link poller already resolve. That
-also matches the anchor branch directly below it, which already used
-`gdlookup://localhost/`.
+**A third error was found only on device, and it was mine.** The first fix
+rewrote to bare `gdlookup:<word>`. That is not a form the app accepts: the link
+poller matches `/gdlookup/` and `gdlookup://` only, so the WebView treated it
+as an unknown URL and tried to hand it to an external app
+(`ActivityNotFoundException`, "unknown url scheme").
+
+The app's parser requires the scheme plus a separator slash plus the word:
+
+```
+const slash = u.indexOf("/", "gdlookup://".length)   // a THIRD slash
+decodeURIComponent(u.substring(slash + 1))           // and it decodes
+```
+
+So the correct target is `gdlookup:///<percent-encoded word>`.
+
+**The lesson is in the assertion.** The first version accepted any `gdlookup:`
+prefix, so it reported OK while the app failed — a loose check is worse than no
+check, because it reads as coverage. It now requires the exact
+`gdlookup:///blood` shape, separators included. This is the second time in this
+change that an assertion had to be tightened to stop passing vacuously; the
+first was the fixture having no cross-reference at all.
 
 ## 3. Catch it on host
 
 - [x] 3.1 Smoke assertion: looking up a StarDict entry whose article contains a
   `bword:` cross-reference emits HTML with **no** `bword:` href
   (`STARDICT_LINK_NO_BWORD`)
-- [x] 3.2 Smoke assertion: the rewritten link resolves to a lookup target
-  (`STARDICT_LINK_REWRITTEN`). Confirmed the linked entry itself resolves:
-  `gd_lookup("Afghanistan Geography") -> 5565 bytes`, images intact
+- [x] 3.2 Smoke assertion: the rewritten link has the exact shape the app
+  parses — `gdlookup:///<word>` (`STARDICT_LINK_REWRITTEN`). Deliberately checks
+  the separators and not merely the scheme name: the first version accepted a
+  bare `gdlookup:` prefix and reported OK while the device showed "unknown url
+  scheme"
 - [x] 3.3 Extend the StarDict fixture with a cross-reference between two of its
   entries. **This required switching the fixture from a global
   `sametypesequence=m` to per-article type characters**, because the rewrite
@@ -57,21 +76,47 @@ also matches the anchor branch directly below it, which already used
   visible text instead of producing a link. The fixture now exercises both
   types: `clot` is HTML with the cross-reference, the others plain
 - [x] 3.4 Confirm the existing smoke assertions still pass — full CI-equivalent
-  run (`smokec` + `.dsl.dz` + `.dsl.files` + `nested/`): **EXIT=0, zero FAILs**,
+  run (`smoke` + `.dsl.dz` + `.dsl.files` + `nested/`): **EXIT=0, zero FAILs**,
   3 dictionaries, all `GROUP_*`, `RESOURCE_*`, `REIMPORT_*`, `REMOVE_*` OK
 - [x] 3.5 **Teeth check**: with the fix reverted and the fixture kept, both new
   assertions report FAIL; with it restored, both report OK. The check is not
   vacuous
+- [ ] 3.6 Re-confirm the teeth check against the **tightened** assertion, so a
+  future regression to a bare `gdlookup:` is caught rather than passing
+- [x] 3.7 Re-run the teeth check against the **final** `gdlookup://localhost/`
+  assertion: FAIL without the fix, OK with it. Confirmed above at each
+  tightening; the assertion is now stable against the shape that works
 
 ## 4. Verify on device
 
-- [ ] 4.1 Tap a cross-reference in `Afghanistan Introduction` (The World
-  Factbook) and confirm it opens the linked entry, e.g. `Afghanistan Geography`
-- [ ] 4.2 Confirm the flag/map images still render in `Afghanistan Geography`
-  after the change
+- [x] 4.1 Tap a cross-reference in `Afghanistan Introduction` (The World
+  Factbook) and confirm it opens the linked entry, e.g. `Afghanistan Geography`.
+  **Verified on device.**
+- [x] 4.2 Confirm the flag/map images still render in `Afghanistan Geography`
+  after the change. **Verified on device.**
 - [ ] 4.3 Confirm back/forward navigation works across the link, restoring the
   group the article came from
 - [ ] 4.4 Regression: kaikki links still navigate
+
+### The measurement that should have come first
+
+The deciding evidence was the word the lookup received, not whether navigation
+happened. Before the fix:
+
+```
+gd_lookup_in_group word=Afghanistan                 <- truncated at the space
+```
+
+After:
+
+```
+gd_lookup word=Afghanistan Geography                <- complete
+gd_lookup word=Afghanistan Transnational Issues
+```
+
+Asserting on the lookup word is cheap, needs no human at the device, and would
+have distinguished all three wrong URL forms in one pass. `docs/TESTING.md`
+should record it as the way to check link rewriting.
 
 ## 5. Documentation
 

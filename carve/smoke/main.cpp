@@ -324,11 +324,16 @@ int main( int argc, char ** argv )
     const bool noBword = linkHtml.find( "bword:" ) == std::string::npos;
     std::printf( "STARDICT_LINK_NO_BWORD=%s\n", noBword ? "OK" : "FAIL" );
 
-    // And the cross-reference must have become a link the app resolves. The
-    // linked word is "blood", so require a gdlookup target naming it.
-    const bool rewritten =
-      linkHtml.find( "gdlookup:blood" ) != std::string::npos
-      || linkHtml.find( "gdlookup://" ) != std::string::npos;
+    // And the cross-reference must have become a link the app resolves, in
+    // exactly the shape the DSL reader produces (gdlookup://localhost/<word>).
+    //
+    // This assertion has now been wrong twice in the same way, which is worth
+    // recording: it first accepted any "gdlookup:" prefix and passed while the
+    // device showed "unknown url scheme"; then it required "gdlookup:///" and
+    // passed while the device silently truncated the word at its space. Both
+    // times it asserted a substring of the scheme rather than the complete URL
+    // the app parses. So it now requires a full href, host included.
+    const bool rewritten = linkHtml.find( "href=\"gdlookup://localhost/blood\"" ) != std::string::npos;
     std::printf( "STARDICT_LINK_REWRITTEN=%s\n", rewritten ? "OK" : "FAIL" );
 
     stardictLinkOk = noBword && rewritten;

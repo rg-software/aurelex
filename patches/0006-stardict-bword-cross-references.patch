@@ -1,8 +1,16 @@
 diff --git a/src/dict/stardict.cc b/src/dict/stardict.cc
-index 90127271..5db78eda 100644
+index 90127271..c65924eb 100644
 --- a/src/dict/stardict.cc
 +++ b/src/dict/stardict.cc
-@@ -483,6 +483,25 @@ string StardictDictionary::handleResource( char type, const char * resource, siz
+@@ -26,6 +26,7 @@
+ #include "utils.hh"
+ #include <charconv>
+ #include <QRegularExpression>
++#include <QUrl>
+ #include "globalregex.hh"
+ #include <QDir>
+ 
+@@ -483,6 +484,25 @@ string StardictDictionary::handleResource( char type, const char * resource, siz
  
          QString link = match.captured( 3 );
  
@@ -28,16 +36,34 @@ index 90127271..5db78eda 100644
          if ( link.indexOf( ':' ) < 0 ) {
            //compatible with issue #567
            //such as bword://fl&#x205;k
-@@ -492,7 +511,11 @@ string StardictDictionary::handleResource( char type, const char * resource, siz
+@@ -492,7 +512,29 @@ string StardictDictionary::handleResource( char type, const char * resource, siz
  
            QString newLink;
            if ( link.indexOf( '#' ) < 0 ) {
 -            newLink = QString( "<a" ) + match.captured( 1 ) + "href=\"bword:" + link + "\"";
-+            // Rewrite to the scheme the app actually resolves. Writing it back
-+            // as "bword:" produced a link no consumer understands; "gdlookup:"
-+            // is one the boundary and the QML link poller already handle, the
-+            // same target the anchor branch below uses.
-+            newLink = QString( "<a" ) + match.captured( 1 ) + "href=\"gdlookup:" + link + "\"";
++            // Rewrite to the scheme the app resolves, using the SAME shape the
++            // DSL reader already produces for its <ref> nodes: build the URL
++            // with QUrl rather than assembling a string. Three hand-written
++            // forms were all wrong, and each failure looked different:
++            //
++            //   "bword:<word>"     - no consumer understands it; tap did nothing.
++            //   "gdlookup:<word>"  - bare scheme, an unknown URL; the WebView
++            //                        offered it to the system and the app
++            //                        reported "unknown url scheme".
++            //   "gdlookup:///<word>" - recognised, but with an EMPTY authority,
++            //                        so the word was mangled at the space and
++            //                        only "Afghanistan" reached the lookup.
++            //
++            // DSL emits "gdlookup://localhost/<encoded word>" and its refs
++            // navigate correctly on device, so matching that construction is the
++            // reliable option: setHost("localhost") keeps the authority
++            // non-empty and toEncoded() percent-encodes the path, which is what
++            // the app's _parseGdlookupUrl expects to decodeURIComponent.
++            QUrl url;
++            url.setScheme( QStringLiteral( "gdlookup" ) );
++            url.setHost( QStringLiteral( "localhost" ) );
++            url.setPath( Utils::Url::ensureLeadingSlash( link ) );
++            newLink = QString( "<a" ) + match.captured( 1 ) + "href=\"" + url.toEncoded() + "\"";
            }
  
  
