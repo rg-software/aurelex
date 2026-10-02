@@ -9,12 +9,19 @@ storage blocks direct path reads of the picked folders. A StarDict dictionary is
 a set of sibling files sharing a basename rather than a single file, so staging
 SHALL copy the `.ifo` together with the `.idx` and `.dict` files the engine
 resolves it against, and the optional `.syn` when present, including the
-compressed variants the engine accepts. A StarDict dictionary keeps the images its articles reference in a
-sibling resource location, which the engine reads from a `res` directory
-beside the dictionary, a `res.zip` beside it, or a `<base>.res.zip`;
-staging SHALL copy whichever of those the picked folder provides, so the
-dictionary's article images resolve after import rather than being dropped.
-A StarDict dictionary whose companion
+compressed variants the engine accepts. A StarDict dictionary keeps the images
+its articles reference in a sibling resource location, which the engine reads
+from a `res` directory beside the dictionary, a `res.zip` beside it, or a
+`<base>.res.zip`; staging SHALL copy whichever of those the picked folder
+provides, so the dictionary's article images resolve after import rather than
+being dropped. An MDict dictionary MAY ship its article assets either inside its
+`.mdd` archive or loose, beside the `.mdx`, and the engine resolves a loose asset
+from the dictionary folder before consulting the archive, so staging SHALL copy
+those assets when the picked folder provides them beside a `.mdx`. Because a
+stylesheet or image name is common, staging SHALL recognise such a file as a
+dictionary's asset ONLY when a `.mdx` sits beside it in the same folder, and only
+for the extensions an article embeds, so an unrelated asset elsewhere in a
+picked tree is not staged. A StarDict dictionary whose companion
 files were not staged MUST NOT be presented as imported, because the engine
 cannot open it. The system SHALL NOT require system-wide storage access to add
 dictionaries. Unsupported files in a picked location MUST NOT be treated as
@@ -129,14 +136,13 @@ scans.
   the report stays until the user dismisses it or imports again, and nothing else
   is deleted on the app's initiative
 
-> **Naming note for archive.** This scenario previously asserted that the staged
-> files of *any* reported failure survive until the user acts. That is now false:
-> an unloadable source's files are deleted automatically, which is the point of
-> this change. The guarantee that survives — and what the body above now states —
-> is narrower: nothing but the unloadable source is deleted, and nothing the user
-> asked for is deleted at all. The scenario's name should be renamed to match when
-> this change is archived; OpenSpec requires the name verbatim in a MODIFIED
-> block, so it cannot be corrected here.
+> **Naming note for archive.** This scenario's name still says "not cleaned up",
+> which the automatic deletion in this change makes misleading — the name survives
+> only because OpenSpec requires a MODIFIED block to carry a current scenario's
+> name verbatim. The body is the narrower guarantee that does survive: nothing but
+> the unloadable source is deleted, and nothing the user asked for is deleted at
+> all. Rename it to match (e.g. "Only an unloadable source is deleted without the
+> user asking") in a later docs change.
 
 #### Scenario: Re-importing a folder clears a previous failed import
 - **WHEN** the user re-imports a folder whose earlier import failed to load
@@ -165,6 +171,22 @@ scans.
 - **WHEN** a picked folder contains a directory named `res` but no StarDict
   dictionary beside it
 - **THEN** that directory's contents are not staged as a dictionary's resources
+
+#### Scenario: An MDX set's loose assets are staged
+- **WHEN** the user imports a folder containing an `.mdx` whose stylesheet or
+  images sit beside it rather than inside a `.mdd`
+- **THEN** those files are staged, and an article that references one is styled
+  and shows its image rather than reporting a missing resource
+
+#### Scenario: A loose asset is recognised only beside an MDX dictionary
+- **WHEN** a picked folder contains a stylesheet or image but no `.mdx` beside it
+- **THEN** that file is not staged as a dictionary's asset
+
+#### Scenario: Files beside an MDX dictionary that no article embeds are not staged
+- **WHEN** a folder holds an `.mdx` alongside files that are not article assets,
+  for example a text note or an unrelated archive
+- **THEN** only the dictionary files and the assets its articles embed are
+  staged
 
 ## ADDED Requirements
 

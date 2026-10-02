@@ -34,23 +34,21 @@ one-off import and imported dictionaries simply belong to the app's dictionary
 set until removed.
 
 When a staged dictionary file cannot be loaded, the system SHALL report that
-failure to the user naming the affected file, and SHALL continue loading the
-other dictionaries in the same scan. The reported failure SHALL be actionable:
-the user SHALL be able to remove that failed import from the app, and the removal
-SHALL delete the files it staged so the failure is not re-raised and its storage
-is not retained. A failed import MUST NOT be unremovable merely because it never
-became a loaded dictionary.
+failure to the user and SHALL continue loading the other dictionaries in the same
+scan. A staged source that cannot be loaded has no value to the user and cannot
+become valid, so the system SHALL delete that source's files without waiting for
+the user to act, and SHALL report it as deleted. That deletion SHALL be scoped to
+the failing source's own files, so it applies even when the import folder holds
+dictionaries that did load, and it SHALL NOT delete files belonging to a loaded
+dictionary or a staging location that still holds another loaded dictionary's
+files. Automatic deletion is confined to sources the engine has reported as
+unloadable; it SHALL NOT delete any dictionary that loaded successfully, and the
+user SHALL NOT be asked to confirm a deletion of their own import.
 
 Re-importing a folder whose previous import ended in a failed load SHALL
 supersede that failed import: after the re-import the failure SHALL no longer be
 reported, and the stale staged copy SHALL NOT remain to be re-attempted on later
 scans.
-
-Cleanup of a failed import SHALL NOT delete files belonging to a loaded
-dictionary, and SHALL NOT delete a staging location that still holds another
-loaded dictionary's files, since one import folder can carry several
-dictionaries. Removing a failed import SHALL NOT be performed automatically as a
-side effect of scanning; it happens only in response to the user's action.
 
 #### Scenario: User selects a valid dictionary folder
 - **WHEN** the user picks a folder containing mdict, DSL, or StarDict files
@@ -118,14 +116,37 @@ side effect of scanning; it happens only in response to the user's action.
   scan is still loaded and usable
 
 #### Scenario: A failed import can be removed
-- **WHEN** the user acts on a reported load failure to remove it
+- **WHEN** a scan reports a source that cannot be loaded
 - **THEN** the files that import staged are deleted, the failure stops being
-  reported, and later scans no longer attempt that file
+  reported as needing the user's attention, and later scans no longer attempt
+  that file
 
 #### Scenario: Removing a failed import leaves loaded dictionaries alone
-- **WHEN** the user removes a failed import whose folder also holds a dictionary
-  that loaded successfully
-- **THEN** the loaded dictionary's files remain and it keeps working
+- **WHEN** the cleanup of a failed import runs in a folder that also holds a
+  dictionary that loaded successfully
+- **THEN** only the failing source's files are deleted, and the loaded
+  dictionary's files remain and it keeps working
+
+#### Scenario: A dictionary the user asked for is never deleted on its own
+- **WHEN** a scan completes, however it reports its results
+- **THEN** the app does not delete a dictionary that loaded successfully, and does
+  not delete any part of a dictionary the user asked for, without the user acting
+  on that dictionary
+
+#### Scenario: Failures are not cleaned up without the user asking
+- **WHEN** a scan reports that a source could not be loaded and the user takes no
+  action
+- **THEN** the only files deleted are those of the source that could not be loaded;
+  the report stays until the user dismisses it or imports again, and nothing else
+  is deleted on the app's initiative
+
+> **Naming note for archive.** This scenario's name still says "not cleaned up",
+> which the automatic deletion in this change makes misleading — the name survives
+> only because OpenSpec requires a MODIFIED block to carry a current scenario's
+> name verbatim. The body is the narrower guarantee that does survive: nothing but
+> the unloadable source is deleted, and nothing the user asked for is deleted at
+> all. Rename it to match (e.g. "Only an unloadable source is deleted without the
+> user asking") in a later docs change.
 
 #### Scenario: Re-importing a folder clears a previous failed import
 - **WHEN** the user re-imports a folder whose earlier import failed to load
@@ -137,11 +158,6 @@ side effect of scanning; it happens only in response to the user's action.
   folder
 - **THEN** the stale staged copy from the failed attempt is gone, so subsequent
   scans do not retry it or report it again
-
-#### Scenario: Failures are not cleaned up without the user asking
-- **WHEN** a scan reports a load failure and the user takes no action
-- **THEN** the staged files are still present and the failure is still reported;
-  the app does not delete an import on its own
 
 #### Scenario: A StarDict dictionary's article images resolve after import
 - **WHEN** the user imports a StarDict dictionary whose articles reference images
@@ -901,4 +917,103 @@ cleared, which takes every other staged dictionary with it.
 - **WHEN** the app scans the staged tree on launch and the engine loads dictionaries
 - **THEN** the Dicts list contains one row per loaded dictionary, so no loaded dictionary
   is left unlisted
+
+### Requirement: Import results are reported in a purely informational banner
+The system SHALL present the results of an import in the Dictionaries pane as a
+notification that is informational only. The banner SHALL contain no control that
+deletes stored files, because by the time it is shown nothing that the import
+failed on is left to delete.
+
+Each row SHALL name what did not get imported and why. Where a result has a
+dictionary name, the row SHALL show that name rather than a file name, because a
+file name inside app-private storage is not something the user recognises; a file
+name SHALL be shown only where no dictionary name exists. The system SHALL
+distinguish, in the wording of a row, between a source that could not be loaded,
+a dictionary that was already present and therefore not added again, and a
+dictionary that was not added because a different dictionary with the same name is
+installed.
+
+The banner SHALL be dismissed by a single control that removes it from view and
+changes nothing else. Starting another import SHALL clear results from earlier
+imports before the new results are shown, so the banner never describes a batch
+other than the most recent one. The user SHALL be able to ignore the banner and
+use the rest of the app as usual, and SHALL resolve anything actionable by removing
+a dictionary through the normal Dictionaries list.
+
+#### Scenario: A row names the dictionary and the reason
+- **GIVEN** an import did not add a dictionary
+- **WHEN** the user reads the banner
+- **THEN** each row names the dictionary or file concerned and states the reason
+  it was not added, in wording specific to why it was not added
+
+#### Scenario: The banner deletes nothing
+- **WHEN** an import reports a result
+- **THEN** the banner offers no control that deletes stored files, and the stored
+  files it refers to are in the state the app's own rules put them in
+
+#### Scenario: Dismissing removes the banner and nothing else
+- **WHEN** the user activates the banner's dismiss control
+- **THEN** the banner is no longer shown, and no stored file and no dictionary is
+  changed by dismissing it
+
+#### Scenario: A new import clears stale results
+- **GIVEN** a banner is showing results from an earlier import
+- **WHEN** the user imports again
+- **THEN** the earlier results are no longer shown, and the banner shows only the
+  outcome of the import just performed
+
+#### Scenario: The user carries on using the app
+- **GIVEN** a banner is showing results
+- **WHEN** the user navigates, searches, groups or removes dictionaries without
+  dismissing it
+- **THEN** every one of those actions works normally, and the banner does not
+  block or change them
+
+### Requirement: The import-results banner does not crowd out the dictionary list
+The banner SHALL be shown in the Dictionaries pane above the dictionary list, and
+SHALL be shown alongside it rather than in place of it. Its height SHALL be bounded
+so that a large number of results cannot push the dictionary list out of view, and
+its results SHALL scroll within that bound. The number of results SHALL always be
+visible, so results that are scrolled out of view are still accounted for.
+
+The banner SHALL NOT be shown when there is nothing to report, and it SHALL NOT be
+shown for a purely successful outcome that the user has nothing to act on.
+
+#### Scenario: Many results keep the dictionary list visible
+- **GIVEN** an import produced more results than fit in the banner
+- **WHEN** the user views the Dictionaries pane
+- **THEN** the dictionary list is still visible below the banner, the results
+  scroll within the banner, and the total number of results is shown
+
+#### Scenario: Few results take only the space they need
+- **WHEN** an import produced a small number of results
+- **THEN** the banner is only as tall as its results, and the dictionary list
+  takes the remaining space
+
+#### Scenario: The banner is hidden when there is nothing to report
+- **WHEN** there is nothing to report
+- **THEN** the banner is not shown and does not occupy any space
+
+#### Scenario: A fully successful import shows no banner
+- **WHEN** an import added every dictionary it contained and nothing was skipped
+  or rejected
+- **THEN** the user is not given a results banner to dismiss
+
+### Requirement: The import-results banner is announced to assistive technology
+The banner's dismiss control SHALL expose an accessible name and role, and the
+name SHALL be the same invariant English string in every shipped display language,
+so that the control can be located reliably by accessibility-based automated
+testing. The name SHALL describe dismissing the results rather than removing a
+file, because the control deletes nothing.
+
+#### Scenario: The dismiss control is reachable by its accessible name
+- **WHEN** an accessibility client inspects the Dictionaries pane while the banner
+  is showing
+- **THEN** the dismiss control is present with its documented accessible name and
+  role, in the invariant English form regardless of the display language
+
+#### Scenario: The name does not describe a deletion
+- **WHEN** the dismiss control is exposed to assistive technology
+- **THEN** its accessible name refers to dismissing the results, not to removing or
+  deleting a file
 
