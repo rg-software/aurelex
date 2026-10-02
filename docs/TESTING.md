@@ -227,6 +227,29 @@ One thing that looks like a bug and is not:
   (no language pair, and an image it does not ship) are in the MDict section above.
 
 
+## Article scrollbar clearance
+
+Android's WebView draws **overlay** scrollbars: the thumb is composited over the
+page and given no layout space, and `scrollbar-gutter` does not reserve space for
+overlay scrollbars (it applies to classic ones only). The app therefore injects
+`body { padding-right: 12px !important }` so the entry text stops short of the
+right edge the thumb occupies. The strip is painted the article's own background
+(synced to the app background), so it does not read as a separate gap
+(`reserve-article-scrollbar-space`). Check by screenshotting mid-scroll — swipe,
+then capture before the thumb fades — and scanning the pixel columns at the
+article's right edge; on a 1080×2400 / 400 dpi device the WebView's right edge is
+x=1044 and the thumb occupies the last 11 px, x=1034–1044.
+
+| # | How to test | Expected | Status |
+| --- | --- | --- | --- |
+| 18t | Open a long article that **scales** (`The World Factbook 2014` → `Zimbabwe`), zoom to the 250% ceiling, scroll, screenshot mid-scroll | The thumb still clears the text: rightmost text ink x≈995, thumb x1034–1044 → ~39 px gap. The 12 px reserve holds at max zoom (measured — the reserve is in px and the text scales into it) | ✅ |
+| 18u | At 100% (light), scroll a long article | Thumb x1034–1044 clear of the text; the reserved strip is the article background, no border or gap | ✅ |
+| 18v | A short article that does not scroll, in both themes | Nothing drawn at the right edge — uniform `#FFFBFE` light / `#1C1B1F` dark | ✅ |
+| 18w | `adb logcat` over the scroll/zoom pass | No `W`/`E`/`F` from the app's pid | ✅ |
+
+`collinslaw` does not scale, so at any zoom its text is unchanged — that is the
+known absolute-size limitation above, not a scrollbar-clearance failure.
+
 ## Article optional parts (`[*]…[/opt]`)
 
 DSL dictionaries hide author-marked optional content (answers, notes, extra

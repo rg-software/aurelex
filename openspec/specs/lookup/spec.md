@@ -51,6 +51,7 @@ The system SHALL render a lookup as HTML built from the dictionaries of the acti
 Successful article lookups SHALL be recorded in the lookup history.
 Unknown words, lookups scoped to a group with no dictionaries, and articles whose embedded resources load or fail concurrently MUST NOT crash or hang the app; navigation (switching tabs, opening other panes, and returning) SHALL remain responsive while an article is displayed.
 The Search pane's layout SHALL fit within the height the window gives it at every window size: the inline article area SHALL NOT spill past the bottom navigation dock, and therefore the article surface SHALL never cover the app's own chrome. In particular the bottom navigation dock SHALL remain fully visible and tappable on the Search tab in every window orientation. When the window changes size, the article surface SHALL settle in the new orientation without the user having to switch tabs or re-open the word, and the article that was open SHALL still be displayed afterwards.
+Where the article is longer than the visible area, its text SHALL stay clear of the scrolling affordance: the scrollbar SHALL NOT be drawn over the entry text. The inset that keeps them apart SHALL be painted with the article's own background, so it reads as part of the article rather than as a separate strip.
 
 #### Scenario: Word found in multiple dictionaries
 - **WHEN** the user looks up a headword present in several dictionaries of the active group
@@ -91,6 +92,14 @@ The Search pane's layout SHALL fit within the height the window gives it at ever
 #### Scenario: Opening the keyboard does not disturb an article or its suggestions
 - **WHEN** the soft keyboard opens while the search field is focused, which shrinks the window without changing its width
 - **THEN** the open article stays displayed and headword suggestions still appear as the user types
+
+#### Scenario: Scrolling a long article keeps the text clear of the scrollbar
+- **WHEN** an article longer than the visible article area is scrolled
+- **THEN** the scrollbar and the entry text do not overlap — the text ends before the edge the scrollbar occupies
+
+#### Scenario: The reserved space is not visible as a gap
+- **WHEN** an article is displayed, whether or not it is long enough to scroll
+- **THEN** the space kept clear of the scrollbar is the same color as the article's background, so no strip or border is apparent
 
 ### Requirement: Embedded dictionary resources
 The system SHALL load resources referenced by an article (for example images and audio stored in mdict `.mdd` archives or referenced from dictionary folders) and display or play them within the article. Resource loading SHALL be robust: resolving the article's resources via the local article server MUST NOT crash the app or deadlock/freeze the UI, including when several resources are requested concurrently, and a request whose client disconnects before the resource is ready SHALL be dropped without error. Resolving a resource MUST NOT block the user interface and MUST NOT require the user interface thread to run a nested event loop; resource work SHALL be performed off the user interface thread, and a resource that cannot be produced SHALL be abandoned within a short bounded time rather than after a long fixed wait.
