@@ -53,6 +53,24 @@ This adb-installs the result (`-Install`); without it the APK lands in
 | 8l | Leave a genuinely empty leftover staged directory in `files/staged/` (an import that staged no dictionary at all), then restart | It is still reclaimed, and logcat shows `sweeping staged dir holding no dictionary`. Confirms the fix did not turn the sweep off: nested imports survive, true orphans do not. Re-verified on device for `fix-long-path-dictionaries-invisible` | ✅ |
 | 8m | **Regression — a dictionary whose staged path is very long.** Hand-build a staged tree on a debug device so one dictionary's absolute source path exceeds 512 bytes while a sibling stays under it: `run-as org.aurelex.pocket.dictionary mkdir -p "files/staged/zzover/<four nested segments>"`, then copy a valid `.dsl` in. Give the fixture a **unique** `#NAME` (a name shared with a loaded dictionary would be collapsed by `resolve-duplicate-dictionaries`, and an identical path under the buffer is the sibling). Force-stop and relaunch | The over-boundary dictionary is **listed** and removable like any other, and on cold start `gd_dict_count` equals the number of rows the Dicts list shows. After `fix-long-path-dictionaries-invisible`: a 530-byte path and a 500-byte sibling were both listed (`gd_dict_count = 10`, `dictionaries available: 10`); removing the 530-byte one deleted its staged file, its index and its `zzover` directory and it stopped resolving, while the 500-byte sibling still did. Before the fix the buffers were 512/256 bytes, `gd_dict_info` refused the over-long path, and the dictionary was loaded but unlistable and unremovable | ✅ |
 
+## Duplicate dictionaries (identity is name + content)
+
+A dictionary's identity is its **normalized display name plus a content signature**
+(the source-file basenames with sizes and mtimes, 5 s tolerance) — never the folder
+it was staged from. Two copies of one dictionary are one dictionary regardless of
+path or format. The full-content comparison runs on host in
+`app/tests/DictIdentityTest.cpp`, and the boundary record shape is exercised by the
+engine smoke tool (`DICT_IDENTITY_SAME`/`DICT_IDENTITY_DIFF`).
+
+| # | How to test | Expected | Status |
+| --- | --- | --- | --- |
+| 20a | Have two identical copies of one dictionary staged under **different** source folders (a pre-existing duplicate), then restart | The next scan **collapses** them to one: the redundant copy's files are deleted and its directory reclaimed, the survivor keeps its position and groups, and **nothing** is reported. Log: `collapsing identical duplicates … x 2`, then `duplicate resolution removed 1` | ✅ |
+| 20b | Pick a different folder containing an **identical** copy of an already-imported dictionary | The copy is **silently skipped**: its files are deleted, no second row appears, and the banner shows nothing. The incumbent keeps its object, position, groups and indexes | ✅ |
+| 20c | Pick a folder containing a **different build** of an already-installed dictionary (same name, different size/mtime) | The incoming copy is **rejected**: it is deleted, the installed dictionary is left completely unchanged, and the banner reports the name with "a dictionary with this name is already installed". Nothing is prompted | ✅ |
+| 20d | A pick mixes a same-name differing dictionary with genuinely new ones | Every new dictionary is imported, scanned and indexed; the clashing one is reported; the import is **not** presented as a failure | ✅ |
+| 20e | Remove the installed dictionary, then import the previously rejected build again | It is added normally and no longer clashes, because the identity no longer matches anything loaded | ✅ |
+| 20f | Two same-name dictionaries that **differ** are already present (a cold-start clash) | Both remain loaded and in place, and the banner reports the name as "installed more than once with different content"; the user resolves it by removing one through the Dicts list | ✅ |
+
 ## Groups
 
 | # | How to test | Expected | Status |
