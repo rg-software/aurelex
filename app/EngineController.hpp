@@ -192,7 +192,10 @@ public:
     Q_INVOKABLE void setArticleZoom(qreal zoom);
     bool onboarded() const { return m_onboarded; }
     void setOnboarded(bool v);
-    QVariantList scanFailures() const { return m_scanFailures; }
+    // The banner's results: unloadable sources (m_scanFailures) followed by
+    // name clashes resolved by the last scan (m_resultClashes). Combined here so
+    // the two producers never race to overwrite each other's rows.
+    QVariantList scanFailures() const { return m_scanFailures + m_resultClashes; }
 
     // Dismiss the import-results banner. Pure UI state: it clears the reported
     // results and touches no file and no dictionary. Failed sources have already
@@ -545,6 +548,10 @@ private:
     void setFtsFraction(qreal allFraction, qreal dictFraction);
     void pollFtsProgress();
     void setScanFailures(const QVariantList &list);
+    // Publish the name-clash rows (reason "nameClashWithInstalled") found by the
+    // last scan, replacing any from the previous one. Kept separate from
+    // m_scanFailures because the two are produced by independent passes.
+    void setResultClashes(const QVariantList &list);
     void collectScanFailures();
 
     // ---- dictionary identity + duplicate resolution ----
@@ -654,9 +661,22 @@ private:
     QStringList m_unloadedSources;
 
     // Name clashes found by the last resolveDuplicateDictionaries pass, as
-    // {name, count}. Rendered by the report-import-results surface, which is not
-    // built yet; nothing reads this member for now.
+    // {name, count}, kept for logging. The banner rows derived from them live in
+    // m_resultClashes.
     QVariantList m_nameClashes;
+    // Banner rows for a same-name conflict, as {name, file, reason}. Set by
+    // resolveDuplicateDictionaries; cleared when the conflict is gone.
+    QVariantList m_resultClashes;
+    // The top-level staged directories that existed when the last pick's staging
+    // began. A dictionary whose staged ancestor is NOT in this set came from that
+    // pick, so the import-path rule (skip/reject) applies to it. Emptied after the
+    // first scan that follows the pick, so later scans use the cold-start rule
+    // (collapse only, never reject) — design.md D3/D5.
+    QSet<QString> m_prePickStagedDirs;
+    // True between a pick's staging start and the first scan that resolves it.
+    // Distinguishes "a pick happened and the snapshot was empty" (first-ever
+    // import) from a cold start, where m_prePickStagedDirs is also empty.
+    bool m_prePickSnapshotValid = false;
 
     // The staging scratch dirs (files/staging-tmp/<contentHash>) a live download
     // owns, so purgeStagingTmp never deletes a transfer in flight.

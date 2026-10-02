@@ -285,6 +285,13 @@ ApplicationWindow {
     // inline WebView is created with a correct (band-sized) native surface rather
     // than a full-window one.
     property bool inlineWebReady: false
+    // --- in-article find (see openspec change in-article-find) ---
+    // QML owns the find bar state; the injected article-find.js owns the DOM
+    // highlights. findIndex is 1-based (0 when there are no matches).
+    property bool articleFindMode: false
+    property string findQuery: ""
+    property int findIndex: 0
+    property int findTotal: 0
     Timer {
         id: inlineWebTimer
         interval: 420
@@ -337,6 +344,7 @@ ApplicationWindow {
         root.currentHtml = ""
         root.navStack = []
         root.fwdStack = []
+        root._resetFind()
         root._hideSuggestOverlay()
         root._blankInline()
     }
@@ -348,6 +356,7 @@ ApplicationWindow {
     // (leaving the tab / exiting to search).
     function _hideInlineArticle() {
         root.inlineArticle = false
+        root._resetFind()
         root._hideSuggestOverlay()
         root._blankInline()
     }
@@ -366,6 +375,69 @@ ApplicationWindow {
             root._blankPending = true
             root.inlineWv.loadHtml(root.uiBlankHtml(), engine.articleBaseUrl)
         }
+    }
+
+    // --- in-article find (openspec change in-article-find) ---
+    // QML owns the bar; the injected article-find.js owns the highlights. All
+    // controller calls return a "total|index" string (index 1-based, 0 = none).
+    function _openFind() {
+        if (!root.inlineArticle) return
+        root.articleFindMode = true
+        findInput.forceActiveFocus()
+    }
+    function _closeFind() {
+        if (root.inlineWv && root.inlineWv.url.toString().length > 5)
+            root.inlineWv.runJavaScript(
+                "try{if(window.gdFindClear)gdFindClear();}catch(e){}")
+        findInput.focus = false
+        root._resetFind()
+    }
+    // Clear the bar and its state. Called when a new article is shown or the
+    // article surface is concealed — a new article must not inherit a query.
+    function _resetFind() {
+        root.articleFindMode = false
+        root.findQuery = ""
+        root.findIndex = 0
+        root.findTotal = 0
+        if (findInput.text.length > 0) findInput.text = ""
+    }
+    // Wrap a controller call so a missing/old document yields "0|0" rather than
+    // an undefined result. runJavaScript returns the last expression's value.
+    function _findCall(expr) {
+        return "(function(){try{return window." + expr + "}catch(e){return '0|0'}})()"
+    }
+    function _applyFind() {
+        const wv = root.inlineWv
+        if (!wv || !root.inlineArticle || wv.url.toString().length < 6) return
+        wv.runJavaScript(
+            root._findCall("gdFindSet(" + JSON.stringify(root.findQuery) + ")"),
+            root._setFindResult)
+    }
+    function _findNext() {
+        const wv = root.inlineWv
+        if (!wv || !root.findQuery || wv.url.toString().length < 6) return
+        wv.runJavaScript(root._findCall("gdFindNext()"), root._setFindResult)
+    }
+    function _findPrev() {
+        const wv = root.inlineWv
+        if (!wv || !root.findQuery || wv.url.toString().length < 6) return
+        wv.runJavaScript(root._findCall("gdFindPrev()"), root._setFindResult)
+    }
+    function _setFindResult(v) {
+        const parts = String(v === undefined || v === null ? "0|0" : v).split("|")
+        root.findTotal = parseInt(parts[0], 10) || 0
+        root.findIndex = parseInt(parts[1], 10) || 0
+    }
+    // Re-apply an open find after the document is (re)loaded — rotation, or the
+    // WebView being recreated on returning to the tab — restoring the match.
+    function _reapplyFind() {
+        if (!root.articleFindMode || root.findQuery.length === 0) return
+        const wv = root.inlineWv
+        if (!wv || !root.inlineArticle || wv.url.toString().length < 6) return
+        const want = root.findIndex > 0 ? root.findIndex - 1 : 0
+        wv.runJavaScript(
+            root._findCall("gdFindSet(" + JSON.stringify(root.findQuery) + "," + want + ")"),
+            root._setFindResult)
     }
 
     // --- search-suggestion overlay (rendered inside the inline article
@@ -571,6 +643,8 @@ ApplicationWindow {
     function _showArticle(word, html) {
         // A picked word replaces the candidate list — collapse the dropdown.
         root._hideSuggestOverlay()
+        // A newly opened article must not inherit the previous find query.
+        root._resetFind()
         if (currentWord !== "" && currentWord !== word) {
             // Reassign a NEW array: push()/pop() on a `property var` don't
             // notify QML, so a binding on navStack.length would go stale.
@@ -605,6 +679,7 @@ ApplicationWindow {
             root.fwdStack = []
             return
         }
+        root._resetFind()
         const prev = root.navStack[root.navStack.length - 1]
         root.navStack = root.navStack.slice(0, root.navStack.length - 1)
         // Push the article we're leaving onto the forward stack (new array so
@@ -628,6 +703,7 @@ ApplicationWindow {
     }
     function _forwardFromArticle() {
         if (root.fwdStack.length === 0) return
+        root._resetFind()
         const next = root.fwdStack[root.fwdStack.length - 1]
         root.fwdStack = root.fwdStack.slice(0, root.fwdStack.length - 1)
         // Moving forward returns us to where we'd be on the back path.
@@ -709,6 +785,7 @@ ApplicationWindow {
         if (renameGroupInput.activeFocus) renameGroupInput.focus = false
         if (createGroupNameInput.activeFocus) createGroupNameInput.focus = false
         if (ftsInput.activeFocus) ftsInput.focus = false
+        if (findInput.activeFocus) findInput.focus = false
     }
     function _openDicts() {
         _blurActive()
@@ -1249,6 +1326,19 @@ ColumnLayout {
                         anchors.leftMargin: 4
                         anchors.rightMargin: 4
                         spacing: 4
+                        // Find mode swaps this row for the find bar (below).
+                        visible: !root.articleFindMode
+
+                        // Find toggle, leftmost so it has room; opens the find bar
+                        // in place of the navigation controls.
+                        ToolButton {
+                            text: root.icon("search")
+                            font.family: root.iconFontFamily
+                            font.pixelSize: 20
+                            Accessible.name: "Search in article"
+                            Accessible.role: Accessible.Button
+                            onClicked: root._openFind()
+                        }
 
                         // Spacer right-justifies the controls.
                         Item { Layout.fillWidth: true }
@@ -1305,6 +1395,82 @@ ColumnLayout {
                             Accessible.name: "Zoom in"
                             Accessible.role: Accessible.Button
                             onClicked: engine.setArticleZoom(engine.articleZoom + engine.articleZoomStep)
+                        }
+                    }
+
+                    // Find bar: drawn in place of the navigation row, same 40px
+                    // height (so opening/closing find never resizes the WebView).
+                    RowLayout {
+                        id: findBar
+                        anchors.fill: parent
+                        anchors.leftMargin: 4
+                        anchors.rightMargin: 4
+                        spacing: 4
+                        visible: root.articleFindMode
+
+                        // The magnifier turns into the close affordance.
+                        ToolButton {
+                            text: root.icon("close")
+                            font.family: root.iconFontFamily
+                            font.pixelSize: 20
+                            Accessible.name: "Close find"
+                            Accessible.role: Accessible.Button
+                            onClicked: root._closeFind()
+                        }
+
+                        // Compact field: no floating label, so it fits the row.
+                        TextField {
+                            id: findInput
+                            Layout.fillWidth: true
+                            Layout.fillHeight: true
+                            placeholderText: qsTr("Find in article")
+                            Accessible.name: "Find in article"
+                            Accessible.role: Accessible.EditableText
+                            font.pixelSize: 14
+                            selectByMouse: true
+                            topPadding: 0
+                            bottomPadding: 0
+                            background: Rectangle {
+                                color: "transparent"
+                                border.color: root.uiBorder
+                                border.width: 1
+                                radius: 4
+                            }
+                            onDisplayTextChanged: {
+                                root.findQuery = findInput.displayText
+                                findDebounce.restart()
+                            }
+                            // Enter advances to the next match.
+                            onAccepted: root._findNext()
+                        }
+
+                        Label {
+                            id: findCounter
+                            text: root.findTotal > 0
+                                  ? (root.findIndex + " / " + root.findTotal)
+                                  : (root.findQuery.length > 0 ? qsTr("No matches") : "")
+                            color: root.uiSubFg
+                            font.pixelSize: 13
+                            Layout.alignment: Qt.AlignVCenter
+                        }
+
+                        ToolButton {
+                            text: root.icon("arrow_back")
+                            font.family: root.iconFontFamily
+                            font.pixelSize: 20
+                            enabled: root.findTotal > 0
+                            Accessible.name: "Previous match"
+                            Accessible.role: Accessible.Button
+                            onClicked: root._findPrev()
+                        }
+                        ToolButton {
+                            text: root.icon("arrow_forward")
+                            font.family: root.iconFontFamily
+                            font.pixelSize: 20
+                            enabled: root.findTotal > 0
+                            Accessible.name: "Next match"
+                            Accessible.role: Accessible.Button
+                            onClicked: root._findNext()
                         }
                     }
                 }
@@ -1368,6 +1534,9 @@ ColumnLayout {
                                     // any suggestions that arrived meanwhile.
                                     root._blankPending = false
                                     root._flushPendingSugg()
+                                    // A genuine reload with find open re-applies the
+                                    // query and restores the current match.
+                                    root._reapplyFind()
                                     // With nothing typed and no article open, the
                                     // empty Search surface falls back to history.
                                     if (root.state === 0 && !root.inlineArticle
@@ -1848,7 +2017,9 @@ text: root._stagingActive
                                   ? qsTr("%1 was already imported and was not added again").arg(modelData.name)
                                   : modelData.reason === "nameClashWithInstalled"
                                     ? qsTr("%1 was not added: a dictionary with this name is already installed. Remove the installed one to use this build.").arg(modelData.name)
-                                    : qsTr("%1 could not be loaded and was removed").arg(modelData.name)
+                                    : modelData.reason === "nameClash"
+                                      ? qsTr("%1 is installed more than once with different content. Remove the one you do not want.").arg(modelData.name)
+                                      : qsTr("%1 could not be loaded and was removed").arg(modelData.name)
                             font.pixelSize: 11
                             color: root.uiSubFg
                             wrapMode: Text.Wrap
@@ -3346,6 +3517,12 @@ text: root._stagingActive
         id: articleReloader
         interval: 200
         onTriggered: root._loadArticleNow()
+    }
+    Timer {
+        id: findDebounce
+        // Coalesce find-as-you-type so the DOM is not re-marked on every key.
+        interval: 150
+        onTriggered: root._applyFind()
     }
     property real loadedAtHeight: 0
     function _loadArticleNow() {

@@ -4,6 +4,7 @@
 // carve + boundary end-to-end without a device.
 #include "goldendict.h"
 #include "index_path.hpp"
+#include "DictIdentity.hpp"
 
 #include <QDir>
 #include <QCoreApplication>
@@ -746,9 +747,99 @@ int main( int argc, char ** argv )
     dictOk = dictOk && rmRc == 0 && after == before - 1 && bookFoundBefore && !bookFoundAfter && readdOk;
   }
 
+  // ---- dictionary identity smoke (resolve-duplicate-dictionaries) ----
+  // Identity is name + content, never location. Copy a loaded dictionary to a
+  // second path, rescan, and assert the two gd_dict_identity records compare
+  // equal; then change the copy and assert they differ. This is the only place
+  // the REAL boundary record shape is exercised on host, which is the contract
+  // the app's grouping depends on (design.md D2 risk).
+  bool identityOk = false;
+  {
+    // Pick a self-contained primary (a DSL or MDX has no companion files to
+    // copy; a StarDict .ifo alone would fail to load and confound the test).
+    char iname[ 512 ] = { 0 };
+    char ifile[ 4096 ] = { 0 };
+    int src = -1;
+    for ( int i = 0; i < gd_dict_count(); ++i ) {
+      if ( gd_dict_info( i, iname, sizeof iname, ifile, sizeof ifile ) != 0 || !ifile[0] )
+        continue;
+      const QString p = QString::fromLocal8Bit( ifile ).toLower();
+      if ( p.endsWith( QLatin1String( ".dsl.dz" ) ) || p.endsWith( QLatin1String( ".dsl" ) )
+           || p.endsWith( QLatin1String( ".mdx" ) ) ) {
+        src = i;
+        break;
+      }
+    }
+    if ( src < 0 ) {
+      std::printf( "DICT_IDENTITY_SKIP=no self-contained fixture\n" );
+    }
+    else {
+      const QString primary = QString::fromLocal8Bit( ifile );
+      const QString name    = QString::fromLocal8Bit( iname );
+      const QDir    dictQDir( QString::fromLocal8Bit( dictDir ) );
+      const QString dupDir  = dictQDir.filePath( QStringLiteral( "dupcheck" ) );
+      QDir().mkpath( dupDir );
+      const QString copy = QDir( dupDir ).filePath( QFileInfo( primary ).fileName() );
+      QFile::remove( copy );
+      const bool copied = QFile::copy( primary, copy );
+      if ( copied ) {
+        // Match the source's mtime so the 5 s tolerance is not what decides this:
+        // the copy is byte-identical and staged now, the original is older.
+        QFile c( copy );
+        if ( c.open( QIODevice::ReadWrite ) )
+          c.setFileTime( QFileInfo( primary ).lastModified(),
+                         QFileDevice::FileModificationTime );
+      }
+      const int added = copied ? gd_scan_dicts( dictDir ) : 0;
+
+      auto identitiesByName = [ & ]( const QString &n ) {
+        QVector< DictIdentity::Identity > v;
+        char nb[ 512 ] = { 0 };
+        char fb[ 4096 ] = { 0 };
+        for ( int i = 0; i < gd_dict_count(); ++i ) {
+          if ( gd_dict_info( i, nb, sizeof nb, fb, sizeof fb ) == 0
+               && QString::fromLocal8Bit( nb ) == n ) {
+            std::vector< char > buf( 1 << 16 );
+            if ( gd_dict_identity( i, buf.data(), static_cast< int >( buf.size() ) ) == 0 )
+              v.append( DictIdentity::parseRecord( QString::fromUtf8( buf.data() ) ) );
+          }
+        }
+        return v;
+      };
+
+      const QVector< DictIdentity::Identity > ids = identitiesByName( name );
+      const bool same = ids.size() >= 2
+        && DictIdentity::sameContent( ids.at( 0 ), ids.at( 1 ) );
+      std::printf( "DICT_IDENTITY_SAME=%s (name=%s, copies=%d, scan+%d)\n",
+                   same ? "OK" : "FAIL", qPrintable( name ),
+                   static_cast< int >( ids.size() ), added );
+
+      // Change the copy's size, rescan (the engine reloads it in place), and
+      // assert the two no longer compare equal.
+      bool differs = false;
+      if ( copied ) {
+        QFile f( copy );
+        if ( f.open( QIODevice::Append ) )
+          f.write( "\nidentitydrift\n\tmore\n" );
+        f.close();
+        gd_scan_dicts( dictDir );
+        const QVector< DictIdentity::Identity > ids2 = identitiesByName( name );
+        if ( ids2.size() >= 2 )
+          differs = !DictIdentity::sameContent( ids2.at( 0 ), ids2.at( 1 ) );
+        else if ( ids2.size() == 1 )
+          differs = true; // the copy did not reload as a same-name pair at all
+      }
+      std::printf( "DICT_IDENTITY_DIFF=%s\n", differs ? "OK" : "FAIL" );
+      identityOk = same && differs;
+
+      // Leave the fixture folder as it was found.
+      QFile::remove( copy );
+    }
+  }
+
   gd_cleanup();
   return ( lookSz > 0 && sugN > 0 && ftsOk && dedupOk && dictOk && optPartsOk && groupsOk
-           && resourceThreadOk && reimportOk && stardictLinkOk )
+           && resourceThreadOk && reimportOk && stardictLinkOk && identityOk )
              ? 0
              : 1;
 }

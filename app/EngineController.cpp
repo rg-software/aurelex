@@ -358,6 +358,12 @@ void EngineController::setScanFailures(const QVariantList &list) {
     emit scanFailuresChanged();
 }
 
+void EngineController::setResultClashes(const QVariantList &list) {
+    if (m_resultClashes == list) return;
+    m_resultClashes = list;
+    emit scanFailuresChanged();
+}
+
 void EngineController::collectScanFailures() {
     // gd_scan_failures takes g_engineMutex, held by the FTS worker for the whole
     // duration of a large dictionary's index build. Never call it on the UI
@@ -1178,12 +1184,23 @@ void EngineController::resolveDuplicateDictionaries(const std::function<void()> 
     fetchIdentityInventory([this, done](const QVector<DictIdentity::Identity> &inv) {
         const QVector<QVector<DictIdentity::Identity>> groups = duplicateGroups(inv);
 
+        // Did the scan being resolved follow a pick? If so, a dictionary whose
+        // staged root did not exist before the pick is a CANDIDATE: the
+        // import-path rule (skip an identical one, reject a differing one) applies
+        // to it. Otherwise only the cold-start rule runs: collapse identical
+        // copies, but report differing ones and delete none (design.md D3/D5).
+        const bool afterPick = m_prePickSnapshotValid;
+
+        auto isCandidate = [&](const DictIdentity::Identity &id) {
+            if (!afterPick)
+                return false;
+            const QString anc = stagedAncestor(id.primaryFile, m_stagedDir);
+            return !anc.isEmpty() && !m_prePickStagedDirs.contains(anc);
+        };
+
         QVector<DictIdentity::Identity> toDrop;
-        QVariantList clashes;
+        QVariantList clashRows;
         for (const QVector<DictIdentity::Identity> &group : groups) {
-            // All-or-nothing within a group. If ANY pair differs, collapse nothing:
-            // the signature cannot say which build the user wants, so removing any
-            // of them here would be the app guessing (design.md D5).
             bool allIdentical = true;
             for (int i = 1; i < group.size(); ++i) {
                 if (!DictIdentity::sameContent(group.at(0), group.at(i))) {
@@ -1191,32 +1208,72 @@ void EngineController::resolveDuplicateDictionaries(const std::function<void()> 
                     break;
                 }
             }
+            QVector<bool> isCand(group.size(), false);
+            bool anyIncumbent = false;
+            for (int i = 0; i < group.size(); ++i) {
+                isCand[i] = isCandidate(group.at(i));
+                if (!isCand[i])
+                    anyIncumbent = true;
+            }
+
             if (allIdentical) {
-                // Keep the first in ENGINE order and drop the rest: the survivor's
-                // object, list position, groups and indexes are all left alone, so
-                // nothing has to be migrated (design.md D3).
-                for (int i = 1; i < group.size(); ++i)
-                    toDrop.append(group.at(i));
+                // Keep an INCUMBENT when there is one, so the dictionary the user
+                // already had keeps its object, list position, groups and indexes;
+                // otherwise keep the first in engine order. Drop the rest. An
+                // identical candidate therefore disappears silently — the skip
+                // (design D3), and what repairs an existing installation (D5).
+                int keep = 0;
+                for (int i = 0; i < group.size(); ++i) {
+                    if (!isCand[i]) { keep = i; break; }
+                }
+                for (int i = 0; i < group.size(); ++i) {
+                    if (i != keep)
+                        toDrop.append(group.at(i));
+                }
                 qInfo().noquote() << "[aurelex] collapsing identical duplicates of"
-                                  << group.at(0).name << "x" << group.size();
+                                  << group.at(keep).name << "x" << group.size();
                 continue;
             }
-            QVariantMap clash;
-            clash.insert("name", group.at(0).name);
-            clash.insert("count", group.size());
-            clashes.append(clash);
+
+            // Content differs. On the import path the CANDIDATE is the copy to
+            // remove; the incumbent is never touched (design D3). With no
+            // incumbent — a cold-start clash, or two builds inside one pick —
+            // nothing is deleted, because a scan expresses no intent (design D5).
+            bool rejected = false;
+            if (anyIncumbent) {
+                for (int i = 0; i < group.size(); ++i) {
+                    if (isCand[i]) {
+                        toDrop.append(group.at(i));
+                        rejected = true;
+                    }
+                }
+            }
             qWarning().noquote()
                 << "[aurelex] name clash:" << group.at(0).name << "is present"
-                << group.size() << "times with different content - left in place; the"
-                << "user removes one";
+                << group.size() << "times with different content -"
+                << (rejected ? "the incoming copy is removed"
+                             : "left in place; the user removes one");
+
+            QVariantMap row;
+            row.insert("name", group.at(0).name);
+            row.insert("file", QString());
+            row.insert("reason", rejected ? QStringLiteral("nameClashWithInstalled")
+                                          : QStringLiteral("nameClash"));
+            clashRows.append(row);
         }
 
-        m_nameClashes = clashes;
+        m_nameClashes = clashRows;
+        setResultClashes(clashRows);
+
         if (!toDrop.isEmpty()) {
             const int removed = unloadAndDelete(toDrop);
             qInfo() << "[aurelex] duplicate resolution removed" << removed
-                    << "identical duplicate dictionary(s)";
+                    << "dictionary copy(ies)";
         }
+
+        // The pick's candidate window is over: later scans use the cold-start rule.
+        m_prePickSnapshotValid = false;
+        m_prePickStagedDirs.clear();
         done();
     });
 }
@@ -1324,12 +1381,14 @@ void EngineController::deleteIdentityFiles(const DictIdentity::Identity &id,
     // Delete the whole file SET, not just the primary: an .mdx plus its .mdd
     // volumes, a StarDict .ifo plus .idx/.dict, is one dictionary, and leaving the
     // companions behind means a later import of the same folder builds a broken
-    // one. Only basenames, resolved inside this dictionary's staged directory, so
-    // nothing outside it can be named.
-    const QDir sd(stagedDir);
+    // one. Basenames are resolved inside the PRIMARY's own directory, not the
+    // top-level import root: an import mirrors the picked folder's layout, so a
+    // nested dictionary's files live several levels down (fix-long-path /
+    // report-import-results).
+    const QDir fileDir(QFileInfo(primary).absolutePath());
     for (const DictIdentity::SourceFile &sf : id.files) {
-        const QString victim = sd.filePath(sf.baseName);
-        if (!StagedCleanup::isDirectChildOf(victim, stagedRoot)) {
+        const QString victim = fileDir.filePath(sf.baseName);
+        if (!StagedCleanup::isUnderRoot(victim, stagedRoot)) {
             qWarning() << "[aurelex] refusing to delete outside the staged root:"
                        << victim;
             continue;
@@ -1347,8 +1406,8 @@ void EngineController::deleteIdentityFiles(const DictIdentity::Identity &id,
     if (tree.endsWith(QLatin1String(".dsl")))
         tree += QLatin1String(".files");
     if (tree != primary) {
-        const QString treeDir = sd.filePath(QFileInfo(tree).fileName());
-        if (StagedCleanup::isDirectChildOf(treeDir, stagedRoot) &&
+        const QString treeDir = fileDir.filePath(QFileInfo(tree).fileName());
+        if (StagedCleanup::isUnderRoot(treeDir, stagedRoot) &&
             QFileInfo::exists(treeDir)) {
             qInfo() << "[aurelex] removing staged resource tree" << treeDir;
             QDir(treeDir).removeRecursively();
@@ -1368,6 +1427,7 @@ void EngineController::dismissScanFailures() {
     // source's files were already deleted when the scan reported it
     // (report-import-results, design D2/D7), so there is no action left to take.
     setScanFailures({});
+    setResultClashes({});
 }
 
 void EngineController::deleteDictionaryFiles(const QString &sourceFile,
@@ -1972,6 +2032,13 @@ img.hidden_expand_opt { padding: 12px; margin: -12px !important; }
 .gdarticlebody img[src*="gd_tag_"] { width: 1.1em; height: 1.1em;
                                     vertical-align: -0.15em;
                                     background: transparent !important; }
+/* In-article find highlights (article-find.js). Explicit, high-contrast colors
+   in both themes; em-based sizing so gdSetZoom reflows them with the text.
+   Verify the current-versus-other distinction survives Dark Reader on device. */
+mark.gd-find-mark { background: #ffe082 !important; color: #202124 !important;
+                    border-radius: 2px; padding: 0 1px; }
+mark.gd-find-mark[data-gd-find-current] { background: #e65100 !important;
+                    color: #ffffff !important; }
 </style>
 )").arg(canvasBg);
     const QString darkInit = m_darkMode ? QStringLiteral("1") : QStringLiteral("0");
@@ -1982,6 +2049,15 @@ img.hidden_expand_opt { padding: 12px; margin: -12px !important; }
     // article body that can be clicked.
     const QString optCtrl = QStringLiteral(
         R"(<script src="%1/scripts/gd-article-controls.js"></script>
+)").arg(base);
+    // In-article find: mark.min.js (vendored in APK assets/scripts; the engine's
+    // own qrc mark tag stays in the strip-list above as dead desktop weight) plus
+    // the article-find.js controller. QML drives them via runJavaScript —
+    // gdFindSet/gdFindNext/gdFindPrev/gdFindClear. See
+    // app/android/assets/scripts/README.md.
+    const QString findCtrl = QStringLiteral(
+        R"(<script src="%1/scripts/mark.min.js"></script>
+<script src="%1/scripts/article-find.js"></script>
 )").arg(base);
     const QString darkCtrl = QStringLiteral(
         R"(
@@ -2077,7 +2153,7 @@ if(window.__gdZoom!==100)window.gdSetZoom(window.__gdZoom);
 
     const int headEnd = out.indexOf(QStringLiteral("</head>"));
     if (headEnd >= 0)
-        out.insert(headEnd, zoomCtrl + plainCss + optCtrl + darkCtrl);
+        out.insert(headEnd, zoomCtrl + plainCss + optCtrl + findCtrl + darkCtrl);
     else
         out.append(zoomCtrl + plainCss + optCtrl + darkCtrl);
     return out;
@@ -3881,6 +3957,18 @@ void EngineController::pollPendingLookup()
             // before the new ones are collected, so the banner never describes an
             // older import (report-import-results, design D3).
             setScanFailures({});
+            // Remember the staged roots that already exist. The scan that follows
+            // can then tell which dictionaries this pick brought in and apply the
+            // skip/reject rule to them; a dictionary whose staged ancestor is not
+            // in this set is a candidate (resolve-duplicate-dictionaries D3).
+            m_prePickStagedDirs.clear();
+            {
+                const QDir sr(m_stagedDir);
+                const QStringList dirs = sr.entryList(QDir::Dirs | QDir::NoDotAndDotDot);
+                for (const QString &d : dirs)
+                    m_prePickStagedDirs.insert(sr.filePath(d));
+            }
+            m_prePickSnapshotValid = true;
             // Start the continuous processing indicator; runScan/autoIndexMissing
             // keep it raised across the phase hand-offs and it is lowered only
             // when the whole staging -> scan -> index chain is done.

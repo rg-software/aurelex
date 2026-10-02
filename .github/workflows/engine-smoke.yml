@@ -249,6 +249,14 @@ jobs:
             printf '%s' "$mdxout" | grep -q "$gate" \
               || { echo "SMOKE FAILED: MDX run did not enforce $gate"; exit 1; }
           done
+          # Dictionary identity is name + content, never location
+          # (resolve-duplicate-dictionaries). The MDX fixture is self-contained,
+          # so the tool's copy-to-a-second-path check runs here: the two identity
+          # records compare equal, and a changed copy does not.
+          printf '%s' "$mdxout" | grep -q "DICT_IDENTITY_SAME=OK" \
+            || { echo "SMOKE FAILED: identity is not location-independent"; exit 1; }
+          printf '%s' "$mdxout" | grep -q "DICT_IDENTITY_DIFF=OK" \
+            || { echo "SMOKE FAILED: a differing copy compared equal"; exit 1; }
           # Every headword in the fixture must resolve, not just the first:
           # a partial walk (one block, wrong sizes) still renders one article.
           for w in blood cafe; do
@@ -306,4 +314,9 @@ jobs:
           # beside it as `index<md5>` (fix-index-directory-path-separator).
           printf '%s' "$out" | grep -q "INDEX_PLACEMENT=OK" \
             || { echo "SMOKE FAILED: dictionary index written outside the index directory"; exit 1; }
+          # Identity is name + content, never location (resolve-duplicate-dictionaries).
+          printf '%s' "$out" | grep -q "DICT_IDENTITY_SAME=OK" \
+            || { echo "SMOKE FAILED: identity is not location-independent"; exit 1; }
+          printf '%s' "$out" | grep -q "DICT_IDENTITY_DIFF=OK" \
+            || { echo "SMOKE FAILED: a differing copy compared equal"; exit 1; }
           echo "SMOKE OK"
