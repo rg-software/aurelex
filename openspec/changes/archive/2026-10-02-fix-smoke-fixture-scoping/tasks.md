@@ -68,8 +68,11 @@
 - [x] 6.3 All existing assertions still pass unchanged in the combined folder —
   15 `_OK` results including the StarDict link, FTS, resource-thread, re-import
   and removal blocks. No block was weakened to make the MDX run green
-- [ ] 6.4 Push and confirm the workflow is green — the only proof that matters,
-  and the step that was skipped last time
+- [x] 6.4 Push and confirm the workflow is green — the only proof that matters,
+  and the step that was skipped last time. **Done:** pushed as `83b33e1`
+  ("fix(smoke): scope the tool's blocks to the fixtures a run was given"); the
+  `engine smoke` run on that commit (36936587798, 2026-10-01T22:41Z) completed
+  **success**, as did the release build on the same head.
 
 ## Notes
 
