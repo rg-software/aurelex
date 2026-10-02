@@ -138,7 +138,12 @@ SHALL/MUST language) — follow the instructions output before writing any artif
   `scripts/update-translations.ps1`, translate the new catalog entries in `app/i18n/*.ts`, mirror
   the change in `values-ru/` + `values-ja/`, and recommit the compiled `app/i18n/*.qm`. Qt catalog
   entries are source-keyed: never edit `<source>` inside a `.ts` (edit the code, then re-extract),
-  and changing English retires the old key so its translation must be re-entered per catalog.
+  and changing English retires the old key so its translation must be re-entered per catalog. A
+  new language also needs its `resConfigs` entry in `app/build.ps1` or aapt2 strips its
+  `values-xx/`. To *see* a language on a device there is no in-app switcher: use
+  `adb shell cmd locale set-app-locales org.aurelex.pocket.dictionary --locales <tag>` (Android
+  13+; the app declares no `android:localeConfig` yet) then force-stop and relaunch — recipe in
+  `docs/DEVELOPMENT.md` § "Switching the display language for testing".
 
 ## Accessible element IDs (for automated testing)
 

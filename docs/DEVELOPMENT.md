@@ -292,7 +292,7 @@ The app defaults its display language to the system UI language and ships
 Qt translation catalogs; Android surfaces (app label, widgets, tiles,
 notifications) use `res/values*/strings.xml`.
 
-**How it works**
+### How it works
 
 - QML strings use `qsTr("…")` with `%1`-style placeholders
   (`qsTr("Indexing (%1 of %2): %3").arg(a, b, c)`); imperative JS strings that
@@ -310,44 +310,139 @@ notifications) use `res/values*/strings.xml`.
   (`aurelex_ru.qm`) from the embedded `:/i18n/` resource, and falls back to
   English (with a `qInfo` line) without aborting.
 
-**Source strings are the catalog keys** — this matters when editing English.
+### Editing the English source
 
-Unlike Android `strings.xml` (where the resource `name` is a language-independent
-key and only the value changes per locale), a Qt catalog entry is keyed by the
-literal English `qsTr`/`tr` argument it was extracted from (`<source>`). Two
-consequences:
+QML user-visible strings use `qsTr("…")`; C++ ones use `tr("…")`. A Qt catalog
+entry is keyed by that literal argument (`<source>`), unlike Android
+`strings.xml` where the resource `name` is a language-independent key — so the
+code is the only home of the English string and the catalogs are downstream of
+it. `Accessible.name` values are never translated (they are the stable test IDs
+in `AGENTS.md`).
+
+1. Write or edit the string in `app/main.qml` / `app/EngineController.cpp` /
+   etc. Keep `%1`-style placeholders
+   (`qsTr("Indexing (%1 of %2): %3").arg(a, b, c)`) — never concatenate at the
+   literal site.
+2. Extract and compile:
+   `pwsh -File .\scripts\update-translations.ps1 -Languages @("ru","ja")`
+   `lupdate` updates `app/i18n/aurelex.<lang>.ts` to match the sources and
+   drops any message whose source no longer exists (`-no-obsolete`); `lrelease`
+   then recompiles the `.qm`. Add `-NoCompile` to refresh the `.ts` only.
+   Requires Qt's `lupdate`/`lrelease` (`AURELEX_QT_BASE`/`AURELEX_QT_HOST`
+   default to `C:\Qt\6.6.3` / `msvc2019_64`).
+3. The changed string is now a `<message>` with an *empty* `<translation>` in
+   **every** catalog — no translation carries over, because the key changed.
+   Fill it in each one (next subsection). An empty `<translation>` is not an
+   error: Qt falls back to the English source and `lrelease` warns.
+4. Rebuild and verify the result (see "Switching the display language for
+   testing" below).
+
+Two rules follow from source-keying:
 
 - **Never edit `<source>` inside a `.ts`.** Its only true home is the QML/C++
-  code; `lupdate` regenerates it and (`-no-obsolete`) deletes any message whose
-  source no longer appears in the sources — a hand-edited key just vanishes on
-  the next extract.
-- **Changing English copy means retranslating in every catalog.** Edit the
-  string in the source and re-extract: the old message is dropped as obsolete
-  and a fresh `<message>` appears with an *empty* `<translation>`. Fill it in
-  each shipped catalog — no translation carries over, because the key changed.
+  code; `lupdate` regenerates it, and a hand-edited key just vanishes on the
+  next extract.
+- A user-visible English change obliges a retranslation of RU and JA in the same
+  change (`AGENTS.md`).
 
-**Adding or updating text**
+### Editing a non-English translation
 
-1. Write or edit the user-facing string with `qsTr`/`tr` in the QML/C++
-   source. If only the target-language text changes (English stays correct),
-   skip to step 3 and edit translations directly.
-2. Extract and compile catalogs:
+Use this when the English is correct and only a translation is wrong or missing
+— the common manual edit.
+
+1. Edit the `<translation>` element of the matching `<message>` in
+   `app/i18n/aurelex.ru.ts` and/or `aurelex.ja.ts`. Find the message by its
+   `<source>` text; **do not** edit the `<source>`.
+2. Recompile the `.qm`:
    `pwsh -File .\scripts\update-translations.ps1 -Languages @("ru","ja")`
-   (`-NoCompile` to refresh the `.ts` only). `lupdate` updates the `.ts` to
-   match the sources; `lrelease` then recompiles the `.qm`. Requires Qt's
-   `lupdate`/`lrelease` (`AURELEX_QT_BASE`/`AURELEX_QT_HOST` default to
-   `C:\Qt\6.6.3` / `msvc2019_64`).
-3. Translate: fill the `<translation>` of any new (or freshly emptied)
-   `<message>` directly in `app/i18n/aurelex.ru.ts` / `aurelex.ja.ts`, then
-   re-run the script to recompile the `.qm`. Translation-only tweaks do not
-   need step 2.
-4. **Commit the compiled `.qm` files** — they are the shipped artifacts; both
-   are embedded via the `qt_add_resources(aurelex "i18n" ...)` block in
-   `app/CMakeLists.txt`.
-5. If a new system language is added, also extend `app/android/res/values-xx/`
-   (app label, tile/widget labels, notification strings) and add it to the
-   `-Languages` array.
+   (re-extracting is harmless when the sources did not change). To re-emit a
+   single catalog without touching the `.ts`, `lrelease` alone works:
+   `& "C:\Qt\6.6.3\msvc2019_64\bin\lrelease.exe" app\i18n\aurelex.ru.ts -qm app\i18n\aurelex_ru.qm`
+3. **Commit the compiled `app/i18n/aurelex_<lang>.qm`.** The `.qm` is the
+   shipped artifact — embedded by the `qt_add_resources(aurelex "i18n" ...)`
+   block in `app/CMakeLists.txt`; the `.ts` is the editable source.
 
-Android notification/launcher strings resolve via `getString(R.string.*)` in
-`StagingService`/`IndexingService`; the indexing-progress template is a c-format
-`formatted="false"` resource formatted at runtime (`%1$d of %2$d: %3$s`).
+### Android-managed strings (`res/values*/strings.xml`)
+
+The launcher label, Quick-Settings tile, home-screen widget and notification
+text are Android resources, not Qt catalogs. Edit the English default in
+`app/android/res/values/strings.xml` and mirror the same value into
+`values-ru/` and `values-ja/`. Here the `name` attribute is the key, so the
+English lives in one place and only values differ per locale (`app_name` stays
+"Aurelex" in every language). The strings resolve via `getString(R.string.*)`
+in `StagingService`/`IndexingService`; the indexing-progress template is a
+c-format `formatted="false"` resource formatted at runtime
+(`%1$d of %2$d: %3$s`).
+
+### Adding a new language
+
+1. Create and translate its catalog:
+   `pwsh -File .\scripts\update-translations.ps1 -Languages @("ru","ja","<lang>")`
+   (a missing `.ts` is created), then fill in its `<translation>` elements and
+   recompile.
+2. Add the compiled `.qm` to the `qt_add_resources(aurelex "i18n" ...)` FILES
+   list in `app/CMakeLists.txt` — a catalog that is not listed is never
+   embedded, so the app can never load it.
+3. Add `app/android/res/values-<lang>/strings.xml` (copy the keys from
+   `values/strings.xml`) for the Android surfaces.
+4. **Add the language code to `resConfigs` in `app/build.ps1`** (currently
+   `resConfigs "en", "ru", "ja"`). The build regenerates the Gradle template
+   with `resConfig "en"`, which makes aapt2 *strip* any `values-xx` directory
+   that is not listed — the strings then ship English-only with no build error.
+5. Update the shipped-language list where the docs name it: `AGENTS.md`,
+   `README.md`, and the localization rows in `docs/TESTING.md`.
+
+### Switching the display language for testing
+
+The app has **no in-app language switcher** — the display language is whatever
+the *process* locale resolves to at startup, so switching means changing a
+locale and cold-starting the app.
+
+**Per-app language (Android 13+ / API 33 and newer) is the fastest loop.** It
+changes only this app, needs no root, and also re-resolves the Android surfaces
+(tile/widget/notification strings):
+
+```powershell
+$adb = "C:\Program Files (x86)\Android\android-sdk\platform-tools\adb.exe"   # or add to PATH
+$pkg = "org.aurelex.pocket.dictionary"
+
+& $adb shell cmd locale set-app-locales $pkg --user 0 --locales ru-RU        # or ja-JP
+& $adb shell cmd locale get-app-locales $pkg --user 0                      # confirm what the system stored
+& $adb shell am force-stop $pkg                                            # REQUIRED, see below
+& $adb shell am start -n "$pkg/.AurelexActivity"
+
+& $adb shell cmd locale set-app-locales $pkg --user 0 --locales ""         # back to the device language
+```
+
+A relaunch is mandatory: `main.cpp` installs the `QTranslator` once, before the
+QML engine loads, and never re-evaluates it (a mid-session locale change is a
+documented non-goal in the `2026-09-25-localization` design). `am force-stop`
+plus `am start` gives that cold start; a plain `adb install -r` also does.
+
+Confirm the locale actually reached Qt — the same check the localization change
+used — rather than trusting the settings screen:
+
+```powershell
+& $adb logcat -c; & $adb shell am force-stop $pkg; & $adb shell am start -n "$pkg/.AurelexActivity"
+& $adb logcat -d | Select-String "using translation catalog|no matching translation"
+```
+
+`[aurelex] using translation catalog: ru_RU for ru-RU,…` means the catalog loaded;
+`no matching translation catalog` means the process locale did not change, so
+either the per-app locale was rejected (see below) or the device is not
+Android 13+.
+
+**Known gap:** the app declares no `android:localeConfig` (there is no
+`app/android/res/xml/locales_config.xml`, and AGP 7.4.1 cannot auto-generate
+one), so the app is not listed under *Settings → Apps → Aurelex → Language*, and
+`cmd locale set-app-locales` may be refused on some builds. Making the system
+picker real means adding `res/xml/locales_config.xml` (listing `en`, `ru`,
+`ja`) and `android:localeConfig="@xml/locales_config"` on `<application>` —
+a manifest-only change, but a user-visible feature, so it goes through an
+OpenSpec change rather than a drive-by edit.
+
+**Fallback (any device, incl. pre-13):** change the whole system language in
+*Settings → System → Languages & input* and relaunch the app. Doing that over
+adb (`setprop persist.sys.locale` + `stop`/`start`) needs root and a reboot, so
+it is only practical on an emulator; for a multi-locale sweep an AVD with a
+different system language is the cheapest option.
