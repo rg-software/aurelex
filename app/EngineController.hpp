@@ -194,13 +194,11 @@ public:
     void setOnboarded(bool v);
     QVariantList scanFailures() const { return m_scanFailures; }
 
-    // Remove a failed import the scan reported. `file` is the path from
-    // scanFailures() (the file the engine could not load); the staged directory
-    // containing it is deleted and the entry is dropped from scanFailures, so a
-    // broken import stops being retried and stops being reported. A file that is
-    // already gone is simply dropped. Deleting outside the staged root is
-    // refused, and a directory a loaded dictionary still uses is kept.
-    Q_INVOKABLE void removeScanFailure(const QString &file);
+    // Dismiss the import-results banner. Pure UI state: it clears the reported
+    // results and touches no file and no dictionary. Failed sources have already
+    // been deleted automatically by the scan (report-import-results), so there is
+    // nothing left for a control here to act on.
+    Q_INVOKABLE void dismissScanFailures();
 
     // Cycle the theme mode Light -> Dark -> Follow-system -> Light. The order is
     // deliberate: leaving Follow-system always lands on an explicit theme, which

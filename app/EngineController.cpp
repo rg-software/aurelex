@@ -361,8 +361,16 @@ void EngineController::setScanFailures(const QVariantList &list) {
 void EngineController::collectScanFailures() {
     // gd_scan_failures takes g_engineMutex, held by the FTS worker for the whole
     // duration of a large dictionary's index build. Never call it on the UI
-    // thread (would freeze the app); enumerate off-thread and set on a watcher.
-    QFuture<QVariantList> f = QtConcurrent::run([]{
+    // thread (would freeze the app); enumerate, delete and build the model
+    // off-thread, then publish on a watcher (report-import-results).
+    //
+    // The failure list is consume-on-read, so this is also where an unloadable
+    // source's own files are deleted: by the time the banner shows a row, the
+    // files it names are already gone (design D1), and the row says so. The delete
+    // is scoped to the failing source's stem, so a folder shared with dictionaries
+    // that DID load keeps every file they need.
+    const QString stagedRoot = m_stagedDir;
+    QFuture<QVariantList> f = QtConcurrent::run([stagedRoot]{
         char buf[16384];
         const int n = gd_scan_failures(buf, static_cast<int>(sizeof(buf)));
         QVariantList list;
@@ -370,15 +378,27 @@ void EngineController::collectScanFailures() {
         const QString joined = QString::fromLocal8Bit(buf);
         const QStringList lines = joined.split('\n', Qt::SkipEmptyParts);
         for (const QString &path : lines) {
+            const int removed = StagedCleanup::removeSourceFileSet(path, stagedRoot);
+            qInfo() << "[aurelex] deleted unloadable source files:" << path
+                    << "removed" << removed;
             QVariantMap m;
             m.insert("file", path);
+            m.insert("reason", QStringLiteral("couldNotLoad"));
+            // A source that could not be loaded has no engine display name, so the
+            // row falls back to the file's basename (design D4).
+            m.insert("name", QFileInfo(path).fileName());
             list.append(m);
         }
         return list;
     });
     auto *w = new QFutureWatcher<QVariantList>(this);
     connect(w, &QFutureWatcher<QVariantList>::finished, this, [this, w]{
-        setScanFailures(w->result());
+        const QVariantList result = w->result();
+        // Publish only a non-empty report: an empty read (already consumed, or a
+        // clean scan) must not wipe a banner the user has not dismissed. A new
+        // pick clears the model at the start of runScan instead.
+        if (!result.isEmpty())
+            setScanFailures(result);
         w->deleteLater();
     });
     w->setFuture(f);
@@ -1343,30 +1363,11 @@ void EngineController::deleteIdentityFiles(const DictIdentity::Identity &id,
         qInfo() << "[aurelex] staged dir kept (shared by siblings)" << stagedDir;
 }
 
-void EngineController::removeScanFailure(const QString &file) {
-    if (file.isEmpty())
-        return;
-    // Drop the reported entry first: the message must clear even when the files
-    // are already gone (removed by hand, or by a previous sweep), otherwise the
-    // banner becomes permanently unclearable again — the exact bug this fixes.
-    QVariantList kept;
-    kept.reserve(m_scanFailures.size());
-    for (const QVariant &v : m_scanFailures) {
-        if (v.toMap().value("file").toString() != file)
-            kept.append(v);
-    }
-
-    const QString stagedDir = stagedAncestor(file, m_stagedDir);
-    if (stagedDir.isEmpty()) {
-        qInfo() << "[aurelex] scan failure not under the staged root; clearing entry only"
-                << file;
-    } else if (removeStagedDirIfUnused(stagedDir, liveDictionarySources())) {
-        qInfo() << "[aurelex] removed failed import" << stagedDir;
-    } else {
-        qInfo() << "[aurelex] failed import left in place (shared or refused)" << stagedDir;
-    }
-
-    setScanFailures(kept);
+void EngineController::dismissScanFailures() {
+    // Pure UI state: removing the banner changes nothing on disk. An unloadable
+    // source's files were already deleted when the scan reported it
+    // (report-import-results, design D2/D7), so there is no action left to take.
+    setScanFailures({});
 }
 
 void EngineController::deleteDictionaryFiles(const QString &sourceFile,
@@ -3876,6 +3877,10 @@ void EngineController::pollPendingLookup()
         const bool active = peekStagingActive();
         if (active && !m_stagingActive) {
             setStagingActive(true);
+            // A new pick supersedes the last batch's report: clear the results
+            // before the new ones are collected, so the banner never describes an
+            // older import (report-import-results, design D3).
+            setScanFailures({});
             // Start the continuous processing indicator; runScan/autoIndexMissing
             // keep it raised across the phase hand-offs and it is lowered only
             // when the whole staging -> scan -> index chain is done.

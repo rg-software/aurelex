@@ -269,6 +269,63 @@ int main(int argc, char **argv) {
               QDir(root).filePath(QStringLiteral("does-not-exist"))),
           "a path that does not exist holds no dictionary");
 
+    // ---- file-set deletion for an unloadable source ------------------------
+    // report-import-results D1: an unloadable source's own files are deleted even
+    // when the directory also holds a dictionary that loaded. The sibling's files
+    // must survive - deleting the whole directory is exactly the bug this fixes.
+    check(StagedCleanup::primaryStem(QStringLiteral("X.dsl.dz")) == QLatin1String("X"),
+          "the stem of X.dsl.dz is X");
+    check(StagedCleanup::primaryStem(QStringLiteral("X.ifo")) == QLatin1String("X"),
+          "the stem of X.ifo is X");
+    check(StagedCleanup::belongsToStem(QStringLiteral("X"), QStringLiteral("X.ifo")),
+          "X.ifo belongs to stem X");
+    check(StagedCleanup::belongsToStem(QStringLiteral("X"), QStringLiteral("X.1.mdd")),
+          "a numbered .mdd volume belongs to stem X");
+    check(!StagedCleanup::belongsToStem(QStringLiteral("X"), QStringLiteral("X2.ifo")),
+          "X2.ifo does NOT belong to stem X (no prefix over-reach)");
+    check(!StagedCleanup::belongsToStem(QStringLiteral("X"), QStringLiteral("X.readme")),
+          "an unrecognised sibling is never claimed");
+
+    const QString sharedImport = QDir(root).filePath(QStringLiteral("shared20"));
+    check(touch(QDir(sharedImport).filePath(QStringLiteral("broken.ifo")))
+          && touch(QDir(sharedImport).filePath(QStringLiteral("broken.idx")))
+          && touch(QDir(sharedImport).filePath(QStringLiteral("broken.dict"))),
+          "fixture: the failing source's StarDict set exists");
+    check(touch(QDir(sharedImport).filePath(QStringLiteral("good.ifo")))
+          && touch(QDir(sharedImport).filePath(QStringLiteral("good.idx")))
+          && touch(QDir(sharedImport).filePath(QStringLiteral("good.dict"))),
+          "fixture: a sibling dictionary in the same folder exists");
+    const int removed = StagedCleanup::removeSourceFileSet(
+        QDir(sharedImport).filePath(QStringLiteral("broken.ifo")), root);
+    check(removed == 3, "exactly the failing source's three files are deleted");
+    check(!QFileInfo::exists(QDir(sharedImport).filePath(QStringLiteral("broken.ifo")))
+          && !QFileInfo::exists(QDir(sharedImport).filePath(QStringLiteral("broken.idx")))
+          && !QFileInfo::exists(QDir(sharedImport).filePath(QStringLiteral("broken.dict"))),
+          "the failing source's files are gone");
+    check(QFileInfo::exists(QDir(sharedImport).filePath(QStringLiteral("good.ifo")))
+          && QFileInfo::exists(QDir(sharedImport).filePath(QStringLiteral("good.idx")))
+          && QFileInfo::exists(QDir(sharedImport).filePath(QStringLiteral("good.dict"))),
+          "the sibling dictionary sharing the folder is untouched");
+
+    // A DSL source with a resource tree: the tree goes with the dictionary.
+    const QString dslImport = QDir(root).filePath(QStringLiteral("shared21"));
+    check(touch(QDir(dslImport).filePath(QStringLiteral("broken.dsl")))
+          && touch(QDir(dslImport).filePath(QStringLiteral("broken.files/a.wav"))),
+          "fixture: a DSL with a <name>.files tree exists");
+    check(StagedCleanup::removeSourceFileSet(
+              QDir(dslImport).filePath(QStringLiteral("broken.dsl")), root) == 2,
+          "the DSL primary and its resource tree are deleted");
+    check(!QFileInfo::exists(QDir(dslImport).filePath(QStringLiteral("broken.files"))),
+          "the DSL resource tree is gone");
+
+    // Containment: a path outside the staged root deletes nothing.
+    check(touch(tmp.filePath(QStringLiteral("elsewhere/broken.ifo"))) &&
+          StagedCleanup::removeSourceFileSet(
+              tmp.filePath(QStringLiteral("elsewhere/broken.ifo")), root) == 0,
+          "a source outside the staged root is refused");
+    check(QFileInfo::exists(tmp.filePath(QStringLiteral("elsewhere/broken.ifo"))),
+          "the outside file was not deleted");
+
     std::fprintf(stdout, "%s: staged cleanup\n", g_failures == 0 ? "PASS" : "FAIL");
     return g_failures == 0 ? 0 : 1;
 }

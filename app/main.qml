@@ -1764,91 +1764,100 @@ text: root._stagingActive
                 text: qsTr("Tap Add to import a folder containing dictionary files (.mdx, .dsl, .dsl.dz, .ifo), or the cloud button to pick from the remote catalog. Either way the files are copied into the app once; no system-wide storage access is needed.")
             }
 
-            // Dictionaries that failed to load in the last scan (corrupt or
-            // truncated source files). Surface them so the user knows a
-            // dictionary is missing, and give each one a way out: a failed
-            // dictionary is not in the loaded list, so without the remove action
-            // its staged files would be unreachable (stale-import-cleanup).
-            //
-            // Deliberately compact: this is a status strip, not a dialog. The
-            // rows stay one line each (the path elides rather than wrapping) and
-            // the remove control is a bare glyph, not a Material Button, whose
-            // 48dp minimum height otherwise dominates the banner.
+            // Import results (report-import-results). Purely informational: by
+            // the time it is shown, every unloadable source has already been
+            // deleted by the scan, so nothing here acts on files. One dismiss for
+            // the whole banner; starting a new import clears it (EngineController).
+            // The height is bounded and the rows scroll, so a large result count
+            // can never push the dictionary list out of view.
             Rectangle {
+                id: importResults
                 Layout.fillWidth: true
-                // Size to the content, and never stretch: `Layout.fillHeight`
-                // defaults true for a Rectangle inside a ColumnLayout when an
-                // explicit height is also set, which made the banner swallow all
-                // the leftover vertical space. `implicitHeight` + no fill wins.
                 Layout.fillHeight: false
-                implicitHeight: failuresCol.implicitHeight + 12
+                readonly property int maxHeight: Math.round(dictsPane.height * 0.4)
+                implicitHeight: Math.min(importResultsCol.implicitHeight + 12, maxHeight)
                 visible: engine.scanFailures.length > 0
                 color: Material.color(Material.Red, Material.Shade50)
                 radius: 4
 
                 ColumnLayout {
-                    id: failuresCol
+                    id: importResultsCol
                     anchors { left: parent.left; right: parent.right; top: parent.top; topMargin: 6 }
                     anchors.leftMargin: 10; anchors.rightMargin: 10
                     spacing: 2
 
-                    Label {
+                    RowLayout {
+                        id: importResultsHeader
                         Layout.fillWidth: true
-                        text: qsTr("%1 dictionary file(s) failed to load").arg(engine.scanFailures.length)
-                        font.pixelSize: 12
-                        font.bold: true
-                        color: Material.color(Material.Red)
-                        wrapMode: Text.Wrap
-                    }
-                    Repeater {
-                        model: engine.scanFailures
-                        delegate: RowLayout {
+                        spacing: 4
+                        Label {
                             Layout.fillWidth: true
-                            spacing: 4
-                            Label {
-                                Layout.fillWidth: true
-                                // Basename only: the full staged path is long,
-                                // meaningless to read, and what made this row
-                                // wrap. The directory underneath is an opaque id.
-                                text: modelData.file.replace(/^.*[\\/]/, "")
-                                font.pixelSize: 11
-                                elide: Text.ElideMiddle
+                            // Placeholder-substituted count: the headline stays a
+                            // translated template, never concatenated (localization
+                            // "Parameterized messages").
+                            text: qsTr("%1 import result(s)").arg(engine.scanFailures.length)
+                            font.pixelSize: 12
+                            font.bold: true
+                            color: Material.color(Material.Red)
+                            wrapMode: Text.Wrap
+                        }
+                        // The banner's only control: dismiss the report. It is not
+                        // a delete - the failed sources are already gone.
+                        Item {
+                            implicitWidth: 28
+                            implicitHeight: 28
+                            Layout.preferredWidth: 28
+                            Layout.preferredHeight: 28
+                            Layout.fillHeight: false
+                            Layout.alignment: Qt.AlignVCenter
+                            Text {
+                                anchors.centerIn: parent
+                                text: root.icon("close")
+                                font.family: root.iconFontFamily
+                                font.pixelSize: 15
                                 color: root.uiSubFg
                             }
-                            // Remove this failed import: deletes what it staged so
-                            // the failure stops recurring. A small glyph rather
-                            // than a Button, whose minimum height would size the
-                            // whole row.
-                            Item {
-                                implicitWidth: 28
-                                implicitHeight: 28
-                                // A RowLayout stretches children along the cross
-                                // axis to the tallest row member; pin both axes so
-                                // the tap target stays the glyph's size instead of
-                                // growing the row.
-                                Layout.preferredWidth: 28
-                                Layout.preferredHeight: 28
-                                Layout.fillHeight: false
-                                Layout.alignment: Qt.AlignVCenter
-                                Text {
-                                    anchors.centerIn: parent
-                                    text: root.icon("delete")
-                                    font.family: root.iconFontFamily
-                                    font.pixelSize: 15
-                                    color: root.uiSubFg
-                                }
-                                MouseArea {
-                                    anchors.fill: parent
-                                    Accessible.name: "Remove failed import"
-                                    Accessible.role: Accessible.Button
-                                    onClicked: engine.removeScanFailure(modelData.file)
-                                }
+                            MouseArea {
+                                anchors.fill: parent
+                                // Invariant English test ID (AGENTS.md); it says
+                                // dismiss, never remove.
+                                Accessible.name: "Dismiss import results"
+                                Accessible.role: Accessible.Button
+                                onClicked: engine.dismissScanFailures()
                             }
                         }
                     }
-                    Label {
+                    ListView {
+                        id: importResultsList
                         Layout.fillWidth: true
-                        text: qsTr("The file may be incomplete or corrupt. Remove it and import the folder again.")
+                        // Scroll only once the rows would exceed what the pane can
+                        // spare; below that the banner is only as tall as its rows.
+                        Layout.preferredHeight: Math.min(contentHeight,
+                            Math.max(0, importResults.maxHeight - importResultsHeader.height
+                                        - importResultsFootnote.height
+                                        - importResultsCol.spacing * 2 - 12))
+                        clip: true
+                        model: engine.scanFailures
+                        spacing: 2
+                        delegate: Label {
+                            width: ListView.view.width
+                            // The reason wording is specific to why the row was not
+                            // added; a clash must NOT inherit the old corrupt-file
+                            // advice, which is untrue for it.
+                            text: modelData.reason === "alreadyPresent"
+                                  ? qsTr("%1 was already imported and was not added again").arg(modelData.name)
+                                  : modelData.reason === "nameClashWithInstalled"
+                                    ? qsTr("%1 was not added: a dictionary with this name is already installed. Remove the installed one to use this build.").arg(modelData.name)
+                                    : qsTr("%1 could not be loaded and was removed").arg(modelData.name)
+                            font.pixelSize: 11
+                            color: root.uiSubFg
+                            wrapMode: Text.Wrap
+                        }
+                    }
+                    Label {
+                        id: importResultsFootnote
+                        Layout.fillWidth: true
+                        text: qsTr("Nothing else is needed from you.")
                         font.pixelSize: 11
                         color: root.uiSubFg
                         wrapMode: Text.Wrap
