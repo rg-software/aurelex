@@ -34,6 +34,7 @@
 #include <QNetworkRequest>
 #include <cmath>
 #include <algorithm>
+#include <climits>
 #if defined(Q_OS_ANDROID)
 #include <QJniObject>
 #endif
@@ -390,11 +391,22 @@ void EngineController::collectScanFailures() {
 // cold start because it read the wrong one
 // (fix-stale-sweep-deletes-live-dictionaries).
 //
-// Buffer sizes are the ones this file has always used. gd_dict_info returns
-// non-zero - and this yields an empty source - when a name or path does not
-// fit, which is the same behaviour the model already had; such a dictionary
-// simply does not appear in the in-use set, and holdsPrimaryDictionaryFile is
-// what still protects its directory.
+// Buffers are sized from kDictInfoBufferSize, one constant shared by every
+// gd_dict_info call site. gd_dict_info refuses a name or path that does not fit
+// rather than truncating it (carve/gd_boundary.cc): a truncated path is *wrong*
+// data, not merely incomplete, and the sweep's prefix comparison
+// (StagedCleanup::isUsedByLoadedDictionary) could then match a different staged
+// directory - protecting the wrong one, or none. A dictionary whose path did not
+// fit was therefore loaded but unlisted: absent from the model *and* from the
+// in-use set, so it could never be removed
+// (fix-long-path-dictionaries-invisible). Sizing to PATH_MAX makes any path a
+// filesystem can produce fit instead.
+#ifndef PATH_MAX
+#define PATH_MAX 4096 // POSIX; bionic defines it, the fallback keeps host tools building
+#endif
+constexpr int kDictInfoBufferSize = 4096;
+static_assert(kDictInfoBufferSize >= PATH_MAX,
+              "the dictionary-info buffers must fit any path a filesystem can produce");
 namespace {
 
 struct DictInfoAtIndex {
@@ -413,13 +425,14 @@ struct ScanOutcome {
 };
 
 DictInfoAtIndex readDictInfoAt(int i) {
-    // Fixed stack buffers: the sizes are pinned HERE so every caller gets the
-    // same answer, and stack storage keeps this allocation-free on the path that
-    // walks every loaded dictionary. gd_dict_info copies the trailing NUL, but the
-    // zero-init is kept so a buffer it chose not to fill is still a valid C
-    // string - QString::fromLocal8Bit would otherwise read past it.
-    char name[256] = {};
-    char file[512] = {};
+    // Fixed stack buffers, sized by kDictInfoBufferSize: the sizes are pinned
+    // HERE so every caller gets the same answer, and stack storage keeps this
+    // allocation-free on the path that walks every loaded dictionary.
+    // gd_dict_info copies the trailing NUL, but the zero-init is kept so a
+    // buffer it chose not to fill is still a valid C string -
+    // QString::fromLocal8Bit would otherwise read past it.
+    char name[kDictInfoBufferSize] = {};
+    char file[kDictInfoBufferSize] = {};
     if (gd_dict_info(i, name, static_cast<int>(sizeof(name)),
                      file, static_cast<int>(sizeof(file))) != 0)
         return {};
@@ -701,7 +714,13 @@ void EngineController::ensureFtsWorker()
     // build so the header shows what's actually being indexed.
     QFuture<void> f = QtConcurrent::run([this, runTotal]{
         int done = 0;
-        char idb[128] = {0}, nb[256] = {0}, fb[512] = {0};
+        char idb[128] = {0};
+        // nb/fb feed gd_dict_info the same way readDictInfoAt does, so the name
+        // this loop reports to the progress UI cannot disagree with the name the
+        // list shows. fb is unused, but gd_dict_info rejects a null file buffer
+        // whenever file_size > 0 (carve/gd_boundary.cc), so a caller that only
+        // wants the name must still supply one - do not drop it.
+        char nb[kDictInfoBufferSize] = {0}, fb[kDictInfoBufferSize] = {0};
         for (;;) {
             QString id;
             {
@@ -1487,10 +1506,9 @@ bool EngineController::sweepStaleStagedDirs(const QStringList &loadedSources) {
         // RECURSIVE. An import mirrors the picked folder's layout, so the normal
         // staged shape is staged/<sourceId>/<topic>/<name>/<dict>.dsl.dz. Reading
         // only the top level found no primary in that shape and deleted the
-        // directory while its dictionaries were loaded and searchable. A
-        // dictionary whose path overflowed gd_dict_info's buffer also lands here,
-        // so this is the layer that protects it even when the in-use list cannot
-        // name it.
+        // directory while its dictionaries were loaded and searchable. This is
+        // also the layer that protects any dictionary the in-use list cannot name,
+        // independent of that list's completeness.
         if (!StagedCleanup::holdsPrimaryDictionaryFile(dirAbs)) {
             qInfo() << "[aurelex] sweeping staged dir holding no dictionary" << dirAbs;
             if (removeStagedDirIfUnused(dirAbs, loadedSources))
@@ -2370,7 +2388,7 @@ QVariantList EngineController::ftsIndexStates() const
             if (mm.value("index", -1).toInt() == i) { name = mm.value("name").toString(); break; }
         }
         if (name.isEmpty()) {
-            std::vector<char> buf(256);
+            std::vector<char> buf(kDictInfoBufferSize);
             if (gd_dict_info(i, buf.data(), static_cast<int>(buf.size()), nullptr, 0) == 0) {
                 name = QString::fromLocal8Bit(buf.data());
             }
