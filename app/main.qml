@@ -108,8 +108,22 @@ ApplicationWindow {
         root._insetLeft = Math.round(engine.systemInsetLeft() / root._insetDpr)
         root._insetRight = Math.round(engine.systemInsetRight() / root._insetDpr)
     }
+    // The resize hooks below are a FAST PATH for the common cases (a real
+    // portrait<->landscape flip, the IME, split screen). They are not the
+    // authoritative trigger: flipping between the two LANDSCAPE orientations
+    // (rotation 1 <-> 3) leaves the window at identical dimensions, so no resize
+    // signal fires while the display cutout moves from one side edge to the
+    // other — measured, that left the article running back under the camera.
+    // EngineController::pollInsets watches the four values themselves and emits
+    // insetsChanged on actual movement, which covers every case above plus this
+    // one. Both paths are kept: the resize hook makes the common case instant
+    // rather than waiting up to one poll interval (~500ms).
     onWidthChanged: root._refreshInsets()
     onHeightChanged: root._refreshInsets()
+    Connections {
+        target: engine
+        function onInsetsChanged() { root._refreshInsets() }
+    }
     Component.onCompleted: root._refreshInsets()
     // First-launch tab routing happens on onOnboardedChanged (not here):
     // engine.onboarded is only final after EngineController's ASYNC gd_init +

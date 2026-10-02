@@ -458,6 +458,13 @@ signals:
     void onboardedChanged();
     void articleBaseUrlChanged();
     void systemDarkChanged();
+    // Emitted when any safe-area inset moved since the last poll (rotation, the
+    // IME, split screen, a foldable unfolding). Rotation between the two
+    // LANDSCAPE orientations keeps the window at identical dimensions, so no
+    // resize signal fires even though the display cutout has moved from one side
+    // edge to the other — polling the values is what catches that, and QML
+    // re-reads all four insets on this.
+    void insetsChanged();
     void themeModeChanged();
     void articleZoomChanged();
     void scanFailuresChanged();
@@ -669,6 +676,15 @@ private:
     // Periodic self-heal: the WM/Qt can reset the bar icons to the device-theme
     // default; this reapplies our desired appearance when it drifted (cheap, ~2Hz).
     void syncSystemBarAppearance();
+    // Re-reads the four safe-area insets and emits insetsChanged() when any of
+    // them moved. Driven from the same ~2Hz poll as the dark-mode sample rather
+    // than from a window-resize hook: a landscape flip between the two landscape
+    // orientations (rotation 1 <-> 3) keeps the window at identical dimensions,
+    // so NO resize signal fires, yet the display cutout moves from one side edge
+    // to the other. Polling the values themselves notices that case, and every
+    // other one, without depending on which Qt signal the platform happens to
+    // emit for a given rotation.
+    void pollInsets();
 
     QTimer m_pollTimer;
     // Failsafe for the "Scanning/Reading dictionary files..." banner: gd_scan
@@ -717,6 +733,11 @@ private:
     QVariantList m_favorites;
     bool m_darkMode = false;
     bool m_systemDark = false;
+    // Last physical-px safe-area insets seen by pollInsets(), so a change can be
+    // detected by comparing against the previous tick. {-1, -1, -1, -1} forces
+    // the first tick to emit, which is what makes the initial layout land on the
+    // correct values rather than the QML defaults of 0.
+    int m_insets[4] = {-1, -1, -1, -1};
     // Persisted theme setting. Stored as the int itself so settings.json carries
     // no serialize step; the values are the on-disk representation.
     int m_themeMode = kThemeFollowSystem;

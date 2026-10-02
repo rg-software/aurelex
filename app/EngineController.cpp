@@ -2707,6 +2707,36 @@ void EngineController::applySystemBarAppearance()
 #endif
 }
 
+// Detect movement of the four safe-area insets.
+//
+// Why a poll rather than a window-resize hook: rotation 1 and rotation 3 are both
+// 2400x1080, so flipping between the two landscape orientations — the natural
+// way to turn a phone sideways — produces NO onWidthChanged/onHeightChanged,
+// while the display cutout moves from the left edge to the right. Measured on a
+// ThinkPhone: the platform reported the cutout correctly (sideHint=RIGHT,
+// frame=[2290,0][2400,1080]) but the layout kept the stale left margin and put
+// the article back under the camera. Comparing the VALUES also covers the IME,
+// split screen and a foldable unfolding, none of which are guaranteed to resize
+// the window either.
+//
+// The compare-and-emit shape matches updateSystemDark on the same tick: read, diff,
+// notify. Costs four JNI int reads per 500ms tick, and the emit only fires on an
+// actual change.
+void EngineController::pollInsets()
+{
+    const int now[4] = { systemInsetTop(), systemInsetBottom(),
+                         systemInsetLeft(), systemInsetRight() };
+    if (now[0] == m_insets[0] && now[1] == m_insets[1] &&
+        now[2] == m_insets[2] && now[3] == m_insets[3]) {
+        return;
+    }
+    m_insets[0] = now[0];
+    m_insets[1] = now[1];
+    m_insets[2] = now[2];
+    m_insets[3] = now[3];
+    emit insetsChanged();
+}
+
 void EngineController::syncSystemBarAppearance()
 {
 #if defined(Q_OS_ANDROID)
@@ -3700,6 +3730,12 @@ void EngineController::pollPendingLookup()
     // natively); the activity's onConfigurationChanged fires on a live switch,
     // and this poll (500ms) picks it up for a near-immediate re-palette.
     updateSystemDark();
+
+    // Re-read the safe-area insets and notify QML when any moved (rotation, the
+    // IME, split screen, a foldable unfolding). Must stay a poll and not a resize
+    // hook: the two landscape orientations have identical window dimensions, so
+    // the cutout can move sides with no resize signal at all.
+    pollInsets();
 
     // Staging-progress + one-off-import trigger: the StagingService copies a
     // picked folder into app-private storage and holds its start marker while
