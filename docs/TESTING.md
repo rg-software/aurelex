@@ -271,6 +271,54 @@ dead — but do not expect a repaint on it.
 | 25j | In each of the three modes, compare the theme cell's glyph and label against the other dock tabs | The "Theme" label baseline matches the tab labels, and the auto glyph is the same size as the sun/moon. The auto glyph comes from the *secondary* subset font, so the subset's vertical metrics must be normalized to the classic font's 1.0 em (`asc=upm`, `desc=0`); otherwise its taller line box pushes the label down ~11 px | ✅ (measured: label top row 2270 for Theme = Search/Dicts/Groups/Favorites across states; auto glyph ink band 30–76 = sun) |
 | 26 | Force-stop and relaunch after forcing dark | Dark persists (`themeMode` stored in `files/settings.json`) | ✅ |
 
+## Orientation (portrait ⇄ landscape)
+
+The Search tab's bottom dock once **disappeared in landscape** and only on that
+tab — the one with the inline article `WebView`. The cause was a QML layout
+overflow, not a stale native surface: `searchArticleArea` carried
+`Layout.minimumHeight: 300` as the last item of a `ColumnLayout` that could not
+shrink its search row, so on a landscape phone the column overflowed the pane and
+spilled *downward* over the dock — and the `WebView`, being a native Android child
+view, painted over it as well (native views ignore QML `z`/`clip`). Fixed by
+`fix-article-surface-covers-dock`; the rotation teardown that the earlier
+misl diagnosis had added was removed as unnecessary. If a landscape-only
+disappearance comes back, check that floor before anything native — see the
+measured numbers in that change's `design.md`.
+
+To rotate reliably from a script, pin the rotation; **restore it afterwards**:
+
+```powershell
+$adb = "C:\Program Files (x86)\Android\android-sdk\platform-tools\adb.exe"   # or add to PATH
+& $adb shell settings put system accelerometer_rotation 0   # 0 = follow user_rotation
+& $adb shell settings put system user_rotation 1            # 1 = landscape, 0 = portrait
+& $adb shell settings put system accelerometer_rotation 1   # restore auto-rotate
+```
+
+Open an article without typing, for a repeatable cold start:
+
+```powershell
+& $adb shell am force-stop org.aurelex.pocket.dictionary
+& $adb shell am start -a android.intent.action.VIEW -d "aurelex://lookup?word=law" org.aurelex.pocket.dictionary
+```
+
+Two cheap checks that catch this class of bug without eyeballing a screenshot:
+`adb shell uiautomator dump` and compare the `Dictionary article` bottom edge with
+the `Main navigation` top edge (the article must end **above** the dock), and count
+magenta pixels in the dock's bottom band — the active tab paints the accent, so a
+band that is the article instead reads near zero (device reference: portrait dock
+visible ≈ 470 accent px, the bug ≈ 15, fixed landscape ≈ 594).
+
+| # | How to test | Expected | Status |
+| --- | --- | --- | --- |
+| 70 | Search tab with an article open, rotate to landscape | The bottom dock stays fully visible and tappable, and the article ends **above** it | ✅ (measured: article bottom 822 vs dock top 856 in device px; dock tab tap navigates) |
+| 71 | Rotate back to portrait | Dock visible again, same article still open | ✅ (470 accent px) |
+| 72 | Force-stop with the device **already in landscape**, relaunch, open an article | Dock visible on the first landscape frame — no rotation event needed | ✅ (594 accent px; article bottom 821 < 856) |
+| 73 | Rotate twice in a row with an article open, touching nothing | No flicker to a half-drawn dock, no crash, article survives both | ✅ |
+| 74 | Rotate on the Dictionaries and Full-text search tabs (no article surface there) | No regression; system insets still correct (the bottom inset goes to 0 on rotation) | ✅ (600 accent px in landscape on both tabs) |
+| 75 | Search tab, tap the field, type slowly while the keyboard opens and closes | Headword suggestions appear as you type, the open article is not disturbed, the dock stays visible | ✅ (guard for the removed teardown: `mInputShown=true`, `smok` → suggestions `Smoking` / `Smoke Inhalation`) |
+| 76 | Scroll an open article down, then rotate to landscape and back | The article returns to the **top**. This is the pre-existing responsive-reflow path (`articleReloader` re-renders the HTML whenever the WebView's height changes, and `loadHtml` resets the scroll) — not the removed rotation teardown, which only added a second reset. Recorded here so it is not re-attributed to the landscape fix; restoring the offset is a separate change | ✅ (measured: scrolled → rotate → back is pixel-identical to the unscrolled article; 0 % differing vs 9.5 % for top↔scrolled) |
+| 77 | Landscape article band | Tight but usable: the article keeps ~42 px below its 40 px toolbar. Portrait is unaffected (the value is a floor, not a fixed height) | ✅ (by construction; the article is scrollable from there) |
+
 ## Full-text search
 
 | # | How to test | Expected | Status |

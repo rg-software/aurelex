@@ -85,37 +85,10 @@ ApplicationWindow {
     property int _insetTop: 0
     property int _insetBottom: 0
     property real _insetDpr: Screen.devicePixelRatio > 0 ? Screen.devicePixelRatio : 1
-    // Briefly true after an orientation change: tears down both native WebViews
-    // so they recreate at the new window geometry (a stale-size native surface
-    // would otherwise cover sibling chrome — e.g. the bottom dock in landscape).
-    property bool _geometryInvalid: false
-    // Last observed window size, used to detect real orientation flips.
-    // A pure resize (the Android IME showing/hiding resizes the window on
-    // adjustResize) must NOT tear the WebView down — doing so killed the
-    // suggestion overlay mid-typing (typed word, no candidates rendered).
-    property int _lastGeoW: -1
-    property int _lastGeoH: -1
     function _refreshInsets() {
         root._insetDpr = Screen.devicePixelRatio > 0 ? Screen.devicePixelRatio : 1
         root._insetTop = Math.round(engine.systemInsetTop() / root._insetDpr)
         root._insetBottom = Math.round(engine.systemInsetBottom() / root._insetDpr)
-        var w = root.width, h = root.height
-        if (root._lastGeoW < 0) {
-            root._lastGeoW = w; root._lastGeoH = h
-            return
-        }
-        var prevLandscape = root._lastGeoW > root._lastGeoH
-        var nowLandscape = w > h
-        root._lastGeoW = w; root._lastGeoH = h
-        // Only a true portrait<->landscape flip needs the WebView teardown:
-        // both loaders' `active` bindings re-evaluate to false (destroying the
-        // native surfaces) then true again next tick (recreating them at the new
-        // window size). The inline currentHtml/overlay survive and re-render via
-        // onLoaded/onLoadingChanged.
-        if (prevLandscape !== nowLandscape) {
-            root._geometryInvalid = true
-            Qt.callLater(function(){ root._geometryInvalid = false })
-        }
     }
     onWidthChanged: root._refreshInsets()
     onHeightChanged: root._refreshInsets()
@@ -1171,7 +1144,23 @@ ColumnLayout {
                 id: searchArticleArea
                 Layout.fillWidth: true
                 Layout.fillHeight: true
-                Layout.minimumHeight: 300
+                // A floor for the article surface, but a SMALL one on purpose. This
+                // is the last item in a ColumnLayout that cannot shrink the search
+                // row, so a floor larger than the window's leftover height makes the
+                // whole column overflow its pane — and the overflow spills DOWNWARD
+                // over the bottom dock. That is exactly why the dock used to vanish
+                // in landscape: on a 387px-tall landscape window the pane is 268, the
+                // search row takes 64, and the old floor of 300 pushed this item to
+                // y=364 while the dock starts at y=307. The native WebView inside
+                // paints over the dock (a native view ignores QML z and clip), so the
+                // whole bottom bar disappeared on the Search tab only.
+                //
+                // 88 keeps a usable band (toolbar 40 + 6 margin leaves 42 of article)
+                // and never inverts the toolbar anchors below it, while still fitting
+                // a landscape phone with room to spare. Do not raise it without
+                // re-measuring the landscape layout.
+                // (fix-article-surface-covers-dock)
+                Layout.minimumHeight: 88
                 color: root.uiBg
 
                 Rectangle {
@@ -1257,7 +1246,7 @@ ColumnLayout {
                     // native surface to a wrong (full-window) size that then
                     // overtakes the whole screen. inlineWebReady is set by a
                     // short timer once the Search tab is actually visible.
-                    active: root.state === 0 && root.inlineWebReady && !root._pickerOpen && !root._geometryInvalid
+                    active: root.state === 0 && root.inlineWebReady && !root._pickerOpen
                     onLoaded: {
                         root.inlineWv = item
                         // Give the fresh WebView a document to run JS against.
