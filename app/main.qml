@@ -28,6 +28,13 @@ ApplicationWindow {
     Material.accent: Material.Purple
     Material.theme: engine.darkMode ? Material.Dark : Material.Light
 
+    // The window paints the app background edge to edge. Everything that is not
+    // a pane (the inset strips beside a side-mounted camera, the area under a
+    // dialog) shows this, so an inset never exposes the window's clear colour as
+    // a black band. The panes carry `color: root.uiBg` too, so the seam is
+    // invisible in either theme.
+    color: root.uiBg
+
     // 0 = search, 1 = dictionaries, 2 = article, 3 = groups, 4 = fts,
     // 5 = history, 6 = favorites.
     property int state: 0
@@ -76,19 +83,30 @@ ApplicationWindow {
     // classic Material Icons set lacks. The registered family is the subset's
     // name (log: "Material Symbols Outlined"); symbolIcon emits the codepoints.
     property string symbolFontFamily: "Material Symbols Outlined"
-    // Android system-window insets (logical px): the Qt window is edge-to-edge,
-    // so our own chrome must sit below the status bar / above the navigation
-    // bar. Converted from physical px returned by the activity via JNI. They are
-    // recomputed on every window resize (e.g. portrait->landscape, where the
-    // bottom inscription on gesture-nav devices moves to a side and the bottom
-    // inset becomes 0) rather than captured once.
+    // Android safe-area insets (logical px): the Qt window is edge-to-edge, so
+    // our own content must sit inside the area the platform reserves. Each value
+    // is the union — the LARGER of — the system-window inset and the display
+    // cutout's safe inset for that edge (Android 15 folds the cutout into the
+    // status bar on the top edge, so summing would double-count it). Converted
+    // from physical px returned by the activity via JNI and recomputed on every
+    // window resize rather than captured once.
+    //
+    // Top/bottom cover the status bar and the navigation bar. The horizontal pair
+    // exists for the display cutout: on Android 15 the platform enforces
+    // layoutInDisplayCutoutMode=always for our target SDK, so a camera in
+    // landscape punches a hole in OUR surface and nothing else reserves space
+    // there. Both are 0 on a device with no cutout, so the layout is unchanged.
     property int _insetTop: 0
     property int _insetBottom: 0
+    property int _insetLeft: 0
+    property int _insetRight: 0
     property real _insetDpr: Screen.devicePixelRatio > 0 ? Screen.devicePixelRatio : 1
     function _refreshInsets() {
         root._insetDpr = Screen.devicePixelRatio > 0 ? Screen.devicePixelRatio : 1
         root._insetTop = Math.round(engine.systemInsetTop() / root._insetDpr)
         root._insetBottom = Math.round(engine.systemInsetBottom() / root._insetDpr)
+        root._insetLeft = Math.round(engine.systemInsetLeft() / root._insetDpr)
+        root._insetRight = Math.round(engine.systemInsetRight() / root._insetDpr)
     }
     onWidthChanged: root._refreshInsets()
     onHeightChanged: root._refreshInsets()
@@ -795,7 +813,12 @@ ApplicationWindow {
 
         Row {
             id: navRow
-            anchors { left: parent.left; right: parent.right; top: parent.top }
+            // The dock itself keeps its full-bleed background (it is what
+            // visually terminates the bottom of the screen), but its cells are
+            // interactive, so the row takes the side insets — in landscape the
+            // outermost tab must move clear of the camera.
+            anchors { left: parent.left; leftMargin: root._insetLeft
+                      right: parent.right; rightMargin: root._insetRight; top: parent.top }
             height: 56
             spacing: 0
 
@@ -922,7 +945,12 @@ ApplicationWindow {
     // --- search view ---
     Rectangle {
         id: searchPane
-        anchors { top: topBar.bottom; left: parent.left; right: parent.right; bottom: navDock.top }
+        // Every top-level pane shares this anchor line, so the side insets that keep
+        // content clear of a display cutout are applied in one place. A new pane
+        // must copy this line verbatim, margins included, or it will run under a
+        // side-mounted camera.
+        anchors { top: topBar.bottom; left: parent.left; leftMargin: root._insetLeft
+                  right: parent.right; rightMargin: root._insetRight; bottom: navDock.top }
         color: root.uiBg
         visible: root.state === 0
 
@@ -1328,7 +1356,12 @@ ColumnLayout {
     // --- dictionaries view ---
     Rectangle {
         id: dictsPane
-        anchors { top: topBar.bottom; left: parent.left; right: parent.right; bottom: navDock.top }
+        // Every top-level pane shares this anchor line, so the side insets that keep
+        // content clear of a display cutout are applied in one place. A new pane
+        // must copy this line verbatim, margins included, or it will run under a
+        // side-mounted camera.
+        anchors { top: topBar.bottom; left: parent.left; leftMargin: root._insetLeft
+                  right: parent.right; rightMargin: root._insetRight; bottom: navDock.top }
         color: root.uiBg
         visible: root.state === 1
 
@@ -2304,7 +2337,12 @@ text: root._stagingActive
 
     Rectangle {
         id: groupsPane
-        anchors { top: topBar.bottom; left: parent.left; right: parent.right; bottom: navDock.top }
+        // Every top-level pane shares this anchor line, so the side insets that keep
+        // content clear of a display cutout are applied in one place. A new pane
+        // must copy this line verbatim, margins included, or it will run under a
+        // side-mounted camera.
+        anchors { top: topBar.bottom; left: parent.left; leftMargin: root._insetLeft
+                  right: parent.right; rightMargin: root._insetRight; bottom: navDock.top }
         color: root.uiBg
         visible: root.state === 3
 
@@ -3111,7 +3149,12 @@ text: root._stagingActive
     // --- favorites view ---
     Rectangle {
         id: favoritesPane
-        anchors { top: topBar.bottom; left: parent.left; right: parent.right; bottom: navDock.top }
+        // Every top-level pane shares this anchor line, so the side insets that keep
+        // content clear of a display cutout are applied in one place. A new pane
+        // must copy this line verbatim, margins included, or it will run under a
+        // side-mounted camera.
+        anchors { top: topBar.bottom; left: parent.left; leftMargin: root._insetLeft
+                  right: parent.right; rightMargin: root._insetRight; bottom: navDock.top }
         color: root.uiBg
         visible: root.state === 6
 
@@ -3379,7 +3422,12 @@ text: root._stagingActive
     // --- FTS view ---
     Rectangle {
         id: ftsPane
-        anchors { top: topBar.bottom; left: parent.left; right: parent.right; bottom: navDock.top }
+        // Every top-level pane shares this anchor line, so the side insets that keep
+        // content clear of a display cutout are applied in one place. A new pane
+        // must copy this line verbatim, margins included, or it will run under a
+        // side-mounted camera.
+        anchors { top: topBar.bottom; left: parent.left; leftMargin: root._insetLeft
+                  right: parent.right; rightMargin: root._insetRight; bottom: navDock.top }
         color: root.uiBg
         visible: root.state === 4
 

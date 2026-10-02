@@ -1,47 +1,47 @@
 ## 1. Read the cutout on the Android side
 
-- [ ] 1.1 In `AurelexActivity.java`, add a private helper that returns the
+- [x] 1.1 In `AurelexActivity.java`, add a private helper that returns the
       `DisplayCutout`'s safe insets (`getSafeInsetLeft/Top/Right/Bottom`) from the
       decor view's `getRootWindowInsets()`, guarded by
       `Build.VERSION.SDK_INT >= 28` and returning 0 below (design D3)
-- [ ] 1.2 Make `getSystemInsetTop()` / `getSystemInsetBottom()` return the **max**
+- [x] 1.2 Make `getSystemInsetTop()` / `getSystemInsetBottom()` return the **max**
       of the system-bar inset and the corresponding cutout safe inset, keeping the
       existing resource fallback for pre-28 and for a zero inset (design D1)
-- [ ] 1.3 Add `getSystemInsetLeft()` / `getSystemInsetRight()` with the same shape
+- [x] 1.3 Add `getSystemInsetLeft()` / `getSystemInsetRight()` with the same shape
       and the same error handling (`Log.w` on failure, 0 as the answer) (design D2)
 
 ## 2. Forward the insets to QML
 
-- [ ] 2.1 `EngineController.hpp`: declare `Q_INVOKABLE int systemInsetLeft() const;`
+- [x] 2.1 `EngineController.hpp`: declare `Q_INVOKABLE int systemInsetLeft() const;`
       and `systemInsetRight()` beside the existing pair, with a comment noting the
       values are the union of the system-bar and display-cutout insets
-- [ ] 2.2 `EngineController.cpp`: implement both with the same
+- [x] 2.2 `EngineController.cpp`: implement both with the same
       `QJniObject::callStaticMethod<jint>` / `#if defined(Q_OS_ANDROID)` shape,
       returning 0 off Android
 
 ## 3. Apply the insets in QML
 
-- [ ] 3.1 `app/main.qml`: `ApplicationWindow.color: root.uiBg`, so the inset strip
+- [x] 3.1 `app/main.qml`: `ApplicationWindow.color: root.uiBg`, so the inset strip
       at any edge is app background rather than the window's clear colour (design D4)
-- [ ] 3.2 `_refreshInsets()`: read the two new values, divide by `_insetDpr`, and
+- [x] 3.2 `_refreshInsets()`: read the two new values, divide by `_insetDpr`, and
       store them as `_insetLeft` / `_insetRight` (design D7)
-- [ ] 3.3 Add `leftMargin: root._insetLeft; rightMargin: root._insetRight` to the
+- [x] 3.3 Add `leftMargin: root._insetLeft; rightMargin: root._insetRight` to the
       shared anchor line of all five panes — `searchPane`, `dictsPane`,
       `groupsPane`, `favoritesPane`, `ftsPane` (design D4)
-- [ ] 3.4 `navDock.navRow`: give the cell row the same left/right margins while
+- [x] 3.4 `navDock.navRow`: give the cell row the same left/right margins while
       `navDock` itself keeps its full-bleed background and height (design D5)
-- [ ] 3.5 Update the comment on `_insetTop` / `_insetBottom` to say the values are
+- [x] 3.5 Update the comment on `_insetTop` / `_insetBottom` to say the values are
       unions with the display cutout and that the horizontal pair exists for the
       same reason
 
 ## 4. Guard against silent gaps
 
-- [ ] 4.1 Grep every `top: topBar.bottom` pane and confirm each carries both
+- [x] 4.1 Grep every `top: topBar.bottom` pane and confirm each carries both
       margins, so a pane added later is caught in review (design Risks)
-- [ ] 4.2 Confirm no `qsTr` string was added or changed; if one was, run
+- [x] 4.2 Confirm no `qsTr` string was added or changed; if one was, run
       `scripts/update-translations.ps1` and update `values-ru` / `values-ja` in the
       same change
-- [ ] 4.3 `openspec validate respect-display-cutout-insets --strict` passes
+- [x] 4.3 `openspec validate respect-display-cutout-insets --strict` passes
 - [ ] 4.4 `pwsh -File .\app\build.ps1 -Configuration Debug` + `adb install -r`, and
       confirm the QML compiles with no new warnings
 

@@ -408,11 +408,17 @@ public:
     // Clear a terminal outcome once the UI has shown it.
     Q_INVOKABLE void clearDownloadOutcome();
 
-    // System-window inset heights (physical px) read from the Android activity:
-    // the Qt window runs edge-to-edge, so QML offsets its top/bottom chrome
-    // above the status bar / navigation bar itself. 0 off-Android.
+    // Safe-area insets (physical px) read from the Android activity: the Qt
+    // window runs edge-to-edge, so QML offsets its own content inside these
+    // values. Each is the union — the larger of — the system-window inset and
+    // the display cutout's safe inset for that edge, because the platform
+    // already folds the cutout into the status bar on some versions and not on
+    // others. The horizontal pair is what keeps content clear of a side-mounted
+    // camera in landscape, where nothing else reserves space. 0 off-Android.
     Q_INVOKABLE int systemInsetTop() const;
     Q_INVOKABLE int systemInsetBottom() const;
+    Q_INVOKABLE int systemInsetLeft() const;
+    Q_INVOKABLE int systemInsetRight() const;
 
 signals:
     void dictCountChanged();

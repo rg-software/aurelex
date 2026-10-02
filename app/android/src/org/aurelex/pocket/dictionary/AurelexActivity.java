@@ -187,20 +187,65 @@ public class AurelexActivity extends QtActivity {
     }
 
     /**
-     * Height (px) of the system status-bar inset at the top of the screen.
+     * Safe insets (px) contributed by the display cutout, as {left, top, right,
+     * bottom}. All zeros when the window reports no cutout, and below API 28
+     * where {@code DisplayCutout} does not exist at all — no cutout to avoid
+     * there, so 0 is the answer rather than a fallback guess.
+     *
+     * The Qt window is edge-to-edge, and on Android 15 the platform enforces
+     * {@code layoutInDisplayCutoutMode=always} for our target SDK, so the cutout
+     * is a camera hole punched into OUR surface rather than a letterbox the
+     * system handles. These insets are the only statement of how much of each
+     * edge is unreadable and untappable.
+     */
+    private static int[] cutoutSafeInsets() {
+        try {
+            if (android.os.Build.VERSION.SDK_INT < 28) return new int[] {0, 0, 0, 0};
+            android.app.Activity activity = QtNative.activity();
+            if (activity == null) return new int[] {0, 0, 0, 0};
+            android.view.WindowInsets wi = activity.getWindow().getDecorView().getRootWindowInsets();
+            if (wi == null) return new int[] {0, 0, 0, 0};
+            android.view.DisplayCutout cutout = wi.getDisplayCutout();
+            if (cutout == null) return new int[] {0, 0, 0, 0};
+            return new int[] {
+                    cutout.getSafeInsetLeft(),
+                    cutout.getSafeInsetTop(),
+                    cutout.getSafeInsetRight(),
+                    cutout.getSafeInsetBottom()
+            };
+        } catch (Exception e) {
+            android.util.Log.w(TAG, "cutoutSafeInsets failed: " + e);
+            return new int[] {0, 0, 0, 0};
+        }
+    }
+
+    /**
+     * Height (px) of the safe area at the top of the screen: the larger of the
+     * status-bar inset and the display cutout's safe inset.
+     *
      * The Qt window runs edge-to-edge (no Android insets applied), so the QML
      * layer must offset its own top chrome below the status icons. Favors the
      * window's reported inset; falls back to the resource dimension.
+     *
+     * The two are unioned rather than summed because the platform already folds
+     * the cutout into the status bar on Android 15 (measured: both report
+     * [0,0][1080,110] in portrait), so adding them would count the camera twice
+     * and push the content 110 px below where it belongs. max() is a no-op where
+     * the platform has folded them and still clears a cutout that is taller than
+     * the status bar.
      */
     public static int getSystemInsetTop() {
         try {
+            final int cutout = cutoutSafeInsets()[1];
             android.app.Activity activity = QtNative.activity();
             if (activity != null) {
                 android.view.WindowInsets wi = activity.getWindow().getDecorView().getRootWindowInsets();
-                if (wi != null && wi.getSystemWindowInsetTop() > 0) return wi.getSystemWindowInsetTop();
+                if (wi != null && wi.getSystemWindowInsetTop() > 0)
+                    return Math.max(wi.getSystemWindowInsetTop(), cutout);
             }
             int id = activity.getResources().getIdentifier("status_bar_height", "dimen", "android");
-            return id > 0 ? activity.getResources().getDimensionPixelSize(id) : 0;
+            int fallback = id > 0 ? activity.getResources().getDimensionPixelSize(id) : 0;
+            return Math.max(fallback, cutout);
         } catch (Exception e) {
             android.util.Log.w(TAG, "getSystemInsetTop failed: " + e);
             return 0;
@@ -208,23 +253,73 @@ public class AurelexActivity extends QtActivity {
     }
 
     /**
-     * Height (px) of the system navigation-bar inset at the bottom.
-     * Same edge-to-edge rationale as {@link #getSystemInsetTop}: the bottom
-     * chrome must sit above the gesture/3-button nav area.
+     * Height (px) of the safe area at the bottom: the larger of the
+     * navigation-bar inset and the display cutout's safe inset. Same
+     * edge-to-edge rationale and same union rule as {@link #getSystemInsetTop}:
+     * the bottom chrome must sit above the gesture/3-button nav area.
      */
     public static int getSystemInsetBottom() {
         try {
+            final int cutout = cutoutSafeInsets()[3];
             android.app.Activity activity = QtNative.activity();
             if (activity != null) {
                 android.view.WindowInsets wi = activity.getWindow().getDecorView().getRootWindowInsets();
-                if (wi != null && wi.getSystemWindowInsetBottom() > 0) return wi.getSystemWindowInsetBottom();
+                if (wi != null && wi.getSystemWindowInsetBottom() > 0)
+                    return Math.max(wi.getSystemWindowInsetBottom(), cutout);
             }
             int id = activity.getResources().getIdentifier("navigation_bar_height", "dimen", "android");
-            return id > 0 ? activity.getResources().getDimensionPixelSize(id) : 0;
+            int fallback = id > 0 ? activity.getResources().getDimensionPixelSize(id) : 0;
+            return Math.max(fallback, cutout);
         } catch (Exception e) {
             android.util.Log.w(TAG, "getSystemInsetBottom failed: " + e);
             return 0;
         }
+    }
+
+    /**
+     * Width (px) of the safe area on the LEFT edge: the larger of the system-bar
+     * and display-cutout insets there. Zero on every device where nothing is
+     * reserved on that side, which is the normal case in portrait.
+     *
+     * Landscape is the case that matters: the cutout moves to a side edge
+     * ({@code sideHint} LEFT or RIGHT depending on the rotation direction), and
+     * without this the article pane, the search row and the outermost dock tab
+     * sit underneath the camera. Reported per edge rather than as one symmetric
+     * value because the camera is only ever on ONE side.
+     */
+    public static int getSystemInsetLeft() {
+        final int cutout = cutoutSafeInsets()[0];
+        if (cutout == 0) return 0;
+        try {
+            android.app.Activity activity = QtNative.activity();
+            if (activity != null) {
+                android.view.WindowInsets wi = activity.getWindow().getDecorView().getRootWindowInsets();
+                if (wi != null) return Math.max(wi.getSystemWindowInsetLeft(), cutout);
+            }
+        } catch (Exception e) {
+            android.util.Log.w(TAG, "getSystemInsetLeft failed: " + e);
+        }
+        return cutout;
+    }
+
+    /**
+     * Width (px) of the safe area on the RIGHT edge. Same rationale and same
+     * union rule as {@link #getSystemInsetLeft}; non-zero only when the cutout
+     * or a system bar occupies that side.
+     */
+    public static int getSystemInsetRight() {
+        final int cutout = cutoutSafeInsets()[2];
+        if (cutout == 0) return 0;
+        try {
+            android.app.Activity activity = QtNative.activity();
+            if (activity != null) {
+                android.view.WindowInsets wi = activity.getWindow().getDecorView().getRootWindowInsets();
+                if (wi != null) return Math.max(wi.getSystemWindowInsetRight(), cutout);
+            }
+        } catch (Exception e) {
+            android.util.Log.w(TAG, "getSystemInsetRight failed: " + e);
+        }
+        return cutout;
     }
 
     /**

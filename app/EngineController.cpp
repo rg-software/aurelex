@@ -1980,6 +1980,30 @@ int EngineController::systemInsetBottom() const
 #endif
 }
 
+int EngineController::systemInsetLeft() const
+{
+#if defined(Q_OS_ANDROID)
+    return QJniObject::callStaticMethod<jint>(
+        "org/aurelex/pocket/dictionary/AurelexActivity",
+        "getSystemInsetLeft",
+        "()I");
+#else
+    return 0;
+#endif
+}
+
+int EngineController::systemInsetRight() const
+{
+#if defined(Q_OS_ANDROID)
+    return QJniObject::callStaticMethod<jint>(
+        "org/aurelex/pocket/dictionary/AurelexActivity",
+        "getSystemInsetRight",
+        "()I");
+#else
+    return 0;
+#endif
+}
+
 void EngineController::playAudio(const QString &url) {
 #if defined(Q_OS_ANDROID)
     // JNI passthrough to AurelexActivity.playAudio(String) — Android's
