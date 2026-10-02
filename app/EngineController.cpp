@@ -3155,6 +3155,14 @@ void EngineController::refreshCatalogEntries()
         // that a later scan would make a lie.
         const QStringList sources = dictionarySources();
 
+        // Only the PRIMARY UI language may select a localized entry name: on
+        // Android uiLanguages() also lists the APK's resource locales, so passing
+        // the whole list would let a device whose top language the manifest has
+        // no name for fall through to a ru/ja name.
+        const QStringList uiLanguages = QLocale().uiLanguages();
+        const QStringList primaryUiLanguage = uiLanguages.isEmpty()
+            ? QStringList{} : QStringList{ uiLanguages.first() };
+
         for (const RemoteCatalog::Entry &e : m_manifest.entries) {
             QVariantMap m;
             m.insert(QStringLiteral("id"), e.id);
@@ -3162,7 +3170,7 @@ void EngineController::refreshCatalogEntries()
             // The name for the app's active language, or `name` when the entry
             // provides none; QML shows this one and keeps `name` as the stable
             // (English) identifier for accessibility/test IDs.
-            m.insert(QStringLiteral("displayName"), e.nameFor(QLocale().uiLanguages()));
+            m.insert(QStringLiteral("displayName"), e.nameFor(primaryUiLanguage));
             m.insert(QStringLiteral("langFrom"), e.langFrom);
             m.insert(QStringLiteral("langTo"), e.langTo);
             m.insert(QStringLiteral("pair"), e.langFrom + QLatin1Char('/') + e.langTo);

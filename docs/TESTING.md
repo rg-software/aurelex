@@ -500,8 +500,11 @@ cosmetic preference, not a defect.
 
 The app defaults its display language to the UI language of its process, trying
 the full locale (`ru-RU`) before the language (`ru`) and falling back to English
-when no catalog matches. **RU** and **JA** are shipped as
-`app/i18n/aurelex_ru.qm` / `aurelex_ja.qm`.
+when no catalog matches. **Only the primary UI language decides** — on Android
+Qt's `uiLanguages()` also lists the locales the APK ships resources for, which
+must not override the primary one. **RU** and **JA** are shipped as
+`app/i18n/aurelex_ru.qm` / `aurelex_ja.qm`; English is the untranslated base
+(`en-US` is therefore a valid test value — it selects English).
 
 **To switch the language for a run** (no in-app switcher exists — the translator
 is installed once at startup, so every switch needs a cold start):
@@ -510,16 +513,21 @@ is installed once at startup, so every switch needs a cold start):
 $adb = "C:\Program Files (x86)\Android\android-sdk\platform-tools\adb.exe"   # or add to PATH
 $pkg = "org.aurelex.pocket.dictionary"
 
-& $adb shell cmd locale set-app-locales $pkg --user 0 --locales ru-RU   # or ja-JP
+& $adb shell cmd locale set-app-locales $pkg --user 0 --locales ru-RU   # or ja-JP / en-US
 & $adb shell am force-stop $pkg                                         # required
 & $adb shell am start -n "$pkg/.AurelexActivity"
+```
+
+Run this **separately, once you are done looking**, or the switch above is
+undone before you see it:
+
+```powershell
 & $adb shell cmd locale set-app-locales $pkg --user 0 --locales ""     # back to device language
 ```
 
-That per-app path needs **Android 13+** and an app the system is willing to
-re-locale; Aurelex declares no `android:localeConfig`, so it is *not* listed
-under *Settings → Apps → Aurelex → Language* and `cmd locale` can be refused
-(known gap — see "Switching the display language for testing" in
+That per-app path needs **Android 13+**; Aurelex declares no
+`android:localeConfig`, so it is *not* listed under *Settings → Apps → Aurelex →
+Language* (known gap — see "Switching the display language for testing" in
 `docs/DEVELOPMENT.md`). On an older device, or if the switch is refused, change
 the **system** language (*Settings → System → Languages & input*) and relaunch.
 When checking a language, verify what Qt actually picked instead of trusting the
@@ -529,6 +537,11 @@ settings screen:
 & $adb logcat -d | Select-String "using translation catalog|no matching translation"
 ```
 
+`using translation catalog: "ru_RU" for primary ui language "ru-RU"` means the
+catalog loaded; `no matching translation catalog for …` means the primary
+language has no catalog and English is in use — correct for English/unsupported
+primaries, not an error.
+
 The catalog source of truth and the `update-translations.ps1` lupdate/lrelease
 workflow are documented under "Localization" in `docs/DEVELOPMENT.md`.
 
@@ -536,7 +549,8 @@ workflow are documented under "Localization" in `docs/DEVELOPMENT.md`.
 | --- | --- | --- | --- |
 | 50 | Switch the app (or system) language to **Russian**, relaunch | Navigation, search placeholder, dictionary/group/FTS/favorites labels, onboarding, dialogs, banners ("Indexing (…)"), "engine error" wrapper, history "No lookups yet"/"Clear all", Not Found term in Russian; group names/dictionary names stay as-is | ⬜ (needs a device with RU; build.ps1 verified) |
 | 51 | Same with **Japanese**, relaunch | Same set in Japanese | ⬜ (needs a device with JA) |
-| 52 | Set the app/system language to one without a catalog (e.g. **Finnish**), relaunch | Falls back to English, no crash, logcat line `[aurelex] no matching translation catalog; using English base strings` | ⬜ (needs a device with a non-RU/JA locale; logcat can confirm the message) |
+| 52 | Set the app/system language to one without a catalog (e.g. **Finnish**), relaunch | Falls back to English, no crash, logcat line `[aurelex] no matching translation catalog for "fi-FI"; using English base strings` | ⬜ (needs a device with a non-RU/JA locale; logcat can confirm the message) |
+| 52a | Set the app language to **English** (`en-US`), relaunch | English base strings — no RU/JA fall-through (regression: `uiLanguages()` lists the APK's resource locales after the primary, so a whole-list scan loaded `ru`) | ✅ (motorola ThinkPhone, Android 15: `no matching translation catalog for "en-US"; using English base strings`; visible UI English — `fix-english-locale-fallthrough`) |
 | 53 | In RU/JA, import a dictionary and let FTS index | Android notifications: channel names ("Dictionary preparation" / "Full-text indexing" under Settings → Apps → Aurelex → Notifications), title, "Preparing dictionaries…", "Indexing (%1 of %2): name" shown in the device language | ⬜ (needs the RU/JA device + a dict import) |
 | 54 | In RU/JA, inspect the Quick Settings tile and home-screen widget | Tile/widget labels localize ("Поиск в Aurelex", "Aurelex で検索") | ⬜ (needs the RU/JA device) |
 | 55 | UIAutomator / Appium dump in RU or JA | `Accessible.name`/`content-desc`/`className` remain stable English IDs (localization never touches the accessibility names) | ⬜ (re-run the existing on-device flows under any locale) |

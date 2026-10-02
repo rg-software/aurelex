@@ -303,12 +303,17 @@ notifications) use `res/values*/strings.xml`.
   "All" fallback). Diagnostic/protocol strings (`gd_* failed (rc=%1)`, HTTP
   status bodies in `ArticleServer`) stay English behind the localized "engine
   error:" banner.
-- `main.cpp` installs a `QTranslator` at startup from
+- `main.cpp` installs a `QTranslator` at startup from the **primary** entry of
   `QLocale().uiLanguages()` (the Qt Android kit does not compile
-  `QGuiApplication::uiLanguages()`): for each UI language it tries the full
-  locale first (`aurelex_ru_RU.qm`) then the language-only code
-  (`aurelex_ru.qm`) from the embedded `:/i18n/` resource, and falls back to
-  English (with a `qInfo` line) without aborting.
+  `QGuiApplication::uiLanguages()`): it tries the full locale first
+  (`aurelex_ru_RU.qm`) then the language-only code (`aurelex_ru.qm`) from the
+  embedded `:/i18n/` resource, then falls back to English (with a `qInfo` line)
+  without aborting. Only the primary entry may decide: on Android
+  `uiLanguages()` appends every locale the APK ships resources for (en/ru/ja)
+  after the primary one, so iterating the whole list let an English-primary
+  device fall through to the ru/ja catalog — English is the untranslated base
+  and has no `.qm`, so "no catalog for the primary language" must end in
+  English, not in a later language's catalog.
 
 ### Editing the English source
 
@@ -406,11 +411,17 @@ changes only this app, needs no root, and also re-resolves the Android surfaces
 $adb = "C:\Program Files (x86)\Android\android-sdk\platform-tools\adb.exe"   # or add to PATH
 $pkg = "org.aurelex.pocket.dictionary"
 
-& $adb shell cmd locale set-app-locales $pkg --user 0 --locales ru-RU        # or ja-JP
+& $adb shell cmd locale set-app-locales $pkg --user 0 --locales ru-RU        # or ja-JP / en-US
 & $adb shell cmd locale get-app-locales $pkg --user 0                      # confirm what the system stored
 & $adb shell am force-stop $pkg                                            # REQUIRED, see below
 & $adb shell am start -n "$pkg/.AurelexActivity"
+```
 
+`en-US` selects the untranslated English base (there is no `aurelex_en.qm`).
+Run this **on its own, only when you are finished**, so that pasting the block
+above does not undo the switch before you have looked at the app:
+
+```powershell
 & $adb shell cmd locale set-app-locales $pkg --user 0 --locales ""         # back to the device language
 ```
 
@@ -427,10 +438,11 @@ used — rather than trusting the settings screen:
 & $adb logcat -d | Select-String "using translation catalog|no matching translation"
 ```
 
-`[aurelex] using translation catalog: ru_RU for ru-RU,…` means the catalog loaded;
-`no matching translation catalog` means the process locale did not change, so
-either the per-app locale was rejected (see below) or the device is not
-Android 13+.
+`using translation catalog: "ru_RU" for primary ui language "ru-RU"` means the
+catalog loaded. `no matching translation catalog for …` means the **primary** UI
+language has no catalog, so the English base is in use — the correct outcome for
+an English or unsupported primary language. Treat it as "the locale did not
+apply" only when you were expecting a language that has a catalog.
 
 **Known gap:** the app declares no `android:localeConfig` (there is no
 `app/android/res/xml/locales_config.xml`, and AGP 7.4.1 cannot auto-generate

@@ -25,35 +25,39 @@ int main(int argc, char *argv[])
     QtWebView::initialize();
     QGuiApplication app(argc, argv);
 
-    // Localization: install the best-matching compiled catalog for the
-    // device's UI language (embedded as :/i18n/aurelex_<lang>.qm, see the
+    // Localization: install the compiled catalog for the device's PRIMARY UI
+    // language (embedded as :/i18n/aurelex_<lang>.qm, see the
     // qt_add_resources("i18n") call in CMakeLists.txt).
-    // Try each full locale first, then its language-only code; the first that
-    // loads wins. No match falls back to English (no translator) — non-fatal.
+    //
+    // Only the primary language may decide. On Android QLocale::uiLanguages()
+    // returns the primary locale FOLLOWED BY every locale the APK ships
+    // resources for (en/ru/ja from resConfigs), each expanded into region/script
+    // forms. Iterating that whole list let an English-primary device fall
+    // through to the ru/ja catalog, because English is the untranslated base and
+    // has no .qm. So try the primary locale in full (ru_RU), then its language
+    // code (ru), then stop at English (no translator) — non-fatal.
     QTranslator *translator = new QTranslator(&app);
     QString loadedLocale;
-    const QStringList uiLangs = QLocale().uiLanguages();
-    for (const QString &localeName : uiLangs) {
-        const QString base = QString(localeName).replace(QLatin1Char('-'), QLatin1Char('_'));
+    const QString primaryLocale = QLocale().uiLanguages().value(0);
+    if (!primaryLocale.isEmpty()) {
+        const QString base = QString(primaryLocale).replace(QLatin1Char('-'), QLatin1Char('_'));
         const QStringList candidates = base.contains(QLatin1Char('_'))
             ? QStringList{ base, base.section(QLatin1Char('_'), 0, 0) }
             : QStringList{ base };
         for (const QString &candidate : candidates) {
-            if (translator->load(QStringLiteral(":/i18n/aurelex_") + candidate)) {
-                if (app.installTranslator(translator)) {
-                    loadedLocale = candidate;
-                    break;
-                }
+            if (translator->load(QStringLiteral(":/i18n/aurelex_") + candidate)
+                && app.installTranslator(translator)) {
+                loadedLocale = candidate;
+                break;
             }
         }
-        if (!loadedLocale.isEmpty())
-            break;
     }
     if (!loadedLocale.isEmpty())
-        qInfo() << "[aurelex] using translation catalog:" << loadedLocale
-                << "for" << uiLangs.join(QLatin1Char(','));
+        qInfo().nospace() << "[aurelex] using translation catalog: " << loadedLocale
+                          << " for primary ui language " << primaryLocale;
     else
-        qInfo() << "[aurelex] no matching translation catalog; using English base strings";
+        qInfo().nospace() << "[aurelex] no matching translation catalog for "
+                          << primaryLocale << "; using English base strings";
 
     // Register the Material Icons font (bundled via qt_add_resources("fonts") in
     // CMakeLists.txt) so QML can render
