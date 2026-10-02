@@ -174,8 +174,6 @@ ApplicationWindow {
             // light_mode_auto needs the symbol subset.
             "light_mode": 0xe518,
             "dark_mode": 0xe51c,
-            "zoom_in": 0xe8ff,
-            "zoom_out": 0xe900,
             "cloud_download": 0xe2c0,
             "refresh": 0xe5d5,
             "sync": 0xe627,
@@ -194,7 +192,7 @@ ApplicationWindow {
     }
     // Material Symbols icons (rendered with symbolFontFamily): glyphs that only
     // exist in the Material Symbols Outlined subset (folder_open, match_word,
-    // light_mode_auto).
+    // light_mode_auto, text_decrease, text_increase).
     // fromCodePoint, not fromCharCode: light_mode_auto is U+FFF00, outside the
     // BMP, so it needs a surrogate pair in UTF-16. fromCharCode truncates its
     // argument to 16 bits, which would yield U+FF00 — a real glyph present in the
@@ -204,7 +202,9 @@ ApplicationWindow {
         var map = {
             "folder_open": 0xe2c8,
             "match_word": 0xf6f0,
-            "light_mode_auto": 0xfff00
+            "light_mode_auto": 0xfff00,
+            "text_decrease": 0xeadd,
+            "text_increase": 0xeae2
         }
         return map[name] !== undefined ? String.fromCodePoint(map[name]) : "\uFFFD"
     }
@@ -1259,9 +1259,12 @@ ColumnLayout {
                         // Article reflow zoom: icon-only controls (no visible text),
                         // disabled at the range bounds so the header never offers a
                         // no-op tap. engine.setArticleZoom clamps/snaps anyway.
+                        // Icons are the Material Symbols text_decrease/text_increase
+                        // glyphs (from the secondary subset font), which read as
+                        // "smaller/larger text" rather than a generic magnifier.
                         ToolButton {
-                            text: root.icon("zoom_out")
-                            font.family: root.iconFontFamily
+                            text: root.symbolIcon("text_decrease")
+                            font.family: root.symbolFontFamily
                             font.pixelSize: 20
                             enabled: engine.articleZoom > engine.articleZoomMin
                             Accessible.name: "Zoom out"
@@ -1269,8 +1272,8 @@ ColumnLayout {
                             onClicked: engine.setArticleZoom(engine.articleZoom - engine.articleZoomStep)
                         }
                         ToolButton {
-                            text: root.icon("zoom_in")
-                            font.family: root.iconFontFamily
+                            text: root.symbolIcon("text_increase")
+                            font.family: root.symbolFontFamily
                             font.pixelSize: 20
                             enabled: engine.articleZoom < engine.articleZoomMax
                             Accessible.name: "Zoom in"

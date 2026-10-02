@@ -455,8 +455,13 @@ the pane makes no catalog request. Format, manifest and hosting rules:
 - Secondary icon font (`MaterialSymbols-Outlined-subset.ttf`, family "Material Symbols
   Outlined"): it must keep the classic font's 1.0 em vertical metrics, or any Text mixing
   the two families develops a taller line box and drops the sibling label (#25j). The
-  subset is built by `build_symbol_subset.py`, which pins `hhea`/OS-2 `asc=upm`,
-  `desc=0`, sets `USE_TYPO_METRICS`, and zeroes the `post` underline. Bundled resources
+  subset is built by `scripts/build_symbol_subset.py`, which pins `hhea`/OS-2 `asc=upm`,
+  `desc=0`, sets `USE_TYPO_METRICS`, and zeroes the `post` underline. It carries **five**
+  glyphs: `folder_open`, `match_word`, `light_mode_auto` (the theme toggle), and
+  `text_decrease` / `text_increase` (the article toolbar's zoom controls, which use an
+  "A-"/"A+" so they state "article text size" instead of reading as a magnifier). Add a
+  new secondary glyph by codepoint in that script's `GLYPHS` map and regenerate the
+  subset — a glyph referenced in QML but absent from the font renders as tofu. Bundled resources
   are declared with `qt_add_resources` in `app/CMakeLists.txt` (not `.qrc` files +
   AUTORCC), because AUTORCC does not track the payload files listed inside a `.qrc` — a
   regenerated `.ttf` silently stayed out of the APK until the resource was rebuilt by an

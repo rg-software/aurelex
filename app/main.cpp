@@ -69,7 +69,8 @@ int main(int argc, char *argv[])
 
     // Material Symbols Outlined (subset): a small secondary icon font holding a
     // few glyphs the classic Material Icons set doesn't have (folder_open,
-    // match_word and light_mode_auto in the Material Symbols design). Rendered
+    // match_word, light_mode_auto, text_decrease and text_increase in the
+    // Material Symbols design). Rendered
     // with the "Material Symbols Outlined" family. See the groups-tab-polish and
     // tri-state-theme-control changes.
     const int msFontId = QFontDatabase::addApplicationFont(
