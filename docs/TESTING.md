@@ -211,8 +211,8 @@ does not override a dictionary's own typography to force it to scale.
 | 18e | Force-stop at 150%, relaunch, open an article | Still 150% | ⬜ |
 | 18f | Zoom in on an article that has an `<img>` and a sense-marker icon | Both scale; the `gd_tag_*` icons stay inline with the text rather than drifting | ⬜ |
 | 18g | Zoom to 75% on a long article and scroll to the end | No horizontal overflow at any zoom level, on a scaling dictionary and on `collinslaw` alike | ⬜ |
-| 18m | Over CDP, read `getComputedStyle(document.documentElement).fontSize` at 100% and at 200% | It doubles (16px → 32px). This isolates the **mechanism** from the limitation: if the root does not change, zoom is broken; if it changes but `collinslaw`'s text does not, that is the documented limit | ⬜ |
-| 18n | Open `law` in `collinslaw` at 100% and at 200%, reading `.gdarticlebody span`'s computed size | Stays **16px** at both, and its rendered width is unchanged. Expected — the dictionary sets `span { font-size: 16px !important }` | ⬜ |
+| 18r | Over CDP, read `getComputedStyle(document.documentElement).fontSize` at 100% and at 200% | It doubles (16px → 32px). This isolates the **mechanism** from the limitation: if the root does not change, zoom is broken; if it changes but `collinslaw`'s text does not, that is the documented limit | ⬜ |
+| 18s | Open `law` in `collinslaw` at 100% and at 200%, reading `.gdarticlebody span`'s computed size | Stays **16px** at both, and its rendered width is unchanged. Expected — the dictionary sets `span { font-size: 16px !important }` | ⬜ |
 
 One thing that looks like a bug and is not:
 
