@@ -99,3 +99,16 @@ whose staged paths already fit the current buffers. Rollback is a plain revert.
   Deferrable: with the buffers at `PATH_MAX` the case cannot arise from file length, and the
   spec's completeness requirement is satisfied without it. Worth revisiting only if the
   boundary ever gains a path source that is not a filesystem path.
+
+## Supersedes the long-path caveat in `fix-stale-sweep-deletes-live-dictionaries`
+
+That change's Open Questions record the fixed 512-byte path buffer as "a latent
+defect, left as found" — a dictionary at a ≥512-byte staged path is loaded but
+omitted from the model and the in-use set. **This change fixes exactly that
+defect**, so once both are archived the older note must be read as describing the
+state *before* this change, not a still-open issue. The older note is otherwise
+consistent with this one: it reaches the same conclusion (raise the two caller
+buffers to `PATH_MAX`; no boundary, `patches/` or engine edit) and the same
+byte-vs-character observation. What it left open — whether a loaded-but-
+unenumerable dictionary should be *reported* — stays open here too (see Open
+Questions), because at `PATH_MAX` the case can no longer arise from path length.
