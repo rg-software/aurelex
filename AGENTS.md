@@ -152,13 +152,13 @@ elements in automated tests:
 |------|---------|-------------------|
 | Nav | TabBar | `"Main navigation"` |
 | Nav | Search tab | `"Search"` (invariant English test ID; the visible label is localized) |
-| Nav | Dictionaries tab | `"Dictionaries"` (label localized) |
+| Nav | Dictionaries tab | `"Dicts"` (short invariant English test ID; the visible label is localized) |
 | Nav | Groups tab | `"Groups"` (label localized) |
-| Nav | Full-text search tab | `"Full-text search"` (label localized) |
-| Nav | Favorites tab | `"Favorites"` (label localized) |
+| Nav | Full-text search tab | `"FTS"` (short invariant English test ID; the visible label is localized — `"Full-text search"` is the *field* and *group-scope button* ID in that pane, not the tab) |
+| Nav | Favorites tab | `"Favs"` (short invariant English test ID; the visible label is localized — `"Favorites"` is the *list* ID in that pane, not the tab) |
 | Nav | Theme toggle | `"Dark mode"` / `"Light mode"` / `"Follow system theme"` (dynamic); a plain button that is a SIBLING of the TabBar (not a TabButton) in the last (6th) slot of the bottom dock — never becomes the active tab. Cycles Light → Dark → Follow-system → Light. The glyph AND the name both show the theme the **next tap** selects, not the current one (moon = "tap to go dark", sun = "tap to go light", auto glyph = "tap to hand control back to the system"), so no two modes look alike |
 | Top | Status strip | No interactive content — paints the edge-to-edge window's top chrome in the app background |
-| Search | Group button | `"Search group scope"` (shows the current group in the magenta accent scheme; always tappable — taps open the modal `Select group` picker, which has no "Groups" subtitle) |
+| Search | Group button | `"Search group scope"` (shows the current group in the magenta accent scheme; always tappable — taps open the modal picker, which is itself addressable as `"Select group"` and has no "Groups" subtitle) |
 | Search | TextField | `"Search dictionaries"` |
 | Search | Clipboard button | `"Clipboard"` (magnifier-over-page glyph, primary accent styling; **disabled while the clipboard holds no usable text** — it is enabled only when the clipboard has non-whitespace text, and tracks clipboard changes live) |
 | Search | Suggestion dropdown | Rendered as an HTML `<a>` panel (`#gd-sugg`) *inside* the article WebView — QML controls can't stack above Android's native WebView surface. Each entry carries a `data-w` word and dispatches via the QML link poller (`engine.lookup`), so no page navigation happens; the panel collapses when the article loads. UIAutomator sees entries via the WebView's own DOM accessibility subtree (content-desc = the word). No separate Qt node. |
@@ -189,7 +189,7 @@ elements in automated tests:
 | Membership | Rename group | `"Rename group"` (header icon button in the membership editor) |
 | Membership | By Pair | `"By Pair"` (header icon toggle; groups the available-to-add list by source/target language pair; hidden on the `All` group) |
 | Membership | Members list | `"Group members"` |
-| Membership | Reorder surface | Drag the member row's left-hand handle to reorder; the name area scrolls the list, and the trailing `Remove from group` sliver is excluded |
+| Membership | Reorder surface | Drag the member row's left-hand handle — itself exposed as `"Reorder"` — to reorder; the name area scrolls the list, and the trailing `Remove from group` sliver is excluded |
 | Membership | Remove from group | `"Remove from group"` |
 | Membership | Non-members list | `"Available dictionaries to add"` |
 | Membership | Add to group | `"Add to group"` |
@@ -202,15 +202,15 @@ elements in automated tests:
 | Article | Optional-parts expander | Rendered by the engine as an HTML `<img class="hidden_expand_opt">` *inside* the article WebView, with `alt="[+]"` when the dictionary's `[*]…[/opt]` hidden zone is collapsed and `alt="[-]"` when it is revealed (the `alt` text is the state flag and the icon swaps with it; `assets/scripts/gd-article-controls.js` implements the handler). UIAutomator sees it through the WebView's DOM accessibility subtree as `content-desc = "[+]"` / `"[-]"` — address it by that. Only present for headwords whose entry has a hidden zone. |
 | FTS | TextField | `"Full-text search"` |
 | FTS | Whole words toggle | `"Whole words"` (Material Symbols "match word" glyph; magenta-filled when on, gray when off) |
-| FTS | Group button | `"Full-text search group scope"` (shows the current group in the magenta accent scheme; always tappable; sits inline next to the field, like Search; opens the same modal `Select group` picker) |
+| FTS | Group button | `"Full-text search group scope"` (shows the current group in the magenta accent scheme; always tappable; sits inline next to the field, like Search; opens the same modal picker, addressable as `"Select group"`) |
 | FTS | Search button | `"Search"` (magnifier icon button on its own row below the field; the only way to submit a search — typing, a scope change and the whole-words toggle do not search. Disabled while the query is blank and while a submitted search is running) |
 | FTS | Results list | `"Full-text search results"` |
 | History | Clear all | Rendered as a `data-action="clear-history"` row *inside* the article WebView when the search field is empty |
 | History | Word rows | Rendered as `data-w` anchors (tap = lookup) with `data-action="remove-history"` per-row buttons in the WebView; no separate Qt list/tab |
 | Favorites | ListView | `"Favorites"` |
 | Favorites | Remove button | `"Remove"` (per-row X, no swipe gesture) |
-| Onboarding | Dialog | `"Welcome"` |
-| Onboarding | Get started | `"Get started"` |
+| Onboarding | Overlay | **No accessible name** — it is a plain `Rectangle` overlay drawn inside the Dicts pane (not a `Dialog`, which would take taps unreliably on Android), so there is no node to address. Match the heading label `"Welcome to Aurelex"` (localized) instead, or gate the test on `"Get started"` not existing |
+| Onboarding | Get started | `"Get started"` (the overlay's only interactive element; appears when the app has been run but not dismissed) |
 
 ## Git / Commit conventions
 
