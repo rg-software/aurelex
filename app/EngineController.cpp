@@ -1890,10 +1890,10 @@ QString EngineController::rewriteArticleUrls(const QString &html) const {
     // each dictionary entry as a bordered white card (.gdarticle), which reads
     // as a light-gray frame on the phone. Neutralize the card so article text
     // sits directly on the pane's plain background. The base canvas uses a CSS
-    // variable that gdSetDarkMode() flips, so the whole WebView backgrounds
-    // match the app theme on a live dark/light switch (a fully-transparent html
-    // would show the native WebView's own white underneath).
-    // contains no such pattern).
+    // variable that gdSetDarkMode() flips, so the whole WebView background
+    // matches the app theme on a live dark/light switch (a fully-transparent
+    // html would show the native WebView's own white underneath).
+    //
     // The article canvas is the app's own background color, so no seam shows
     // where the article meets the chrome around it. These are Qt 6.6's Material
     // `backgroundColorLight` / `backgroundColorDark` — the same pair Qt resolves
@@ -1904,11 +1904,11 @@ QString EngineController::rewriteArticleUrls(const QString &html) const {
     // main.qml keeps the same pair as root.uiBgHex() — change both together.
     const QString canvasBgLight = QStringLiteral("#fffbfe");
     const QString canvasBgDark = QStringLiteral("#1c1b1f");
-    // Baked into the stylesheet below rather than left to the injected controller:
+    // Baked into the var() fallback rather than left to the injected controller:
     // the document's first paint happens before any script runs, and the
     // controller's own initial call is a no-op (the mode is already baked in),
-    // so this is what paints the first frame in BOTH themes. Baking the light
-    // value unconditionally would flash white on a dark cold load.
+    // so the fallback is what paints the first frame in BOTH themes. Baking the
+    // light value unconditionally would flash white on a dark cold load.
     const QString canvasBg = m_darkMode ? canvasBgDark : canvasBgLight;
     const QString plainCss = QStringLiteral(
         R"(<style>
