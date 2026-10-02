@@ -50,6 +50,7 @@ A suggestion response SHALL NOT paint the candidate surface over an article that
 The system SHALL render a lookup as HTML built from the dictionaries of the active group that contain the headword, presented in the on-screen web view with the dictionaries ordered per the active group, whether the lookup is initiated by typing in the search field, selecting a suggestion, or an external entry point (share action, clipboard, history, favorites, or full-text search). Every article SHALL be presented in the Search tab's inline article surface; there SHALL NOT be a separate full-pane article view.
 Successful article lookups SHALL be recorded in the lookup history.
 Unknown words, lookups scoped to a group with no dictionaries, and articles whose embedded resources load or fail concurrently MUST NOT crash or hang the app; navigation (switching tabs, opening other panes, and returning) SHALL remain responsive while an article is displayed.
+The Search pane's layout SHALL fit within the height the window gives it at every window size: the inline article area SHALL NOT spill past the bottom navigation dock, and therefore the article surface SHALL never cover the app's own chrome. In particular the bottom navigation dock SHALL remain fully visible and tappable on the Search tab in every window orientation. When the window changes size, the article surface SHALL settle in the new orientation without the user having to switch tabs or re-open the word, and the article that was open SHALL still be displayed afterwards.
 
 #### Scenario: Word found in multiple dictionaries
 - **WHEN** the user looks up a headword present in several dictionaries of the active group
@@ -74,6 +75,22 @@ Unknown words, lookups scoped to a group with no dictionaries, and articles whos
 #### Scenario: Navigation stays responsive while an article with resources is shown
 - **WHEN** an article whose entries reference embedded resources is displayed
 - **THEN** switching to another tab and back completes without the app freezing or becoming unresponsive to input
+
+#### Scenario: Rotating keeps the bottom dock visible
+- **WHEN** the device is rotated while an article is displayed in the Search tab
+- **THEN** the bottom navigation dock remains fully visible and tappable in the new orientation, and the article ends above it rather than on top of it
+
+#### Scenario: The article survives an orientation change
+- **WHEN** the device is rotated while an article is displayed in the Search tab
+- **THEN** the same article is still displayed once the app settles in the new orientation, without the user re-entering the word or switching tabs
+
+#### Scenario: Starting in landscape keeps the bottom dock visible
+- **WHEN** the app is launched with the device already in landscape and an article is opened on the Search tab
+- **THEN** the bottom navigation dock is visible and tappable, and the article renders above it
+
+#### Scenario: Opening the keyboard does not disturb an article or its suggestions
+- **WHEN** the soft keyboard opens while the search field is focused, which shrinks the window without changing its width
+- **THEN** the open article stays displayed and headword suggestions still appear as the user types
 
 ### Requirement: Embedded dictionary resources
 The system SHALL load resources referenced by an article (for example images and audio stored in mdict `.mdd` archives or referenced from dictionary folders) and display or play them within the article. Resource loading SHALL be robust: resolving the article's resources via the local article server MUST NOT crash the app or deadlock/freeze the UI, including when several resources are requested concurrently, and a request whose client disconnects before the resource is ready SHALL be dropped without error. Resolving a resource MUST NOT block the user interface and MUST NOT require the user interface thread to run a nested event loop; resource work SHALL be performed off the user interface thread, and a resource that cannot be produced SHALL be abandoned within a short bounded time rather than after a long fixed wait.
