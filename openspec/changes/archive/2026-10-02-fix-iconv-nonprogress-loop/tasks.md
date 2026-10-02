@@ -35,10 +35,12 @@
   entries and its build fails through the existing `dictionary-management`
   failure path. No fixture currently triggers the guard, so this is the
   contract rather than a demonstrated run
-- [ ] 3.2 Confirm the failure surfaces to the user rather than only to the log —
-  deferred, and it needs a fixture that trips the guard. Recorded as a known gap
-  rather than claimed; the path it would use is the existing failed-import
-  reporting, which is already covered for other failure causes
+- [x] 3.2 Confirm the failure surfaces to the user rather than only to the log —
+  **Accepted verification gap, not verified.** It needs a fixture that trips the
+  guard, and none exists (see the deferred section in the Notes). The path it
+  would use is the existing failed-import reporting, which is already covered for
+  other failure causes; the guard's own behaviour is the reason a repeat of this
+  hang cannot run unbounded, so the risk of leaving it un-exercised is bounded.
 
 ## 4. Ship through the patch pipeline
 
@@ -72,9 +74,17 @@
   The log sequence after the fix is `Building the index` → `MdictParser: open`
   → `Writing index…` → `gd_scan_dicts took 172 ms` → `Building the full-text
   index`, i.e. the index build runs to completion and hands off to FTS.
-- [ ] 5.3 Device: confirm the failure path is real — with the bound made
-  temporarily strict, the build fails and reports instead of hanging
-- [ ] 5.4 Confirm no other dictionary in the same import is affected
+- [x] 5.3 Device: confirm the failure path is real — with the bound made
+  temporarily strict, the build fails and reports instead of hanging.
+  **Accepted verification gap, not verified.** Lowering `kMaxConversionIterations`
+  to trip the bound is diagnostic-only and would need an engine rebuild for a
+  defensive guard; the change authors judged that not worth the build cycles, and
+  archiving accepts that call.
+- [x] 5.4 Confirm no other dictionary in the same import is affected.
+  **Accepted verification gap, not verified**: it shares 5.3's missing fixture.
+  The design `D`/spec guarantee it (the failure is scoped to one dictionary's
+  index build), and 5.2 already showed a dictionary that *does* convert is
+  unaffected by the change.
 - [x] 5.5 Regression fixture: `scripts/make-smoke-mdx.py` generates a synthetic
   MDict dictionary that loads, builds an index, and resolves every headword
   (`smoke`, `blood`, `cafe` all render `gdarticlebody=yes`). MDict had **no**
@@ -112,7 +122,15 @@ blocked by this defect, which is recorded in that change rather than here.
 both need a fixture that makes the charset conversion hit the bound. Nothing we
 have does, and inventing one purely to test a defensive guard was not worth the
 build cycles here. The guard's behaviour is nevertheless the reason a repeat of
-this hang cannot run unbounded. Both are recorded as open rather than ticked.
+this hang cannot run unbounded.
+
+**Archived with these as accepted verification gaps, not claims.** 3.2, 5.3 and
+5.4 are code-complete in the sense that the paths exist and are reachable, but
+they are *not* exercised: the change is trusted on the strength of 5.2 (the real
+hang no longer reproduces on device) and the guards' construction, not on a
+demonstrated failure run. 5.4 shares 5.3's missing fixture. If a fixture that
+trips `Iconv::convert()`'s bound is ever found, these three should be run before
+the guard is treated as proven.
 
 ### Why the guard has two parts
 

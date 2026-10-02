@@ -41,4 +41,4 @@ A dictionary's index SHALL be written inside the app's index directory, and the 
 
 #### Scenario: Index placement is verified automatically
 - **WHEN** the build-time engine check imports a dictionary and builds its index
-- **THEN** the check confirms the index was written inside the expected index directory, so a regression in index placement fails the build rather than reaching the device
+- **THEN** the check fails if the resulting index is not inside the supplied index directory
