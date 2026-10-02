@@ -3,7 +3,6 @@
 #include "DictionaryIndex.hpp"
 #include "IndexCleanup.hpp"
 #include "StagedCleanup.hpp"
-#include "StagingRules.hpp"
 #include "IndexMigration.hpp"
 
 #include <QtConcurrent>
@@ -384,6 +383,52 @@ void EngineController::collectScanFailures() {
     w->setFuture(f);
 }
 
+// The single place the boundary's dictionary-info call is made, so the source
+// path cannot drift between the two places that need it: the scan's in-use set
+// (which decides what the staged sweep may delete) and the QML model. They were
+// separate gd_dict_info loops, and the sweep's in-use guard ended up vacuous on a
+// cold start because it read the wrong one
+// (fix-stale-sweep-deletes-live-dictionaries).
+//
+// Buffer sizes are the ones this file has always used. gd_dict_info returns
+// non-zero - and this yields an empty source - when a name or path does not
+// fit, which is the same behaviour the model already had; such a dictionary
+// simply does not appear in the in-use set, and holdsPrimaryDictionaryFile is
+// what still protects its directory.
+namespace {
+
+struct DictInfoAtIndex {
+    bool ok = false; // gd_dict_info returned 0
+    QString name;
+    QString source;
+};
+
+// What one scan produced: how many dictionaries loaded, and where each reads from.
+// Replaces the QPair<int,int> the scan used to return, whose first element was
+// hardcoded to 0 - so `result.first > 0` never fired and the guard downstream was
+// really only ever about the count.
+struct ScanOutcome {
+    int count = 0;
+    QStringList sources;
+};
+
+DictInfoAtIndex readDictInfoAt(int i) {
+    // Fixed stack buffers: the sizes are pinned HERE so every caller gets the
+    // same answer, and stack storage keeps this allocation-free on the path that
+    // walks every loaded dictionary. gd_dict_info copies the trailing NUL, but the
+    // zero-init is kept so a buffer it chose not to fill is still a valid C
+    // string - QString::fromLocal8Bit would otherwise read past it.
+    char name[256] = {};
+    char file[512] = {};
+    if (gd_dict_info(i, name, static_cast<int>(sizeof(name)),
+                     file, static_cast<int>(sizeof(file))) != 0)
+        return {};
+    return DictInfoAtIndex{true, QString::fromLocal8Bit(name),
+                           QString::fromLocal8Bit(file)};
+}
+
+} // namespace
+
 void EngineController::runScan() {
     // One-off import model: the app-private staged root is the single source of
     // dictionaries. gd_scan_dicts recurses, so scanning the root picks up every
@@ -410,19 +455,35 @@ void EngineController::runScan() {
     // returns and the banner would show forever. Kick a watchdog so the UI
     // recovers with a clear message instead of an endless spinner.
     m_scanWatchdog.start(kScanWatchdogMs);
-    QFuture<QPair<int, int>> f = QtConcurrent::run([stagedBase]{
-        int total = 0;
+    // The count AND the source of every loaded dictionary come back together,
+    // read on this thread while gd_scan_dicts' result is still the live one.
+    //
+    // The source list is not redundant with refreshDictionaries() below: that one
+    // runs after the staged sweep, and on the first scan after a launch
+    // m_dictionaries is still empty - which left the sweep's in-use guard
+    // vacuous and every nested import classified as an orphan
+    // (fix-stale-sweep-deletes-live-dictionaries). Same read, taken while it is
+    // authoritative rather than after.
+    QFuture<ScanOutcome> f = QtConcurrent::run([stagedBase]{
+        ScanOutcome out;
         if (QDir(stagedBase).exists())
             gd_scan_dicts(stagedBase.toLocal8Bit().constData());
-        total = gd_dict_count();
-        return QPair<int, int>(0, total);
+        const int n = gd_dict_count();
+        out.count = n;
+        out.sources.reserve(n);
+        for (int i = 0; i < n; ++i) {
+            const QString src = readDictInfoAt(i).source;
+            if (!src.isEmpty())
+                out.sources.append(src);
+        }
+        return out;
     });
-    auto *w = new QFutureWatcher<QPair<int, int>>(this);
-    connect(w, &QFutureWatcher<QPair<int, int>>::finished, this, [this, w]{
+    auto *w = new QFutureWatcher<ScanOutcome>(this);
+    connect(w, &QFutureWatcher<ScanOutcome>::finished, this, [this, w]{
         m_scanWatchdog.stop();
-        const QPair<int, int> result = w->result();
-        qInfo() << "[aurelex] scan done; gd_dict_count =" << result.second;
-        setDictCount(result.second);
+        const ScanOutcome result = w->result();
+        qInfo() << "[aurelex] scan done; gd_dict_count =" << result.count;
+        setDictCount(result.count);
         setScanningActive(false);
         w->deleteLater();
         // Surface ANY dictionary files that failed to load (corrupt/truncated)
@@ -441,9 +502,9 @@ void EngineController::runScan() {
         // forever, which is what made the banner's own advice ("pick the same
         // folder again") untrue. Sweep those now that the scan has settled, and
         // re-collect so the banner reflects the result.
-        if (sweepStaleStagedDirs())
+        if (sweepStaleStagedDirs(result.sources))
             collectScanFailures();
-        if (result.first > 0 || result.second > 0) {
+        if (result.count > 0) {
             refreshDictionaries();
             refreshGroups();
         }
@@ -801,13 +862,10 @@ void EngineController::refreshDictionaries() {
         QVariantList list;
         const int n = gd_dict_count();
         list.reserve(n);
-        std::vector<char> name(256);
-        std::vector<char> file(512);
         std::vector<char> lf(128), lt(128);
         for (int i = 0; i < n; ++i) {
-            const int rn = gd_dict_info(i, name.data(), static_cast<int>(name.size()),
-                                        file.data(), static_cast<int>(file.size()));
-            if (rn != 0) continue;
+            const DictInfoAtIndex info = readDictInfoAt(i);
+            if (!info.ok) continue;
             QVariantMap m;
             // The list is sorted by name below, so the displayed position is NOT
             // the engine's index. Carry the engine index (the coordinate every
@@ -815,8 +873,8 @@ void EngineController::refreshDictionaries() {
             // translate display positions back to it before crossing the
             // boundary (fix-dictionary-removal-index-mismatch).
             m.insert("engineIndex", i);
-            m.insert("name", QString::fromLocal8Bit(name.data()));
-            m.insert("source", QString::fromLocal8Bit(file.data()));
+            m.insert("name", info.name);
+            m.insert("source", info.source);
             // Language pair + approx size (design D1): human names, empty when
             // unknown (QML renders '?'); size is the summed staged source files.
             long long sizeBytes = 0;
@@ -1262,7 +1320,7 @@ void EngineController::deleteIdentityFiles(const DictIdentity::Identity &id,
     // import folder holds many dictionaries, so removing one must not delete its
     // siblings. removeStagedDirIfUnused re-checks that against the live list and
     // removes the directory once its last user is gone.
-    if (!removeStagedDirIfUnused(stagedDir))
+    if (!removeStagedDirIfUnused(stagedDir, liveDictionarySources()))
         qInfo() << "[aurelex] staged dir kept (shared by siblings)" << stagedDir;
 }
 
@@ -1283,7 +1341,7 @@ void EngineController::removeScanFailure(const QString &file) {
     if (stagedDir.isEmpty()) {
         qInfo() << "[aurelex] scan failure not under the staged root; clearing entry only"
                 << file;
-    } else if (removeStagedDirIfUnused(stagedDir)) {
+    } else if (removeStagedDirIfUnused(stagedDir, liveDictionarySources())) {
         qInfo() << "[aurelex] removed failed import" << stagedDir;
     } else {
         qInfo() << "[aurelex] failed import left in place (shared or refused)" << stagedDir;
@@ -1324,7 +1382,8 @@ void EngineController::deleteDictionaryFiles(const QString &sourceFile,
         const QString stagedDir = stagedAncestor(sourceFile, stagedRoot);
         // The guard now lives in removeStagedDirIfUnused so the failed-import
         // cleanup cannot drift from it.
-        if (!stagedDir.isEmpty() && !removeStagedDirIfUnused(stagedDir)) {
+        if (!stagedDir.isEmpty()
+            && !removeStagedDirIfUnused(stagedDir, liveDictionarySources())) {
             qInfo() << "[aurelex] staged copy dir kept (shared by siblings)"
                     << stagedDir;
         }
@@ -1346,13 +1405,19 @@ QStringList EngineController::liveDictionarySources() const {
     return sources;
 }
 
-bool EngineController::removeStagedDirIfUnused(const QString &stagedDir) {
+// `loadedSources` is a parameter rather than read from m_dictionaries so that
+// every caller names the set it is protecting a deletion with: the sweep passes
+// the scan's list (the model is empty on a cold start), the removal and
+// failed-import paths pass liveDictionarySources() (the model is the right
+// authority there - it reflects an edit the user just made, including the
+// m_unloadedSources exclusions that stop a just-unloaded dictionary from
+// keeping its own directory alive). Containment and sharing are decided in one
+// place so no caller can apply one guard and forget the other
+// (see app/StagedCleanup.hpp).
+bool EngineController::removeStagedDirIfUnused(const QString &stagedDir,
+                                               const QStringList &loadedSources) {
     if (stagedDir.isEmpty() || m_stagedDir.isEmpty())
         return false;
-
-    // Containment and sharing are decided in one place so no caller can apply
-    // one guard and forget the other (see app/StagedCleanup.hpp).
-    const QStringList loadedSources = liveDictionarySources();
 
     if (!StagedCleanup::isDirectChildOf(stagedDir, m_stagedDir)) {
         qWarning() << "[aurelex] refusing to remove staged dir outside the staged root:"
@@ -1371,7 +1436,7 @@ bool EngineController::removeStagedDirIfUnused(const QString &stagedDir) {
     return QDir(dirAbs).removeRecursively();
 }
 
-bool EngineController::sweepStaleStagedDirs() {
+bool EngineController::sweepStaleStagedDirs(const QStringList &loadedSources) {
     if (m_stagedDir.isEmpty())
         return false;
     // Never sweep while an import is being copied: a directory mid-copy can
@@ -1386,21 +1451,26 @@ bool EngineController::sweepStaleStagedDirs() {
 
     // Directories a loaded dictionary reads from. Anything else under the staged
     // root produced nothing, i.e. it is a failed import.
-    const QStringList live = liveDictionarySources();
+    //
+    // The list is the scan's, handed in by the caller, NOT liveDictionarySources()
+    // from m_dictionaries: the model is still empty on the first scan after a
+    // launch (this runs before refreshDictionaries), so reading it here made the
+    // guard vacuous and every nested import an orphan
+    // (fix-stale-sweep-deletes-live-dictionaries). Logged so a cold start is
+    // checkable from logcat - a 0 here with dictionaries on disk means the guard
+    // is broken again.
+    qInfo() << "[aurelex] staged sweep: in-use sources handed to the sweep ="
+            << loadedSources.size();
 
     const QStringList dirs =
         root.entryList(QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name);
     bool removedAny = false;
     for (const QString &name : dirs) {
         const QString dirAbs = root.absoluteFilePath(name);
-        bool used = false;
-        for (const QString &s : live) {
-            if (s.startsWith(dirAbs + QLatin1Char('/')) || s == dirAbs) {
-                used = true;
-                break;
-            }
-        }
-        if (used)
+        // The shared guard, not a local reimplementation of it: the sweep used to
+        // carry its own prefix loop, which is the second time this file has had
+        // two copies of this test and only one of them was tested.
+        if (StagedCleanup::isUsedByLoadedDictionary(dirAbs, loadedSources))
             continue;
 
         // An orphan: a staged directory that holds no primary dictionary file.
@@ -1413,21 +1483,17 @@ bool EngineController::sweepStaleStagedDirs() {
         // Checked BEFORE the failed-import test, because such a directory
         // produces no scan failure to be reported: it yields no dictionary and
         // no error, which is exactly why the old condition never matched it.
-        bool hasPrimary = false;
-        {
-            const QDir d(dirAbs);
-            const QStringList entries =
-                d.entryList(QDir::Files | QDir::NoDotAndDotDot, QDir::Name);
-            for (const QString &f : entries) {
-                if (StagingRules::isPrimaryDictionaryName(f)) {
-                    hasPrimary = true;
-                    break;
-                }
-            }
-        }
-        if (!hasPrimary) {
+        //
+        // RECURSIVE. An import mirrors the picked folder's layout, so the normal
+        // staged shape is staged/<sourceId>/<topic>/<name>/<dict>.dsl.dz. Reading
+        // only the top level found no primary in that shape and deleted the
+        // directory while its dictionaries were loaded and searchable. A
+        // dictionary whose path overflowed gd_dict_info's buffer also lands here,
+        // so this is the layer that protects it even when the in-use list cannot
+        // name it.
+        if (!StagedCleanup::holdsPrimaryDictionaryFile(dirAbs)) {
             qInfo() << "[aurelex] sweeping staged dir holding no dictionary" << dirAbs;
-            if (removeStagedDirIfUnused(dirAbs))
+            if (removeStagedDirIfUnused(dirAbs, loadedSources))
                 removedAny = true;
             continue;
         }
@@ -1446,7 +1512,7 @@ bool EngineController::sweepStaleStagedDirs() {
         if (!reported)
             continue;
         qInfo() << "[aurelex] sweeping stale failed import" << dirAbs;
-        if (removeStagedDirIfUnused(dirAbs))
+        if (removeStagedDirIfUnused(dirAbs, loadedSources))
             removedAny = true;
     }
     return removedAny;
@@ -1642,15 +1708,13 @@ void EngineController::groupDicts(int groupId) {
         int memberCount = 0;
         const int rc = gd_group_dicts(groupId, members.data(), n + 1);
         if (rc >= 0) memberCount = rc;
-        std::vector<char> name(256);
-        std::vector<char> file(512);
         for (int i = 0; i < n; ++i) {
-            if (gd_dict_info(i, name.data(), static_cast<int>(name.size()),
-                             file.data(), static_cast<int>(file.size())) != 0) continue;
+            const DictInfoAtIndex info = readDictInfoAt(i);
+            if (!info.ok) continue;
             QVariantMap m;
             m.insert("index", i);
-            m.insert("name", QString::fromLocal8Bit(name.data()));
-            m.insert("source", QString::fromLocal8Bit(file.data()));
+            m.insert("name", info.name);
+            m.insert("source", info.source);
             QVector<int> idx; // position within the group's ordered membership
             for (int k = 0; k < memberCount; ++k) if (members[k] == i) idx << k;
             m.insert("member", !idx.isEmpty());

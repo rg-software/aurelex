@@ -17,12 +17,20 @@
 //      that any loaded dictionary still reads from must survive, so removing a
 //      failed member cannot take its working siblings with it.
 //
+// Plus one predicate the caller applies before either: holdsPrimaryDictionaryFile.
+// It is here rather than inline in EngineController because the sweep's copy of
+// it shipped untested and read only the top level, which deleted nested imports
+// that were loading fine (fix-stale-sweep-deletes-live-dictionaries).
+//
 // Kept as header-only free functions (rather than inline in EngineController) so
 // a host test can exercise them without the Android build, following
 // app/IndexCleanup.hpp.
 #pragma once
 
+#include "StagingRules.hpp"
+
 #include <QDir>
+#include <QDirIterator>
 #include <QFileInfo>
 #include <QString>
 #include <QStringList>
@@ -57,6 +65,38 @@ inline bool isUsedByLoadedDictionary(const QString &dir,
         // a plain prefix test; normalise both sides the same way.
         const QString sClean = QDir::cleanPath(s);
         if (sClean == dirAbs || sClean.startsWith(dirAbs + QLatin1Char('/')))
+            return true;
+    }
+    return false;
+}
+
+// True when `dir` holds a primary dictionary file (.mdx / .dsl / .dsl.dz / .ifo)
+// ANYWHERE beneath it, at any depth.
+//
+// The walk descends because an import preserves the picked folder's layout, so
+// `staged/<sourceId>/<topic>/<name>/<dict>.dsl.dz` is the normal shape - not an
+// edge case. The sweep's previous test listed only the top level with
+// QDir::Files and no QDir::Subdirectories, found no primary, and deleted every
+// such directory while its dictionaries were loaded and searchable.
+//
+// QDirIterator rather than QDir::entryInfoList(QDir::Subdirectories): the latter
+// materialises the whole listing, so a match at the first entry still costs a
+// stat of every file in the tree - and a `<dict>.files` or StarDict `res` tree
+// holds thousands. Iterating short-circuits on the first hit, which is the
+// common case. Symlinked directories are not followed (no FollowSymlinks flag),
+// so a cycle cannot trap the sweep.
+//
+// Descending into resource trees is deliberate and errs safe: a nested `.dsl`
+// found inside some resource archive makes the directory look occupied, which
+// keeps it rather than deletes it.
+inline bool holdsPrimaryDictionaryFile(const QString &dir) {
+    if (dir.isEmpty())
+        return false;
+    QDirIterator it(dir, QStringList(), QDir::Files | QDir::NoDotAndDotDot,
+                    QDirIterator::Subdirectories);
+    while (it.hasNext()) {
+        it.next();
+        if (StagingRules::isPrimaryDictionaryName(it.fileName()))
             return true;
     }
     return false;

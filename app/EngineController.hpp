@@ -508,12 +508,22 @@ private:
     // it, so a shared import folder (one pick holding several dictionaries) keeps
     // the members that still work. Returns true when the directory is gone (or
     // was already absent).
-    bool removeStagedDirIfUnused(const QString &stagedDir);
+    //
+    // `loadedSources` is supplied by the caller rather than read from
+    // m_dictionaries: see sweepStaleStagedDirs. Removal and failed-import paths
+    // pass liveDictionarySources(); the sweep passes the scan's list.
+    bool removeStagedDirIfUnused(const QString &stagedDir,
+                                 const QStringList &loadedSources);
     // Remove staged directories that yielded no loaded dictionary (a failed
     // import) so they are not retried and re-reported on every later scan.
     // Returns true when it removed anything. Never touches a directory a loaded
     // dictionary uses, and never runs on its own initiative outside a scan.
-    bool sweepStaleStagedDirs();
+    //
+    // `loadedSources` MUST come from the scan that just ran, not from
+    // m_dictionaries: this runs BEFORE refreshDictionaries(), so on the first scan
+    // after a launch the model is still empty and a guard read from it protects
+    // nothing (fix-stale-sweep-deletes-live-dictionaries).
+    bool sweepStaleStagedDirs(const QStringList &loadedSources);
     // Remove leftover temporary staging dirs (files/staging-tmp/*) once a
     // scan+index batch has finished and the staged tree is consistent.
     // `keepHashes` are content-hash scratch dirs a live download owns; they are

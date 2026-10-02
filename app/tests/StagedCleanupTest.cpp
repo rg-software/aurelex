@@ -5,6 +5,8 @@
 //   - sharing: a directory any loaded dictionary reads from is not removable, so
 //     removing a failed member cannot take working siblings with it;
 //   - mayRemoveStagedDir composes both, and is the gate both callers use.
+//   - holdsPrimaryDictionaryFile finds a primary at any depth, because an import
+//     mirrors the picked folder's layout (fix-stale-sweep-deletes-live-dictionaries).
 //
 // Header-only, Qt Core only, no engine - mirrors IndexCleanupTest.cpp.
 // Exit code 0 = all checks passed.
@@ -13,6 +15,7 @@
 
 #include <QCoreApplication>
 #include <QDir>
+#include <QFile>
 #include <QFileInfo>
 #include <QTemporaryDir>
 
@@ -29,6 +32,16 @@ void check(bool cond, const QString &what) {
         std::fprintf(stdout, "FAIL: %s\n", qPrintable(what));
         ++g_failures;
     }
+}
+
+// Create an empty placeholder file, creating parent directories as needed.
+// Returns false if it could not be created - and a "holds nothing" check against
+// a file that was never written would pass for the wrong reason, so the
+// positive cases assert this too.
+bool touch(const QString &path) {
+    QDir().mkpath(QFileInfo(path).absolutePath());
+    QFile f(path);
+    return f.open(QIODevice::WriteOnly) && f.resize(1);
 }
 
 } // namespace
@@ -132,6 +145,129 @@ int main(int argc, char **argv) {
           "a loaded dictionary elsewhere does not block removing a failed import");
     check(!StagedCleanup::mayRemoveStagedDir(otherImport, root, QStringList{ otherImport }),
           "the directory the loaded dictionary lives in is itself blocked");
+
+    // ---- recursive primary-file detection ---------------------------------
+    // The predicate the staged sweep applies before it deletes. It has to look at
+    // every depth, because an import mirrors the picked folder's layout: the
+    // staged shape of a dictionary that is loaded and searchable at this moment
+    // is staged/<sourceId>/<topic>/<name>/<dict>.dsl.dz. The sweep used to list
+    // only the top level, found no primary there, and deleted exactly that
+    // directory (fix-stale-sweep-deletes-live-dictionaries).
+
+    // The incident shape, three levels down, plus a sibling topic folder in the
+    // same import.
+    const QString nestedImport =
+        QDir(root).filePath(QStringLiteral("nested01"));
+    const QString deepDir = QDir(nestedImport).filePath(
+        QStringLiteral("English/American Heritage Dictionary (4th Ed)"));
+    const QString deepDict =
+        QDir(deepDir).filePath(QStringLiteral("En-En_American Heritage.dsl.dz"));
+    check(touch(deepDict), "fixture: the deeply nested dictionary file exists");
+    // Its DSL sound/image tree, as the incident's dictionary had. A real nested
+    // import is a primary PLUS a resource tree, and the walk has to see the
+    // primary before descending into thousands of .wav files.
+    check(touch(QDir(deepDir).filePath(
+                  QStringLiteral("En-En_American Heritage.files/w1_001.wav"))),
+          "fixture: a file in the dictionary's resource tree exists");
+    check(StagedCleanup::holdsPrimaryDictionaryFile(nestedImport),
+          "a primary three levels down counts: the import holds a dictionary");
+    check(StagedCleanup::holdsPrimaryDictionaryFile(deepDir),
+          "the directory actually containing the primary holds a dictionary");
+
+    // The pick held a single folder and the dictionary sits in it: one level below
+// the import directory. This is the simplest shape of the incident, and it is
+    // already enough for the old top-level-only test to miss it.
+    const QString oneDownImport =
+        QDir(root).filePath(QStringLiteral("nested02"));
+    const QString oneDownDir = QDir(oneDownImport).filePath(QStringLiteral("Topic"));
+    check(touch(QDir(oneDownDir).filePath(QStringLiteral("En-En_A.mdx"))),
+          "fixture: the one-level-down dictionary file exists");
+    check(StagedCleanup::holdsPrimaryDictionaryFile(oneDownImport),
+          "a primary one level down counts (the shape that used to be swept)");
+    check(StagedCleanup::holdsPrimaryDictionaryFile(oneDownDir),
+          "the subfolder actually holding the primary counts too");
+
+    // Two sibling dictionaries in separate subfolders: one of them is enough, so
+    // the result cannot depend on which subfolder the walk happens to reach first.
+    const QString siblingsImport =
+        QDir(root).filePath(QStringLiteral("nested03"));
+    check(touch(QDir(siblingsImport).filePath(QStringLiteral("A/En-En_A.mdx"))),
+          "fixture: the first sibling dictionary exists");
+    check(touch(QDir(siblingsImport).filePath(QStringLiteral("B/En-En_B.mdx"))),
+          "fixture: the second sibling dictionary exists");
+    check(StagedCleanup::holdsPrimaryDictionaryFile(siblingsImport),
+          "a primary in either of two sibling subfolders counts");
+
+    // The flat shape - a dictionary straight in the import directory - is what
+    // the old top-level-only test was written for. It must still hold.
+    const QString flatImport = QDir(root).filePath(QStringLiteral("flat03"));
+    check(touch(QDir(flatImport).filePath(QStringLiteral("En-En_Flat.ifo"))),
+          "fixture: the flat dictionary file exists");
+    check(StagedCleanup::holdsPrimaryDictionaryFile(flatImport),
+          "a primary at the top level counts (unchanged behaviour)");
+
+    // Every primary extension is recognised, at depth, and case-insensitively:
+    // these are exactly the four isPrimaryDictionaryName accepts.
+    struct { const char *dir; const char *file; const char *what; } formats[] = {
+        { "fmt_md4",  "a/b/Deep.mdx",      "a nested .mdx counts" },
+        { "fmt_dsl5", "c/d/Deep.dsl",      "a nested .dsl counts" },
+        { "fmt_dz6",  "e/f/Deep.dsl.dz",   "a nested .dsl.dz counts" },
+        { "fmt_ifo7", "g/h/Deep.ifo",      "a nested .ifo counts" },
+        { "fmt_up8",  "i/j/Deep.MDX",      "extension matching is case-insensitive" },
+        { "fmt_up9",  "k/l/Deep.IFO",      "case-insensitive for .ifo too" },
+    };
+    for (const auto &fmt : formats) {
+        const QString dir = QDir(root).filePath(QString::fromLatin1(fmt.dir));
+        const QString file = QDir(dir).filePath(QString::fromLatin1(fmt.file));
+        check(touch(file), QStringLiteral("fixture: %1").arg(QString::fromLatin1(fmt.file)));
+        check(StagedCleanup::holdsPrimaryDictionaryFile(dir),
+              QString::fromLatin1(fmt.what));
+    }
+
+    // A resource tree alone is not a dictionary. This is the DSL "<dict>.files"
+    // sounds/images directory and the StarDict "res" directory: thousands of
+    // files, none of them primary. Such a directory IS an orphan and must be
+    // reported as one, or the sweep's own reclaim stops working.
+    const QString resourcesOnly = QDir(root).filePath(QStringLiteral("res10"));
+    check(touch(QDir(resourcesOnly).filePath(QStringLiteral("X.files/a1.wav"))),
+          "fixture: a file inside the resource tree exists");
+    check(!StagedCleanup::holdsPrimaryDictionaryFile(resourcesOnly),
+          "a resource tree holding only sounds is not a dictionary");
+
+    // Companions and archives are not primaries either. isPrimaryDictionaryName
+    // deliberately excludes them, and that is what lets the sweep reclaim an
+    // import whose dictionary was removed but whose companions were left.
+    const QString companionsOnly = QDir(root).filePath(QStringLiteral("comp11"));
+    static const char *companions[] = {
+        "X.mdd", "X.idx", "X.dict", "X.syn", "X.css", "X.ann",
+        "X.bmp", "X.wav", "X.dsl.zip", "X.readme.txt",
+    };
+    bool companionsMade = true;
+    for (const char *c : companions)
+        companionsMade &= touch(QDir(companionsOnly).filePath(QString::fromLatin1(c)));
+    check(companionsMade, "fixture: the companion files exist");
+    check(!StagedCleanup::holdsPrimaryDictionaryFile(companionsOnly),
+          "companions, resource archives and loose assets are not primaries");
+
+    // Subfolders that hold nothing primary, one level and deeper.
+    const QString emptyTree = QDir(root).filePath(QStringLiteral("empty12"));
+    check(touch(QDir(emptyTree).filePath(QStringLiteral("a/b/c/readme.md"))),
+          "fixture: a file with no dictionary extension exists deep down");
+    check(!StagedCleanup::holdsPrimaryDictionaryFile(emptyTree),
+          "subfolders containing no primary do not make the import hold one");
+
+    // Nothing at all.
+    const QString trulyEmpty = QDir(root).filePath(QStringLiteral("empty13"));
+    QDir().mkpath(trulyEmpty);
+    check(!StagedCleanup::holdsPrimaryDictionaryFile(trulyEmpty),
+          "an empty directory holds no dictionary");
+
+    // Degenerate inputs must be false, never a crash or a true.
+    check(!StagedCleanup::holdsPrimaryDictionaryFile(QString()),
+          "an empty path holds no dictionary");
+    check(!StagedCleanup::holdsPrimaryDictionaryFile(
+              QDir(root).filePath(QStringLiteral("does-not-exist"))),
+          "a path that does not exist holds no dictionary");
 
     std::fprintf(stdout, "%s: staged cleanup\n", g_failures == 0 ? "PASS" : "FAIL");
     return g_failures == 0 ? 0 : 1;
