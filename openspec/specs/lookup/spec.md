@@ -151,7 +151,13 @@ Audio formats the player cannot decode (for example speex) MUST NOT crash the ap
 - **THEN** the app does not play sound and signals that the format is unsupported
 
 ### Requirement: Article zoom reflows to the screen width
-The system SHALL offer article zoom controls (zoom in, zoom out) beside the article's back/forward/star controls. Zooming in SHALL re-render the article so that text re-wraps to the viewport width: enlarged content stays fully visible on screen with no horizontal scrolling for regular article text. Zooming out SHALL likewise keep the article fitted to the screen width. The zoom level is a single global value shared by all articles (no per-word or per-dictionary zoom memory).
+The system SHALL offer article zoom controls beside the article's back/forward/star controls, and each control SHALL be labelled with a text-size increase/decrease icon (an "A" with a plus / minus) rather than a generic magnifier, so the control states that it changes article text size. Zooming SHALL enlarge article text that inherits the article's root text size, and the enlarged content SHALL re-wrap to the viewport width so that it stays fully visible with no horizontal scrolling. Zooming out SHALL likewise keep the article fitted to the screen width. The zoom level is a single global value shared by all articles (no per-word or per-dictionary zoom memory).
+
+Zoom SHALL scale text the article renders at its root text size. Text and elements whose size a dictionary's own bundled stylesheet sets in an absolute unit (such as px or pt) SHALL NOT be scaled by zoom, because such a declaration overrides the root size for the content it matches; the app SHALL NOT override a dictionary's own typographic declarations in order to force them to scale. A dictionary that sets absolute sizes therefore renders some of its content at the same size at every zoom level, and this is a property of that dictionary, not of its file format.
+
+#### Scenario: Zoom controls state their text-size meaning
+- **WHEN** the user views the article toolbar's zoom controls
+- **THEN** they show the text-size increase and decrease icons (an "A" with a plus / minus), not a magnifier
 
 #### Scenario: Zooming in reflows text
 - **WHEN** the user zooms in on an article using the zoom controls
@@ -164,6 +170,14 @@ The system SHALL offer article zoom controls (zoom in, zoom out) beside the arti
 #### Scenario: Zoom applies to every article
 - **WHEN** the user looks up a new headword after setting a zoom level
 - **THEN** the new article renders at that same zoom level
+
+#### Scenario: A dictionary that pins absolute text sizes keeps them
+- **WHEN** the user zooms in or out on an article whose dictionary sets its entry text to an absolute size in its own stylesheet
+- **THEN** that dictionary's text stays at the size the dictionary specified while the rest of the article surface scales, and the article remains legible and free of horizontal scrolling at both extremes
+
+#### Scenario: The zoom limit is per-dictionary, not per-format
+- **WHEN** an article is rendered from a dictionary that does not set absolute text sizes, in the same format as one that does
+- **THEN** that article's text scales with zoom normally
 
 ### Requirement: Article hidden content toggle
 The system SHALL render dictionary content that a dictionary's markup marks as hidden (for example the DSL `[*]…[/opt]` optional zone) collapsed and out of view by default, behind a single tappable control placed in the article, and the user SHALL be able to reveal that content and hide it again. No content the dictionary chose to hide SHALL be permanently unreachable. The control SHALL be an icon (no text label) and SHALL be rendered at a size and position that leaves it tappable on a touch screen. Hidden content SHALL stay collapsed again when the article is re-rendered, so the hidden state is never sticky across articles.

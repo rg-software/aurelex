@@ -25,6 +25,7 @@
 #include <QTimer>
 #include <QUrl>
 #include <QXmlStreamReader>
+#include <QColor>
 #include <QGuiApplication>
 #include <QLocale>
 #include <QThread>
@@ -1828,13 +1829,43 @@ QString EngineController::rewriteArticleUrls(const QString &html) const {
     // variable that gdSetDarkMode() flips, so the whole WebView backgrounds
     // match the app theme on a live dark/light switch (a fully-transparent html
     // would show the native WebView's own white underneath).
+    // contains no such pattern).
+    // The article canvas is the app's own background color, so no seam shows
+    // where the article meets the chrome around it. These are Qt 6.6's Material
+    // `backgroundColorLight` / `backgroundColorDark` — the same pair Qt resolves
+    // for Material.background, which main.qml aliases as uiBg and
+    // app/android/res/values{,-night}/colors.xml carries for the starting
+    // window. They were #ffffff / #242526, which matched neither theme and left
+    // the article a shade off the pane in both (pin-article-canvas-against-dark-reader).
+    // main.qml keeps the same pair as root.uiBgHex() — change both together.
+    const QString canvasBgLight = QStringLiteral("#fffbfe");
+    const QString canvasBgDark = QStringLiteral("#1c1b1f");
+    // Baked into the stylesheet below rather than left to the injected controller:
+    // the document's first paint happens before any script runs, and the
+    // controller's own initial call is a no-op (the mode is already baked in),
+    // so this is what paints the first frame in BOTH themes. Baking the light
+    // value unconditionally would flash white on a dark cold load.
+    const QString canvasBg = m_darkMode ? canvasBgDark : canvasBgLight;
     const QString plainCss = QStringLiteral(
         R"(<style>
-html, body { background: var(--gd-bg, #ffffff) !important; }
+/* Paints the article's first frame before any script runs. A stylesheet rule
+   cannot hold the canvas once Dark Reader is on (its override is a layered
+   !important, which outranks an unlayered one), so this is superseded on the
+   live document by an inline !important declaration set from the controller
+   below. Baked per render so a dark cold load never flashes the light value. */
+html, body { background: %1 !important; }
 /* Clear the inline nav toolbar: the WebView surface starts right under it, and
    without this the first line of the article (the dictionary-name heading) can
    tuck under the toolbar's buttons. */
 body { padding-top: 8px !important; }
+/* Reserve a right-hand gutter for the floating scrollbar. Android's WebView
+   uses overlay scrollbars, which are drawn OVER the content (and which
+   scrollbar-gutter cannot reserve space in — upstream's `scrollbar-gutter:
+   stable` on html is a no-op here), so without this the article's text runs
+   under the thumb while scrolling. This is also what the stylesheet's own
+   2em padding on .gdarticle used to provide before the card frame was
+   neutralized below. */
+body { padding-right: 12px !important; }
 .gdarticle { border: none !important; border-radius: 0 !important;
              background: transparent !important; box-shadow: none !important;
              padding: 0 !important;
@@ -1859,7 +1890,7 @@ img.hidden_expand_opt { padding: 12px; margin: -12px !important; }
                                     vertical-align: -0.15em;
                                     background: transparent !important; }
 </style>
-)");
+)").arg(canvasBg);
     const QString darkInit = m_darkMode ? QStringLiteral("1") : QStringLiteral("0");
     // gd-article-controls.js defines gdExpandOptPart, the handler the engine's
     // DSL optional-parts expander binds to. It replaces the stripped
@@ -1892,12 +1923,23 @@ window.__gdDarkMode=%2;
   }
   DarkReader.setFetchMethod(fetchShim);
   var cssId='gd-darkmode-css', imgStyleId='gd-dark-img-style';
+  /* The canvas is asserted as an inline !important declaration, not by the
+     stylesheet rule above. Dark Reader overrides html/body's background from
+     inside a cascade @layer, and a layered !important outranks an unlayered
+     one, so the sheet rule loses and the article came out a grey shade
+     (#242525) rather than the app's #1c1b1f. An inline !important declaration
+     sits outside the layer system and wins. Both elements are set: once html
+     has a background, body's no longer propagates to the canvas. */
+  function gdSetCanvasBg(bg){
+    if(document.documentElement)document.documentElement.style.setProperty('background-color',bg,'important');
+    if(document.body)document.body.style.setProperty('background-color',bg,'important');
+  }
   window.gdSetDarkMode=function(v){
     v=!!v;
+    gdSetCanvasBg(v?'%3':'%4');
     if(v===window.__gdDarkMode)return;
     window.__gdDarkMode=v;
     var head=document.head||document.documentElement;
-    if(document.documentElement)document.documentElement.style.setProperty('--gd-bg', v?'#242526':'#ffffff');
     if(v){
       var l=document.getElementById(cssId);
       if(!l){l=document.createElement('link');l.id=cssId;l.rel='stylesheet';l.href='%1/article-style-darkmode.css';head.appendChild(l);}
@@ -1911,9 +1953,15 @@ window.__gdDarkMode=%2;
     }
   };
   if(window.__gdDarkMode)window.gdSetDarkMode(1);
+  /* This controller runs from <head>, before document.body exists, so the call
+     above could only reach <html>. Re-assert once the document is parsed, which
+     also lets Dark Reader's late style injection settle first. */
+  function gdAssertCanvas(){ gdSetCanvasBg(window.__gdDarkMode?'%3':'%4'); }
+  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',gdAssertCanvas);
+  else gdAssertCanvas();
 })();
 </script>
-)").arg(base).arg(darkInit);
+)").arg(base).arg(darkInit).arg(canvasBgDark).arg(canvasBgLight);
 
     // --- mobile reflow + article zoom ---
     // Fit the article to the device-width viewport and kill native pinch page

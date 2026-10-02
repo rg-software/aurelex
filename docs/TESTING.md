@@ -49,6 +49,8 @@ This adb-installs the result (`-Install`); without it the APK lands in
 | 8h | Import a StarDict dictionary that keeps article images in a sibling `res/` folder (e.g. The World Factbook), then open a country's **Geography** entry | The locator and map GIFs render instead of missing-resource placeholders. `stardict-resource-staging` stages `res/` wholesale; before it, every `res/` file was dropped. On host the engine returns the 10310-byte `af_large_locator.gif` through `gd_get_resource` | ✅ |
 | 8i | Import a folder that has a directory named `res` but **no** StarDict `.ifo` beside it | Nothing from that `res/` is staged — the name alone is not treated as a dictionary's resources | ✅ |
 | 8j | Re-import an already-imported StarDict folder after adding a file to its `res/` tree | The new resource is staged **and** the dictionary's existing files survive. Before the `StagingService` overlay fix the re-import deduped the unchanged files against the folder's own copy and then replaced the directory with the partial temp copy, deleting the dictionary | ✅ |
+| 8k | **Regression — nested import across a restart.** Import a folder whose only supported dictionary files are inside a **subfolder** (e.g. `GoldenDict/English/<Name>/<dict>.dsl.dz`, nothing at the top level), then force-stop and relaunch the app | The dictionaries are **still listed and searchable** after the restart. Before `fix-stale-sweep-deletes-live-dictionaries` the startup sweep classified the staged directory as an orphan, deleted it, and the dictionaries were gone — permanently, since the staged copy was the only copy the app owned. Check `adb logcat`: the line `staged sweep: in-use sources handed to the sweep =` must report a **non-zero** count, and there must be **no** `sweeping staged dir holding no dictionary` or `removing staged dir` for that source | ⬜ |
+| 8l | Leave a genuinely empty leftover staged directory in `files/staged/` (an import that staged no dictionary at all), then restart | It is still reclaimed, and logcat shows `sweeping staged dir holding no dictionary`. Confirms the fix did not turn the sweep off: nested imports survive, true orphans do not | ⬜ |
 
 ## Groups
 
@@ -191,15 +193,39 @@ layout reflows to the new measure instead of scaling a fixed-width column. The
 value is stored as `articleZoom` in `files/settings.json`, snapped to 25% steps
 and clamped to **75–250%**, so it survives a restart.
 
+Because zoom changes the root size, it scales the text that **inherits** that
+size. It cannot scale text whose size a dictionary's own bundled stylesheet pins
+in an absolute unit (`px`/`pt`) — such a declaration overrides the root for the
+content it matches. That is a property of **that dictionary**, not of its
+format: an `.mdx` with no bundled CSS scales exactly like a DSL file. See
+"things that look like bugs and are not" below for the known case. This is
+recorded as a deliberate limit (`article-zoom-honors-dictionary-css`); the app
+does not override a dictionary's own typography to force it to scale.
+
 | # | How to test | Expected | Status |
 | --- | --- | --- | --- |
 | 18a | Open an article, tap "Zoom in" twice (100 → 150%) | Text and images grow together; **no** horizontal scrollbar appears; long paragraphs re-wrap to the wider measure rather than being clipped | ⬜ |
 | 18b | Tap "Zoom out" to the floor | Stops at 75%; the button greys out and stays there | ⬜ |
-| 18c | Tap "Zoom in" to the ceiling | Stops at 250%; the button greys out and stays there | ⬜ |
+| 18c | Tap "Zoom in" to the ceiling | Stops at 250%; the button greys out and stays there. Check this on a dictionary that scales (Black's Medical `.mdx` or a DSL fixture) — a dictionary pinning absolute sizes will look unchanged, which is the known limitation, not a failure of the buttons | ⬜ |
 | 18d | At 150%, look up a *different* word | The new article opens at 150% — zoom is a property of the surface, not of one article | ⬜ |
 | 18e | Force-stop at 150%, relaunch, open an article | Still 150% | ⬜ |
 | 18f | Zoom in on an article that has an `<img>` and a sense-marker icon | Both scale; the `gd_tag_*` icons stay inline with the text rather than drifting | ⬜ |
-| 18g | Zoom to 75% on a long article and scroll to the end | No horizontal overflow at any zoom level | ⬜ |
+| 18g | Zoom to 75% on a long article and scroll to the end | No horizontal overflow at any zoom level, on a scaling dictionary and on `collinslaw` alike | ⬜ |
+| 18m | Over CDP, read `getComputedStyle(document.documentElement).fontSize` at 100% and at 200% | It doubles (16px → 32px). This isolates the **mechanism** from the limitation: if the root does not change, zoom is broken; if it changes but `collinslaw`'s text does not, that is the documented limit | ⬜ |
+| 18n | Open `law` in `collinslaw` at 100% and at 200%, reading `.gdarticlebody span`'s computed size | Stays **16px** at both, and its rendered width is unchanged. Expected — the dictionary sets `span { font-size: 16px !important }` | ⬜ |
+
+One thing that looks like a bug and is not:
+
+- **Zoom does nothing to `collinslaw`'s article text.** Its bundled `collinslaw.css`
+  (inside the `.mdx`) sets absolute sizes on `span` (16px, `!important`), `body`
+  (16px), `.s8` (16px) and `.citou_head` (19px/18px). `span` is what wraps the
+  entry body, and it out-specifies the root, so the entry renders identically at
+  every zoom level. Measured: at zoom 200 the root is 32px and `span` stays 16px.
+  This is the known limitation above — do not file it as a zoom regression, and do
+  not "fix" it by overriding the dictionary (that would flatten the citou/body
+  size distinction the dictionary intends). The other two `collinslaw` surprises
+  (no language pair, and an image it does not ship) are in the MDict section above.
+
 
 ## Article optional parts (`[*]…[/opt]`)
 
@@ -318,6 +344,64 @@ visible ≈ 470 accent px, the bug ≈ 15, fixed landscape ≈ 594).
 | 75 | Search tab, tap the field, type slowly while the keyboard opens and closes | Headword suggestions appear as you type, the open article is not disturbed, the dock stays visible | ✅ (guard for the removed teardown: `mInputShown=true`, `smok` → suggestions `Smoking` / `Smoke Inhalation`) |
 | 76 | Scroll an open article down, then rotate to landscape and back | The article returns to the **top**. This is the pre-existing responsive-reflow path (`articleReloader` re-renders the HTML whenever the WebView's height changes, and `loadHtml` resets the scroll) — not the removed rotation teardown, which only added a second reset. Recorded here so it is not re-attributed to the landscape fix; restoring the offset is a separate change | ✅ (measured: scrolled → rotate → back is pixel-identical to the unscrolled article; 0 % differing vs 9.5 % for top↔scrolled) |
 | 77 | Landscape article band | Tight but usable: the article keeps ~42 px below its 40 px toolbar. Portrait is unaffected (the value is a floor, not a fixed height) | ✅ (by construction; the article is scrollable from there) |
+
+## Display cutout (punch-hole camera)
+
+The window always renders edge-to-edge — Android 15 enforces
+`layoutInDisplayCutoutMode=always` for this target SDK, so there is no letterbox
+to configure. What is checked here is that the app's **content** clears the camera:
+the article, the search row and the outermost dock tab must not sit under it.
+
+Measure in numbers, not by eye. The camera's occupied area comes from the
+platform and the app's layout comes from the accessibility tree, both in the same
+device pixels:
+
+```powershell
+adb shell dumpsys window displays | Select-String 'type=displayCutout frame='
+adb shell uiautomator dump /sdcard/u.xml; adb pull /sdcard/u.xml .
+```
+
+Compare the cutout's frame with the outermost content node's bounds — the article
+is `Dictionary article`, the first dock tab is `Search`. Content must start at or
+past the cutout edge. Reference on a 1080×2400 device, density 2.5:
+
+| orientation | cutout frame | what to expect |
+|---|---|---|
+| portrait | `[0,0][1080,110]` (top, full width) | **no** side inset; the camera sits inside the inert top strip, so article `x0` stays at the usual margin |
+| landscape, camera left | `[0,0][110,1080]` | left inset applied — article `x0` ≈ 142 |
+| landscape, camera right | `[2290,0][2400,1080]` | right inset applied — article `x1` ≈ 2256 |
+
+| # | How to test | Expected | Status |
+| --- | --- | --- | --- |
+| 78 | Portrait, article open | The camera area is covered by the non-interactive top strip and **nothing changes** vs. a device with no cutout. Portrait is unchanged by design — the camera's horizontal safe insets are 0 there — so a report that portrait "looks different" is not a regression | ✅ (article `x0=33`, no side inset) |
+| 79 | Rotate to landscape with the camera on the **left** | The article, the search field and the leftmost dock tab all start clear of the cutout | ✅ (article `x0=142`) |
+| 80 | Rotate to landscape with the camera on the **right** (flip the phone the other way) | The right-hand cells clear the cutout and the left edge is **not** inset — the insets are per-edge, not symmetric | ✅ (article `x1=2256`, right clearance 144 px) |
+| 81 | **Flip between the two landscape orientations directly** (`adb shell settings put system user_rotation 1` then `3`, never passing through portrait) | The clearance follows the camera to the other side. This is the case a resize-based re-read silently misses: both landscape orientations are the same window size, so no resize signal fires while the cutout moves sides | ✅ (right clearance 144 px, then left 142 px on the way back) |
+| 82 | Force-stop with the device **already** in landscape, relaunch, open an article | Correct clearance on the first frame — no rotation event to react to | ✅ (right clearance 144 px) |
+| 83 | Rotate back to portrait | The side margins return to 0 — no leftover inset on either edge | ✅ (article `x0=33`) |
+| 84 | Rotate on the Dictionaries, Groups, Full-text search and Favorites tabs | Every pane inherits the same side inset (they share one anchor line) | ✅ (all four report `x0=33 x1=2256`) |
+| 85 | Both themes, look at the strip beside the camera | The strip is **indistinguishable** from the neighbouring background — no black band, no unthemed edge | ✅ (light `#FFFBFE`, dark `#1C1B1F`, matching at the left strip, right strip and top strip) |
+| 86 | Search tab with the keyboard open in landscape | The inset path does not disturb the open article; the right edge still clears the cutout | ✅ (article `x1=2256` with `mInputShown=true`) |
+| 87 | Whole rotation pass, then read the app's logcat | No new warnings from the app's pid, no ANR, no crash | ✅ (only pre-existing `Qt A11Y: empty contentDescription` notices) |
+
+### Two measurement traps
+
+Both of these make a run report a false PASS if you do not notice them:
+
+- **`adb shell am force-stop` resets `user_rotation` to 0 on this device.** If you set the rotation *before* the force-stop, a "cold start already in landscape" run actually launches in portrait and passes trivially. Correct order: force-stop → set rotation → **confirm** the cutout frame is a side edge → launch.
+- **Read the element's bounds before tapping it.** The theme cell's position depends on the dock layout (its a11y bounds were `1909..2290` in landscape with the camera on the right), so a tap at a guessed coordinate can land on the boundary and silently do nothing — which then looks like "the theme toggle is broken".
+
+### Known cosmetic difference (not a regression)
+
+The article canvas is **not** the same colour as the app background:
+`#FFFFFF` vs `#FFFBFE` in light, `#242526` vs `#1C1B1F` in dark. The WebView paints
+its own `--gd-bg` constant while the app uses Material's `background`, so they are
+two independent choices of "background". This predates the cutout work, is
+unrelated to it, and affects the whole article area rather than any edge — the
+inset strips themselves do match the app background exactly (row 85). Matching
+them would mean driving `--gd-bg` from the Material palette; not done, because
+the light-theme delta is 1/255 and invisible while the dark-theme one is a
+cosmetic preference, not a defect.
 
 ## Full-text search
 

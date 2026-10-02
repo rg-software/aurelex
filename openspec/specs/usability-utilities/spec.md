@@ -3,9 +3,7 @@
 ## Purpose
 
 Adds everyday conveniences that make Aurelex useful as a daily dictionary: looking up words from other apps or the clipboard, and browsing recent lookups and favorites.
-
 ## Requirements
-
 ### Requirement: External lookup entry points
 The system SHALL accept a lookup request originating outside the search field — from a share action ("Look up in Aurelex"), an explicit lookup intent, or the clipboard — and SHALL open the article screen for that text as if it had been typed.
 
@@ -151,12 +149,9 @@ theme" when it returns to following the system.
 
 ### Requirement: The resolved theme drives all app appearance
 
-Which theme is in effect SHALL be derived from the theme mode and the system theme, and that
-single resolved theme SHALL drive every part of the app's appearance together: the app
-chrome and controls, the system status- and navigation-bar icon contrast, the theme
-dictionaries render articles in, and the article currently on screen. Switching modes SHALL
-take effect on the article already displayed without re-running the lookup, and a dictionary
-article SHALL be readable in both themes.
+Which theme is in effect SHALL be derived from the theme mode and the system theme, and that single resolved theme SHALL drive every part of the app's appearance together: the app chrome and controls, the system status- and navigation-bar icon contrast, the theme dictionaries render articles in, and the article currently on screen. Switching modes SHALL take effect on the article already displayed without re-running the lookup, and a dictionary article SHALL be readable in both themes.
+
+The background of the surface that shows an article — and of the headword-suggestion and recent-lookups pane that stands in for one — SHALL be the same color as the app's background, so that no seam is visible between the two. This SHALL hold in both themes, on the article's first painted frame as well as after the theme changes, and it SHALL hold whether or not the article's own content has finished loading.
 
 #### Scenario: All appearance follows the resolved theme
 - **WHEN** the resolved theme changes, whether because the mode changed or because the system theme did
@@ -169,6 +164,14 @@ article SHALL be readable in both themes.
 #### Scenario: Articles are readable in either theme
 - **WHEN** an article is rendered in the light theme and again in the dark theme
 - **THEN** the entry's text is legible against its background in both
+
+#### Scenario: The article surface matches the app background
+- **WHEN** an article, or the candidate pane shown in its place, is displayed in either theme
+- **THEN** the surface behind the content is the same color as the surrounding app background, with no visible border or change of shade where the two meet
+
+#### Scenario: The theme change carries the surface background
+- **WHEN** the resolved theme changes while an article or the candidate pane is displayed
+- **THEN** the surface's background becomes the new theme's background at the same moment as the rest of the app, without the previous theme's color being left behind
 
 ### Requirement: Recent lookups fill the candidate pane
 The recent-lookups (history) surface SHALL fill the Search pane's candidate area from the top of that area down to the bottom navigation dock, rather than stopping partway, and the bottom dock SHALL remain visible. This full-height presentation SHALL apply to the history surface only: the headword-suggestion dropdown SHALL keep its bounded height.
@@ -207,3 +210,4 @@ The Search pane's clipboard control SHALL be enabled only while the clipboard ho
 #### Scenario: Correct state on first show
 - **WHEN** the user first switches to the Search pane
 - **THEN** the clipboard control's enabled state already reflects the clipboard rather than a stale default
+

@@ -214,6 +214,16 @@ ApplicationWindow {
     property color uiBorder: Material.dividerColor
     property color uiFg: Material.foreground
     property color uiSubFg: Material.secondaryTextColor
+    // The article WebView's canvas: the app's own background color, so no seam
+    // shows where the article meets the chrome. These are Qt 6.6's Material
+    // backgroundColorLight / backgroundColorDark — the same pair Qt resolves for
+    // Material.background (root.uiBg) and colors.xml carries for the starting
+    // window. They were #ffffff / #242526, which matched neither theme
+    // (pin-article-canvas-against-dark-reader). EngineController carries the same two
+    // values for the article CSS it injects — change both together.
+    function uiBgHex() {
+        return engine.darkMode ? "#1c1b1f" : "#fffbfe"
+    }
     // Section stripe for the By-Pair dictionary list. A full-width tinted band
     // that reads as a separator between pairs in both themes (the pair headers
     // were previously a pale, half-width rect and were nearly invisible).
@@ -341,12 +351,20 @@ ApplicationWindow {
         root._hideSuggestOverlay()
         root._blankInline()
     }
+    // The article surface is a NATIVE view painted over the QML panes, so a bare
+    // document shows the WebView's own white canvas behind it — a white flash or
+    // pane in dark mode. Painting it the app background fixes that; the value is
+    // re-stated on <html> by _applyArticleDarkMode on a live theme flip.
+    function uiBlankHtml() {
+        return "<html style=\"background:" + root.uiBgHex()
+            + "\"><body></body></html>"
+    }
     function _blankInline() {
         if (root.inlineWv && engine.articleBaseUrl.length > 0) {
             // A suggestion injected before this blank load finishes gets wiped;
             // flag it so _renderSuggestOverlay defers (see _blankPending).
             root._blankPending = true
-            root.inlineWv.loadHtml("<html><body></body></html>", engine.articleBaseUrl)
+            root.inlineWv.loadHtml(root.uiBlankHtml(), engine.articleBaseUrl)
         }
     }
 
@@ -437,7 +455,10 @@ ApplicationWindow {
             return
         }
         const dark = engine.darkMode
-        const bg = dark ? "#242526" : "#ffffff"
+        // The overlay is painted on the WebView's canvas, so its background is
+        // the app background too — same value the article itself uses, so the
+        // candidate pane never reads as a lighter panel inside the Search pane.
+        const bg = root.uiBgHex()
         const fg = dark ? "#e0e0e0" : "#202124"
         const sep = dark ? "#3a3b3c" : "#eeeeee"
         const accent = dark ? "#b388ff" : "#6200ee"
@@ -498,12 +519,17 @@ ApplicationWindow {
             }
         }
         html += '</div>'
+        // Only the panel itself is painted here. The DOCUMENT's background is
+        // deliberately not touched: the blank base document paints it inline on
+        // <html> (uiBlankHtml, restated on a theme flip by
+        // _applyArticleDarkMode) and the article paints it from its injected
+        // CSS (rewriteArticleUrls). Writing it inline here instead froze the
+        // color at the value it had when the overlay was drawn, which left the
+        // pane on the previous theme's background after a flip — and unlike the
+        // overlay it was never removed again (pin-article-canvas-against-dark-reader).
         const script = '(function(){'
             + 'var e=document.getElementById("gd-sugg");if(e)e.remove();'
-            + 'var st="' + bg + '";'
-            + 'if(document.body){document.body.style.background=st;'
-            + 'document.body.style.margin="0";}'
-            + 'if(document.documentElement)document.documentElement.style.background=st;'
+            + 'if(document.body)document.body.style.margin="0";'
             + 'var d=document.createElement("div");d.id="gd-sugg";d.innerHTML='
             + JSON.stringify(html) + ';document.body.appendChild(d);})()'
         wv.runJavaScript(script)
@@ -539,7 +565,7 @@ ApplicationWindow {
         if (root.inlineWv && !root.inlineArticle && root.currentHtml.length === 0
             && engine.articleBaseUrl.length > 5) {
             root._blankPending = true
-            root.inlineWv.loadHtml("<html><body></body></html>", engine.articleBaseUrl)
+            root.inlineWv.loadHtml(root.uiBlankHtml(), engine.articleBaseUrl)
         }
     }
     function _showArticle(word, html) {
@@ -1317,7 +1343,7 @@ ColumnLayout {
                                         root._requestedWord = word
                                         engine.lookup(word)
                                     }
-                                    searchArticleView.loadHtml("<html><body></body></html>", engine.articleBaseUrl)
+                                    searchArticleView.loadHtml(root.uiBlankHtml(), engine.articleBaseUrl)
                                     return
                                 }
                                 if (u.indexOf("gdlookup://") === 0) {
@@ -1327,12 +1353,12 @@ ColumnLayout {
                                         root._requestedWord = word
                                         engine.lookup(word)
                                     }
-                                    searchArticleView.loadHtml("<html><body></body></html>", engine.articleBaseUrl)
+                                    searchArticleView.loadHtml(root.uiBlankHtml(), engine.articleBaseUrl)
                                     return
                                 }
                                 if (base.length > 0 && u.indexOf(base + "/gdau/") === 0) {
                                     engine.playAudio(u)
-                                    searchArticleView.loadHtml("<html><body></body></html>", engine.articleBaseUrl)
+                                    searchArticleView.loadHtml(root.uiBlankHtml(), engine.articleBaseUrl)
                                     return
                                 }
                             }
@@ -3327,7 +3353,13 @@ text: root._stagingActive
     // rewriteArticleUrls, so nothing to do here.
     function _applyArticleDarkMode() {
         if (root.inlineWv && root.inlineWv.url.toString().length > 5) {
-            root.inlineWv.runJavaScript("try{if(window.gdSetDarkMode)gdSetDarkMode("
+            // The blank base document has no injected controller, so its canvas is
+            // restated here directly; the article's own flip is handled inside
+            // gdSetDarkMode. Both use the same two colors.
+            const c = JSON.stringify(root.uiBgHex())
+            root.inlineWv.runJavaScript(
+                "try{if(document.documentElement)document.documentElement.style"
+                + ".background=" + c + ";if(window.gdSetDarkMode)gdSetDarkMode("
                 + (engine.darkMode ? 1 : 0) + ");}catch(e){}")
         }
     }
