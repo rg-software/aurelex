@@ -416,11 +416,14 @@ ApplicationWindow {
     function _findNext() {
         const wv = root.inlineWv
         if (!wv || !root.findQuery || wv.url.toString().length < 6) return
+        // A pending debounced re-search would reset to the first match.
+        findDebounce.stop()
         wv.runJavaScript(root._findCall("gdFindNext()"), root._setFindResult)
     }
     function _findPrev() {
         const wv = root.inlineWv
         if (!wv || !root.findQuery || wv.url.toString().length < 6) return
+        findDebounce.stop()
         wv.runJavaScript(root._findCall("gdFindPrev()"), root._setFindResult)
     }
     function _setFindResult(v) {
@@ -1335,6 +1338,7 @@ ColumnLayout {
                             text: root.icon("search")
                             font.family: root.iconFontFamily
                             font.pixelSize: 20
+                            focusPolicy: Qt.NoFocus
                             Accessible.name: "Search in article"
                             Accessible.role: Accessible.Button
                             onClicked: root._openFind()
@@ -1413,28 +1417,46 @@ ColumnLayout {
                             text: root.icon("close")
                             font.family: root.iconFontFamily
                             font.pixelSize: 20
+                            // Never take focus: a focus move on tap dismisses the
+                            // IME and the first tap is swallowed.
+                            focusPolicy: Qt.NoFocus
                             Accessible.name: "Close find"
                             Accessible.role: Accessible.Button
                             onClicked: root._closeFind()
                         }
 
-                        // Compact field: no floating label, so it fits the row.
+                        // Compact field: matches the toolbar's other controls and
+                        // keeps the placeholder in-field (no Material floating
+                        // label, which would make the 40px row read as taller).
                         TextField {
                             id: findInput
                             Layout.fillWidth: true
-                            Layout.fillHeight: true
-                            placeholderText: qsTr("Find in article")
+                            Layout.preferredHeight: 30
+                            Layout.alignment: Qt.AlignVCenter
                             Accessible.name: "Find in article"
                             Accessible.role: Accessible.EditableText
                             font.pixelSize: 14
                             selectByMouse: true
                             topPadding: 0
                             bottomPadding: 0
+                            leftPadding: 10
+                            rightPadding: 10
                             background: Rectangle {
                                 color: "transparent"
                                 border.color: root.uiBorder
                                 border.width: 1
-                                radius: 4
+                                radius: 6
+                                Text {
+                                    anchors.fill: parent
+                                    anchors.leftMargin: 10
+                                    anchors.rightMargin: 6
+                                    verticalAlignment: Text.AlignVCenter
+                                    elide: Text.ElideRight
+                                    text: qsTr("Find in article")
+                                    color: root.uiSubFg
+                                    font.pixelSize: 14
+                                    visible: findInput.displayText.length === 0
+                                }
                             }
                             onDisplayTextChanged: {
                                 root.findQuery = findInput.displayText
@@ -1459,6 +1481,7 @@ ColumnLayout {
                             font.family: root.iconFontFamily
                             font.pixelSize: 20
                             enabled: root.findTotal > 0
+                            focusPolicy: Qt.NoFocus
                             Accessible.name: "Previous match"
                             Accessible.role: Accessible.Button
                             onClicked: root._findPrev()
@@ -1468,6 +1491,7 @@ ColumnLayout {
                             font.family: root.iconFontFamily
                             font.pixelSize: 20
                             enabled: root.findTotal > 0
+                            focusPolicy: Qt.NoFocus
                             Accessible.name: "Next match"
                             Accessible.role: Accessible.Button
                             onClicked: root._findNext()

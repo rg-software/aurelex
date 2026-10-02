@@ -2032,11 +2032,15 @@ img.hidden_expand_opt { padding: 12px; margin: -12px !important; }
 .gdarticlebody img[src*="gd_tag_"] { width: 1.1em; height: 1.1em;
                                     vertical-align: -0.15em;
                                     background: transparent !important; }
-/* In-article find highlights (article-find.js). Explicit, high-contrast colors
-   in both themes; em-based sizing so gdSetZoom reflows them with the text.
-   Verify the current-versus-other distinction survives Dark Reader on device. */
+/* In-article find highlights (article-find.js). Distinct, high-contrast colors
+   in both themes. font/line-height are forced to inherit and padding/border are
+   zero so a marked run has exactly the surrounding text's metrics and wrapping a
+   match never reflows the line. Verify the current-versus-other distinction
+   survives Dark Reader on device. */
 mark.gd-find-mark { background: #ffe082 !important; color: #202124 !important;
-                    border-radius: 2px; padding: 0 1px; }
+                    font: inherit !important; line-height: inherit !important;
+                    padding: 0 !important; border: 0 !important;
+                    border-radius: 2px; }
 mark.gd-find-mark[data-gd-find-current] { background: #e65100 !important;
                     color: #ffffff !important; }
 </style>
@@ -2110,6 +2114,8 @@ window.__gdDarkMode=%2;
       var st=document.getElementById(imgStyleId);if(st&&st.parentNode)st.parentNode.removeChild(st);
       DarkReader.disable();
     }
+    /* Open find highlights are inline-styled; re-color them for the new mode. */
+    try{if(window.gdFindRestyle)window.gdFindRestyle();}catch(e){}
   };
   if(window.__gdDarkMode)window.gdSetDarkMode(1);
   /* This controller runs from <head>, before document.body exists, so the call

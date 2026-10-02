@@ -204,6 +204,11 @@ elements in automated tests:
 | Article | Favorites star | `"Add to favorites"` / `"Remove from favorites"` (dynamic) |
 | Article | Zoom out button | `"Zoom out"` (disabled at the 75% minimum) |
 | Article | Zoom in button | `"Zoom in"` (disabled at the 250% maximum) |
+| Article | Find toggle / close | `"Search in article"` (magnifier, leftmost in the article toolbar) opens the find bar **in place of** the back/forward/favorite/zoom controls; the same control then reads `"Close find"` (✕) and restores them |
+| Article | Find field | `"Find in article"` (compact query field in the find bar; the in-field placeholder; typing highlights every match live) |
+| Article | Find counter | Non-interactive `n / total` label showing the current match's position, or `"No matches"` for a non-empty query with none |
+| Article | Previous match | `"Previous match"` (disabled when there are no matches) |
+| Article | Next match | `"Next match"` (disabled when there are no matches; also the field's submit action) |
 | Article | WebView | `"Dictionary article"` (inline in the Search tab; no separate full-pane article surface) |
 | Article | Optional-parts expander | Rendered by the engine as an HTML `<img class="hidden_expand_opt">` *inside* the article WebView, with `alt="[+]"` when the dictionary's `[*]…[/opt]` hidden zone is collapsed and `alt="[-]"` when it is revealed (the `alt` text is the state flag and the icon swaps with it; `assets/scripts/gd-article-controls.js` implements the handler). UIAutomator sees it through the WebView's DOM accessibility subtree as `content-desc = "[+]"` / `"[-]"` — address it by that. Only present for headwords whose entry has a hidden zone. |
 | FTS | TextField | `"Full-text search"` |
