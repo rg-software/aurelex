@@ -1,0 +1,96 @@
+{
+  "schemaVersion": 1,
+  "updated": "2026-10-03",
+  "entries": [
+    {
+      "id": "kaikki-en",
+      "name": "Aurelex Kaikki English",
+      "names": {
+        "ru": "Aurelex Kaikki английский",
+        "ja": "Aurelex Kaikki 英語解説辞典"
+      },
+      "langFrom": "en",
+      "langTo": "en",
+      "attribution": "Wiktionary contributors, CC BY-SA 4.0 (via kaikki.org)",
+      "license": "CC-BY-SA-4.0",
+      "files": [
+        {
+          "role": "dictionary",
+          "required": true,
+          "name": "au_kaikki_en-en.dsl.dz",
+          "url": "https://github.com/rg-software/aurelex/releases/download/catalog-data/au_kaikki_en-en.dsl.dz",
+          "sizeBytes": 70005395,
+          "sha256": "e47f3c5baaafa497bbc07c81b1b05cb5f9bd6187431eb75a1a4601e586eb0940"
+        },
+        {
+          "role": "resources",
+          "required": false,
+          "name": "au_kaikki_en-en.dsl.files.zip",
+          "url": "https://github.com/rg-software/aurelex/releases/download/catalog-data/au_kaikki_en-en.dsl.files.zip",
+          "sizeBytes": 1697784932,
+          "sha256": "aba3b46278afc1d6bfa6219a4f4d6d730eb448b36af1355752d7cb4e956ebcbb"
+        }
+      ]
+    },
+    {
+      "id": "kaikki-ja",
+      "name": "Aurelex Kaikki Japanese",
+      "names": {
+        "ru": "Aurelex Kaikki японский",
+        "ja": "Aurelex Kaikki 日本語解説辞典"
+      },
+      "langFrom": "ja",
+      "langTo": "ja",
+      "attribution": "Wiktionary contributors, CC BY-SA 4.0 (via kaikki.org)",
+      "license": "CC-BY-SA-4.0",
+      "files": [
+        {
+          "role": "dictionary",
+          "required": true,
+          "name": "au_kaikki_ja-ja.dsl.dz",
+          "url": "https://github.com/rg-software/aurelex/releases/download/catalog-data/au_kaikki_ja-ja.dsl.dz",
+          "sizeBytes": 7906514,
+          "sha256": "86e5ce22a2a5468c134812e3aab87dd58fc4d2d903022e84d2d0cc44662baa64"
+        },
+        {
+          "role": "resources",
+          "required": false,
+          "name": "au_kaikki_ja-ja.dsl.files.zip",
+          "url": "https://github.com/rg-software/aurelex/releases/download/catalog-data/au_kaikki_ja-ja.dsl.files.zip",
+          "sizeBytes": 1516175,
+          "sha256": "060fbec5df35ad8e833a6a87802cc05f5b223e37d7031050ca0e5775ef783025"
+        }
+      ]
+    },
+    {
+      "id": "kaikki-ru",
+      "name": "Aurelex Kaikki Russian",
+      "names": {
+        "ru": "Aurelex Kaikki русский",
+        "ja": "Aurelex Kaikki ロシア語解説辞典"
+      },
+      "langFrom": "ru",
+      "langTo": "ru",
+      "attribution": "Wiktionary contributors, CC BY-SA 4.0 (via kaikki.org)",
+      "license": "CC-BY-SA-4.0",
+      "files": [
+        {
+          "role": "dictionary",
+          "required": true,
+          "name": "au_kaikki_ru-ru.dsl.dz",
+          "url": "https://github.com/rg-software/aurelex/releases/download/catalog-data/au_kaikki_ru-ru.dsl.dz",
+          "sizeBytes": 48315584,
+          "sha256": "3beb227034b8bd19b2d9d9c3936d3ada3790e8b0b29d295fe383be105dacf6c4"
+        },
+        {
+          "role": "resources",
+          "required": false,
+          "name": "au_kaikki_ru-ru.dsl.files.zip",
+          "url": "https://github.com/rg-software/aurelex/releases/download/catalog-data/au_kaikki_ru-ru.dsl.files.zip",
+          "sizeBytes": 347430462,
+          "sha256": "46330ce90f64154667f9184c5d3c07fb097d5e7b8dec67c7995bfc8b81b26659"
+        }
+      ]
+    }
+  ]
+}

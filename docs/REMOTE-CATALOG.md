@@ -5,10 +5,11 @@ sideloading and no computer round-trip. This document is the maintainer how-to:
 the manifest format, how to host it, and how to add an entry. The shipped app
 knows one URL, compiled in; there is no user-editable catalog address.
 
-The catalog is a **static, hand-authored JSON document**. There is no discovery,
-no scraping, no accounts, and no entry versioning. Everything a user installs
-from it is downloaded once and then searched entirely on-device, exactly like a
-dictionary they imported themselves.
+The published catalog is a **static JSON document**, generated from an authored
+source (`catalog/source.json`) by `scripts/build-catalog.py`. There is no
+discovery, no scraping, no accounts, and no entry versioning. Everything a user
+installs from it is downloaded once and then searched entirely on-device,
+exactly like a dictionary they imported themselves.
 
 The app knows one catalog address. There is **no UI** for changing it; the
 address is a compiled-in default that `settings.json` may override via a
@@ -121,9 +122,9 @@ File fields:
 | `role` | yes | `"dictionary"` (engine-loadable) or `"resources"` (opt-in companion bundle). An unrecognised role rejects the document: the app has to know whether a file participates in installed-detection. |
 | `required` | yes | `false` is what makes a bundle opt-in (audio). |
 | `name` | yes | Basename only — no path separators, no `..`. This is the name the engine sees under `files/staged/<contentHash>/` and the value installed-detection matches on. |
-| `url` | yes | Must be `https://`. Cleartext is refused at parse time. |
-| `sizeBytes` | yes | Integer > 0. Drives the free-space preflight and the progress total. Hand-maintained and NOT verified; the transfer is bounded by the server's `Content-Length`. |
-| `sha256` | no | 64 lowercase hex chars. Present → the downloaded file is verified; absent → accepted without verification (best-effort integrity). |
+| `url` | yes | Must be `https://`. Cleartext is refused at parse time. Emitted by the generator for the permanent release tag. |
+| `sizeBytes` | yes | Integer > 0. Drives the free-space preflight and the progress total. Computed by the generator; the transfer is still bounded by the server's `Content-Length`. |
+| `sha256` | no | 64 lowercase hex chars. Present → the downloaded file is verified; absent → accepted without verification. The generator always emits it, so published catalogs are always verified. |
 
 Entry-level rules:
 
@@ -188,52 +189,114 @@ size.
 
 ## Hosting
 
-The URL compiled into the app is:
+The manifest and the dictionary files are hosted separately, because they have
+different constraints:
 
-```
-https://rg-software.github.io/aurelex/catalog/catalog.json
-```
+| Artifact | Host | Why |
+|---|---|---|
+| `catalog.json` | **GitHub Pages** — `https://rg-software.github.io/aurelex/catalog/catalog.json` | Small, and must live at a URL that never rots: decoupled from a branch or tag, CDN-served, with a good `ETag`/`Last-Modified`. Pages caps a site at ~1 GB, so it cannot hold the files. |
+| Dictionary files | **GitHub release assets** under one permanent tag (`catalog-data`) | Multi-GB; free and unmetered for a public repository. |
 
-Hosted on **GitHub Pages** rather than `raw.githubusercontent.com` because the
-Pages URL is decoupled from a branch or tag name (renaming a branch cannot break
-every installed app) and it is served from a CDN with proper HTTP semantics
-(strong `ETag` + `Last-Modified`). To publish an update, commit the new
-`catalog.json` to the Pages source branch; no app release is needed. The app
-serves a cached copy and re-probes at most once every 6 hours (or on an explicit
-refresh), so an update reaches users without hammering the host.
+`catalog.json` is deployed by `.github/workflows/pages.yml`, which validates the
+committed document and serves only that file. It is **not** rebuilt in CI: doing
+so needs the dictionary files hashed, and those are not in the repository.
 
-The address is the constant `EngineController::kDefaultRemoteCatalogUrl`
-(`app/EngineController.hpp`). **It does not point at Pages yet** — it is still
-the maintainer's temporary self-hosted share, kept there to exercise the real
-download path on device. Swapping that constant to the Pages URL above is the
-last step of standing this up; until it happens, no released build can fetch the
-catalog.
+The file URLs point at the permanent release tag, so they do not change when the
+app releases. **Never delete or reuse that tag** — every installed catalog's file
+URLs reference it. `releases/latest/...` is deliberately not used because it
+moves on every app release and would silently repoint the catalog.
+
+The address compiled into the app is the constant
+`EngineController::kDefaultRemoteCatalogUrl` (`app/EngineController.hpp`),
+pointing at the Pages URL above. An install that already persisted a
+`remoteCatalogUrl` keeps it — the compiled value is only the first-run default.
+The app caches the manifest and re-probes at most once every 6 hours, or on an
+explicit refresh, so a published update reaches users without hammering the host.
 
 The manifest must be no larger than 4 MiB; the app aborts the fetch past that.
 A fetch also gives up after 15 s, so a slow link fails to a stated error instead
 of leaving the catalog spinner up indefinitely.
 
-## Adding an entry
+## Maintaining the catalog
 
-1. Decide the `id` (permanent) and where the files are hosted. Anything over
-   HTTPS works; a GitHub release asset or a Pages-served file is fine.
-2. Compute each file's size in bytes and, ideally, its SHA-256
-   (`sha256sum <file>`). Both go in the manifest.
-3. Append the entry to `catalog.json`. Keep ids append-only.
-4. Validate locally before publishing — the app's parser is the contract. The
-   `catalog_test` CMake target under `app/tests` builds against a plain desktop
-   Qt Core and runs the checked-in fixtures:
+`catalog/source.json` is the **authored source of truth** for entry metadata;
+the built dictionary files are the source of truth for content. `catalog.json`
+is a **derived artifact** and is never hand-edited. It looks like the manifest
+but carries no `url`, `sizeBytes`, or `sha256`, and adds the hosting constants:
+
+```json
+{
+  "releaseTag": "catalog-data",
+  "baseUrl": "https://github.com/rg-software/aurelex/releases/download",
+  "entries": [
+    { "id": "kaikki-en", "name": "Aurelex Kaikki English",
+      "names": { "ru": "…", "ja": "…" },
+      "langFrom": "en", "langTo": "en",
+      "attribution": "Wiktionary contributors, CC BY-SA 4.0 (via kaikki.org)",
+      "license": "CC-BY-SA-4.0",
+      "files": [
+        { "role": "dictionary", "required": true,
+          "name": "au_kaikki_en-en.dsl.dz" },
+        { "role": "resources", "required": false,
+          "name": "au_kaikki_en-en.dsl.files.zip" }
+      ] }
+  ]
+}
+```
+
+`scripts/build-catalog.py` has four modes:
+
+| Mode | Does |
+|---|---|
+| `import <published>` | Bootstrap or refresh `source.json` from a published catalog (drops the derived fields). Takes a path, `-` (stdin), or an https URL. |
+| `build` | `source.json` + files dir → `catalog.json`, computing size, SHA-256, and URL. |
+| `diff <published>` | Classify built vs published: new / changed / unchanged / removed, plus identity violations (a published file renamed or moved). Exits `2` on a violation. |
+| `validate [catalog]` | Structural check of a catalog document, needing no files; used by CI. |
+
+### Publishing an update
+
+1. Build the dictionaries into `dist/` (or wherever; override with `--files-dir`).
+2. Run the whole loop:
 
    ```powershell
-   cmake -S app/tests -B build-catalog-test -DCMAKE_PREFIX_PATH=C:/Qt/6.6.3/msvc2019_64
-   cmake --build build-catalog-test --config Release --target catalog_test
-   build-catalog-test/Release/catalog_test.exe
+   pwsh -File scripts/publish-catalog.ps1
    ```
 
-   Add the new shape to `app/tests/fixtures/catalog.json` if it exercises a new
-   file arrangement (an mdict pair, a DSL `.files.zip`, …).
-5. Commit the updated `catalog.json` to the Pages source branch. In-app, the
-   entry appears on the next re-probe or explicit refresh.
+   It `build`s `catalog.json`, `validate`s it, `diff`s it against the live
+   catalog, uploads only the new/changed files to the permanent release with
+   `gh release upload --clobber`, and stages `catalog/catalog.json`. It refuses
+   to publish if `diff` reports an identity violation.
+3. Commit and push `catalog/catalog.json`; the Pages workflow deploys it. The app
+   re-probes within 6 hours (or on an explicit refresh) and shows the change.
+
+Adding an entry: append it to `catalog/source.json` (a new `id`, at least one
+required `dictionary` file), place the built file in `dist/`, then publish. Entry
+ids, entry names, and file names are **stable and append-only** — renaming a file
+breaks installed-detection, and `diff` refuses a publish that renames or moves a
+published file.
+
+### Verifying the parser
+
+The app's parser is the contract. `catalog_test` builds against a desktop Qt Core
+and runs the checked-in fixtures:
+
+```powershell
+cmake -S app/tests -B build-catalog-test -DCMAKE_PREFIX_PATH=C:/Qt/6.6.3/msvc2019_64
+cmake --build build-catalog-test --config Release --target catalog_test
+build-catalog-test/Release/catalog_test.exe
+```
+
+Add a shape to `app/tests/fixtures/catalog.json` if it exercises a new file
+arrangement (an mdict pair, a DSL `.files.zip`, …).
+
+### Installed content identity
+
+When a catalog download succeeds the app records, in `settings.json` under
+`catalogInstalledDigests`, each installed entry's required-file SHA-256
+(`entryId -> { fileName: sha256 }`, matched by entry name, which the generator
+keeps unique). This is **inert** today — no UI reads it and no update check runs
+— but it is the baseline a future "update available" feature compares the
+manifest against, without re-hashing multi-GB files.
 
 ## Privacy
 

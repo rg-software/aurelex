@@ -6,6 +6,7 @@
 #include <QDateTime>
 #include <QVariantList>
 #include <QVariantMap>
+#include <QJsonObject>
 #include <QFuture>
 #include <QFutureWatcher>
 #include <QPointer>
@@ -631,6 +632,10 @@ private:
     // catalog still renders (read-only) while offline. Called only after a
     // successful parse: a failed fetch must leave both untouched.
     void cacheManifest();
+    // Record the manifest's required-file digests for the catalog entries named
+    // by a successful download batch (matched by entry name, which the download
+    // service reports). Inert bookkeeping for a future update check.
+    void recordInstalledDigests(const QStringList &entryNames);
     // Consume shared_prefs/download.xml into the download properties, and on a
     // terminal outcome clear the marker + arm the tail's rescan. Called from the
     // same 500 ms poller as the staging/indexing markers.
@@ -834,14 +839,12 @@ private:
     QStringList m_articleCacheOrder;
 
     // ---------- Remote catalog state ----------
-    // The compiled-in default. TEMPORARY: the maintainer's self-hosted Seafile
-    // share, used to exercise the real download path on device. Replace with the
-    // final hosted catalog URL before release (the target is GitHub Pages, chosen
-    // so the URL is decoupled from a branch/tag and served from a CDN). Not
-    // user-editable in this change; that is a later, additive settings change
-    // (and it is what keeps the LAN-cleartext question out of this one).
+    // The compiled-in default: the published catalog on GitHub Pages, chosen so
+    // the URL is decoupled from a branch/tag name and served from a CDN. Not
+    // user-editable; the persisted `remoteCatalogUrl` overrides it for installs
+    // that already stored one (see loadSettings()).
     static constexpr char kDefaultRemoteCatalogUrl[] =
-        "https://seafile.rt247a.ddns.me/f/26478702ed5b41fd82f1/?dl=1";
+        "https://rg-software.github.io/aurelex/catalog/catalog.json";
     // Fetch budget. The document is a few hundred KB at most; a slow link must
     // not leave the catalog spinner up indefinitely.
     static constexpr int kCatalogFetchTimeoutMs = 15000;
@@ -868,6 +871,11 @@ private:
     QString m_catalogUpdated;
     QString m_catalogLastFetched;
     QVariantList m_catalogEntries;
+    // Installed catalog content identity: entryId -> { requiredFileName: sha256 },
+    // recorded when a catalog download succeeds. Inert today (nothing reads it);
+    // it lets a future update capability compare installed content against the
+    // manifest without re-hashing the files. See public-catalog-hosting.
+    QJsonObject m_installedDigests;
     QNetworkAccessManager *m_net = nullptr;
     // A fetch already in flight, so a refresh tap does not stack replies.
     bool m_catalogFetchInFlight = false;

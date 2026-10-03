@@ -1,0 +1,78 @@
+{
+  "releaseTag": "catalog-data",
+  "baseUrl": "https://github.com/rg-software/aurelex/releases/download",
+  "entries": [
+    {
+      "id": "kaikki-en",
+      "name": "Aurelex Kaikki English",
+      "names": {
+        "ru": "Aurelex Kaikki английский",
+        "ja": "Aurelex Kaikki 英語解説辞典"
+      },
+      "langFrom": "en",
+      "langTo": "en",
+      "attribution": "Wiktionary contributors, CC BY-SA 4.0 (via kaikki.org)",
+      "license": "CC-BY-SA-4.0",
+      "files": [
+        {
+          "role": "dictionary",
+          "required": true,
+          "name": "au_kaikki_en-en.dsl.dz"
+        },
+        {
+          "role": "resources",
+          "required": false,
+          "name": "au_kaikki_en-en.dsl.files.zip"
+        }
+      ]
+    },
+    {
+      "id": "kaikki-ja",
+      "name": "Aurelex Kaikki Japanese",
+      "names": {
+        "ru": "Aurelex Kaikki японский",
+        "ja": "Aurelex Kaikki 日本語解説辞典"
+      },
+      "langFrom": "ja",
+      "langTo": "ja",
+      "attribution": "Wiktionary contributors, CC BY-SA 4.0 (via kaikki.org)",
+      "license": "CC-BY-SA-4.0",
+      "files": [
+        {
+          "role": "dictionary",
+          "required": true,
+          "name": "au_kaikki_ja-ja.dsl.dz"
+        },
+        {
+          "role": "resources",
+          "required": false,
+          "name": "au_kaikki_ja-ja.dsl.files.zip"
+        }
+      ]
+    },
+    {
+      "id": "kaikki-ru",
+      "name": "Aurelex Kaikki Russian",
+      "names": {
+        "ru": "Aurelex Kaikki русский",
+        "ja": "Aurelex Kaikki ロシア語解説辞典"
+      },
+      "langFrom": "ru",
+      "langTo": "ru",
+      "attribution": "Wiktionary contributors, CC BY-SA 4.0 (via kaikki.org)",
+      "license": "CC-BY-SA-4.0",
+      "files": [
+        {
+          "role": "dictionary",
+          "required": true,
+          "name": "au_kaikki_ru-ru.dsl.dz"
+        },
+        {
+          "role": "resources",
+          "required": false,
+          "name": "au_kaikki_ru-ru.dsl.files.zip"
+        }
+      ]
+    }
+  ]
+}

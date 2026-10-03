@@ -1,0 +1,65 @@
+name: publish catalog (GitHub Pages)
+
+# Deploys the COMMITTED catalog/catalog.json to GitHub Pages.
+#
+# The document is generated locally by scripts/build-catalog.py, because
+# generating it requires hashing the multi-GB dictionary files, which are not in
+# the repository. CI therefore VALIDATES and SERVES the committed document; it
+# does not rebuild it. The dictionary files themselves are release assets (see
+# scripts/publish-catalog.ps1 and docs/REMOTE-CATALOG.md).
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "catalog/catalog.json"
+      - ".github/workflows/pages.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Validate the committed catalog
+        run: python scripts/build-catalog.py validate catalog/catalog.json
+
+      - name: Run the catalog tool tests
+        run: python -m unittest discover -s scripts/tests -p "test_build_catalog.py"
+
+      - name: Stage the Pages site (catalog document only)
+        run: |
+          mkdir -p _site/catalog
+          cp catalog/catalog.json _site/catalog/catalog.json
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

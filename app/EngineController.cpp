@@ -3380,6 +3380,10 @@ void EngineController::syncDownloadState()
             m_audioReloadIds.clear();
         }
     }
+    // A published batch means the named entries are now installed from the
+    // catalog: remember their digests (inert; see recordInstalledDigests).
+    if (terminal && published)
+        recordInstalledDigests(m_downloadSucceeded);
     emit downloadChanged();
     // Terminal + published + idle, and the engine must actually RE-LOAD, not
     // rescan. Both conditions are required: firing this while the transfer is
@@ -3739,6 +3743,14 @@ void EngineController::loadSettings()
     // reason regardless.
     m_catalogReachable = m_manifestValid
             && obj.value(QStringLiteral("remoteCatalogReachable")).toBool(false);
+    // Installed catalog content identity (inert): entryId -> { fileName: sha256 },
+    // written when a catalog download succeeds. Nothing reads it yet; it is the
+    // baseline a future update check compares the manifest against. See
+    // public-catalog-hosting.
+    const QJsonValue installedDigests =
+            obj.value(QStringLiteral("catalogInstalledDigests"));
+    if (installedDigests.isObject())
+        m_installedDigests = installedDigests.toObject();
     // One-off import model: a persisted "sources" array (from older builds) is
     // intentionally ignored — the app-private staged copies remain on disk and
     // are the single source of dictionaries; they re-scan on startup.
@@ -3766,6 +3778,9 @@ void EngineController::saveSettings()
         obj.insert("remoteCatalogFetchedAt", m_manifestFetched.toString(Qt::ISODate));
         obj.insert("remoteCatalogReachable", m_catalogReachable);
     }
+    // Installed catalog content identity (inert): entryId -> { fileName: sha256 }.
+    if (!m_installedDigests.isEmpty())
+        obj.insert("catalogInstalledDigests", m_installedDigests);
     f.write(QJsonDocument(obj).toJson(QJsonDocument::Compact));
 }
 
@@ -3774,6 +3789,44 @@ void EngineController::cacheManifest()
     // Called only after a successful parse; saveSettings() re-emits the parsed
     // manifest (and its fetch time) into settings.json.
     saveSettings();
+}
+
+void EngineController::recordInstalledDigests(const QStringList &entryNames)
+{
+    // Inert bookkeeping (public-catalog-hosting): remember, per catalog entry, the
+    // SHA-256 of the required dictionary files we just installed, so a future
+    // update check can compare manifest vs installed content without re-reading
+    // multi-GB files. The download service reports success by entry NAME, and the
+    // generator guarantees names are unique, so the entry is found by name.
+    if (!m_manifestValid || entryNames.isEmpty())
+        return;
+    bool changed = false;
+    for (const QString &name : entryNames) {
+        const RemoteCatalog::Entry *entry = nullptr;
+        for (const RemoteCatalog::Entry &e : m_manifest.entries) {
+            if (e.name == name) { entry = &e; break; }
+        }
+        if (!entry)
+            continue;
+        QJsonObject files;
+        for (const RemoteCatalog::File &f : entry->files) {
+            if (!f.required || f.role != QLatin1String("dictionary"))
+                continue;
+            // No digest in the manifest means nothing to record; the entry is
+            // simply not identifiable for a future update.
+            if (f.sha256.isEmpty())
+                continue;
+            files.insert(f.name, f.sha256);
+        }
+        if (files.isEmpty())
+            continue;
+        if (m_installedDigests.value(entry->id).toObject() == files)
+            continue;
+        m_installedDigests.insert(entry->id, files);
+        changed = true;
+    }
+    if (changed)
+        saveSettings();
 }
 
 void EngineController::recordHistory(const QString &word)

@@ -16,7 +16,7 @@ Aurelex. If you are a user, see the top-level `README.md` instead.
   - `DEVELOPMENT.md` — this file: layout, build, tests, workflow.
   - `ENGINE.md` — the pinned goldendict-ng source, the four deviation patches, the bump procedure.
   - `TESTING.md` — the on-device verification checklist (what is verified, what is not).
-  - `REMOTE-CATALOG.md` — the remote catalog's manifest format, hosting, and free-space rules.
+  - `REMOTE-CATALOG.md` - the remote catalog's manifest format, hosting, generator workflow, and free-space rules.
   - `KAIKKI-CONVERSION.md` — building DSL dictionaries from kaikki.org extracts.
   - `SIGNING.md` — signing channels, Play/F-Droid split, app identity.
 - `scripts/` — `apply-patches.*`, fixture generators, build helpers, and
@@ -112,15 +112,18 @@ Building a single target is often enough while iterating:
 `cmake --build build-app-tests --target catalog_test`. Adding a new test means
 adding a target here; keep it host-only (the project hard-fails on `ANDROID`).
 
-### Converter tests (`scripts/tests`, Python)
+### Script tests (`scripts/tests`, Python)
 
-The kaikki converter has its own suite, standard library only, no network — every
-audio path either passes `--no-audio-download`, injects a stub downloader, or
-blocks the opener:
+Standard library only, no network needed — the catalog suite reads JSON from
+files, and the kaikki converter suite either passes `--no-audio-download`,
+injects a stub downloader, or blocks the opener:
 
 ```powershell
 python -m unittest discover -s scripts/tests
 ```
+
+This runs both the kaikki converter suite and the catalog tool suite
+(`test_build_catalog.py`, covering `scripts/build-catalog.py`).
 
 ### Engine smoke test (`carve/smoke`, CI)
 
@@ -174,6 +177,44 @@ reason. Use `if out=$(cmd 2>&1); then ex=0; else ex=$?; fi`.
 rendering, audio, groups, FTS, history/favorites, storage, the remote catalog,
 external entry points) with a per-item status. It is the record of what has
 actually been seen on hardware, as opposed to what the tests above prove.
+
+**Resetting first-run state (the onboarding overlay).** The overlay shows while
+`onboarded` is false (`main.qml`: `visible: !engine.onboarded`). The flag is
+persisted in the app's private `files/settings.json`, reachable over adb via
+`run-as` (debug builds). Write the JSON to a host file and push it — quoting it
+inline through PowerShell → `adb shell` → `sh -c` mangles the quotes and fails
+with `sh: no closing quote`:
+
+```powershell
+$adb = "C:\Program Files (x86)\Android\android-sdk\platform-tools\adb.exe"
+$pkg = "org.aurelex.pocket.dictionary"
+
+& $adb shell am force-stop $pkg                                   # REQUIRED, see below
+
+$tmp = Join-Path $env:TEMP "onboarded-false.json"
+Set-Content -Path $tmp -Value '{"onboarded":false}' -NoNewline -Encoding ascii
+& $adb push $tmp /data/local/tmp/onboarded-false.json
+& $adb shell "run-as $pkg cp /data/local/tmp/onboarded-false.json files/settings.json"
+& $adb shell rm /data/local/tmp/onboarded-false.json
+
+& $adb shell am start -n "$pkg/.AurelexActivity"                  # onboarding is back
+& $adb shell run-as $pkg cat files/settings.json                  # confirm the flag
+```
+
+Force-stop first: the app rewrites the whole `settings.json` on every launch
+(`EngineController::saveSettings`), so an edit made while it is running is
+overwritten at the next save. For the same reason you need **only** the one key
+— `loadSettings` keeps its defaults for anything absent and the next save
+re-fills the rest (`articleZoom`, `themeMode`, `remoteCatalogUrl`, …), so there
+is no need to preserve them.
+
+For the other direction — checking that a returning user is *not* shown the
+overlay — push `{"onboarded":true}` the same way.
+
+A fresh install also shows the overlay (there is no upgrade heuristic — see the
+`all-qt-ui-port` tasks), so `adb install -r` with cleared data is the other way
+to reach the same state. `run-as` needs a debuggable build; on a release APK the
+file is not readable this way, so reinstall or clear its data instead.
 
 ## The engine source
 
