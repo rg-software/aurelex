@@ -855,7 +855,13 @@ private:
     // the user asks for the catalog.
     static constexpr int kCatalogRereprobeMs = 6 * 60 * 60 * 1000;
 
-    QString m_remoteCatalogUrl;
+    // Initialized to the compiled-in default, deliberately NOT left empty:
+    // loadSettings() returns early when settings.json does not exist (a fresh
+    // install), so without this a first-run app would never probe the catalog
+    // (fetchCatalog() bails on an empty URL) and the pane would sit on "Not
+    // checked yet" until a restart wrote the file. Found on-device while
+    // verifying public-catalog-hosting.
+    QString m_remoteCatalogUrl = QLatin1String(kDefaultRemoteCatalogUrl);
     // Last-good manifest, cached in settings.json so it survives a restart and
     // renders while offline. m_manifestValid guards against a missing/!parsed
     // cache (there is no manifest to speak of until the first successful fetch).
