@@ -4,19 +4,19 @@
 <context>
     <name>EngineController</name>
     <message>
-        <location filename="../EngineController.cpp" line="3496"/>
+        <location filename="../EngineController.cpp" line="3504"/>
         <source>The dictionary catalog is unavailable.</source>
         <translation>Каталог словарей недоступен.</translation>
     </message>
     <message>
-        <location filename="../EngineController.cpp" line="3575"/>
+        <location filename="../EngineController.cpp" line="3583"/>
         <source>Not enough free space.</source>
         <translation>Недостаточно свободного места.</translation>
     </message>
     <message>
-        <location filename="../EngineController.cpp" line="3620"/>
+        <location filename="../EngineController.cpp" line="3628"/>
         <source>The download could not be started.</source>
-        <translation>Не удалось запустить загрузку.</translation>
+        <translation>Не удалось начать загрузку.</translation>
     </message>
 </context>
 <context>
@@ -74,7 +74,7 @@
     <message>
         <location filename="../main.qml" line="856"/>
         <source>FTS</source>
-        <translation>Полнотекст.</translation>
+        <translation>Везде</translation>
     </message>
     <message>
         <location filename="../main.qml" line="857"/>
@@ -93,9 +93,14 @@
     </message>
     <message>
         <location filename="../main.qml" line="1277"/>
-        <location filename="../main.qml" line="3824"/>
+        <location filename="../main.qml" line="3816"/>
         <source>engine error: %1</source>
         <translation>ошибка движка: %1</translation>
+    </message>
+    <message>
+        <location filename="../main.qml" line="1688"/>
+        <source>About %1 is needed but only %2 is free. Free up space and try again.</source>
+        <translation>Требуется около %1, но свободно только %2. Освободите место и повторите попытку.</translation>
     </message>
     <message>
         <location filename="../main.qml" line="1695"/>
@@ -103,9 +108,14 @@
         <translation>Мало свободного места</translation>
     </message>
     <message>
-        <location filename="../main.qml" line="1696"/>
-        <source>About %1 is needed but only %2 is free. Downloading may fail if the app also needs room for the index.</source>
-        <translation>Требуется около %1, но свободно только %2. Загрузка может не удаться, если приложению также понадобится место для индекса.</translation>
+        <location filename="../main.qml" line="3068"/>
+        <source>The group is removed. The dictionaries themselves are not deleted.</source>
+        <translation>Группа удалена. Сами словари не удалены.</translation>
+    </message>
+    <message>
+        <location filename="../main.qml" line="3144"/>
+        <source>Article order: drag to set which dictionary comes first.</source>
+        <translation>Порядок статей: перетащите, чтобы задать последовательность словарей.</translation>
     </message>
     <message>
         <location filename="../main.qml" line="1687"/>
@@ -121,11 +131,6 @@
         <location filename="../main.qml" line="1473"/>
         <source>No matches</source>
         <translation>Нет совпадений</translation>
-    </message>
-    <message>
-        <location filename="../main.qml" line="1688"/>
-        <source>%1 is needed but only %2 is free. Free up space and try again.</source>
-        <translation>Требуется %1, но свободно только %2. Освободите место и повторите попытку.</translation>
     </message>
     <message>
         <location filename="../main.qml" line="1836"/>
@@ -148,228 +153,218 @@
         <translation>Подготовка полнотекстового индекса…</translation>
     </message>
     <message>
-        <location filename="../main.qml" line="1877"/>
-        <source>Copying dictionary files into app storage. Your dictionaries will appear here when it&apos;s done.</source>
-        <translation>Копирование файлов словарей в хранилище приложения. Словари появятся здесь, когда копирование завершится.</translation>
-    </message>
-    <message>
         <location filename="../main.qml" line="1879"/>
         <source>Reading dictionary files…</source>
         <translation>Чтение файлов словарей…</translation>
     </message>
     <message>
-        <location filename="../main.qml" line="1880"/>
-        <source>Checking which dictionaries need indexing…</source>
-        <translation>Проверка, каким словарям нужна индексация…</translation>
-    </message>
-    <message>
-        <location filename="../main.qml" line="1957"/>
-        <source>Tap Add to import a folder containing dictionary files (.mdx, .dsl, .dsl.dz, .ifo), or the cloud button to pick from the remote catalog. Either way the files are copied into the app once; no system-wide storage access is needed.</source>
-        <translation>Нажмите «Добавить», чтобы импортировать папку с файлами словарей (.mdx, .dsl, .dsl.dz, .ifo), или кнопку с облаком, чтобы выбрать из удалённого каталога. В любом случае файлы один раз копируются в приложение; доступ ко всему хранилищу устройства не требуется.</translation>
-    </message>
-    <message>
-        <location filename="../main.qml" line="1991"/>
+        <location filename="../main.qml" line="1983"/>
         <source>%1 import result(s)</source>
         <translation>Результатов импорта: %1</translation>
     </message>
     <message>
-        <location filename="../main.qml" line="2041"/>
-        <source>%1 was already imported and was not added again</source>
-        <translation>%1 уже импортирован и не был добавлен повторно</translation>
-    </message>
-    <message>
-        <location filename="../main.qml" line="2043"/>
-        <source>%1 was not added: a dictionary with this name is already installed. Remove the installed one to use this build.</source>
-        <translation>%1 не добавлен: словарь с таким именем уже установлен. Удалите установленный, чтобы использовать эту версию.</translation>
-    </message>
-    <message>
-        <location filename="../main.qml" line="2045"/>
-        <source>%1 is installed more than once with different content. Remove the one you do not want.</source>
-        <translation>%1 установлен более одного раза с разным содержимым. Удалите ненужный.</translation>
-    </message>
-    <message>
-        <location filename="../main.qml" line="2046"/>
+        <location filename="../main.qml" line="2038"/>
         <source>%1 could not be loaded and was removed</source>
-        <translation>Не удалось загрузить %1; файл удалён</translation>
+        <translation>Не удалось загрузить %1. Файл удалён.</translation>
     </message>
     <message>
-        <location filename="../main.qml" line="2055"/>
-        <source>Nothing else is needed from you.</source>
-        <translation>Больше от вас ничего не требуется.</translation>
-    </message>
-    <message>
-        <location filename="../main.qml" line="2266"/>
+        <location filename="../main.qml" line="2258"/>
         <source>Dictionary catalog</source>
         <translation>Каталог словарей</translation>
     </message>
     <message>
-        <location filename="../main.qml" line="2273"/>
+        <location filename="../main.qml" line="2265"/>
         <source>Checking for updates…</source>
         <translation>Проверка обновлений…</translation>
     </message>
     <message>
-        <location filename="../main.qml" line="2275"/>
-        <source>Using the saved catalog — the update check failed.</source>
-        <translation>Используется сохранённый каталог — не удалось проверить обновления.</translation>
-    </message>
-    <message>
-        <location filename="../main.qml" line="2277"/>
+        <location filename="../main.qml" line="2269"/>
         <source>Updated %1</source>
         <translation>Обновлено %1</translation>
     </message>
     <message>
-        <location filename="../main.qml" line="2278"/>
+        <location filename="../main.qml" line="2270"/>
         <source>Not checked yet</source>
-        <translation>Ещё не проверялось</translation>
+        <translation>Проверка ещё не выполнялась</translation>
     </message>
     <message>
-        <location filename="../main.qml" line="2310"/>
+        <location filename="../main.qml" line="2302"/>
         <source>The catalog could not be loaded.
 %1</source>
         <translation>Не удалось загрузить каталог.
 %1</translation>
     </message>
     <message>
-        <location filename="../main.qml" line="2311"/>
+        <location filename="../main.qml" line="2303"/>
         <source>The catalog has no dictionaries yet.</source>
         <translation>В каталоге пока нет словарей.</translation>
     </message>
     <message>
-        <location filename="../main.qml" line="2326"/>
+        <location filename="../main.qml" line="2318"/>
         <source>Showing the last saved catalog. Downloads need a connection to the catalog host.</source>
         <translation>Показан последний сохранённый каталог. Для загрузки требуется подключение к серверу каталога.</translation>
     </message>
     <message>
-        <location filename="../main.qml" line="2355"/>
+        <location filename="../main.qml" line="2347"/>
         <source>Downloading %1 (%2 of %3 files)</source>
         <translation>Загрузка %1 (%2 из %3 файлов)</translation>
     </message>
     <message>
-        <location filename="../main.qml" line="2359"/>
+        <location filename="../main.qml" line="2351"/>
         <source>Downloading %1</source>
         <translation>Загрузка %1</translation>
     </message>
     <message>
-        <location filename="../main.qml" line="2368"/>
+        <location filename="../main.qml" line="2360"/>
         <source>Download cancelled.</source>
         <translation>Загрузка отменена.</translation>
     </message>
     <message>
-        <location filename="../main.qml" line="2371"/>
+        <location filename="../main.qml" line="2363"/>
         <source>Some downloads failed.</source>
         <translation>Некоторые загрузки не удались.</translation>
     </message>
     <message>
-        <location filename="../main.qml" line="2436"/>
+        <location filename="../main.qml" line="2428"/>
         <source>Installed</source>
         <translation>Установлено</translation>
     </message>
     <message>
-        <location filename="../main.qml" line="2437"/>
+        <location filename="../main.qml" line="2429"/>
         <source>%1 to download</source>
         <translation>%1 к загрузке</translation>
     </message>
     <message>
-        <location filename="../main.qml" line="2445"/>
-        <source>This dictionary&apos;s format is not supported by this app version.</source>
-        <translation>Формат этого словаря не поддерживается этой версией приложения.</translation>
-    </message>
-    <message>
-        <location filename="../main.qml" line="2975"/>
-        <location filename="../main.qml" line="3028"/>
+        <location filename="../main.qml" line="2967"/>
+        <location filename="../main.qml" line="3020"/>
         <source>Cancel</source>
         <translation>Отмена</translation>
     </message>
     <message>
-        <location filename="../main.qml" line="2981"/>
+        <location filename="../main.qml" line="2973"/>
         <source>Create</source>
         <translation>Создать</translation>
     </message>
     <message>
-        <location filename="../main.qml" line="3034"/>
+        <location filename="../main.qml" line="3026"/>
         <source>Rename</source>
         <translation>Переименовать</translation>
     </message>
     <message>
-        <location filename="../main.qml" line="3152"/>
-        <source>Article order: drag to set which dictionary&apos;s results come first.</source>
-        <translation>Порядок статей: перетащите, чтобы задать, чьи результаты идут первыми.</translation>
-    </message>
-    <message>
-        <location filename="../main.qml" line="3270"/>
+        <location filename="../main.qml" line="3262"/>
         <source>Add dictionaries</source>
         <translation>Добавить словари</translation>
     </message>
     <message>
-        <location filename="../main.qml" line="2551"/>
+        <location filename="../main.qml" line="2543"/>
         <source>Welcome to Aurelex</source>
         <translation>Добро пожаловать в Aurelex</translation>
     </message>
     <message>
-        <location filename="../main.qml" line="2559"/>
-        <source>Add dictionaries by tapping Add dictionaries below and picking a folder with dictionary files (.mdx, .dsl, .dsl.dz, .ifo) — the folder is copied into the app once (no system-wide storage access needed). Use the bottom bar to switch between Search, Dictionaries, Groups, FTS and Favorites.</source>
-        <translation>Добавляйте словари, нажимая «Добавить словари» ниже и выбирая папку с файлами словарей (.mdx, .dsl, .dsl.dz, .ifo) — папка копируется в приложение один раз (без доступа ко всему хранилищу устройства). Нижней панелью переключайтесь между поиском, словарями, группами, полнотекстовым поиском и избранным.</translation>
-    </message>
-    <message>
-        <location filename="../main.qml" line="2569"/>
+        <location filename="../main.qml" line="2561"/>
         <source>Get started</source>
         <translation>Начать</translation>
     </message>
     <message>
-        <location filename="../main.qml" line="2957"/>
+        <location filename="../main.qml" line="2949"/>
         <source>New group name</source>
         <translation>Название новой группы</translation>
     </message>
     <message>
-        <location filename="../main.qml" line="2900"/>
+        <location filename="../main.qml" line="2892"/>
         <source>%1 (%2)</source>
         <translation>%1 (%2)</translation>
     </message>
     <message>
-        <location filename="../main.qml" line="2746"/>
-        <location filename="../main.qml" line="2764"/>
-        <location filename="../main.qml" line="2802"/>
-        <location filename="../main.qml" line="2806"/>
+        <location filename="../main.qml" line="1696"/>
+        <source>About %1 is needed but only %2 is free. Indexing may fail.</source>
+        <translation>Требуется около %1, но свободно только %2. Индексация может не удаться.</translation>
+    </message>
+    <message>
+        <location filename="../main.qml" line="1877"/>
+        <source>Copying dictionary files into app storage.</source>
+        <translation>Копирование файлов словарей в хранилище приложения.</translation>
+    </message>
+    <message>
+        <location filename="../main.qml" line="1880"/>
+        <source>Checking indexes…</source>
+        <translation>Проверка индексов…</translation>
+    </message>
+    <message>
+        <location filename="../main.qml" line="2033"/>
+        <source>%1 was already imported</source>
+        <translation>%1 уже импортирован</translation>
+    </message>
+    <message>
+        <location filename="../main.qml" line="2035"/>
+        <source>%1 was not added: a dictionary with this name is already installed.</source>
+        <translation>%1 не добавлен: словарь с таким именем уже установлен.</translation>
+    </message>
+    <message>
+        <location filename="../main.qml" line="2037"/>
+        <source>%1 is installed with another content. Remove the one you do not need.</source>
+        <translation>%1 уже установлен с другим содержимым. Удалите ненужный.</translation>
+    </message>
+    <message>
+        <location filename="../main.qml" line="2047"/>
+        <source>Process completed.</source>
+        <translation>Процесс завершён.</translation>
+    </message>
+    <message>
+        <location filename="../main.qml" line="2267"/>
+        <source>Update check failed. Using saved catalog.</source>
+        <translation>Не удалось проверить обновления. Используется сохранённый каталог.</translation>
+    </message>
+    <message>
+        <location filename="../main.qml" line="2437"/>
+        <source>This dictionary&apos;s format is not supported.</source>
+        <translation>Формат этого словаря не поддерживается.</translation>
+    </message>
+    <message>
+        <location filename="../main.qml" line="2551"/>
+        <source>Tap the Folder button to add dictionaries from your device. Tap the Cloud button to use our online catalog. Use the bottom bar to switch between Search, Dictionaries, Groups, Full-text search, and Favorites.</source>
+        <translation>Нажмите на кнопку с папкой, чтобы добавить словари с вашего устройства. Нажмите кнопку с облаком, чтобы использовать наш онлайн-каталог. Используйте нижнюю панель, чтобы переключаться между вкладками: Поиск, Словари, Группы, Полнотекстовый поиск, Избранное.</translation>
+    </message>
+    <message>
+        <location filename="../main.qml" line="2738"/>
+        <location filename="../main.qml" line="2756"/>
+        <location filename="../main.qml" line="2794"/>
+        <location filename="../main.qml" line="2798"/>
         <source>A group named &quot;%1&quot; already exists</source>
         <translation>Группа с названием «%1» уже существует</translation>
     </message>
     <message>
-        <location filename="../main.qml" line="2947"/>
+        <location filename="../main.qml" line="2939"/>
         <source>Add group</source>
         <translation>Добавить группу</translation>
     </message>
     <message>
-        <location filename="../main.qml" line="3001"/>
+        <location filename="../main.qml" line="2993"/>
         <source>Rename group</source>
         <translation>Переименовать группу</translation>
     </message>
     <message>
-        <location filename="../main.qml" line="3061"/>
+        <location filename="../main.qml" line="3053"/>
         <source>Delete group</source>
-        <translation>Удаление группы</translation>
+        <translation>Удалить группу</translation>
     </message>
     <message>
-        <location filename="../main.qml" line="3070"/>
+        <location filename="../main.qml" line="3062"/>
         <source>Delete group &quot;%1&quot;?</source>
         <translation>Удалить группу «%1»?</translation>
     </message>
     <message>
-        <location filename="../main.qml" line="3076"/>
-        <source>The group and its dictionary order are removed. The dictionaries themselves are not deleted.</source>
-        <translation>Группа и порядок её словарей будут удалены. Сами словари не удаляются.</translation>
-    </message>
-    <message>
-        <location filename="../main.qml" line="3153"/>
+        <location filename="../main.qml" line="3145"/>
         <source>In this group (%1)</source>
         <translation>В этой группе (%1)</translation>
     </message>
     <message>
-        <location filename="../main.qml" line="3706"/>
+        <location filename="../main.qml" line="3698"/>
         <source>Full-text search</source>
         <translation>Полнотекстовый поиск</translation>
     </message>
     <message>
-        <location filename="../main.qml" line="3880"/>
+        <location filename="../main.qml" line="3872"/>
         <source>Select group</source>
         <translation>Выбор группы</translation>
     </message>
