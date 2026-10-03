@@ -586,23 +586,44 @@ the pane makes no catalog request. Format, manifest and hosting rules:
 
 | # | How to test | Expected | Status |
 | --- | --- | --- | --- |
-| 56 | Dictionaries toolbar → "Add from remote" | The catalog pane opens with the title "Dictionary catalog" and a Back arrow; the manifest is fetched | ⬜ |
-| 57 | Wait for the list | Entries appear as rows named `<entry name>` under "Remote catalog list", with attribution/licence beneath | ⬜ |
-| 58 | Tap an entry name, then the header download icon | The row highlights, the icon becomes "Cancel download", and a `ProgressBar` plus a non-interactive line appear | ⬜ |
-| 59 | Let a download finish | The row goes grey and its accessible name gains `, installed`; the entry then appears in the Dictionaries list after the rescan, and the auto-index banner follows | ⬜ |
+| 56 | Dictionaries toolbar → "Add from remote" | The catalog pane opens with the title "Dictionary catalog" and a Back arrow; the manifest is fetched | ✅ (2026-10-03, motorola ThinkPhone, Android 15: fetched `rg-software.github.io/aurelex/catalog/catalog.json`) |
+| 57 | Wait for the list | Entries appear as rows named `<entry name>` under "Remote catalog list", with attribution/licence beneath | ✅ (3 entries: English, Japanese, Russian, each with a size line and an audio toggle) |
+| 58 | Tap an entry name, then the header download icon | The row highlights, the icon becomes "Cancel download", and a `ProgressBar` plus a non-interactive line appear | ✅ (row highlights; header icon became "Cancel download" and cancelling through it worked) |
+| 59 | Let a download finish | The row goes grey and its accessible name gains `, installed`; the entry then appears in the Dictionaries list after the rescan, and the auto-index banner follows | ✅ (Japanese: row greyed + `, installed`, listed in the Dicts pane, auto-index followed) |
 | 60 | Back out to the dictionary list while a download runs | The download keeps running; reopening the pane shows its progress | ⬜ |
-| 61 | Tap "Cancel download" mid-transfer | The line reads "Download cancelled."; the partially written files never appear as a dictionary and no stray entry is left in the list | ⬜ |
-| 62 | Re-install an entry that is already installed | Clean no-op: the row reads `, installed`, is **not** selectable, and no duplicate dictionary row appears | ⬜ |
+| 61 | Tap "Cancel download" mid-transfer | The line reads "Download cancelled."; the partially written files never appear as a dictionary and no stray entry is left in the list | ✅ (Russian: cancel left a partial `.part` + `.etag` in `files/staging-tmp/`, nothing published; the retry then **resumed** it and completed — see the pass note) |
+| 62 | Re-install an entry that is already installed | Clean no-op: the row reads `, installed`, is **not** selectable, and no duplicate dictionary row appears | ✅ (installed Japanese row: `, installed`, non-selectable, no duplicate) |
 | 63 | An entry with an optional audio bundle | The row carries a music-note toggle named "Audio for `<name>`"; tapping the note first switches it to "No audio for `<name>`" and the selection downloads the dictionary without audio | ⬜ |
 | 64 | An **installed** entry still missing its bundle | Its audio toggle is enabled and tapping it fetches only the bundle into the same directory; audio then plays after the dictionary reloads, with no app restart | ⬜ |
 | 65 | With < 512 MiB free, start a download | Refused with the "Not enough free space" dialog naming the need and the free amount; nothing is fetched | ⬜ |
 | 66 | With between 512 MiB and 2 GiB free, start a download | "Not much free space" dialog; Cancel aborts, OK proceeds (the index built afterwards also needs room) | ⬜ |
 | 67 | Airplane mode, then open the pane | A previously-fetched catalog still renders, with the warning "Showing the last saved catalog. Downloads need a connection to the catalog host."; a per-entry download attempt fails with a stated reason rather than silently | ⬜ |
-| 68 | Airplane mode on a **first** run with no cached manifest | "The catalog could not be loaded." with the reason; the app does not crash and the rest of the Dicts tab works | ⬜ |
+| 68 | Airplane mode on a **first** run with no cached manifest | "The catalog could not be loaded." with the reason; the app does not crash and the rest of the Dicts tab works | ✅ (offline, no cache: "The catalog could not be loaded.\n<reason>") |
 | 69 | Point the app at a manifest containing an unsupported format (`.epwing`) | The entry is **listed but not selectable**, with "This dictionary's format is not supported by this app version." — the rest of the catalog still loads | ⬜ |
-| 70 | Inspect a downloaded dictionary's files | It is a staged copy under `files/staged/<contentHash>/`; re-importing the same folder is still deduped (#4/#5) | ⬜ |
+| 70 | Inspect a downloaded dictionary's files | It is a staged copy under `files/staged/<contentHash>/`; re-importing the same folder is still deduped (#4/#5) | ✅ (Japanese `f64386db…/au_kaikki_ja-ja.dsl.dz`, Russian `122b8d…/au_kaikki_ru-ru.{dsl.dz,files.zip}`) |
 | 71 | Install an `.mdx`+`.mdd` catalog entry | The entry reports installed only once **both** halves have landed | ⬜ |
-| 72 | A release build, on a device with no other TLS user | The catalog loads. ⚠️ If it reports "TLS initialization failed" while everything else works, the APK shipped without the vendored `libcrypto_3.so`/`libssl_3.so` — the WebView brings its own TLS, so this is the only feature that notices | ⬜ |
+| 72 | A release build, on a device with no other TLS user | The catalog loads. ⚠️ If it reports "TLS initialization failed" while everything else works, the APK shipped without the vendored `libcrypto_3.so`/`libssl_3.so` — the WebView brings its own TLS, so this is the only feature that notices | ✅ debug build (2026-10-03: the vendored OpenSSL served the Pages fetch over TLS; the release-build assertion is separate, in CI) |
+
+**2026-10-03 device pass (remote catalog).** Verified on a motorola ThinkPhone
+(Android 15, Debug build). The phone had no direct internet (saved Wi-Fi
+association-rejected, SIM absent), so it was reverse-tethered through the PC:
+the device's configured proxy `127.0.0.1:8899` was served by a local CONNECT
+proxy over `adb reverse tcp:8899 tcp:8899` — end-to-end TLS to GitHub, no
+interception.
+
+- Fetch/install/resume all worked (#56–#59, #61, #62, #68, #70, #72).
+- The Japanese dictionary's FTS build took **~3.5 minutes** on this device (slow,
+  not stuck). While it runs, `processingActive` gates the Download button and
+  "Add from remote", so expect the auto-index banner to linger before the next
+  catalog action.
+- **First-run bug, fixed** (`fix(catalog)`): with no `settings.json` yet,
+  `loadSettings()` returned before assigning `remoteCatalogUrl`, so a fresh
+  install never probed ("Not checked yet") until a restart rewrote the file. The
+  member now defaults to the compiled-in URL.
+- Installed digests are recorded in `settings.json` under
+  `catalogInstalledDigests` (`entryId -> { fileName: sha256 }`) and matched the
+  manifest for both installed entries (kaikki-ja `86e5ce22…`, kaikki-ru
+  `3beb2270…`).
 
 ## Known gaps
 
@@ -645,14 +666,14 @@ the pane makes no catalog request. Format, manifest and hosting rules:
   build, and the dictionary being built is withheld until its index completes.
   A very large dictionary is not auto-indexed during import; its index is built
   on the first full-text search over it (`fts-indexing-performance`).
-- The remote catalog has **no on-device coverage at all** (#56–#72). It is the
-  largest shipped feature with zero device verification, and the only one that
-  depends on TLS working in a release build.
+- The remote catalog is now device-verified (#56–#72); still open on device: #60
+  (back out while downloading), #63 (turn audio off), #64 (add a missing bundle),
+  #65/#66 (free-space tiers), #69 (unsupported format) and #71 (mdict pair).
 - Article zoom/reflow (#18a–#18g), the optional-parts expander (#18h–#18l) and
   the sense-marker icons (#18m–#18q) are likewise unexercised on a device.
-- The compiled-in catalog URL is still the maintainer's temporary self-hosted
-  share rather than the documented GitHub Pages address, so a released build
-  cannot currently fetch the real catalog (`docs/REMOTE-CATALOG.md` § Hosting).
+- The compiled-in catalog URL now points at the GitHub Pages address
+  (`public-catalog-hosting`); the Seafile share is gone. A build released before
+  that change still points at the old share until it updates.
 
 ## Provenance
 
@@ -661,5 +682,6 @@ The baseline pass was 2026-09-03 (folder-scoped SAF storage, recursive scan, FTS
 prefix/whole-words, auto-index, history/favorites, theme toggle, external entry
 points, tile/widget); later items were verified on later passes — the tri-state
 theme control and FTS-indexing interleaving on 2026-09-29, the search-field focus
-and floating-label fixes on 2026-10-01. Items still marked ⬜ have **not** been
-seen on any device.
+and floating-label fixes on 2026-10-01, and the remote-catalog pass on 2026-10-03
+(reverse-tethered over USB). Items still marked ⬜ have **not** been seen on any
+device.
