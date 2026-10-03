@@ -10,6 +10,7 @@
 #include <QCoreApplication>
 #include <QFile>
 #include <QFileInfo>
+#include <QStringList>
 #include <QThread>
 
 #include <algorithm>
@@ -754,6 +755,10 @@ int main( int argc, char ** argv )
   // the REAL boundary record shape is exercised on host, which is the contract
   // the app's grouping depends on (design.md D2 risk).
   bool identityOk = false;
+  // The block's copy lives under the CONFIG dir, never under the shared fixture
+  // folder -- see the note at dupDir below. Whether the shared folder was left
+  // untouched is what gets asserted, after the block.
+  bool identityCleanupOk = true;
   {
     // Pick a self-contained primary (a DSL or MDX has no companion files to
     // copy; a StarDict .ifo alone would fail to load and confound the test).
@@ -776,8 +781,24 @@ int main( int argc, char ** argv )
     else {
       const QString primary = QString::fromLocal8Bit( ifile );
       const QString name    = QString::fromLocal8Bit( iname );
-      const QDir    dictQDir( QString::fromLocal8Bit( dictDir ) );
-      const QString dupDir  = dictQDir.filePath( QStringLiteral( "dupcheck" ) );
+      // The copy goes under the CONFIG dir, which is per-invocation, and NOT
+      // under the shared fixture folder. It used to be <dict_dir>/dupcheck, and
+      // that made this block the only one in the tool that wrote into the folder
+      // it was asked to scan -- with a consequence nobody could see: the drifted
+      // copy CANNOT be deleted once loaded, because the engine leaks the QFile
+      // that holds it. MdictParser::open does `file_ = new QFile(...)`
+      // (engine/src/dict/mdictparser.cc:101) into a QPointer that is never
+      // deleted, so the handle lives for the whole PROCESS -- gd_remove_dict and
+      // gd_cleanup() both leave it open, which is why removing the copy after
+      // gd_cleanup() still fails. A leaked copy inside the shared folder is then
+      // found by the next invocation's scan and reported as an identity failure.
+      // Under the config dir the leak is contained: nothing ever scans that
+      // directory twice, so a copy that cannot be deleted is harmless. The
+      // location-independence property under test is unaffected -- the two
+      // dictionaries are still at different paths with the same name and
+      // content, which is the whole point of the comparison.
+      const QString dupDir = QDir( QString::fromLocal8Bit( configDir ) )
+                               .filePath( QStringLiteral( "dupcheck" ) );
       QDir().mkpath( dupDir );
       const QString copy = QDir( dupDir ).filePath( QFileInfo( primary ).fileName() );
       QFile::remove( copy );
@@ -790,7 +811,11 @@ int main( int argc, char ** argv )
           c.setFileTime( QFileInfo( primary ).lastModified(),
                          QFileDevice::FileModificationTime );
       }
-      const int added = copied ? gd_scan_dicts( dictDir ) : 0;
+      // Rescan the fixture folder for the original and the CONFIG dir for the
+      // copy: two dictionaries with one name at different paths, which is what
+      // the identity record is supposed to collapse. (Scanning both from one
+      // folder is what leaked the copy in the first place.)
+      const int added = copied ? gd_scan_dicts( configDir ) : 0;
 
       auto identitiesByName = [ & ]( const QString &n ) {
         QVector< DictIdentity::Identity > v;
@@ -822,7 +847,7 @@ int main( int argc, char ** argv )
         if ( f.open( QIODevice::Append ) )
           f.write( "\nidentitydrift\n\tmore\n" );
         f.close();
-        gd_scan_dicts( dictDir );
+        gd_scan_dicts( configDir );
         const QVector< DictIdentity::Identity > ids2 = identitiesByName( name );
         if ( ids2.size() >= 2 )
           differs = !DictIdentity::sameContent( ids2.at( 0 ), ids2.at( 1 ) );
@@ -832,14 +857,45 @@ int main( int argc, char ** argv )
       std::printf( "DICT_IDENTITY_DIFF=%s\n", differs ? "OK" : "FAIL" );
       identityOk = same && differs;
 
-      // Leave the fixture folder as it was found.
+      // Nothing to restore in the fixture folder: the copy was never put there
+      // (see the dupDir note). Removing it here is best-effort tidying of the
+      // config dir, and it is EXPECTED to fail while the copy is loaded -- the
+      // engine leaks the QFile that holds it for the life of the process, so no
+      // in-process teardown can free the handle. The copy is therefore left in
+      // the config dir, which is per-invocation and never scanned twice, and the
+      // assertion below is on the property CI actually depends on.
       QFile::remove( copy );
+      QDir().rmdir( dupDir );
+    }
+  }
+
+  // The shared fixture folder must be exactly as the workflow created it, so
+  // that the NEXT invocation on it (the workflow scans the MDX folder three
+  // times) sees the same dictionary set this one did. Asserted rather than
+  // assumed: an unverified cleanup is precisely what made this fault invisible
+  // for a whole run -- the leak reached the next invocation and was reported
+  // there as an identity regression (fix-smoke-identity-cleanup-leak D2).
+  {
+    const QString leaked =
+      QDir( QString::fromLocal8Bit( dictDir ) ).filePath( QStringLiteral( "dupcheck" ) );
+    const QStringList entries =
+      QFileInfo::exists( leaked )
+        ? QDir( leaked ).entryList( QDir::AllEntries | QDir::NoDotAndDotDot )
+        : QStringList();
+    if ( !entries.isEmpty() ) {
+      identityCleanupOk = false;
+      std::printf( "DICT_IDENTITY_CLEANUP=FAIL (the fixture folder was modified: %s/%s)\n",
+                   qPrintable( leaked ), qPrintable( entries.join( QLatin1Char( ' ' ) ) ) );
+    }
+    else {
+      std::printf( "DICT_IDENTITY_CLEANUP=OK\n" );
     }
   }
 
   gd_cleanup();
+
   return ( lookSz > 0 && sugN > 0 && ftsOk && dedupOk && dictOk && optPartsOk && groupsOk
-           && resourceThreadOk && reimportOk && stardictLinkOk && identityOk )
+           && resourceThreadOk && reimportOk && stardictLinkOk && identityOk && identityCleanupOk )
              ? 0
              : 1;
 }

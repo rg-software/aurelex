@@ -1,0 +1,9 @@
+schema: spec-driven
+created: 2026-10-03
+
+# Tooling and CI wiring only: the smoke tool is a build-time diagnostic and the
+# workflow is not user-visible behaviour, so no spec requirement changes. The
+# defect is that the tool's own cleanup silently fails on Windows, leaving a
+# drifted copy in the fixture folder that makes the *next* run report an
+# identity failure.
+skip_specs: true

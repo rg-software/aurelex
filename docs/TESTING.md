@@ -60,7 +60,9 @@ A dictionary's identity is its **normalized display name plus a content signatur
 it was staged from. Two copies of one dictionary are one dictionary regardless of
 path or format. The full-content comparison runs on host in
 `app/tests/DictIdentityTest.cpp`, and the boundary record shape is exercised by the
-engine smoke tool (`DICT_IDENTITY_SAME`/`DICT_IDENTITY_DIFF`).
+engine smoke tool (`DICT_IDENTITY_SAME`/`DICT_IDENTITY_DIFF`, plus
+`DICT_IDENTITY_CLEANUP` for the tool's own footprint — see "Run it twice against the
+same `<dicts>` folder" under *MDict indexing is now covered*).
 
 | # | How to test | Expected | Status |
 | --- | --- | --- | --- |
@@ -173,6 +175,23 @@ text was finally visible. It is re-runnable:
 ```
 build-smoke\Release\aurelex_smoke.exe <cfg> <dicts> <word>
 ```
+
+**Run it twice against the same `<dicts>` folder.** CI scans the MDX folder three
+times (`cfg-mdx`, `cfg-mdx-blood`, `cfg-mdx-cafe`) and the combined folder once, so
+the tool has to be **hermetic across repeated invocations on one folder** — it must
+leave the folder's dictionary set exactly as it found it. A single green run does not
+show that, and it is not a property to assume: the `DICT_IDENTITY_*` block once copied
+a dictionary to `<dicts>/dupcheck/` and deleted it with a discarded `QFile::remove`,
+which cannot succeed (the engine leaks the `QFile` holding the copy for the whole
+process, `engine/src/dict/mdictparser.cc:98-111`). The drifted copy survived into the
+*next* invocation's scan and was reported there as
+`DICT_IDENTITY_SAME=FAIL (copies=2, scan+0)` — a harness fault presented as a product
+regression. The copy now lives under `<cfg>`, which nothing rescans, and
+`DICT_IDENTITY_CLEANUP=OK|FAIL` asserts the `<dicts>` folder was left untouched
+(`fix-smoke-identity-cleanup-leak`). So: **whenever you change anything that touches
+the fixture folders, run the tool twice with different `<cfg>` dirs and confirm the
+folder is unchanged in between** — otherwise the next harness leak is caught by a
+27-minute red build instead of locally.
 
 | # | How to test | Expected | Status |
 | --- | --- | --- | --- |

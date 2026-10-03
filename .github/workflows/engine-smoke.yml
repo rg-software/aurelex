@@ -257,6 +257,13 @@ jobs:
             || { echo "SMOKE FAILED: identity is not location-independent"; exit 1; }
           printf '%s' "$mdxout" | grep -q "DICT_IDENTITY_DIFF=OK" \
             || { echo "SMOKE FAILED: a differing copy compared equal"; exit 1; }
+          # ...and the tool must leave the fixture folder as it found it. This
+          # folder is scanned three times (here plus the blood/cafe headwords
+          # below), so a leaked dupcheck/ copy makes the NEXT invocation report
+          # a drifted same-named dictionary as an identity failure -- the tool's
+          # own cleanup reported as a product defect (fix-smoke-identity-cleanup-leak).
+          printf '%s' "$mdxout" | grep -q "DICT_IDENTITY_CLEANUP=OK" \
+            || { echo "SMOKE FAILED: the smoke tool did not restore the MDX fixture folder"; exit 1; }
           # Every headword in the fixture must resolve, not just the first:
           # a partial walk (one block, wrong sizes) still renders one article.
           for w in blood cafe; do
@@ -319,4 +326,10 @@ jobs:
             || { echo "SMOKE FAILED: identity is not location-independent"; exit 1; }
           printf '%s' "$out" | grep -q "DICT_IDENTITY_DIFF=OK" \
             || { echo "SMOKE FAILED: a differing copy compared equal"; exit 1; }
+          # The tool must also restore this folder. Nothing downstream re-reads
+          # $RUNNER_TEMP/dic, so a leak here is invisible to every other gate --
+          # which is exactly why the DSL fixture's copy leaked unnoticed until
+          # the MDX folder, scanned three times, turned it into a red build.
+          printf '%s' "$out" | grep -q "DICT_IDENTITY_CLEANUP=OK" \
+            || { echo "SMOKE FAILED: the smoke tool did not restore the combined fixture folder"; exit 1; }
           echo "SMOKE OK"
