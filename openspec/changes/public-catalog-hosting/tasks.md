@@ -5,9 +5,9 @@
 - [x] 1.2 Add `THIRD-PARTY-NOTICES.md` and reference it from the README's license
       section
 - [x] 1.3 Add `.openchamber/` (local agent/session state) to `.gitignore`
-- [ ] 1.4 Run a secret scan over the full git history (gitleaks or trufflehog) and
+- [x] 1.4 Run a secret scan over the full git history (gitleaks or trufflehog) and
       record the result before any visibility flip
-- [ ] 1.5 Set the repository description and topics
+- [x] 1.5 Set the repository description and topics
 
 ## 2. Catalog generator
 
@@ -29,13 +29,13 @@
 
 ## 3. Publication pipeline
 
-- [ ] 3.1 Create the permanent `catalog-data` release tag and document that it is
+- [x] 3.1 Create the permanent `catalog-data` release tag and document that it is
       never deleted or reused
 - [x] 3.2 Add a script/workflow to upload the dictionary files to that release
       (idempotent, manual dispatch)
 - [x] 3.3 Add `.github/workflows/pages.yml` to generate the catalog and deploy it
       to GitHub Pages
-- [ ] 3.4 Verify the deployed URL serves over HTTPS and the JSON parses with the
+- [x] 3.4 Verify the deployed URL serves over HTTPS and the JSON parses with the
       expected sizes and digests
 
 ## 4. App changes
@@ -64,14 +64,14 @@
       asset; confirm integrity verification and digest recording
 - [ ] 6.2 On device: interrupt a download and confirm resume through the
       release-asset redirect, or a clean restart if the validator does not survive
-- [ ] 6.3 Run `catalog_test` and the generator tests
+- [x] 6.3 Run `catalog_test` and the generator tests
 - [ ] 6.4 Confirm an installed entry shows no update/upgrade/reinstall affordance
       (read-only contract preserved)
 
 ## 7. Make public
 
-- [ ] 7.1 Enable GitHub Pages (source: GitHub Actions) and confirm the catalog URL
+- [x] 7.1 Enable GitHub Pages (source: GitHub Actions) and confirm the catalog URL
       is live
-- [ ] 7.2 Flip repository visibility to public (last, after 1.4)
+- [x] 7.2 Flip repository visibility to public (last, after 1.4)
 - [ ] 7.3 Confirm the license shows GPL-3.0, the notices are present, and the
       catalog and a dictionary file are anonymously reachable
