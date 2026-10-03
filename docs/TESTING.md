@@ -511,7 +511,9 @@ cosmetic preference, not a defect.
 
 | # | How to test | Expected | Status |
 | --- | --- | --- | --- |
-| 47 | Fresh install | Adaptive launcher icon in the launcher; onboarding screen shows on first launch | ⬜ (icon visual not re-checked; onboarding verified) |
+| 47 | Fresh install | Adaptive launcher icon in the launcher; onboarding overlay shows on first launch, on the **Dictionaries** tab | ⬜ (icon visual not re-checked; onboarding verified) |
+| 47a | Fresh install → tap **Get started** | The overlay clears, no keyboard, and the app stays on the **Dictionaries** tab (Folder/Cloud buttons reachable without navigating) | ✅ (motorola ThinkPhone, Android 15: `content-desc="Dicts" checked="true"`, Search false — `fix-onboarding-lands-on-dicts`) |
+| 47b | After dismissing onboarding → force-stop and relaunch | App starts on **Search** (returning-user routing is unchanged) | ✅ (same device: `content-desc="Search" checked="true"`, overlay absent) |
 | 48 | After onboarding, no dicts loaded | Empty search state: guidance to add dictionaries | ✅ |
 | 49 | Tagged release build | Signed APK + AAB produced on a `vX.Y.Z` tag push and attached to the GitHub release | ✅ (v0.2.5 shipped both assets) |
 

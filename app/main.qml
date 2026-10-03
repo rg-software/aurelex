@@ -234,6 +234,43 @@ ApplicationWindow {
         ? Material.color(Material.Purple, Material.Shade100)
         : Material.color(Material.Purple, Material.Shade900)
 
+    // Tinted banners: the processing banner (staging/scanning/indexing) and the
+    // import-results banner. Same shape as uiSectionBg/uiSectionFg, for the same
+    // reason. Both used to be a fixed `Material.color(<hue>, Shade50)` fill, which
+    // is the LIGHT theme's tint: Material.color(named, shade) indexes a fixed
+    // ramp table and does not follow Material.theme, while every Material.* text
+    // role does. So in dark mode each banner stayed a pale magenta/pink slab on
+    // the #1C1B1F background (14:1 and 15:1 against it) and its body line —
+    // bound to root.uiSubFg, i.e. secondaryTextColor = white at 70% alpha —
+    // landed on that light fill at 1.14:1 / 1.10:1. The accent-filled
+    // ProgressBars went the same way (#CE93D8 on #F3E5F5 = 1.97:1). Invert the
+    // fill per theme and take the text from the same ramp, because
+    // secondaryTextColor is only readable on the page background.
+    // Contrast (WCAG AA needs 4.5:1 at these sizes):
+    //   purple light #E1BEE7 bg, #4A148C header 7.19, #7B1FA2 body 4.97
+    //   purple dark  #4A148C bg, #E1BEE7 header 7.19, #CE93D8 body 4.97
+    //          (the index bars keep Material.accentColor: #9C27B0 on #E1BEE7
+    //           light, #CE93D8 on #4A148C dark — 4.97:1 or better)
+    //   red    light #FFCDD2 bg with #B71C1C text 4.67
+    //   red    dark  #B71C1C bg with #FFCDD2 text 4.67
+    // Red gets no third step — Shade700 on Shade100 is only 3.54:1 — so its rows
+    // share the header's tone and bold/size carries the hierarchy.
+    property color uiProcessingBg: engine.darkMode
+        ? Material.color(Material.Purple, Material.Shade900)
+        : Material.color(Material.Purple, Material.Shade100)
+    property color uiProcessingFg: engine.darkMode
+        ? Material.color(Material.Purple, Material.Shade100)
+        : Material.color(Material.Purple, Material.Shade900)
+    property color uiProcessingSubFg: engine.darkMode
+        ? Material.color(Material.Purple, Material.Shade200)
+        : Material.color(Material.Purple, Material.Shade700)
+    property color uiReportBg: engine.darkMode
+        ? Material.color(Material.Red, Material.Shade900)
+        : Material.color(Material.Red, Material.Shade100)
+    property color uiReportFg: engine.darkMode
+        ? Material.color(Material.Red, Material.Shade100)
+        : Material.color(Material.Red, Material.Shade900)
+
     // Human-readable byte size: 145 MB, 1.2 GB, 500 KB, 42 B.
     function fmtSize(bytes) {
         if (!bytes || bytes <= 0) return ""
@@ -1810,7 +1847,7 @@ ColumnLayout {
             Rectangle {
                 Layout.fillWidth: true
                 visible: engine.processingActive
-                color: Material.color(Material.Purple, Material.Shade50)
+                color: root.uiProcessingBg
                 radius: 4
                 // Height from the column's implicitHeight; the column's WIDTH is
                 // bound explicitly (not anchors.fill) so its wrapped-label height
@@ -1842,7 +1879,7 @@ ColumnLayout {
                             : qsTr("Preparing full-text index…")
                         font.pixelSize: 13
                         font.bold: true
-                        color: Material.color(Material.Purple)
+                        color: root.uiProcessingFg
                         elide: Text.ElideMiddle
                         wrapMode: Text.Wrap
                     }
@@ -1878,7 +1915,7 @@ text: root._stagingActive
                           : engine.scanningActive
                             ? qsTr("Reading dictionary files…")
                             : qsTr("Checking indexes…")
-                        color: root.uiSubFg
+                        color: root.uiProcessingSubFg
                         font.pixelSize: 11
                         wrapMode: Text.Wrap
                     }
@@ -1962,7 +1999,7 @@ text: root._stagingActive
                 readonly property int maxHeight: Math.round(dictsPane.height * 0.4)
                 implicitHeight: Math.min(importResultsCol.implicitHeight + 12, maxHeight)
                 visible: engine.scanFailures.length > 0
-                color: Material.color(Material.Red, Material.Shade50)
+                color: root.uiReportBg
                 radius: 4
 
                 ColumnLayout {
@@ -1983,7 +2020,7 @@ text: root._stagingActive
                             text: qsTr("%1 import result(s)").arg(engine.scanFailures.length)
                             font.pixelSize: 12
                             font.bold: true
-                            color: Material.color(Material.Red)
+                            color: root.uiReportFg
                             wrapMode: Text.Wrap
                         }
                         // The banner's only control: dismiss the report. It is not
@@ -2000,7 +2037,7 @@ text: root._stagingActive
                                 text: root.icon("close")
                                 font.family: root.iconFontFamily
                                 font.pixelSize: 15
-                                color: root.uiSubFg
+                                color: root.uiReportFg
                             }
                             MouseArea {
                                 anchors.fill: parent
@@ -2037,7 +2074,7 @@ text: root._stagingActive
                                       ? qsTr("%1 is installed with another content. Remove the one you do not need.").arg(modelData.name)
                                       : qsTr("%1 could not be loaded and was removed").arg(modelData.name)
                             font.pixelSize: 11
-                            color: root.uiSubFg
+                            color: root.uiReportFg
                             wrapMode: Text.Wrap
                         }
                     }
@@ -2046,7 +2083,7 @@ text: root._stagingActive
                         Layout.fillWidth: true
                         text: qsTr("Process completed.")
                         font.pixelSize: 11
-                        color: root.uiSubFg
+                        color: root.uiReportFg
                         wrapMode: Text.Wrap
                     }
                 }
@@ -2426,7 +2463,9 @@ text: root._stagingActive
                                         Layout.fillWidth: true
                                         text: catRow.modelData.installed
                                             ? qsTr("Installed")
-                                            : qsTr("%1 to download").arg(root.fmtSize(catRow.modelData.requiredBytes))
+                                            : (catRow.modelData.hasOptional && catRow.selected)
+                                                ? qsTr("%1 + %2 to download").arg(root.fmtSize(catRow.modelData.requiredBytes)).arg(root.fmtSize(catRow.modelData.optionalBytes))
+                                                : qsTr("%1 to download").arg(root.fmtSize(catRow.modelData.requiredBytes))
                                         font.pixelSize: 11
                                         color: root.uiSubFg
                                         wrapMode: Text.Wrap
@@ -2564,9 +2603,12 @@ text: root._stagingActive
                         Accessible.role: Accessible.Button
                         onClicked: {
                             engine.onboarded = true
-                            // Onboarding is over (the Dicts tab was only chosen
-                            // to host the welcome overlay) — land on Search.
-                            root.state = 0
+                            // Onboarding is over: stay on the Dicts tab, whose
+                            // Folder/Cloud buttons are exactly what the card just
+                            // told the user to tap. (The overlay is dismissed in
+                            // place; Search's empty state would otherwise re-teach
+                            // the same instruction behind a navigation step.)
+                            root.state = 1
                         }
                     }
                 }
