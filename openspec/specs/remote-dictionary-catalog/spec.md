@@ -48,7 +48,7 @@ ship such a build as a catalog that is merely unreachable.
 The system SHALL present the catalog as a list of entries shown in place over the
 Dictionaries pane, without adding a navigation destination. Each entry SHALL show
 its display name, its source/target language pair, and the size of what will be
-downloaded for it, and SHALL indicate whether the entry is already installed. An
+downloaded for it (including optional resources that are currently opted in), and SHALL indicate whether the entry is already installed. An
 entry's display name SHALL be shown in the app's active language when the entry
 provides one for it, falling back to the entry's default name. The system SHALL NOT offer entry version comparison, update checks,
 or any other catalog-side lifecycle action.
