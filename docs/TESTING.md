@@ -624,6 +624,11 @@ interception.
   `catalogInstalledDigests` (`entryId -> { fileName: sha256 }`) and matched the
   manifest for both installed entries (kaikki-ja `86e5ce22…`, kaikki-ru
   `3beb2270…`).
+- **Upgrade migration verified**: injecting a pre-Pages `settings.json` (legacy
+  self-hosted URL, no `catalogUrlSchema`) and launching rewrites
+  `remoteCatalogUrl` to the Pages URL, adds `catalogUrlSchema: 2`, and preserves
+  the recorded digests — so an upgrade from ≤ v0.3.2 adopts the shipped catalog
+  instead of pinning the retired share.
 
 ## Known gaps
 
