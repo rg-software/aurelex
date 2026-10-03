@@ -1,15 +1,32 @@
-# Third-party notices
+# Notices
 
-Aurelex is free software under the GNU General Public License, version 3 or
-later (see [`LICENSE`](LICENSE)). It is built from, links against, or
-redistributes the third-party components listed below. Each remains under its
-own license; nothing here changes those terms.
+## Project
+
+Aurelex — an offline dictionary for Android.
+Copyright (C) 2026 Maxim Mozgovoy
+
+This program is free software: you can redistribute it and/or modify it under
+the terms of the GNU General Public License as published by the Free Software
+Foundation, either version 3 of the License, or (at your option) any later
+version.
+
+This program is distributed in the hope that it will be useful, but WITHOUT ANY
+WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
+PARTICULAR PURPOSE. See the GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License along with
+this program. If not, see <https://www.gnu.org/licenses/>.
+
+The full license text is in [`LICENSE`](LICENSE).
+
+## Third-party components
+
+Aurelex is built from, links against, or redistributes the components below.
+Each remains under its own license; nothing here changes those terms.
 
 The Corresponding Source for the GPL-licensed components Aurelex compiles in is
 this repository together with the exact upstream revision it pins — see
 [`docs/ENGINE.md`](docs/ENGINE.md) and the `engine/` submodule.
-
-## Compiled / linked components
 
 | Component | Version | License | Notes |
 |---|---|---|---|

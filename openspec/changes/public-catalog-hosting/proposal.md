@@ -29,7 +29,7 @@ and that a future dictionary-update capability can build on.
   what a user actually installed, and a future update capability can compare
   manifest and installed digests without re-hashing multi-gigabyte files.
 - **Ready the repository for public access**: Aurelex's own license notice and a
-  `THIRD-PARTY-NOTICES.md` (already added), an ignore for local agent/session
+  `NOTICES.md` (already added), an ignore for local agent/session
   state, a secret scan of history, repository metadata, and enabling Pages.
 
 **Not in scope — deliberately:** entry version comparison, an "update available"

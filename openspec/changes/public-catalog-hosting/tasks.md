@@ -2,8 +2,8 @@
 
 - [x] 1.1 Replace the GoldenDict program notice in `LICENSE` with Aurelex's own
       (holder: Maxim Mozgovoy); confirm GitHub detects GPL-3.0
-- [x] 1.2 Add `THIRD-PARTY-NOTICES.md` and reference it from the README's license
-      section
+- [x] 1.2 Add `NOTICES.md` (project copyright + third-party attributions) and
+      reference it from the README's license section
 - [x] 1.3 Add `.openchamber/` (local agent/session state) to `.gitignore`
 - [x] 1.4 Run a secret scan over the full git history (gitleaks or trufflehog) and
       record the result before any visibility flip

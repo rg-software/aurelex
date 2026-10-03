@@ -130,7 +130,8 @@ change. Older builds keep working ("verify when supplied, accept when absent").
 
 ### 6. Public repository readiness
 
-License notice and `THIRD-PARTY-NOTICES.md` are added; `.openchamber/` (local
+License notice and `NOTICES.md` (project copyright + third-party
+attributions) are added; `.openchamber/` (local
 agent/session state, currently untracked and not ignored) is added to
 `.gitignore`; git history is scanned for secrets before the flip; the Seafile
 hostname leaves the tree with decision 1; repository description/topics are set
