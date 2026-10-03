@@ -73,5 +73,5 @@
 - [x] 7.1 Enable GitHub Pages (source: GitHub Actions) and confirm the catalog URL
       is live
 - [x] 7.2 Flip repository visibility to public (last, after 1.4)
-- [ ] 7.3 Confirm the license shows GPL-3.0, the notices are present, and the
+- [x] 7.3 Confirm the license shows GPL-3.0, the notices are present, and the
       catalog and a dictionary file are anonymously reachable
