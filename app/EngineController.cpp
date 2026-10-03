@@ -3707,13 +3707,16 @@ void EngineController::loadSettings()
     // Article reflow zoom: default 100 when absent; snap/clamp the persisted
     // value so a hand-edited settings.json can't push it out of range.
     setArticleZoom(obj.value("articleZoom").toDouble(100.0));
-    // Remote catalog URL: compiled-in default when the key is absent. There is
-    // deliberately no migration — an app built before this key existed simply
-    // takes the default, and the saveSettings() below writes it back on the
-    // first run after the upgrade. HTTPS only: a persisted non-HTTPS value is
+    // Remote catalog URL: the compiled-in default, unless a CURRENT-schema
+    // settings file persists a deliberate override. An install upgraded from an
+    // older schema (0/1) may pin the retired self-hosted share, so it adopts the
+    // compiled default on load. HTTPS only: a persisted non-HTTPS value is
     // ignored, because the app has no cleartext exception for the catalog
     // (network_security_config.xml is deliberately unchanged).
+    const int catalogUrlSchema = obj.value(QStringLiteral("catalogUrlSchema")).toInt(0);
     m_remoteCatalogUrl = obj.value(QStringLiteral("remoteCatalogUrl")).toString();
+    if (catalogUrlSchema < kCatalogUrlSchema)
+        m_remoteCatalogUrl = QLatin1String(kDefaultRemoteCatalogUrl);
     if (!m_remoteCatalogUrl.startsWith(QLatin1String("https://"), Qt::CaseInsensitive))
         m_remoteCatalogUrl = QLatin1String(kDefaultRemoteCatalogUrl);
     // Last-good catalog manifest, so a previously-read catalog still renders
@@ -3768,6 +3771,7 @@ void EngineController::saveSettings()
     obj.insert("themeMode", m_themeMode);
     obj.insert("onboarded", m_onboarded);
     obj.insert("articleZoom", m_articleZoom);
+    obj.insert("catalogUrlSchema", kCatalogUrlSchema);
     obj.insert("remoteCatalogUrl", m_remoteCatalogUrl);
     // Only ever a manifest that PARSED: a rejected document must not become the
     // cache, or a bad fetch would poison every later offline read. The exact

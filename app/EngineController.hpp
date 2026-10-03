@@ -845,6 +845,13 @@ private:
     // that already stored one (see loadSettings()).
     static constexpr char kDefaultRemoteCatalogUrl[] =
         "https://rg-software.github.io/aurelex/catalog/catalog.json";
+    // Bump whenever the compiled-in catalog location changes. A settings file
+    // written by an OLDER schema has no `catalogUrlSchema` (reads as 0) and its
+    // persisted `remoteCatalogUrl` is ignored in favour of the compiled default,
+    // so an upgraded install adopts the new location instead of pinning a retired
+    // host forever. A settings file at the current schema keeps any deliberate
+    // override.
+    static constexpr int kCatalogUrlSchema = 2;
     // Fetch budget. The document is a few hundred KB at most; a slow link must
     // not leave the catalog spinner up indefinitely.
     static constexpr int kCatalogFetchTimeoutMs = 15000;
