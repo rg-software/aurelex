@@ -1685,7 +1685,7 @@ ColumnLayout {
             if (pf.nothing) return
             if (!pf.ok) {
                 dictsPane._confirmFree(qsTr("Not enough free space"),
-                    qsTr("%1 is needed but only %2 is free. Free up space and try again.")
+                    qsTr("About %1 is needed but only %2 is free. Free up space and try again.")
                         .arg(root.fmtSize(pf.needBytes)).arg(root.fmtSize(pf.freeBytes)),
                     reqs, false)
             } else if (pf.warn) {
@@ -1693,7 +1693,7 @@ ColumnLayout {
                 // authoritatively, so a batch that turns out short fails there
                 // with a real reason rather than silently truncating.
                 dictsPane._confirmFree(qsTr("Not much free space"),
-                    qsTr("About %1 is needed but only %2 is free. Downloading may fail if the app also needs room for the index.")
+                    qsTr("About %1 is needed but only %2 is free. Indexing may fail.")
                         .arg(root.fmtSize(pf.needBytes)).arg(root.fmtSize(pf.freeBytes)),
                     reqs, true)
             } else {
@@ -1874,10 +1874,10 @@ ColumnLayout {
                         Layout.fillWidth: true
                         visible: !engine.buildingFts
 text: root._stagingActive
-                          ? qsTr("Copying dictionary files into app storage. Your dictionaries will appear here when it's done.")
+                          ? qsTr("Copying dictionary files into app storage.")
                           : engine.scanningActive
                             ? qsTr("Reading dictionary files…")
-                            : qsTr("Checking which dictionaries need indexing…")
+                            : qsTr("Checking indexes…")
                         color: root.uiSubFg
                         font.pixelSize: 11
                         wrapMode: Text.Wrap
@@ -1947,14 +1947,6 @@ text: root._stagingActive
                     Accessible.role: Accessible.Button
                     onClicked: dictsPane.byPair = !dictsPane.byPair
                 }
-            }
-
-            Label {
-                Layout.fillWidth: true
-                color: root.uiSubFg
-                font.pixelSize: 12
-                wrapMode: Text.Wrap
-                text: qsTr("Tap Add to import a folder containing dictionary files (.mdx, .dsl, .dsl.dz, .ifo), or the cloud button to pick from the remote catalog. Either way the files are copied into the app once; no system-wide storage access is needed.")
             }
 
             // Import results (report-import-results). Purely informational: by
@@ -2038,11 +2030,11 @@ text: root._stagingActive
                             // added; a clash must NOT inherit the old corrupt-file
                             // advice, which is untrue for it.
                             text: modelData.reason === "alreadyPresent"
-                                  ? qsTr("%1 was already imported and was not added again").arg(modelData.name)
+                                  ? qsTr("%1 was already imported").arg(modelData.name)
                                   : modelData.reason === "nameClashWithInstalled"
-                                    ? qsTr("%1 was not added: a dictionary with this name is already installed. Remove the installed one to use this build.").arg(modelData.name)
+                                    ? qsTr("%1 was not added: a dictionary with this name is already installed.").arg(modelData.name)
                                     : modelData.reason === "nameClash"
-                                      ? qsTr("%1 is installed more than once with different content. Remove the one you do not want.").arg(modelData.name)
+                                      ? qsTr("%1 is installed with another content. Remove the one you do not need.").arg(modelData.name)
                                       : qsTr("%1 could not be loaded and was removed").arg(modelData.name)
                             font.pixelSize: 11
                             color: root.uiSubFg
@@ -2052,7 +2044,7 @@ text: root._stagingActive
                     Label {
                         id: importResultsFootnote
                         Layout.fillWidth: true
-                        text: qsTr("Nothing else is needed from you.")
+                        text: qsTr("Process completed.")
                         font.pixelSize: 11
                         color: root.uiSubFg
                         wrapMode: Text.Wrap
@@ -2272,7 +2264,7 @@ text: root._stagingActive
                             text: engine.catalogLoading
                                 ? qsTr("Checking for updates…")
                                 : engine.catalogError.length > 0
-                                    ? qsTr("Using the saved catalog — the update check failed.")
+                                    ? qsTr("Update check failed. Using saved catalog.")
                                     : engine.catalogLastFetched.length > 0
                                         ? qsTr("Updated %1").arg(engine.catalogLastFetched)
                                         : qsTr("Not checked yet")
@@ -2442,7 +2434,7 @@ text: root._stagingActive
                                     Label {
                                         Layout.fillWidth: true
                                         visible: !catRow.modelData.installable
-                                        text: qsTr("This dictionary's format is not supported by this app version.")
+                                        text: qsTr("This dictionary's format is not supported.")
                                         font.pixelSize: 11
                                         color: Material.color(Material.Red)
                                         wrapMode: Text.Wrap
@@ -2556,7 +2548,7 @@ text: root._stagingActive
                     Label {
                         Layout.fillWidth: true
                         Layout.fillHeight: true
-                        text: qsTr("Add dictionaries by tapping Add dictionaries below and picking a folder with dictionary files (.mdx, .dsl, .dsl.dz, .ifo) — the folder is copied into the app once (no system-wide storage access needed). Use the bottom bar to switch between Search, Dictionaries, Groups, FTS and Favorites.")
+                        text: qsTr("Tap the Folder button to add dictionaries from your device. Tap the Cloud button to use our online catalog. Use the bottom bar to switch between Search, Dictionaries, Groups, Full-text search, and Favorites.")
                         font.pixelSize: 15
                         wrapMode: Text.Wrap
                         horizontalAlignment: Text.AlignHCenter
@@ -3073,7 +3065,7 @@ text: root._stagingActive
                 Label {
                     Layout.fillWidth: true
                     color: root.uiSubFg
-                    text: qsTr("The group and its dictionary order are removed. The dictionaries themselves are not deleted.")
+                    text: qsTr("The group is removed. The dictionaries themselves are not deleted.")
                     wrapMode: Text.Wrap
                 }
             }
@@ -3149,7 +3141,7 @@ text: root._stagingActive
                 Layout.fillWidth: true
                 text: groupsPane.editingGroup === 0
                     // "All" holds every dictionary; only the order is editable.
-                    ? qsTr("Article order: drag to set which dictionary's results come first.")
+                    ? qsTr("Article order: drag to set which dictionary comes first.")
                     : qsTr("In this group (%1)").arg(memberModel.count)
                 color: root.uiSubFg
                 font.pixelSize: 13

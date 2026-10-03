@@ -299,10 +299,11 @@ notifications) use `res/values*/strings.xml`.
   build WebView HTML (history/favorites chrome) are `qsTr` + `_escHtml`-escaped.
   `Accessible.name` values are deliberately **not** translated — they are the
   stable test IDs documented in `AGENTS.md`.
-- C++ user-visible strings use `tr()` (e.g. `EngineController::groupName`'s
-  "All" fallback). Diagnostic/protocol strings (`gd_* failed (rc=%1)`, HTTP
-  status bodies in `ArticleServer`) stay English behind the localized "engine
-  error:" banner.
+- C++ user-visible strings use `tr()` — today the three catalog-download messages
+  in `EngineController.cpp`. Diagnostic/protocol strings (`gd_* failed (rc=%1)`,
+  HTTP status bodies in `ArticleServer`) stay English behind the localized
+  "engine error:" banner, and `groupName()`'s `"All"` fallback is a deliberate
+  invariant literal (every visible group name resolves by id on the QML side).
 - `main.cpp` installs a `QTranslator` at startup from the **primary** entry of
   `QLocale().uiLanguages()` (the Qt Android kit does not compile
   `QGuiApplication::uiLanguages()`): it tries the full locale first
@@ -324,10 +325,29 @@ code is the only home of the English string and the catalogs are downstream of
 it. `Accessible.name` values are never translated (they are the stable test IDs
 in `AGENTS.md`).
 
-1. Write or edit the string in `app/main.qml` / `app/EngineController.cpp` /
-   etc. Keep `%1`-style placeholders
-   (`qsTr("Indexing (%1 of %2): %3").arg(a, b, c)`) — never concatenate at the
-   literal site.
+All translatable strings currently live in **two files**:
+
+- `app/main.qml` — every QML label, dialog/banner copy and WebView chrome word
+  (`qsTr`, context `main`)
+- `app/EngineController.cpp` — three C++ messages (`tr`, context
+  `EngineController`): the catalog-download errors ("The dictionary catalog is
+  unavailable.", "Not enough free space.", "The download could not be started.")
+
+`scripts/update-translations.ps1` also scans `app/main.cpp`,
+`app/EngineController.hpp`, `app/ArticleServer.cpp` and `app/ArticleServer.hpp`,
+so a string added there is extracted too — none of them carry one today. This is
+the Qt surface only; the Android strings are the separate, already key-based
+`app/android/res/values*/strings.xml` (see "Android-managed strings").
+
+**Finding a string.** Grep the two files above, or — for "does this text already
+exist, and where?" — read the catalog: `app/i18n/aurelex.ru.ts` lists every
+source string with its `filename`/`line` and context, and `linguist.exe`
+(`C:\Qt\6.6.3\msvc2019_64\bin`) opens it as a searchable table. The `.ts` is a
+generated inventory, not an editing surface (see the rules below).
+
+1. Write or edit the string in the file for its context, above. Keep `%1`-style
+   placeholders (`qsTr("Indexing (%1 of %2): %3").arg(a, b, c)`) — never
+   concatenate at the literal site.
 2. Extract and compile:
    `pwsh -File .\scripts\update-translations.ps1 -Languages @("ru","ja")`
    `lupdate` updates `app/i18n/aurelex.<lang>.ts` to match the sources and

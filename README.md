@@ -4,7 +4,7 @@ A fast offline dictionary for Android. A modern successor to the
 discontinued [GoldenDict Mobile](http://goldendict.mobi).
 
 Look up words in your own StarDict, mdict, and DSL dictionaries, or install one of our
-free ones straight from the app. Everything runs on-device: no account, no ads, free and open source.
+free ones straight from the app. Everything runs on-device. No account, no ads, free and open source.
 
 ![Aurelex search and article view](docs/screenshots/main.png)
 
@@ -15,7 +15,7 @@ free ones straight from the app. Everything runs on-device: no account, no ads, 
 Open the APK file on your phone, or push it over `adb`:
 
 ```bash
-adb install <the-downloaded-apk>
+adb install <aurelex-apk>
 ```
 
 A Google Play release is in progress.
@@ -52,7 +52,7 @@ You do not need to own any dictionary files to use Aurelex:
 | Format | Files |
 |---|---|
 | mdict | `.mdx`, `.mdd` |
-| ABBYY Lingvo DSL | `.dsl`, `.dsl.dz` |
+| Lingvo DSL | `.dsl`, `.dsl.dz` |
 | StarDict | `.ifo`, `.idx`, `.dict` + `res/` |
 
 Anything else (BGL, SDict, XDXF, Aard, SLOB, GLS, Zim, EPWING, LSA) is not read natively. If you have dictionaries in one of those formats, convert them with [pyglossary](https://github.com/ilius/pyglossary) into the StarDict format.
@@ -74,7 +74,7 @@ Everything happens on-device.
 - No account/ads/tracking.
 - Your dictionaries are yours. They are never uploaded, and no lookup ever
   leaves the phone.
-- Two things can touch the network: 1) the **remote catalog** functionality and 2) remote resources referenced from inside a dictionary article.
+- Two things can touch the network: 1) the remote catalog functionality and 2) remote resources referenced from inside a dictionary article.
 - Google Play build may report crashes to the developer.
 
 ## Building from source
@@ -86,13 +86,13 @@ git clone --recursive https://github.com/rg-software/aurelex.git
 cd aurelex
 
 .\scripts\apply-patches.ps1                                  # patch the engine tree
-pwsh -File .\app\build.ps1 -Configuration Debug -Install      # build, push, launch
+pwsh -File .\app\build.ps1 -Configuration Debug -Install     # build, push, launch
 ```
 
-See full instructions in **[`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md)**. Most functions are planned and implemented via OpenSpec changes under `openspec/`; see [`AGENTS.md`](AGENTS.md) for the working contract.
+See full instructions in [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md). Most functions are planned and implemented via OpenSpec changes under `openspec/`(see [`AGENTS.md`](AGENTS.md) for the working contract).
 
 ## License and credits
 
-Aurelex is free software under the GNU GPL v3, see [`LICENSE`](LICENSE). Aurelex reuses the [goldendict-ng](https://github.com/xiaoyifang/goldendict-ng) dictionary engine, which is itself derived from the original GoldenDict by Konstantin Isakov. The pinned version of the engine and our patches are recorded in [`docs/ENGINE.md`](docs/ENGINE.md).
+Aurelex is free software under the GNU GPL v3, see [`LICENSE`](LICENSE). Aurelex reuses the [goldendict-ng](https://github.com/xiaoyifang/goldendict-ng) dictionary engine, which is itself derived from the original GoldenDict by K.&nbsp;Isakov. The pinned version of the engine and our patches are recorded in [`docs/ENGINE.md`](docs/ENGINE.md).
 
 The dictionaries offered in the built-in catalog are derived from Wiktionary / [kaikki.org](https://kaikki.org) (CC BY-SA 4.0). They are heavily processed and cleaned up for comfortable use.
