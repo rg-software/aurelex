@@ -49,6 +49,9 @@
       and no change to installed-detection
 - [x] 4.4 Extend `settings.json` save/load with the recorded digests without
       breaking older settings files
+- [x] 4.5 Initialize the compiled-in catalog URL as the member default, so a
+      fresh install (no `settings.json` yet) probes the catalog instead of
+      sitting on "Not checked yet" (found on-device)
 
 ## 5. Documentation
 
@@ -60,12 +63,12 @@
 
 ## 6. Verification
 
-- [ ] 6.1 On device: fetch the Pages catalog and install an entry from a release
+- [x] 6.1 On device: fetch the Pages catalog and install an entry from a release
       asset; confirm integrity verification and digest recording
-- [ ] 6.2 On device: interrupt a download and confirm resume through the
+- [x] 6.2 On device: interrupt a download and confirm resume through the
       release-asset redirect, or a clean restart if the validator does not survive
 - [x] 6.3 Run `catalog_test` and the generator tests
-- [ ] 6.4 Confirm an installed entry shows no update/upgrade/reinstall affordance
+- [x] 6.4 Confirm an installed entry shows no update/upgrade/reinstall affordance
       (read-only contract preserved)
 
 ## 7. Make public
