@@ -105,8 +105,10 @@ The system SHALL guide a new user through first steps on first launch and SHALL
 show helpful guidance when the app has no dictionaries yet. On first launch the
 app SHALL land on the Dictionaries tab (which has no article WebView), show an
 onboarding card teaching how to add dictionaries, and SHALL NOT pop the onscreen
-keyboard. Once onboarding is complete (no onboarding screen shown), the app SHALL
-start on the Search tab on every launch.
+keyboard. When onboarding is dismissed the app SHALL leave the user on the
+Dictionaries tab, so the add-dictionary controls the card described are
+immediately available. Once onboarding is complete (no onboarding screen shown),
+every later launch SHALL start on the Search tab.
 
 #### Scenario: First launch shows onboarding on the Dictionaries tab
 - **WHEN** the app is launched for the first time
@@ -115,8 +117,8 @@ start on the Search tab on every launch.
 
 #### Scenario: Onboarding is dismissed
 - **WHEN** the user taps "Get started" on the onboarding card
-- **THEN** the card disappears, the keyboard is not shown, and the app switches
-  to the Search tab
+- **THEN** the card disappears, the keyboard is not shown, and the app is on the
+  Dictionaries tab with the add-dictionary controls reachable without navigating
 
 #### Scenario: Subsequent launches start on Search
 - **WHEN** the user opens the app after onboarding is complete
