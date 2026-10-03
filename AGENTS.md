@@ -132,6 +132,21 @@ SHALL/MUST language) — follow the instructions output before writing any artif
   four names, the app never fetches the bundled copies. Do not "fix" the converter to stop
   bundling them, and do not treat their presence in a bundle as a reason to skip the asset or the
   rewrite.
+- **Tinted surfaces must invert per theme, and must not take their text from a `Material.*` role.**
+  `Material.color(<named>, <shade>)` reads a **fixed** ramp table — it does not follow
+  `Material.theme`. Only `accentColor()` / `shade()` / the `Material.background|foreground|
+  primaryTextColor|secondaryTextColor` roles are theme-aware, and those roles assume they are
+  painted on the *page* background. So a `Shade50` fill stays a pale magenta/pink slab in dark
+  mode, and anything bound to `root.uiSubFg` (= `Material.secondaryTextColor`, white at 70% alpha
+  in dark) lands on it at ~1.1:1. That is what the processing and import-results banners used to
+  do. The convention is `root.uiProcessingBg/Fg/SubFg` and `root.uiReportBg/Fg` (plus
+  `uiSectionBg/Fg` for the By-Pair stripes) in `app/main.qml`: a `Shade100` fill with `Shade900`
+  text in light, the same pair swapped in dark, all from one hue ramp. Measured contrasts are in
+  the comment above those properties — keep new tinted surfaces at ≥4.5:1 for text and reuse the
+  ramp rather than inventing a hex. Known Qt wart, deliberately left for now: a filled
+  `highlighted: true` Button gets accent `Shade200` (`#CE93D8`) with **white** label in dark
+  theme — 2.39:1 (`primaryHighlightedTextColor` is hard-coded white and read-only, so the fix
+  needs an app-side fill/label pair, not a theme setting).
 - **Localization:** English is the source language. If user-visible English text changes in Qt
   sources (`qsTr`/`tr` arguments) or in `app/android/res/values/strings.xml`, the other shipped
   languages (RU, JA) MUST be updated in the same change: run
