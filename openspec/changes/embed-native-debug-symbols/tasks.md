@@ -57,13 +57,13 @@
   file, so a tool that silently did nothing cannot read as "all stripped".
   Verified against an APK carrying the unstripped library: exit 1 naming
   `lib\arm64-v8a\libaurelex_arm64-v8a.so`.
-- [x] 2.3 Attach the per-ABI symbols archive to the GitHub release alongside the AAB and APK, named so the versionCode and ABI are unambiguous.
+- [x] 2.4 Attach the per-ABI symbols archive to the GitHub release alongside the AAB and APK, named so the versionCode and ABI are unambiguous.
   "Package native debug symbols archive" assembles
   `aurelex-native-debug-symbols-<versionCode>-<abi>.zip` (contents
   `<abi>/<library>.so`, `unversioned` when there is no tag-derived versionCode)
   from the AAB, uploads it as the `aurelex-native-debug-symbols` workflow
   artifact, and adds it to the `Create GitHub release` step's `files`.
-- [ ] 2.4 Confirm the workflow still publishes to internal testing on a throwaway tag, and that the failure path leaves the signed AAB/APK attached (the existing "publish failure does not lose the build" behavior).
+- [ ] 2.5 Confirm the workflow still publishes to internal testing on a throwaway tag, and that the failure path leaves the signed AAB/APK attached (the existing "publish failure does not lose the build" behavior).
   **Dry-run half done — run 37178228115** (`workflow_dispatch` on `914620d`, exit 0,
   signed with the release keystore). Everything except the Play step is now proven
   on the runner: `Wrote complete build.gradle (carve-subset fresh tree)` means CI
