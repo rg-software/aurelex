@@ -2032,6 +2032,20 @@ img.hidden_expand_opt { padding: 12px; margin: -12px !important; }
 .gdarticlebody img[src*="gd_tag_"] { width: 1.1em; height: 1.1em;
                                     vertical-align: -0.15em;
                                     background: transparent !important; }
+/* The app's own inline controls need the same transparent background, for the same
+   reason. The dark-mode controller's .gdarticlebody img{background:white} plate is
+   rewritten by Dark Reader to #242525, which is not the #1C1B1F article canvas, so
+   in dark mode the plate reads as an opaque box. For the optional-parts control it
+   is not cosmetic: img.hidden_expand_opt above is padded and pulled back 12px, so
+   its plate lands on the headword and hides its last characters (measured: the
+   article rendered "зооло" plus a box instead of "зоолог"). Selected by class where
+   the image carries one, and by filename for playsound.svg, which carries none;
+   .gdarticlebody and !important are required for the same out-specification reason
+   as the gd_tag_ rule above. Dictionary CONTENT images are deliberately not listed
+   here: their artwork assumes a white page and keeps the plate. */
+.gdarticlebody img.hidden_expand_opt,
+.gdarticlebody img.gdcollapseicon,
+.gdarticlebody img[src*="playsound"] { background: transparent !important; }
 /* In-article find highlights (article-find.js). Distinct, high-contrast colors
    in both themes. font/line-height are forced to inherit and padding/border are
    zero so a marked run has exactly the surrounding text's metrics and wrapping a

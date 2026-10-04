@@ -603,6 +603,22 @@ the pane makes no catalog request. Format, manifest and hosting rules:
 | 70 | Inspect a downloaded dictionary's files | It is a staged copy under `files/staged/<contentHash>/`; re-importing the same folder is still deduped (#4/#5) | ✅ (Japanese `f64386db…/au_kaikki_ja-ja.dsl.dz`, Russian `122b8d…/au_kaikki_ru-ru.{dsl.dz,files.zip}`) |
 | 71 | Install an `.mdx`+`.mdd` catalog entry | The entry reports installed only once **both** halves have landed | ⬜ |
 | 72 | A release build, on a device with no other TLS user | The catalog loads. ⚠️ If it reports "TLS initialization failed" while everything else works, the APK shipped without the vendored `libcrypto_3.so`/`libssl_3.so` — the WebView brings its own TLS, so this is the only feature that notices | ✅ debug build (2026-10-03: the vendored OpenSSL served the Pages fetch over TLS; the release-build assertion is separate, in CI) |
+| 73 | Dark theme, an article whose entry has a hidden zone (Russian `зоолог`) | The headword renders **complete** and the expand/collapse control shows only its glyph, with no rectangle around it | ✅ (2026-10-04: before the fix the headword read `зооло` + an opaque box over the `г`, because `img.hidden_expand_opt` is padded/pulled up 12px; after it, `зоолог` renders whole) |
+| 74 | Both themes, an article with a hidden zone: computed `background-color` of the hidden-content control and of the pronunciation control | Both `rgba(0, 0, 0, 0)` — no plate in either theme, matching the article canvas | ✅ (2026-10-04: dark — canvas `#1C1B1F`, Dark Reader active, both transparent (they were `rgb(36, 37, 37)` = `#242525`); light — canvas `#FFFBFE`, Dark Reader inactive, both transparent, unchanged) |
+| 75 | Dark theme, tap the hidden-content control twice | The hidden content is revealed, the icon swaps to the collapse glyph, and a second tap re-hides it | ✅ (2026-10-04, human-confirmed) |
+| 76 | An article whose entry has **no** hidden zone | No control appears, and the article's layout is untouched | ⬜ No installed dictionary produced such an entry (`зоолог` and `кот` both have hidden zones). The rule sets only `background`, so it cannot move anything; still unverified |
+| 77 | Dark theme, a dictionary entry that embeds artwork (photograph, illustration) | The artwork still sits on its light plate — the no-box rule covers the app's own controls, not content images | ⬜ Not verifiable on this device: neither installed dictionary entry embeds artwork |
+| 78 | Engine glyphs other than the two fixed ones (`lsasound.png`, `zipsound.svg`, `text2speech.svg`, `folder-sound.svg`) | No plate behind them either | ⬜ Not present in the articles inspected (`зоолог`, `кот` use only `expand_opt.svg` and `playsound.svg`, plus a 0×0 `dicticon.png`), so no selector was added for them. Re-check with a dictionary that uses them |
+
+**2026-10-04 device pass (dark-theme article control icons).** ThinkPhone
+(Android 15, Debug build), app locale left at the system default. Reproduced and
+verified by reading computed styles from the live article document over the
+WebView's DevTools socket (`adb forward` + CDP), not by eyeballing pixels; the
+headword legibility was then confirmed on a screenshot. The cause was two
+`!important` rules on `.gdarticlebody img`: the dark-mode controller's white
+plate, which Dark Reader rewrites to `#242525` while the canvas is `#1C1B1F`.
+Fixed in the injected article CSS by forcing `background: transparent` for the
+two control glyphs, the same way the `gd_tag_*` sense icons were already handled.
 
 **2026-10-03 device pass (remote catalog).** Verified on a motorola ThinkPhone
 (Android 15, Debug build). The phone had no direct internet (saved Wi-Fi
