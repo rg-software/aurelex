@@ -44,6 +44,16 @@ You do not need to own any dictionary files to use Aurelex:
 - **Light, dark, or follow the system** theme.
 - **Look up from anywhere**. Look up text from the clipboard or access dictionaries from the Quick Settings tile, the share menu, or the text-selection toolbar.
 
+## Online catalog
+
+Aurelex online catalog features a selection of dictionaries derived from [Wiktionary](https://www.wiktionary.org) / [kaikki.org](https://kaikki.org). They are heavily processed and cleaned up for comfortable use. The current selection includes:
+
+| Dictionary | Entries | With sound
+|---|---|---|
+| English (Explanatory) |  883,403 | 9.89% |
+| Japanese (Explanatory) | 111,320 | 0.08% |
+| Russian (Explanatory) | 454,310 | 4.19% |
+
 ## Dictionary formats
 
 | Format | Files |
@@ -92,6 +102,4 @@ See full instructions in [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md). Most func
 
 ## License and credits
 
-Aurelex is free software under the GNU GPL v3, see [`LICENSE`](LICENSE) and [`NOTICES.md`](NOTICES.md). Aurelex reuses the [goldendict-ng](https://github.com/xiaoyifang/goldendict-ng) dictionary engine, which is itself derived from the original GoldenDict by K.&nbsp;Isakov. The pinned version of the engine and our patches are recorded in [`docs/ENGINE.md`](docs/ENGINE.md). Aurelex is largely inspired by the discontinued [GoldenDict Mobile](http://goldendict.mobi).
-
-The dictionaries offered in the built-in catalog are derived from Wiktionary / [kaikki.org](https://kaikki.org) (CC BY-SA 4.0). They are heavily processed and cleaned up for comfortable use.
+Aurelex is free software under the GNU GPL v3, see [`LICENSE`](LICENSE) and [`NOTICES.md`](NOTICES.md). Aurelex reuses the [goldendict-ng](https://github.com/xiaoyifang/goldendict-ng) dictionary engine, which is itself derived from the original GoldenDict by K.&nbsp;Isakov. The pinned version of the engine and our patches are recorded in [`docs/ENGINE.md`](docs/ENGINE.md). Aurelex is largely inspired by the discontinued [GoldenDict Mobile](http://goldendict.mobi). The dictionaries offered in the built-in catalog are distributed under CC BY-SA 4.0.

@@ -116,7 +116,7 @@ phone (same folder) and add that folder in Aurelex.
 | `--no-audio-download` | Do not fetch audio that the archive lacks from Wikimedia (archive only). |
 | `--force-audio-index` | Rebuild the cached audio-archive name index even if it looks current. |
 | `--audio-layout {zip,dir}` | Bundle audio as one archive (default) or a loose directory. |
-| `--reuse-bundle` | Render the dictionary only and reuse the resource bundle already beside it instead of rebuilding it; the existing bundle is checked to cover every resource the dictionary references. Use it when a re-render changes only the text — it skips the audio-archive pass entirely. Fails rather than shipping a dictionary whose bundle is missing a referenced file. |
+| `--reuse-bundle` | Render the dictionary only and reuse the resource bundle already beside it instead of rebuilding it; the existing bundle is checked to cover every resource the dictionary references. Use it when a re-render changes only the text — it skips the audio-archive pass entirely. **The check only warns: the build continues and can publish a dictionary whose bundle lacks a referenced file** — see [Known defects](#known-defects). |
 | `--sample N` | Emit exactly N headwords (a word with several records is one headword); reads only a bounded part of the snapshot, so it is quick. |
 | `--sample-mode {first,random}` | How `--sample` picks headwords: first N in file order, or a reproducible spread over thousands of headwords (default `first`). |
 | `--preview` | Also write `<name>.preview.html`. |
@@ -661,6 +661,94 @@ is cached next to the archive as `<archive>.keys.txt` (~25 MB) and validated
 against the archive's path, size, modification time and `sha256` sidecar, so it
 is rebuilt only when the archive actually changes. The first run with audio pays
 the scan; later runs reuse the index. `--force-audio-index` rebuilds it anyway.
+
+### Measured audio coverage
+
+Coverage of the three dictionaries published in `catalog/catalog.json` (audited
+2026-10-10 against the shipped artifacts, whose sha256 match the manifest):
+
+| Dictionary | Entries | With a recording | Coverage | Recordings | Of which playable |
+| --- | --- | --- | --- | --- | --- |
+| `au_kaikki_en-en` | 883,402 | 87,341 | **9.89%** | 95,554 | 87,156 (9.87%) |
+| `au_kaikki_ja-ja` | 111,320 | 84 | **0.08%** | 85 | 84 (0.08%) |
+| `au_kaikki_ru-ru` | 454,310 | 19,053 | **4.19%** | 19,226 | 19,053 (4.19%) |
+
+Two things to know before re-measuring or comparing a number:
+
+- **`[s]` is not only audio.** The sense-marker icons are sound links too
+  (`[s]gd_tag_uncountable.svg[/s]`, see *Article shape*), so a link counts as a
+  recording only when its name carries an audio extension. Counting every `[s]`
+  inflates the figures to 30.25% / 1.88% / 4.43%, and the dictionary's own
+  **About card is not an entry**. An "entry" is one DSL article (a column-0
+  headword line plus its indented body), which is what the `.ann` `Entries:`
+  line counts; en-en's articles come to one fewer than its `.ann` total
+  (883,402 vs 883,403), a one-card discrepancy that is not yet explained, so
+  read its coverage as ±0.001pp.
+- **Japanese is source-limited, not build-limited.** Measured with
+  `iter_candidate_records` (the build's own filter) over
+  `kaikki.org/dictionary/downloads/ja/ja-extract.jsonl.gz`: of 112,986 indexed
+  Japanese headwords, **87 carry any usable recording at all** — the shipped
+  dictionary has 84 of them. The extract has 188,527 records with a `sounds`
+  array, but nearly all of them are audio for *foreign* words described in
+  Japanese (`En-us-`, `De-`, `Nl-` …), which a monolingual build correctly
+  drops. jawiktionary simply has almost no pronunciation audio, so **do not
+  spend a prefetch run trying to improve ja-ja**; the remaining 3 are within the
+  gap between the shipped snapshot and the current one.
+
+### Known defects
+
+Two ways a `[s]…[/s]` link can end up naming a file the bundle does not hold.
+Both were found by auditing the published artifacts, not by a failing build, and
+neither is visible on a case-insensitive filesystem.
+
+**1. `--reuse-bundle` warns where this document used to promise a failure.** The
+check is a set difference (`build.py`, `required - present`) that prints
+`warning: the reused bundle … lacks N referenced resource(s)` and continues, so
+the mismatched pair ships. The audited `au_kaikki_en-en` bundle is dated
+2026-09-30 while its `.dsl.dz` and `.ann` are dated 2026-10-01 — a reused bundle
+beside a freshly rendered dictionary, which is the fingerprint of this mode.
+`au_kaikki_ru-ru` shows the same skew (bundle 54 min older than its dictionary)
+and got away with it; `au_kaikki_ja-ja` is self-consistent (bundle 25 s newer).
+
+- The check is **case-exact**, while every other comparison in the audio pipeline
+  folds case (`_audio_match_key`). The canonical name comes from the snapshot's
+  `ogg_url`, so its spelling follows whatever that snapshot's wiki markup
+  happened to say, and it can change between snapshots. Of en-en's 210 references
+  with no matching file, **201 exist in the bundle under a different case**
+  (`En-au-BUFF.ogg` referenced, `En-au-buff.ogg` bundled). Android's filesystem
+  is case-sensitive, so 185 entries get a dead play control; on a Windows build
+  machine they resolve, which is why review missed it. The bundle also holds 47
+  recordings no article references any more — the same skew seen from the other
+  side.
+- **Fix, cheapest first.** (a) Fold case in the reuse check *and* exit non-zero
+  on any absent resource, so the documented contract becomes true. (b) Then make
+  `--reuse-bundle` self-healing for a case-only difference, by adding the file
+  under the newly referenced name. (c) Failing both, stop letting the two sides
+  drift: name the bundled file after the archive member's own spelling and
+  rewrite the link to it, so text and bundle cannot disagree.
+- **The shipped artifact needs no re-render.** `bundle-audio` reads the `[s]`
+  names out of the `.dsl.dz`, looks each up case-insensitively in the cache and
+  the archive (`_bundle_archive_keys`) and writes the bundle under exactly the
+  names the articles reference, so it repairs this in place. The 9 names that are
+  genuinely absent (`En-US-crayon.wav.ogg`,
+  `En-US_pronunciation_of__acatalexis_.ogg`) stay missing — they are 404s.
+- **A regression check that would have caught it:** after a build, assert that
+  every audio-extension `[s]` name in the written `.dsl.dz` is an entry name in
+  the sibling `.files.zip`. That is one pass over the dictionary plus the zip's
+  central directory, needs no snapshot and no archive, and belongs in CI next to
+  the catalog's sha256 assertions.
+
+**2. `extract_audio` gives one archive member to one wanted name.** Two wanted
+names that fold to the same key — a case difference between two records'
+`ogg_url` for the same recording — both claim the single tar member, so one of
+them is reported missing and left out of the bundle while its article keeps the
+link. Reproduced with one member `En-au-buff.ogg` and two wanted names
+(`En-au-BUFF.ogg`, `En-au-buff.ogg`): `found=1`, and the second name is written
+nowhere. This one is independent of `--reuse-bundle`, so a clean build can hit it
+too; it is latent today only because `plan()` chooses one recording per headword
+and the affected recordings are rare. **Fix:** when a member's key has several
+claimants, write it to each of them (the first from the stream, the rest copied
+from the extracted file) instead of to the first one found.
 
 ## Output layout and storage
 

@@ -746,6 +746,17 @@ interception.
 - SAF fallback (`ensureDefaultImportDir`) writes shared `<external>/Aurelex` on
   API 36 and can land on a blocked root instead of app-private storage.
 - Speex (`.spx`) audio is silently skipped rather than explicitly indicated (#20).
+- **A published dictionary can carry audio links its resource bundle cannot
+  resolve.** `au_kaikki_en-en.dsl.dz` (catalog sha256 `e47f3c5b…`) references 210
+  recordings the shipped `.dsl.files.zip` does not hold, 201 of them present only
+  under a different letter case (e.g. the article asks for `En-au-BUFF.ogg`, the
+  bundle holds `En-au-buff.ogg`). Android's storage is case-sensitive, so ~185
+  entries show a play control that does nothing; the same files resolve on a
+  Windows dev machine, so nothing about a local check reveals it. Root cause,
+  repair (`bundle-audio`, no re-render needed) and the proposed CI assertion are
+  in [KAIKKI-CONVERSION.md § Known defects](KAIKKI-CONVERSION.md#known-defects).
+  When checking audio on device, pick an entry and confirm the control actually
+  plays — a rendered control is not evidence of a bundled file.
 - FTS indexing now interleaves with other engine calls instead of holding the
   engine mutex for the whole build: existing dictionaries stay usable during a
   build, and the dictionary being built is withheld until its index completes.
