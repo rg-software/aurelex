@@ -516,6 +516,41 @@ cosmetic preference, not a defect.
 | 47b | After dismissing onboarding → force-stop and relaunch | App starts on **Search** (returning-user routing is unchanged) | ✅ (same device: `content-desc="Search" checked="true"`, overlay absent) |
 | 48 | After onboarding, no dicts loaded | Empty search state: guidance to add dictionaries | ✅ |
 | 49 | Tagged release build | Signed APK + AAB produced on a `vX.Y.Z` tag push and attached to the GitHub release | ✅ (v0.2.5 shipped both assets) |
+| 50 | Tagged release build | Release AAB contains native debug symbols for every shipped ABI, and the libraries it ships are stripped — asserted by CI, which refuses to publish otherwise | ⬜ (verified on the local `-Bundle` build; first tag to exercise the assertion pending) |
+| 51 | Release run in GitHub Actions | The "Assert native debug symbols" step reports `OK  AAB symbols …` and "all N shipped libraries are stripped"; a per-ABI `aurelex-native-debug-symbols-<versionCode>-<abi>.zip` is attached to the release | ⬜ (see 50) |
+
+### Verifying native symbols locally
+
+Symbolication is now verifiable **per release** — which ABI, which versionCode —
+instead of being something a maintainer notices when a crash trace arrives as raw
+addresses. CI asserts it, so a release that drops the symbols fails instead of
+shipping; the same check runs locally against a bundle build:
+
+```powershell
+pwsh -File .\app\build.ps1 -Configuration Release -Bundle
+$aab = (Get-ChildItem .\build-qtquick\apk\build\outputs\bundle\release\*.aab)[0]
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+$zip = [System.IO.Compression.ZipFile]::OpenRead($aab.FullName)
+try {
+  # symbols for the shipped ABI (expect libaurelex_<abi>.so.sym, ~15 MB)
+  $zip.Entries | Where-Object FullName -match 'debugsymbols/arm64-v8a/' |
+    ForEach-Object { "{0,10}  {1}" -f $_.Length, $_.FullName }
+  # the shipped engine library, stripped: ~9 MB, and no .symtab below
+  $zip.Entries | Where-Object FullName -eq 'base/lib/arm64-v8a/libaurelex_arm64-v8a.so' |
+    ForEach-Object { "{0,10}  {1}" -f $_.Length, $_.FullName }
+} finally { $zip.Dispose() }
+
+# what the app actually downloads must have no symbol table at all
+$re = "$env:AURELEX_NDK_ROOT\toolchains\llvm\prebuilt\windows-x86_64\bin\llvm-readelf.exe"
+& $re -S .\build-qtquick\apk\build\intermediates\stripped_native_libs\release\out\lib\arm64-v8a\libaurelex_arm64-v8a.so |
+  Select-String -Pattern '\.symtab|\.debug_'
+```
+
+No `.symtab` / `.debug_*` output means stripped; a ~36 MB `base/` entry or an
+empty symbols list means the NDK went unfound again (`ndkPath` in the generated
+`build.gradle` — see the root-cause note in `docs/SIGNING.md`). A real native
+crash cannot be provoked on demand, so this artifact-level check is the proxy for
+"a crash report would be readable".
 
 ## Localization (app language)
 

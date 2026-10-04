@@ -82,6 +82,15 @@ to adb-install the result. A signed release APK is produced by the CI workflow
 `versionName`/`versionCode` come from the tag. See `docs/SIGNING.md` for the Google Play /
 F-Droid signing split.
 
+`build.ps1` also injects the `build.gradle` settings Gradle cannot infer here:
+`ndkPath` (AGP only finds an NDK inside the Android SDK, and ours is outside it —
+without this, nothing is stripped and no native debug symbols are produced, with
+no error) and `ndk.debugSymbolLevel 'SYMBOL_TABLE'` (the symbol tables the release
+AAB carries for Play). Both are re-applied on every run because `androiddeployqt`
+regenerates the file. Release builds that go to Play additionally carry those
+symbols, and CI asserts both halves before publishing — see
+[Native debug symbols](SIGNING.md#native-debug-symbols--crash-symbolication).
+
 ## Tests
 
 There are three test layers. None of them needs a device; the device recipe

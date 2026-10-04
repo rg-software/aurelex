@@ -367,6 +367,189 @@ jobs:
           }
           Write-Host "vendored TLS libraries present in both artifacts for: $($abis -join ', ')"
 
+      # The app is mostly C++ (the carved goldendict-ng engine links in-process),
+      # so a native crash is an engine crash and its report is worthless without
+      # the library's symbol table: Play vitals shows raw addresses otherwise.
+      # AGP writes those symbol tables into the bundle as
+      # BUNDLE-METADATA/com.android.tools.build.debugsymbols/<abi>/<lib>.so.sym,
+      # which is the AAB's native debug symbols entry. There is no
+      # BUNDLE/native-debug-symbols/ directory in an AGP 7.x bundle; an earlier
+      # attempt here asserted that path and found nothing there.
+      #
+      # Assert it on the artifact, per shipped ABI, because the Gradle setting
+      # being present is exactly what failed silently: AGP resolves llvm-strip /
+      # llvm-objcopy out of an NDK it locates itself, ours lives outside the
+      # Android SDK tree, so the build stayed green while stripping nothing and
+      # extracting no symbols at all. Same shape as the vendored-TLS assertion
+      # above, and equally a hard failure before publication.
+      - name: Assert native debug symbols are in the release artifacts
+        shell: pwsh
+        env:
+          APK_PATH: ${{ steps.artifacts.outputs.APK_PATH }}
+          AAB_PATH: ${{ steps.artifacts.outputs.AAB_PATH }}
+          PACKAGED_ABIS: ${{ steps.artifacts.outputs.PACKAGED_ABIS }}
+        run: |
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $abis = @($env:PACKAGED_ABIS -split "," | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+          if (-not $abis) { throw "PACKAGED_ABIS not set by the artifacts step" }
+          Write-Host "Packaged ABIs: $($abis -join ', ')"
+          $failures = @()
+
+          # ---- 1. symbols: one entry per shipped ABI, and it must cover OUR
+          # library (a symbols entry holding only libc++_shared is useless: every
+          # crash frame that matters is in libaurelex).
+          if (-not $env:AAB_PATH -or -not (Test-Path $env:AAB_PATH)) {
+              $failures += "AAB: not found: $env:AAB_PATH"
+          } else {
+              $zip = [System.IO.Compression.ZipFile]::OpenRead($env:AAB_PATH)
+              try {
+                  $entries = @($zip.Entries | ForEach-Object { $_.FullName })
+                  foreach ($abi in $abis) {
+                      $prefix = "BUNDLE-METADATA/com.android.tools.build.debugsymbols/$abi/"
+                      $syms = @($zip.Entries | Where-Object { $_.FullName.StartsWith($prefix) -and $_.Length -gt 0 })
+                      $appSym = "$prefix`libaurelex_$abi.so.sym"
+                      if ($entries -contains $appSym) {
+                          $mb = [math]::Round((($syms | Measure-Object -Property Length -Sum).Sum) / 1MB, 1)
+                          Write-Host "  OK  AAB symbols  $prefix ($($syms.Count) file(s), $mb MB)"
+                      } else {
+                          $have = if ($syms.Count) { ($syms | ForEach-Object { Split-Path $_.FullName -Leaf }) -join ', ' } else { "none" }
+                          $failures += "AAB: missing '$appSym' (Play cannot symbolicate this ABI's native crashes without it; present under '$prefix': $have)"
+                          Write-Host "  MISSING  AAB symbols  $appSym"
+                      }
+                  }
+              } finally { $zip.Dispose() }
+          }
+
+          # ---- 2. the libraries users download must be stripped. When AGP cannot
+          # strip it passes the library through untouched, which is invisible in
+          # the compressed artifact size but ships the ~36 MB unstripped engine
+          # binary to every install. llvm-readelf comes from the NDK the build
+          # already uses; if it is missing, fail rather than pass unchecked.
+          $readelf = $null
+          foreach ($hostDir in @("windows-x86_64", "linux-x86_64")) {
+              $cand = Join-Path $env:AURELEX_NDK_ROOT "toolchains/llvm/prebuilt/$hostDir/bin/llvm-readelf.exe"
+              if (-not (Test-Path $cand)) { $cand = Join-Path $env:AURELEX_NDK_ROOT "toolchains/llvm/prebuilt/$hostDir/bin/llvm-readelf" }
+              if (Test-Path $cand) { $readelf = $cand; break }
+          }
+          if (-not $readelf) { throw "llvm-readelf not found under $env:AURELEX_NDK_ROOT -- cannot verify the shipped libraries are stripped" }
+
+          $work = Join-Path $env:RUNNER_TEMP "stripcheck"
+          if (Test-Path $work) { Remove-Item $work -Recurse -Force }
+          $extracted = @()
+          foreach ($artifact in @(
+              @{ Label = "AAB"; Path = $env:AAB_PATH },
+              @{ Label = "APK"; Path = $env:APK_PATH })) {
+              if (-not $artifact.Path -or -not (Test-Path $artifact.Path)) {
+                  Write-Host "  SKIP  $($artifact.Label)  (not built; nothing to check)"
+                  continue
+              }
+              $zip = [System.IO.Compression.ZipFile]::OpenRead($artifact.Path)
+              try {
+                  foreach ($entry in @($zip.Entries | Where-Object { $_.FullName -match '(^|/)lib/[^/]+/[^/]+\.so$' -and $_.Length -gt 0 })) {
+                      $target = Join-Path $work $entry.FullName.Replace('/', [IO.Path]::DirectorySeparatorChar)
+                      New-Item -ItemType Directory -Force -Path (Split-Path $target -Parent) | Out-Null
+                      [System.IO.Compression.ZipFileExtensions]::ExtractToFile($entry, $target, $true)
+                      $extracted += $target
+                  }
+              } finally { $zip.Dispose() }
+          }
+          if (-not $extracted) { throw "no .so entries extracted from the artifacts -- the strip check would vacuously pass" }
+          Write-Host "Checking $($extracted.Count) shipped libraries for leftover symbol tables with $(Split-Path $readelf -Leaf) ..."
+          $unstripped = @()
+          $inspected = 0
+          $current = ""
+          # Chunked: there are ~280 of them (every lib in both artifacts) and
+          # Windows caps a command line at ~32k characters, so one invocation per
+          # chunk. No 2>&1: a native command's stderr must not become a
+          # terminating error under GitHub's $ErrorActionPreference = 'stop' --
+          # the exit code below is what fails the step.
+          $batchSize = 25
+          for ($i = 0; $i -lt $extracted.Count; $i += $batchSize) {
+              $end = [Math]::Min($i + $batchSize, $extracted.Count) - 1
+              $batch = @($extracted[$i..$end])
+              & $readelf -S @batch | ForEach-Object {
+                  $line = "$_".Trim()
+                  if ($line -match '^File:\s+(.+)$') { $current = $Matches[1].Trim(); $inspected++ }
+                  elseif ($line -match '^\[\s*\d+\]\s+\.symtab\s+') { $unstripped += $current }
+              }
+              if ($LASTEXITCODE -ne 0) { throw "llvm-readelf failed (exit $LASTEXITCODE) on $($batch.Count) library file(s)" }
+          }
+          # A tool that never ran (or one that stopped early) leaves $unstripped
+          # empty, which would read as "everything is stripped". Insist on having
+          # seen a section table for every library we extracted.
+          if ($inspected -ne $extracted.Count) {
+              throw "llvm-readelf reported sections for $inspected of $($extracted.Count) libraries -- refusing to pass the strip check on partial output"
+          }
+          # The AAB's .sym copies legitimately carry .symtab -- that is the point
+          # of them -- but they live under BUNDLE-METADATA/, never under lib/, so
+          # only shipped libraries are checked above. Report artifact-relative
+          # paths (base/lib/... vs lib/...) so the message says which artifact.
+          $prefix = $work.TrimEnd([IO.Path]::DirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
+          $unstripped = @($unstripped | ForEach-Object { "$_".Replace($prefix, '') })
+          $appLibHits = @($unstripped | Where-Object { $_ -match 'libaurelex_' })
+          if ($appLibHits.Count) {
+              $failures += "unstripped app library: $($appLibHits -join ', ') -- every install would download the unstripped engine binary"
+          }
+          $otherHits = @($unstripped | Where-Object { $_ -notmatch 'libaurelex_' })
+          if ($otherHits.Count) {
+              $failures += "unstripped shipped libraries: $($otherHits -join ', ')"
+          }
+          if (-not $failures) {
+              Write-Host "all $($extracted.Count) shipped libraries are stripped"
+          } else {
+              Write-Host ""
+              Write-Host "Native symbol / strip verification failed:"
+              $failures | ForEach-Object { Write-Host "FAIL: $_" -ForegroundColor Red }
+              throw "release artifacts do not satisfy the native debug symbols contract; refusing to publish"
+          }
+
+      # The symbols are already inside the AAB (Play ingests them on upload);
+      # this archive is the human-reachable copy -- the Play Console's
+      # native-debug-symbols upload is manual (the Play Developer API v3 has no
+      # native-symbols method), so the file has to outlive the CI run. Kept
+      # per-ABI and named with the versionCode so an upload cannot be paired with
+      # the wrong Play listing.
+      - name: Package native debug symbols archive
+        id: symbols
+        shell: pwsh
+        env:
+          AAB_PATH: ${{ steps.artifacts.outputs.AAB_PATH }}
+          PACKAGED_ABIS: ${{ steps.artifacts.outputs.PACKAGED_ABIS }}
+        run: |
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $abis = @($env:PACKAGED_ABIS -split "," | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+          if (-not $abis) { throw "PACKAGED_ABIS not set by the artifacts step" }
+          # Dry-runs and branch pushes have no tag-derived versionCode; the
+          # symbols are still produced, just labelled as unversioned.
+          $versionCode = if ($env:AURELEX_VERSION_CODE) { $env:AURELEX_VERSION_CODE } else { "unversioned" }
+          $outDir = Join-Path $env:RUNNER_TEMP "native-debug-symbols"
+          New-Item -ItemType Directory -Force -Path $outDir | Out-Null
+          $zip = [System.IO.Compression.ZipFile]::OpenRead($env:AAB_PATH)
+          try {
+              foreach ($abi in $abis) {
+                  $prefix = "BUNDLE-METADATA/com.android.tools.build.debugsymbols/$abi/"
+                  $stage = Join-Path $outDir $abi
+                  New-Item -ItemType Directory -Force -Path $stage | Out-Null
+                  $count = 0
+                  foreach ($entry in @($zip.Entries | Where-Object { $_.FullName.StartsWith($prefix) -and $_.Length -gt 0 })) {
+                      # AGP names them <lib>.so.sym; Play's upload expects the
+                      # zip to hold <abi>/<lib>.so.
+                      $target = Join-Path $stage ((Split-Path $entry.FullName -Leaf) -replace '\.sym$', '')
+                      [System.IO.Compression.ZipFileExtensions]::ExtractToFile($entry, $target, $true)
+                      $count++
+                  }
+                  if (-not $count) { throw "no native debug symbols for $abi in $env:AAB_PATH -- the previous step should have failed the build" }
+                  $archive = Join-Path $outDir "aurelex-native-debug-symbols-$versionCode-$abi.zip"
+                  if (Test-Path $archive) { Remove-Item $archive -Force }
+                  # Compress the ABI *directory*, not its contents: Play's
+                  # upload expects <abi>/<library>.so, and compressing the
+                  # contents would flatten the ABI away.
+                  Compress-Archive -Path $stage -DestinationPath $archive
+                  Write-Host "symbols archive: $archive ($([math]::Round((Get-Item $archive).Length / 1MB, 1)) MB, $count file(s))"
+              }
+          } finally { $zip.Dispose() }
+          "SYMBOLS_DIR=$outDir" >> $env:GITHUB_OUTPUT
+
       - name: Upload release artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -376,6 +559,14 @@ jobs:
             ${{ steps.artifacts.outputs.AAB_PATH }}
           if-no-files-found: error
 
+      - name: Upload native debug symbols
+        uses: actions/upload-artifact@v4
+        with:
+          name: aurelex-native-debug-symbols
+          path: |
+            ${{ steps.symbols.outputs.SYMBOLS_DIR }}
+          if-no-files-found: error
+
       - name: Create GitHub release (tag pushes)
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
@@ -383,6 +574,7 @@ jobs:
           files: |
             ${{ steps.artifacts.outputs.APK_PATH }}
             ${{ steps.artifacts.outputs.AAB_PATH }}
+            ${{ steps.symbols.outputs.SYMBOLS_DIR }}
           generate_release_notes: true
 
       # Runs only for a well-formed release tag (see the version step's gate) and

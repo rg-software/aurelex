@@ -292,6 +292,20 @@ $gpPath = Join-Path $ApkDir "gradle.properties"
 # in build-tools 36.0.0. The property key is android.aapt2FromMavenOverride.
 $aapt2Name = if ($IsWindows) { "aapt2.exe" } else { "aapt2" }
 $Aapt2Exe = (Join-Path $sdkDir "build-tools/36.0.0/$aapt2Name") -replace '\\', '/'
+# AGP runs its native toolchain (llvm-strip, llvm-objcopy) out of an NDK it has
+# located itself, and the only place it looks is inside the Android SDK
+# (<sdk>/ndk/<androidNdkVersion>). Ours is installed outside the SDK tree (see
+# $NdkRoot above: C:\Program Files (x86)\Android\AndroidNDK\android-ndk-r23c on a
+# dev box, $GITHUB_WORKSPACE/ndk/android-ndk-r23c in CI), so AGP found no NDK at
+# all: stripReleaseDebugSymbols logged "Unable to strip the following libraries,
+# packaging them as they are:" for every jniLib (shipping the ~36 MB unstripped
+# engine library in base/), and extractReleaseNativeSymbolTables produced nothing,
+# so the AAB carried no native debug symbols at all. `ndkPath` points AGP at the
+# NDK we actually built with; it takes precedence over ndkVersion and carries no
+# deprecation warning (the ndk.dir local.properties route logs CXX5106 once per
+# library, i.e. 140 lines per build). Forward slashes only: a Groovy
+# double-quoted string eats \P / \n style escapes out of a Windows path.
+$ndkPathGroovy = ($NdkRoot -replace '\\', '/')
 # androiddeployqt in the carve-subset kit may not generate gradle.properties on
 # a fresh tree (it exists locally only because a prior run left it behind). If
 # absent, write one with our pinned values; otherwise patch the existing file.
@@ -339,6 +353,7 @@ if (-not (Test-Path (Join-Path $ApkDir "settings.gradle"))) {
 # dry-run with no secrets), skip injection so gradle produces an unsigned
 # release APK instead of failing on a missing storeFile.
 function New-BaseBuildGradle {
+    param([string]$NdkPath)
     @"
 buildscript {
     repositories { google(); mavenCentral() }
@@ -356,6 +371,10 @@ android {
     compileSdkVersion androidCompileSdkVersion
     buildToolsVersion androidBuildToolsVersion
     ndkVersion androidNdkVersion
+    // The NDK we compiled with, outside the SDK tree AGP searches. Without it
+    // AGP locates no toolchain: nothing gets stripped and no native debug
+    // symbols are extracted (see the ndkPath note in build.ps1).
+    ndkPath "$NdkPath"
 
     packagingOptions.jniLibs.useLegacyPackaging true
 
@@ -379,6 +398,11 @@ android {
     buildTypes {
         release {
             minifyEnabled false
+            // Turn the merged libraries' symbol tables into the AAB's
+            // BUNDLE-METADATA/com.android.tools.build.debugsymbols/<abi>/*.so.sym
+            // entry, which is what Play symbolicates native crashes from.
+            // SYMBOL_TABLE = function names (tombstone-compatible); FULL would
+            // add file/line info at ~2x the symbols size.
             ndk { debugSymbolLevel 'SYMBOL_TABLE' }
         }
     }
@@ -412,7 +436,7 @@ if ($Configuration -eq "Release") {
             # The carve-subset androiddeployqt --no-build may not generate
             # build.gradle on a fresh tree. Write a complete one matching the
             # Qt androiddeployqt template (values come from gradle.properties).
-            Set-Content $bgPath (New-BaseBuildGradle) -NoNewline
+            Set-Content $bgPath (New-BaseBuildGradle -NdkPath $ndkPathGroovy) -NoNewline
             $bg = Get-Content $bgPath -Raw
             Write-Host "Wrote complete build.gradle (carve-subset fresh tree)." -ForegroundColor Yellow
         }
@@ -447,7 +471,7 @@ if ($Configuration -eq "Release") {
         Write-Host "No release keystore available; building unsigned release APK." -ForegroundColor Yellow
         if (-not (Test-Path $bgPath)) {
             # Fresh carve-subset tree without androiddeployqt's build.gradle.
-            Set-Content $bgPath (New-BaseBuildGradle) -NoNewline
+            Set-Content $bgPath (New-BaseBuildGradle -NdkPath $ndkPathGroovy) -NoNewline
             Write-Host "Wrote complete unsigned build.gradle (fresh tree)." -ForegroundColor Yellow
         }
     }
@@ -458,7 +482,7 @@ if ($Configuration -eq "Release") {
     # base build file (no signing config; the debug keystore is applied by AGP
     # automatically for the debug buildType).
     if (-not (Test-Path $bgPath)) {
-        Set-Content $bgPath (New-BaseBuildGradle) -NoNewline
+        Set-Content $bgPath (New-BaseBuildGradle -NdkPath $ndkPathGroovy) -NoNewline
         Write-Host "Wrote complete build.gradle for $Configuration (fresh tree)." -ForegroundColor Yellow
     }
 }
@@ -474,16 +498,58 @@ if (Test-Path $bgPath) {
     }
 }
 
-# Embed native symbol tables (function names) into the AAB's
-# native-debug-symbols payload so Play can symbolize native crashes without a
-# manual upload. Keep this idempotent so it also fixes an androiddeployqt
-# generated build.gradle left behind on a dev machine.
+# Native symbols + stripped shipped libraries, for the AAB's native debug
+# symbols payload (Play symbolicates native crashes from it) and for base/
+# shipping stripped .so files. Two settings, both required, both re-applied here
+# because androiddeployqt regenerates build.gradle on every run:
+#
+#   ndkPath                        AGP runs llvm-strip / llvm-objcopy out of an
+#                                  NDK it located itself, and it only looks
+#                                  inside the Android SDK (<sdk>/ndk/<version>).
+#                                  Ours lives outside the SDK tree, so without
+#                                  this AGP finds no toolchain: every jniLib is
+#                                  passed through unstripped and NO symbols are
+#                                  extracted at all.
+#   ndk.debugSymbolLevel           turns the merged libraries' symbol tables
+#      'SYMBOL_TABLE'              into the AAB's
+#                                  BUNDLE-METADATA/com.android.tools.build.
+#                                  debugsymbols/<abi>/*.so.sym entries.
+#
+# Idempotent, so it also repairs an androiddeployqt-generated build.gradle left
+# behind on a dev machine.
 if (Test-Path $bgPath) {
-    $bgNow = Get-Content $bgPath -Raw
-    if ($bgNow -notmatch 'debugSymbolLevel') {
-        Set-Content $bgPath ($bgNow -replace '(buildTypes\s*\{[^}]*release\s*\{)', "`$1`n            ndk { debugSymbolLevel 'SYMBOL_TABLE' }`n") -NoNewline
+    $bgOut = Get-Content $bgPath -Raw
+    $dirty = $false
+    if ($bgOut -notmatch '(?m)^\s*ndkPath\s') {
+        $bgLines = @(Get-Content $bgPath)
+        # Anchor on androiddeployqt's own "ndkVersion androidNdkVersion" line so
+        # the setting lands next to its sibling; fall back to the android { }
+        # block if a tree's template ever drops it.
+        $anchor = -1
+        for ($i = 0; $i -lt $bgLines.Count; $i++) {
+            if ($bgLines[$i] -match '^\s*ndkVersion\s+androidNdkVersion\s*$') { $anchor = $i; break }
+        }
+        if ($anchor -lt 0) {
+            for ($i = 0; $i -lt $bgLines.Count; $i++) {
+                if ($bgLines[$i] -match '^\s*android\s*\{\s*$') { $anchor = $i; break }
+            }
+        }
+        if ($anchor -ge 0) {
+            $before = if ($anchor -gt 0) { @($bgLines[0..($anchor - 1)]) } else { @() }
+            $after = if ($anchor -lt ($bgLines.Count - 1)) { @($bgLines[($anchor + 1)..($bgLines.Count - 1)]) } else { @() }
+            $bgOut = (@($before + "    ndkPath `"$ndkPathGroovy`"" + $after) -join "`n")
+            $dirty = $true
+            Write-Host "Patched build.gradle with ndkPath ($ndkPathGroovy)." -ForegroundColor Yellow
+        } else {
+            Write-Warning "build.gradle has no ndkVersion / android { anchor; ndkPath NOT patched (AGP would find no NDK: unstripped libraries, no native debug symbols)."
+        }
+    }
+    if ($bgOut -notmatch 'debugSymbolLevel') {
+        $bgOut = $bgOut -replace '(buildTypes\s*\{[^}]*release\s*\{)', "`$1`n            ndk { debugSymbolLevel 'SYMBOL_TABLE' }`n"
+        $dirty = $true
         Write-Host "Patched release buildType with ndk debugSymbolLevel SYMBOL_TABLE." -ForegroundColor Yellow
     }
+    if ($dirty) { Set-Content $bgPath $bgOut -NoNewline }
 }
 
 Push-Location $ApkDir

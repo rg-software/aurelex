@@ -9,22 +9,29 @@ native symbol tables in release AAB`) but does not work with the current toolcha
 and nothing verifies it.
 
 The same build also logs `Unable to strip the following libraries, packaging them
-as they are: libaurelex_arm64-v8a.so`, so the shipped library is not stripped
-either. Both halves of the native-debug story — "symbols Play can use" and
-"libraries users download" — are therefore unverified today, and the release
-pipeline asserts neither.
+as they are: …` — for every one of the 140 libraries it packages, not just ours
+(Qt's arrive pre-stripped, so ours is the only one it shows up on) — so the
+shipped engine library is ~36 MB unstripped instead of ~9 MB. Both halves of the
+native-debug story — "symbols Play can use" and "libraries users download" — are
+therefore unverified today, and the release pipeline asserts neither.
 
 ## What Changes
 
-- Make the release AAB actually carry `BUNDLE/native-debug-symbols/<abi>/`. The
-  existing `ndk { debugSymbolLevel 'SYMBOL_TABLE' }` in `New-BaseBuildGradle`
-  (`app/build.ps1`) is valid AGP 7.4.1 DSL and is accepted, yet the bundle task
-  emits nothing; the replacement is the `jniLibs` packaging symbol-retention
-  setting, which keeps the unstripped libraries for the symbols entry while
-  `base/` still ships stripped ones.
-- Verify it in the release pipeline: CI asserts that the built AAB contains
-  `BUNDLE/native-debug-symbols/arm64-v8a/` and fails the release when it does
-  not, so a silently symbol-less AAB cannot be published again.
+- Make the release AAB actually carry native debug symbols. The root cause is not
+  the Gradle knob but the toolchain it needs: AGP runs `llvm-strip` /
+  `llvm-objcopy` out of an NDK it locates itself, and it only looks inside the
+  Android SDK (`<sdk>/ndk/<version>`), while our NDK is installed outside that
+  tree. With no toolchain found, AGP strips nothing (it logs `Unable to strip the
+  following libraries, packaging them as they are:` for every jniLib) and extracts
+  no symbols, so the existing `ndk { debugSymbolLevel 'SYMBOL_TABLE' }` in
+  `New-BaseBuildGradle` (`app/build.ps1`) has nothing to act on. Adding
+  `android { ndkPath "<ndk root>" }` alongside it makes both halves work: the AAB
+  gains `BUNDLE-METADATA/com.android.tools.build.debugsymbols/<abi>/*.so.sym`,
+  and `base/` ships stripped libraries again.
+- Verify it in the release pipeline: CI asserts, for every ABI the build ships,
+  that the AAB carries that library's symbol table and that no library in the
+  artifact was left unstripped, and fails the release when either is untrue, so a
+  silently symbol-less AAB cannot be published again.
 - Publish the symbols where a human can reach them: attach the per-ABI symbols
   archive to the GitHub release and document the one manual Play Console upload.
   The Play Developer API v3 exposes no native-symbols method (its `edits`
@@ -57,14 +64,17 @@ distribution requirement.
 
 ## Impact
 
-- `app/build.ps1` — `New-BaseBuildGradle`: replace the ineffective
-  `debugSymbolLevel` line with the packaging setting that retains symbols for the
-  bundle. This is the file `androiddeployqt` regenerates, so the change must
-  survive the same re-application the existing gradle overrides already do.
+- `app/build.ps1` — `New-BaseBuildGradle` plus the idempotent `build.gradle`
+  patch: add `ndkPath` next to the existing `ndkVersion` /
+  `ndk { debugSymbolLevel 'SYMBOL_TABLE' }`, so the change survives the same
+  re-application the existing gradle overrides do after `androiddeployqt`
+  regenerates `build.gradle`.
 - `.github/workflows/release-qt.yml` — an assertion over the built AAB's zip
-  entries (same shape as the existing vendored-OpenSSL packaging assertion), and
-  attaching the symbols archive to the release.
-- `docs/SIGNING.md` — the symbols-in-the-AAB guarantee and the manual Console
-  upload recipe, with the reason it is manual.
+  entries and the shipped libraries' ELF sections (same shape as the existing
+  vendored-OpenSSL packaging assertion), plus assembling and attaching the
+  per-ABI symbols archive.
+- `docs/SIGNING.md`, `docs/TESTING.md` — the symbols-in-the-AAB guarantee and the
+  manual Console upload recipe, with the reason it is manual; the local
+  equivalent of the CI check.
 - No `carve/`, `patches/`, `app/*.cpp` or engine change: this is purely about
   what the packaging step emits.

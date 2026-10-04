@@ -9,12 +9,13 @@ signatures.
 
 On a `vX.Y.Z` tag push, CI (`.github/workflows/release-qt.yml`, windows-latest)
 builds a signed release APK **and** AAB from the Qt app (`app/`) and
-attaches both to a GitHub release:
+attaches both — plus the native debug symbols archive — to a GitHub release:
 
 | Artifact | Path | Used by |
 | --- | --- | --- |
 | `.apk` | `build-qtquick/apk/build/outputs/apk/release/*.apk` | GitHub releases / F-Droid / sideload |
 | `.aab` | `build-qtquick/apk/build/outputs/bundle/release/*.aab` | Google Play upload |
+| native debug symbols | assembled from the AAB into `$RUNNER_TEMP/native-debug-symbols/*.zip` | GitHub release asset → Play Console (manual, see below) |
 
 The release workflow locates both by glob, not by name, and fails the job if
 either glob comes up empty — so the exact Gradle-assigned filename is free to
@@ -80,6 +81,68 @@ Notes:
   involved (the app-signing key lives in Play, the upload key is separate).
 - Republishing the same tag is rejected by Play (duplicate versionCode); fix a
   bad release with a new patch version, never by re-tagging.
+
+## Native debug symbols — crash symbolication
+
+The app is mostly C++: the carved goldendict-ng engine links into the process, so
+almost every crash *is* an engine crash. A stripped native library reports crash
+frames as raw addresses, which makes the report useless — so the release AAB
+carries each shipped library's symbol table under
+`BUNDLE-METADATA/com.android.tools.build.debugsymbols/<abi>/<library>.so.sym`
+(AGP's spelling of the AAB's native debug symbols entry; there is no
+`BUNDLE/native-debug-symbols/` directory). `SYMBOL_TABLE` level = function names,
+which is what a tombstone trace needs. The libraries inside `base/` are shipped
+**stripped** — the symbols never reach the user's download.
+
+| | |
+| --- | --- |
+| Produced by | AGP, from `ndk.debugSymbolLevel 'SYMBOL_TABLE'` + `ndkPath` in the generated `build.gradle` (both applied by `app/build.ps1`) |
+| Travels in | the release AAB, so Play ingests the symbols when the AAB is published |
+| Also attached to | the GitHub release as `aurelex-native-debug-symbols-<versionCode>-<abi>.zip`, containing `<abi>/<library>.so` |
+| Verified by | the release workflow asserts both halves (symbols present per ABI, shipped libs stripped) and refuses to publish otherwise |
+
+`ndkPath` is the load-bearing half, and its absence is silent. AGP runs
+`llvm-strip` / `llvm-objcopy` out of an NDK it locates itself, and it only looks
+inside the Android SDK (`<sdk>/ndk/<version>`). Ours is installed outside that
+tree, so with `ndkVersion` alone AGP finds no toolchain: it logs `Unable to strip
+the following libraries, packaging them as they are:` for *every* jniLib (which
+ships the ~36 MB unstripped engine binary in `base/`), and extracts no symbols at
+all — while the build stays green. Hence the assertion on the artifact rather than
+on the Gradle flag.
+
+### Uploading symbols to Play by hand
+
+The Play Developer API v3 has **no native-symbols method** — its `edits`
+resources are `apks`, `bundles`, `countryavailability`, `deobfuscationfiles`,
+`details`, `expansionfiles`, `images`, `listings`, `testers`, `tracks`. The AAB
+upload is automated; the symbols upload is deliberately manual:
+
+1. Take `aurelex-native-debug-symbols-<versionCode>-<abi>.zip` from the GitHub
+   release (the same run as the AAB).
+2. Play Console → the app → **Release** → pick the release whose versionCode
+   matches the file name → **App bundle explorer** → the version → **Downloads /
+   Native debug symbols** → upload the zip for that ABI.
+3. Confirm versionCode **and** ABI match before uploading — a symbol file that
+   does not belong to the build Play has cannot resolve any of its crash frames.
+
+Symbols only help crashes Play has already collected, so this matters mostly
+*after* a release goes out — the GitHub release asset is the copy to reach for.
+
+### Retention
+
+Keep the symbols archive **at least as long as the Play listing can serve crash
+reports for that versionCode** — in practice, keep every release's archive; they
+are a few MB each and are the only way to re-symbolicate an old report. Deleting
+them makes historical native crash reports unreadable, permanently.
+
+### This is not a crash-reporting SDK
+
+Symbols are a build artifact that feeds *whatever* channel reports crashes. With
+them, Android vitals symbolicates native crashes on its own — which is the
+channel the README and the privacy policy already describe. Adopting Crashlytics
+(or any other reporter) later would *consume the same symbols*, not replace
+them, so shipping them is a prerequisite for native-crash diagnosis either way,
+not a step toward a particular vendor.
 
 ## F-Droid — no cloud signing
 
