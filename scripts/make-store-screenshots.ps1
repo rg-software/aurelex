@@ -94,6 +94,18 @@ try {
         $ok   = if ($dims[0] -eq 1080 -and $dims[1] -eq 1920) { "ok" } else { "WRONG SIZE" }
         Write-Output ("  {0,-34} {1}x{2}  {3,4} KB  {4}" -f $s.Name, $dims[0], $dims[1], $kb, $ok)
     }
+
+    # Prune anything this run did not write. Re-ordering the gallery means
+    # renaming captures; without this, the old NN- names survive as
+    # byte-identical orphans, which is how a duplicate ends up committed and then
+    # uploaded as an extra gallery entry.
+    $keep    = @($shots | ForEach-Object { $_.Name })
+    $orphans = @(Get-ChildItem -LiteralPath $Dest -Filter *.png -File |
+                 Where-Object { $_.Name -notin $keep })
+    foreach ($o in $orphans) {
+        Remove-Item -LiteralPath $o.FullName -Force
+        Write-Output "  removed stale output: $($o.Name)"
+    }
 }
 finally {
     Remove-Item -LiteralPath $tmp -Recurse -Force -ErrorAction SilentlyContinue
