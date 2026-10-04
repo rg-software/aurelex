@@ -1,9 +1,6 @@
 # Aurelex
 
-A fast offline dictionary for Android. A modern successor to the
-discontinued [GoldenDict Mobile](http://goldendict.mobi).
-
-Look up words in your own StarDict, mdict, and DSL dictionaries, or install one of our
+A fast offline dictionary for Android. Look up words in your own StarDict, mdict, and DSL dictionaries, or install one of our
 free ones straight from the app. Everything runs on-device. No account, no ads, free and open source.
 
 ![Aurelex search and article view](docs/screenshots/main.png)
@@ -77,6 +74,8 @@ Everything happens on-device.
 - Two things can touch the network: 1) the remote catalog functionality and 2) remote resources referenced from inside a dictionary article.
 - Google Play build may report crashes to the developer.
 
+See also the [full privacy policy](docs/privacy.html).
+
 ## Building from source
 
 Requirements: JDK 17, the Android SDK and NDK, Qt 6.6.3 (Android and desktop kits), PowerShell 7, and the vcpkg dependencies listed in the docs.
@@ -93,6 +92,6 @@ See full instructions in [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md). Most func
 
 ## License and credits
 
-Aurelex is free software under the GNU GPL v3, see [`LICENSE`](LICENSE) and [`NOTICES.md`](NOTICES.md). Aurelex reuses the [goldendict-ng](https://github.com/xiaoyifang/goldendict-ng) dictionary engine, which is itself derived from the original GoldenDict by K.&nbsp;Isakov. The pinned version of the engine and our patches are recorded in [`docs/ENGINE.md`](docs/ENGINE.md).
+Aurelex is free software under the GNU GPL v3, see [`LICENSE`](LICENSE) and [`NOTICES.md`](NOTICES.md). Aurelex reuses the [goldendict-ng](https://github.com/xiaoyifang/goldendict-ng) dictionary engine, which is itself derived from the original GoldenDict by K.&nbsp;Isakov. The pinned version of the engine and our patches are recorded in [`docs/ENGINE.md`](docs/ENGINE.md). Aurelex is largely inspired by the discontinued [GoldenDict Mobile](http://goldendict.mobi).
 
 The dictionaries offered in the built-in catalog are derived from Wiktionary / [kaikki.org](https://kaikki.org) (CC BY-SA 4.0). They are heavily processed and cleaned up for comfortable use.

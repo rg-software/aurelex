@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Aurelex — Privacy Policy</title>
+<meta name="description" content="Aurelex privacy policy: lookups stay on your device, no account, no ads, no analytics.">
+<style>
+  :root {
+    --ink: #2c2820;
+    --muted: #6e6552;
+    --gold: #a9862b;
+    --line: #e8dfc9;
+    --bg: #fffdf8;
+  }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    padding: 2.5rem 1.25rem 4rem;
+    background: var(--bg);
+    color: var(--ink);
+    font: 16px/1.65 -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  }
+  main { max-width: 44rem; margin: 0 auto; }
+  h1 { font-size: 1.75rem; line-height: 1.25; margin: 0 0 .25rem; }
+  h2 { font-size: 1.1rem; margin: 2rem 0 .5rem; color: var(--gold); }
+  p, li { margin: 0 0 .75rem; }
+  ul { padding-left: 1.15rem; }
+  a { color: var(--gold); }
+  .sub { color: var(--muted); margin: 0 0 2rem; font-size: .95rem; }
+  .lede {
+    background: #f6ecd0;
+    border-radius: 10px;
+    padding: 1rem 1.15rem;
+    margin: 0 0 2rem;
+  }
+  hr { border: 0; border-top: 1px solid var(--line); margin: 2.5rem 0 1rem; }
+  footer { color: var(--muted); font-size: .875rem; }
+  code { background: #f1ead8; padding: .1em .35em; border-radius: 4px; font-size: .9em; }
+</style>
+</head>
+<body>
+<main>
+
+<h1>Aurelex — Privacy Policy</h1>
+<p class="sub">Last updated: 4 October 2026 &middot; applies to every Aurelex build, on Google Play and elsewhere.</p>
+
+<p class="lede"><strong>In one line:</strong> Aurelex has no account, no ads, no analytics and no
+tracking. Looking up a word never touches the network — your dictionaries and your history stay on
+your phone.</p>
+
+<h2>What stays on your device</h2>
+<ul>
+  <li>Every dictionary you import or install, kept in the app's private storage.</li>
+  <li>Your search history, favorites, groups, settings and full-text indexes.</li>
+  <li>Everything the app writes is local. Nothing is uploaded, and nothing about your dictionaries
+      or your lookups is sent to us or to anyone else.</li>
+</ul>
+<p>Removing a dictionary in the app deletes its stored copy and its index. Uninstalling Aurelex
+deletes everything it stored.</p>
+
+<h2>What can use the network</h2>
+<p>Aurelex makes no network request at startup, and searching a word never sends anything anywhere.
+Two features can reach the network, and only when you use them:</p>
+<ol>
+  <li><strong>The dictionary catalog.</strong> When you open the built-in catalog, the app fetches its
+      list from <code>rg-software.github.io</code> and downloads the dictionary files you choose from
+      <code>github.com</code>. These are ordinary downloads: the request tells the server only that
+      Aurelex asked for the file, and nothing about you or your other dictionaries.</li>
+  <li><strong>Resources a dictionary article points at.</strong> If an entry in a dictionary links to
+      an image or another file on a website, Aurelex fetches it, exactly as opening that page in a
+      browser would. The request goes to whichever host the dictionary names, so its operator sees a
+      request from your device. If a dictionary references no external resources, or you are offline,
+      nothing is fetched.</li>
+</ol>
+
+<h2>What we do not do</h2>
+<ul>
+  <li>No account, no sign-in, no user records.</li>
+  <li>No advertising and no ad SDKs.</li>
+  <li>No analytics, telemetry or A/B-testing SDKs, and nothing that profiles you
+      or builds an advertising profile.</li>
+  <li>No selling or sharing of data, and no third-party SDKs that could collect any.</li>
+</ul>
+
+<h2>Google Play and Android backups</h2>
+<p>Two platform features are outside our control and worth knowing about:</p>
+<ul>
+  <li><strong>Crash reporting.</strong> If the app crashes, a crash report is sent to Google Play's
+      crash-reporting service. We will see anonymized reports Play shows in Play Console.
+      Builds installed from a GitHub release or an APK have no such functionality.</li>
+  <li>If you use Android's device backup, the app's data can be included in your backup, subject to
+      Android's size limits and to your own backup settings.</li>
+</ul>
+
+<h2>Children</h2>
+<p>Aurelex is suitable for all ages. Because we collect no data from anyone, we collect none from
+children either.</p>
+
+<h2>Changes to this policy</h2>
+<p>If this policy changes, the updated version will be published at this address and the change will
+be recorded in the project's public repository. Continuing to use Aurelex after a change means the
+new policy applies to you.</p>
+
+<h2>Contact</h2>
+<p>Questions about this policy, or a privacy request: <a href="mailto:rgsoftware@gmail.com">rgsoftware@gmail.com</a>.</p>
+
+<hr>
+<footer>
+<p>Aurelex is free software under the GNU GPL v3. Source code, issue tracker and releases:
+<a href="https://github.com/rg-software/aurelex">github.com/rg-software/aurelex</a>.</p>
+</footer>
+
+</main>
+</body>
+</html>
