@@ -174,10 +174,36 @@ jobs:
       - name: Bootstrap vcpkg + install carve deps
         shell: pwsh
         run: |
-          if (-not (Test-Path "$env:VCPKG_ROOT\vcpkg.exe")) {
-            git clone --depth 1 --branch 2026.07.29 https://github.com/microsoft/vcpkg.git "$env:VCPKG_ROOT"
-            & "$env:VCPKG_ROOT\bootstrap-vcpkg.bat" -disableMetrics
+          # The cache above restores .../vcpkg/installed/arm64-android, so VCPKG_ROOT
+          # can already exist as a non-empty directory on a cache hit. Testing only
+          # for vcpkg.exe then sends `git clone` at that directory, which fails
+          # ("destination path already exists and is not an empty directory") and
+          # takes the whole release down before it builds - which is how v0.3.4's
+          # first run died. So: clone into VCPKG_ROOT only when it is absent or
+          # empty, otherwise treat what is there as the checkout to bootstrap.
+          if (Test-Path "$env:VCPKG_ROOT\vcpkg.exe") {
+            Write-Host "vcpkg.exe already present; skipping clone."
           }
+          elseif ((Test-Path $env:VCPKG_ROOT) -and @((Get-ChildItem $env:VCPKG_ROOT -Force -ErrorAction SilentlyContinue)).Count -gt 0) {
+            # Cache hit that restored the install tree without the executable.
+            # Fetch the vcpkg sources into it so the bootstrap has something to
+            # build against; `git clone` cannot be used here (non-empty dir).
+            Write-Host "VCPKG_ROOT exists (cache restore) but has no vcpkg.exe; fetching sources into it."
+            Push-Location $env:VCPKG_ROOT
+            try {
+              git init --quiet
+              git remote add origin https://github.com/microsoft/vcpkg.git 2>$null
+              git fetch --depth 1 origin 2026.07.29
+              git checkout --quiet FETCH_HEAD
+            } finally { Pop-Location }
+          }
+          else {
+            git clone --depth 1 --branch 2026.07.29 https://github.com/microsoft/vcpkg.git "$env:VCPKG_ROOT"
+          }
+          if (-not (Test-Path "$env:VCPKG_ROOT\bootstrap-vcpkg.bat")) {
+            throw "bootstrap-vcpkg.bat missing from $env:VCPKG_ROOT after the fetch"
+          }
+          & "$env:VCPKG_ROOT\bootstrap-vcpkg.bat" -disableMetrics
           & "$env:VCPKG_ROOT\vcpkg.exe" install zlib bzip2 liblzma lzo fmt --triplet arm64-android
 
       - name: Build xapian for Android
