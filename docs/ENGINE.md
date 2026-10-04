@@ -53,7 +53,7 @@ applied to its working tree:
 
 `git -C engine checkout -- .` reverts the working tree back to the pinned tag.
 
-The set is deliberately short — four patches, applied in numeric order:
+The set is deliberately short — six patches, applied in numeric order:
 
 | # | Patch | Change | Why |
 | --- | --- | --- | --- |
@@ -61,11 +61,13 @@ The set is deliberately short — four patches, applied in numeric order:
 | 0002 | `android-no-gui-app-writable-home` | `android carve: no QGuiApplication; writable config home` | Three fixes so the engine runs with only a `QCoreApplication` and no platform plugin: `getOptimalIconSize` no longer reads `qGuiApp`, `tiff2img` guards `QApplication::primaryScreen()` (null screen → use the image's own size) instead of crashing, and `getHomeDir` uses the `HOME` env var (the boundary points it at the app dir) rather than the XDG/`QStandardPaths` branch, which needs a Qt application. |
 | 0003 | `fts-wildcards-expansion-cap` | `fts: raise wildcard expansion cap for full-text search` | The engine caps wildcard expansion at 1 term, which makes `read*`-style prefix FTS useless. Raised to 100. |
 | 0004 | `fts-sliced-build` | `fts: build in slices, commit periodically, publish atomically` | The engine holds its lock for a whole index build, so lookups over other dictionaries block until it finishes. Slices the build, commits periodically (resume after a kill) and publishes by atomic rename instead of a second `compact()` pass. |
+| 0005 | `iconv-bound-conversion-retries` | `iconv: bound conversion retries, bail on non-progress` | Upstream retries the `iconv()` call with a grown output buffer whenever it reports `E2BIG`, assuming a retry with more room makes progress. That is not guaranteed: a charset the converter cannot represent makes `iconv` fail identically every time, so the loop never terminated and the indexer hung on a bad-charset DSL. Adds a no-progress guard plus a retry cap. Load-bearing — it is the difference between "the import finishes" and "the import wedges". |
+| 0006 | `stardict-bword-cross-references` | `stardict: rewrite `bword:` cross-references into resolvable links` | StarDict dictionaries reference other entries with the internal `bword://word` / `bword:word` scheme, which the desktop engine resolves but the carve emitted verbatim — so a cross-reference in a staged StarDict article was dead text. Rewrites it into a URL the article's link poller routes back through `gd_lookup`. Load-bearing for StarDict link navigation. |
 
 0003 and 0004 are the two FTS changes the user-visible behaviour in
 `docs/TESTING.md` (§ Full-text search, #32a–#32c) depends on, so treat both as
 load-bearing rather than as optional tuning.
 
-Adding a deviation means a fifth row here plus a matching note in `AGENTS.md`.
+Adding a deviation means a seventh row here plus a matching note in `AGENTS.md`.
 If the list is growing, the boundary (`carve/`) is probably the right home
 instead — the smaller this table stays, the cheaper every future release is.

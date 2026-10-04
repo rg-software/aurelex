@@ -50,8 +50,9 @@ open.
 ## Repository layout (target)
 
 - `engine/` — goldendict-ng submodule, pinned at a release tag, never edited.
-- `patches/` — the only deviations from the pinned source (4 patches: dsl svg-drop, android home,
-  fts wildcard cap, fts sliced build). Keep it small; `docs/ENGINE.md` enumerates them.
+- `patches/` — the only deviations from the pinned source (6 patches: dsl svg-drop, android home,
+  fts wildcard cap, fts sliced build, iconv bounded retries, stardict bword cross-refs). Keep it
+  small; `docs/ENGINE.md` enumerates them.
 - `carve/` — the `gd_*` C boundary (`goldendict.h`, `gd_boundary.cc`) + selected engine sources
   compiled once as an object library, shared by the Qt app and the CI smoke tool.
 - `app/` — the Qt app (QML + WebView, Android) that consumes the carve in-process.
