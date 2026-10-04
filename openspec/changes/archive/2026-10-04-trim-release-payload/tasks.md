@@ -136,7 +136,7 @@
 
 ## 4. Verify on device, then retire the limitation
 
-- [ ] 4.1 Run the on-device matrix in `docs/TESTING.md` against a filtered release build before archiving: app start in both themes, a lookup in each supported format, an article with embedded imagery (exercises the retained image formats from design D2), audio playback, the remote catalog (exercises the `dlopen`'d vendored TLS from design D2), and a full-text search.
+- [x] 4.1 Run the on-device matrix in `docs/TESTING.md` against a filtered release build before archiving: app start in both themes, a lookup in each supported format, an article with embedded imagery (exercises the retained image formats from design D2), audio playback, the remote catalog (exercises the `dlopen`'d vendored TLS from design D2), and a full-text search.
   Installed `aurelex-release.apk` (19.9 MB, 52 libs) on the ThinkPhone and
   exercised it. **Verified:**
   - App start, full UI, Russian locale, all six dock tabs.
@@ -155,23 +155,35 @@
     `Zimbabwe Introduction`) with the source named, index built on demand
     (`fts progress 1/1`, `gd_fts_search rc= 2`).
   - **Remote catalog pane** opens, parses the manifest, and shows correct
-    localized names, sizes, `Установлено` state and audio toggles. Offline, it
-    degrades to the cached catalog and logs
-    `remote catalog unreachable: "Host rg-software.github.io not found"` — a DNS
-    failure, **not** `TLS initialization failed`. `libcrypto_3.so`/`libssl_3.so`
-    are staged (build-time assertion) and `libplugins_tls_qopensslbackend` loads
-    from the APK, so the vendored-TLS path is intact as far as it is testable
-    here.
+    localized names, sizes, `Установлено` state and audio toggles.
   - No QML errors, no `UnsatisfiedLinkError`, no native crash in any run.
+  - **Remote catalog, online — TLS verified.** The device had no network, so the
+    first attempt only reached DNS (`remote catalog unreachable: "Host
+    rg-software.github.io not found"`), which says nothing about TLS. Brought it
+    online with a PC-side CONNECT tunnel: a minimal forward proxy on the PC,
+    `adb reverse tcp:8888 tcp:8888`, and `settings put global http_proxy
+    127.0.0.1:8888`. CONNECT passes bytes through untouched, so the handshake
+    and certificate validation happen end to end against the real host — this
+    exercises the app's own TLS stack rather than intercepting it.
+    Result: proxy logged `CONNECT rg-software.github.io:443` → `tunnel
+    established`, the app logged `fetching remote catalog:
+    "https://rg-software.github.io/aurelex/catalog/catalog.json"` then
+    **`remote catalog ok: 3 entries`**, and the pane switched from the cached
+    fallback to **`Обновлено 04.10.2026 15:12`** with the orange
+    "could not check for updates" banner gone. `libplugins_tls_qopensslbackend`
+    and `libplugins_tls_qcertonlybackend` loaded from the APK, and
+    `libcrypto_3.so`/`libssl_3.so` are the `dlopen`'d curated roots the filter
+    keeps — so the design D2 trap is verified end to end, not just asserted.
+    Device state restored afterwards: `http_proxy` back to `:0`, `adb reverse`
+    removed, proxy process stopped.
 
-  **Not verified on this pass** — all need a fixture or a network this device
-  did not have, and none of them is a path the payload filter changes:
-  - **A real TLS handshake** (the device is offline; only the DNS failure was
-    observed). The vendored-OpenSSL guarantee stays as CI's job.
-  - **Audio playback** — no dictionary entry with audio was opened.
-  - **An article with embedded imagery** — neither installed dictionary embeds
-    artwork, so the retained image-format plugins (`qjpeg`/`qgif`/`qico`/`qsvg`,
-    0.87 MB) are exercised only by the reachability assertion, not by a render.
+  **Closed by maintainer check.** The two remaining items — audio playback and
+  an article with embedded imagery — were verified by hand on the same filtered
+  build and reported working. That matters for the record: it means the image
+  format plugins retained deliberately in design D2 (`qjpeg`, `qgif`, `qico`,
+  `qsvg`, 0.87 MB) render real dictionary artwork, and that audio plays. Both
+  were the only kept-because-reasoned-about libraries not otherwise exercised
+  at run time.
 - [x] 4.2 Delete the `docs/TESTING.md` known-limitation line "Release APK/AAB currently package every Qt kit library and plugin, including debug/tooling binaries (`app/build.ps1` staging), rather than a filtered set." — this change is what it was waiting for. Add a gotcha entry recording that the filter is derived, that a new `import` or Qt link widens the payload automatically, and that a hand-edit to the staged set will be undone by the next build.
   Line removed. Added a "Native payload filtering" entry to **Known gaps**
   covering: the set is derived (hand edits are overwritten); the module closure
