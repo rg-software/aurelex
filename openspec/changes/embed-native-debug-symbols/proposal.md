@@ -33,11 +33,12 @@ therefore unverified today, and the release pipeline asserts neither.
   artifact was left unstripped, and fails the release when either is untrue, so a
   silently symbol-less AAB cannot be published again.
 - Publish the symbols where a human can reach them: attach the per-ABI symbols
-  archive to the GitHub release and document the one manual Play Console upload.
-  The Play Developer API v3 exposes no native-symbols method (its `edits`
-  resources are `apks`, `bundles`, `countryavailability`, `deobfuscationfiles`,
-  `details`, `expansionfiles`, `images`, `listings`, `testers`, `tracks`), so this
-  step cannot be automated the way the AAB upload is.
+  archive to the GitHub release and document the manual Play Console upload as
+  the fallback. Play associates symbol files included in a bundle by standard
+  Gradle tasks automatically, so the release path itself needs no extra call; and
+  the API's native-symbols method (`edits.deobfuscationfiles.upload` with
+  `deobfuscationFileType=nativeCode`) is scoped to `apks/{apkVersionCode}` — an
+  APK the edit uploaded — which a bundle-based release does not produce.
 - Record the symbol-retention setting, its verification and the upload recipe in
   `docs/SIGNING.md`, next to the existing Play publishing policy.
 

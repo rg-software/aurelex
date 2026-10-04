@@ -97,7 +97,7 @@ which is what a tombstone trace needs. The libraries inside `base/` are shipped
 | | |
 | --- | --- |
 | Produced by | AGP, from `ndk.debugSymbolLevel 'SYMBOL_TABLE'` + `ndkPath` in the generated `build.gradle` (both applied by `app/build.ps1`) |
-| Travels in | the release AAB, so Play ingests the symbols when the AAB is published |
+| Travels in | the release AAB, so Play associates the symbols with the build automatically — no upload step |
 | Also attached to | the GitHub release as `aurelex-native-debug-symbols-<versionCode>-<abi>.zip`, containing `<abi>/<library>.so` |
 | Verified by | the release workflow asserts both halves (symbols present per ABI, shipped libs stripped) and refuses to publish otherwise |
 
@@ -112,18 +112,37 @@ on the Gradle flag.
 
 ### Uploading symbols to Play by hand
 
-The Play Developer API v3 has **no native-symbols method** — its `edits`
-resources are `apks`, `bundles`, `countryavailability`, `deobfuscationfiles`,
-`details`, `expansionfiles`, `images`, `listings`, `testers`, `tracks`. The AAB
-upload is automated; the symbols upload is deliberately manual:
+Normally you don't. Play associates deobfuscation and symbol files **included in
+the app bundle by standard Gradle tasks** with the project and uses them "without
+additional work on your part", so an AAB built by this pipeline arrives with its
+symbols already attached. The manual route below is the fallback: a release whose
+bundle somehow lost them, or a re-upload after the fact.
 
 1. Take `aurelex-native-debug-symbols-<versionCode>-<abi>.zip` from the GitHub
    release (the same run as the AAB).
 2. Play Console → the app → **Release** → pick the release whose versionCode
    matches the file name → **App bundle explorer** → the version → **Downloads /
-   Native debug symbols** → upload the zip for that ABI.
+   Native debug symbols** → upload the zip for that ABI. (In the release-review
+   screen the same upload lives in the artifacts table's "Assets" row.)
 3. Confirm versionCode **and** ABI match before uploading — a symbol file that
    does not belong to the build Play has cannot resolve any of its crash frames.
+   The zip must hold the ABI folders at its root (`arm64-v8a/libaurelex_arm64-v8a.so`),
+   which is what the workflow produces.
+
+**On the API:** the Play Developer API v3 *does* accept native symbols —
+`edits.deobfuscationfiles.upload` with `deobfuscationFileType=nativeCode` — but
+its URL is scoped to `apks/{apkVersionCode}`, i.e. it attaches a file to an APK
+that the edit uploaded. This project publishes a **bundle**, so there is no such
+APK in the edit to attach to; automating that call is not a shape the API offers
+for bundle releases. Hence: automatic for the bundle, manual in the Console for
+the fallback.
+
+**Which file to use:** not the one Google's docs point at. For APK builds AGP
+also writes `build/outputs/native-debug-symbols/release/native-debug-symbols.zip`,
+but its members are named `<library>.so.sym` (`arm64-v8a/libaurelex_arm64-v8a.so.sym`),
+while the Console's documented layout is `<abi>/<library>.so`. The workflow
+therefore assembles its own archive from the bundle's `.sym` entries, renaming
+`.sym` → `.so`; the bytes are identical.
 
 Symbols only help crashes Play has already collected, so this matters mostly
 *after* a release goes out — the GitHub release asset is the copy to reach for.

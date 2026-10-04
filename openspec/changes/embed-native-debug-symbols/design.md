@@ -52,11 +52,14 @@ all verified against the 2026-09-30 local release build and the tooling:
   libraries arrive already stripped from `androiddeployqt`, so they can
   contribute a symbols entry with little content but should not block one.
 
-- The Play Developer API v3 has no native-symbols method. The `edits` resources
-  are `apks`, `bundles`, `countryavailability`, `deobfuscationfiles`, `details`,
-  `expansionfiles`, `images`, `listings`, `testers`, `tracks`. Native symbols go
-  up through the Play Console, so the pipeline's job ends at "published and
-  documented", not "uploaded".
+- Play associates deobfuscation and symbol files included in a bundle by standard
+  Gradle tasks with the build automatically ("without additional work on your
+  part"), so the symbols travel by riding inside the AAB. The Developer API v3
+  does expose a native-symbols upload — `edits.deobfuscationfiles.upload` with
+  `deobfuscationFileType=nativeCode` — but it is scoped to `apks/{apkVersionCode}`,
+  i.e. an APK the edit uploaded, and this project publishes a bundle, so there is
+  no such APK to attach to. Hence "published and documented": the AAB carries the
+  symbols, and the Console upload stays a documented manual fallback.
 
 - AGP is pinned at 7.4.1 with `compileSdk 36` worked around
   (`android.suppressUnsupportedCompileSdk`, an `aapt2FromMavenOverride` to
@@ -78,8 +81,9 @@ all verified against the 2026-09-30 local release build and the tooling:
 
 **Non-Goals:**
 
-- Automating the Play Console upload. The API does not expose it; pretending
-  otherwise would produce a script that cannot work.
+- Automating the Console fallback upload. The API *has* a native-symbols method,
+  but it attaches to an uploaded APK, which a bundle release does not produce; a
+  script built on it would not work for this pipeline.
 - Symbolication of *Java* crashes, which Play already handles, and of
   obfuscated code (the release build sets `minifyEnabled false`).
 - Adding a crash-reporting SDK, or changing which crash channel is used.

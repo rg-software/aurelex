@@ -88,6 +88,14 @@
 ## 3. Document the manual Play step
 
 - [x] 3.1 Add a section to `docs/SIGNING.md`: what the symbols are for, which file to upload, that the target is the Play Console's per-ABI native debug symbols upload, and that the Play Developer API has no native-symbols method so this step is deliberately manual.
+  Corrected while writing it: the API *does* have one
+  (`edits.deobfuscationfiles.upload` with `deobfuscationFileType=nativeCode`),
+  but it is scoped to `apks/{apkVersionCode}`, an APK the edit uploaded, and
+  this project publishes a bundle — so there is nothing to attach it to. The docs
+  now state that, plus what Play does automatically (files included in a bundle
+  by standard Gradle tasks are associated "without additional work"), and why the
+  workflow assembles its own `.so`-named archive instead of using AGP's
+  `.so.sym`-named `native-debug-symbols.zip`.
 - [x] 3.2 Note in the same section that native symbols are crash-channel-agnostic (they make Play vitals symbolicate native crashes), so this is not a step toward adopting a crash-reporting SDK.
 - [x] 3.3 Record the symbol archive's retention rule (keep at least as long as the Play listing can serve crash reports for that versionCode) so a future cleanup does not drop symbols Play still needs.
 

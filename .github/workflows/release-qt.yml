@@ -503,10 +503,13 @@ jobs:
               throw "release artifacts do not satisfy the native debug symbols contract; refusing to publish"
           }
 
-      # The symbols are already inside the AAB (Play ingests them on upload);
-      # this archive is the human-reachable copy -- the Play Console's
-      # native-debug-symbols upload is manual (the Play Developer API v3 has no
-      # native-symbols method), so the file has to outlive the CI run. Kept
+      # The symbols are already inside the AAB, and Play associates files included
+      # in a bundle by standard Gradle tasks automatically -- so this archive is
+      # the human-reachable copy, not the delivery mechanism. It exists because
+      # the Console fallback is manual: the API's native-symbols call
+      # (edits.deobfuscationfiles.upload, deobfuscationFileType=nativeCode) is
+      # scoped to apks/{apkVersionCode}, i.e. an APK the edit uploaded, and this
+      # project publishes a bundle, so there is no such APK to attach to. Kept
       # per-ABI and named with the versionCode so an upload cannot be paired with
       # the wrong Play listing.
       - name: Package native debug symbols archive
