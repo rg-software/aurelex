@@ -516,8 +516,8 @@ cosmetic preference, not a defect.
 | 47b | After dismissing onboarding → force-stop and relaunch | App starts on **Search** (returning-user routing is unchanged) | ✅ (same device: `content-desc="Search" checked="true"`, overlay absent) |
 | 48 | After onboarding, no dicts loaded | Empty search state: guidance to add dictionaries | ✅ |
 | 49 | Tagged release build | Signed APK + AAB produced on a `vX.Y.Z` tag push and attached to the GitHub release | ✅ (v0.2.5 shipped both assets) |
-| 50 | Tagged release build | Release AAB contains native debug symbols for every shipped ABI, and the libraries it ships are stripped — asserted by CI, which refuses to publish otherwise | ⬜ (verified on the local `-Bundle` build; first tag to exercise the assertion pending) |
-| 51 | Release run in GitHub Actions | The "Assert native debug symbols" step reports `OK  AAB symbols …` and "all N shipped libraries are stripped"; a per-ABI `aurelex-native-debug-symbols-<versionCode>-<abi>.zip` is attached to the release | ⬜ (see 50) |
+| 50 | Tagged release build | Release AAB contains native debug symbols for every shipped ABI, and the libraries it ships are stripped — asserted by CI, which refuses to publish otherwise | ✅ (dry-run `workflow_dispatch` run 37178228115: `OK  AAB symbols … (2 file(s), 15.8 MB)` + `all 254 shipped libraries are stripped`; the `Unable to strip` line is gone from the build log) |
+| 51 | Release run in GitHub Actions | The "Assert native debug symbols" step reports `OK  AAB symbols …` and "all N shipped libraries are stripped"; a per-ABI `aurelex-native-debug-symbols-<versionCode>-<abi>.zip` is attached to the release | ⬜ (produced + uploaded in the same run; the *attachment* only happens on a tag push, so it needs the first real release) |
 
 ### Verifying native symbols locally
 

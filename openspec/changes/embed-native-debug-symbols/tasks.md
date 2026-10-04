@@ -64,11 +64,26 @@
   from the AAB, uploads it as the `aurelex-native-debug-symbols` workflow
   artifact, and adds it to the `Create GitHub release` step's `files`.
 - [ ] 2.4 Confirm the workflow still publishes to internal testing on a throwaway tag, and that the failure path leaves the signed AAB/APK attached (the existing "publish failure does not lose the build" behavior).
-  **Needs a real CI run — not done here.** Structurally the behaviour is
-  preserved: `Create GitHub release` still precedes `Publish AAB to Play`, so a
-  Play failure cannot cost the artifacts, and the new assertion runs *before*
-  both. Publishing to internal testing consumes a versionCode on the real Play
-  listing, so this was left to the maintainer rather than run unilaterally.
+  **Dry-run half done — run 37178228115** (`workflow_dispatch` on `914620d`, exit 0,
+  signed with the release keystore). Everything except the Play step is now proven
+  on the runner: `Wrote complete build.gradle (carve-subset fresh tree)` means CI
+  took the `New-BaseBuildGradle` path and got `ndkPath` from the here-string;
+  `:mergeReleaseNativeDebugMetadata` runs instead of `NO-SOURCE`; **`Unable to
+  strip` appears 0 times in the whole run** (it was there before, for all 140
+  libraries); the assertion printed `OK  AAB symbols
+  BUNDLE-METADATA/com.android.tools.build.debugsymbols/arm64-v8a/ (2 file(s),
+  15.8 MB)` and `all 254 shipped libraries are stripped`; the packaging step
+  produced `aurelex-native-debug-symbols-unversioned-arm64-v8a.zip` and the
+  `aurelex-native-debug-symbols` artifact was uploaded. Downloading that artifact
+  confirms the release-asset format: `arm64-v8a/libaurelex_arm64-v8a.so` with
+  44,195 symbols including `gd_scan_dicts`.
+
+  Still open: the Play internal-testing publish itself, and that the release keeps
+  its assets if it fails. Those need a real tag, which burns a versionCode on the
+  Play listing (latest release v0.3.3 → 303, so the tag must encode higher).
+  Structurally the behaviour is unchanged — `Create GitHub release` still precedes
+  `Publish AAB to Play`, and the new assertions run before both — but that is
+  reasoning, not a green run.
 
 ## 3. Document the manual Play step
 
