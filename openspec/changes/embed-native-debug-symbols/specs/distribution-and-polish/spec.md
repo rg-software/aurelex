@@ -45,8 +45,7 @@ documented.
 #### Scenario: Release AAB carries native debug symbols
 - **WHEN** a release AAB is built
 - **THEN** it contains a native debug symbols entry for each ABI whose libraries
-  it ships, and the libraries in the installable part of the bundle remain
-  stripped
+  it ships, and the libraries in the installable part of the bundle are stripped
 
 #### Scenario: A symbol-less artifact fails the release
 - **WHEN** the built release AAB does not contain the native debug symbols for a

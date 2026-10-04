@@ -8,6 +8,12 @@ for diagnosis. The intent was already implemented once (`c1db358 feat(build): em
 native symbol tables in release AAB`) but does not work with the current toolchain,
 and nothing verifies it.
 
+The same build also logs `Unable to strip the following libraries, packaging them
+as they are: libaurelex_arm64-v8a.so`, so the shipped library is not stripped
+either. Both halves of the native-debug story — "symbols Play can use" and
+"libraries users download" — are therefore unverified today, and the release
+pipeline asserts neither.
+
 ## What Changes
 
 - Make the release AAB actually carry `BUNDLE/native-debug-symbols/<abi>/`. The

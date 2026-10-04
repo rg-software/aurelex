@@ -24,6 +24,22 @@ all verified against the 2026-09-30 local release build and the tooling:
   keeps `.symtab`, `.strtab` and `.debug_info` (it is unstripped); Qt's own
   libraries arrive already stripped from `androiddeployqt`, so they can
   contribute a symbols entry with little content but should not block one.
+- **AGP also declines to strip our library.** A debug build logs, from the
+  `:stripDebugDebugSymbols` task:
+
+  ```
+  Unable to strip the following libraries, packaging them as they are:
+  libaurelex_arm64-v8a.so
+  ```
+
+  So the library reaches `base/` unstripped, and there is still no
+  `BUNDLE/native-debug-symbols/`. That makes the cause **two independent
+  possibilities**, not one: either the `debugSymbolLevel` knob does not reach the
+  bundle task in 7.4.1 (D1), or AGP's symbol extraction needs a relationship
+  between the stripped library it ships and an unstripped original that this
+  library's pass-through breaks. The first task in `tasks.md` exists to tell them
+  apart before anything is written, because the fix differs: D1's
+  `keepDebugSymbols` switch is only correct under the first reading.
 
 - The Play Developer API v3 has no native-symbols method. The `edits` resources
   are `apks`, `bundles`, `countryavailability`, `deobfuscationfiles`, `details`,
@@ -109,12 +125,19 @@ they are a prerequisite for *any* native-crash diagnosis.
 
 ## Risks / Trade-offs
 
-- **AGP 7.4.1 may not honour `keepDebugSymbols` for bundles either.** → The
-  first task is a throwaway release build that prints the AAB's top-level entries;
-  if the symbols entry still does not appear, the fallback is to run `llvm-strip`
-  ourselves from `llvm-objcopy --only-keep-debug` in the build script and zip the
-  result, which is uglier but fully under our control. The spec does not change
-  either way.
+- **AGP may not honour `keepDebugSymbols` for bundles either.** → The first task
+  is a throwaway release build that prints the AAB's top-level entries and the
+  `:stripDebugDebugSymbols` log; if the symbols entry still does not appear, the
+  fallback is to run `llvm-strip` ourselves from `llvm-objcopy --only-keep-debug`
+  in the build script and zip the result, which is uglier but fully under our
+  control. The spec does not change either way.
+- **Our library ships unstripped into the AAB.** The strip task declines it, so
+  `base/lib/arm64-v8a/libaurelex_arm64-v8a.so` is the ~38 MB unstripped file. That
+  is a download-size regression for every user and is invisible in the artifact's
+  compressed size. → Treat "is the library actually stripped in the AAB" as an
+  explicit assertion alongside the symbols assertion, and if AGP cannot strip it,
+  strip it in the build script before packaging rather than shipping the
+  pass-through.
 - **A larger AAB.** The symbols entry for a ~38 MB engine library is on the order
   of a few MB, uncompressed in the bundle and not part of what users download.
   → Watch the AAB size in the release log; the download size is unaffected
