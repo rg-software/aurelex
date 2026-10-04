@@ -659,6 +659,7 @@ jobs:
           $versionCode = if ($env:AURELEX_VERSION_CODE) { $env:AURELEX_VERSION_CODE } else { "unversioned" }
           $outDir = Join-Path $env:RUNNER_TEMP "native-debug-symbols"
           New-Item -ItemType Directory -Force -Path $outDir | Out-Null
+          $archives = @()
           $zip = [System.IO.Compression.ZipFile]::OpenRead($env:AAB_PATH)
           try {
               foreach ($abi in $abis) {
@@ -680,10 +681,20 @@ jobs:
                   # upload expects <abi>/<library>.so, and compressing the
                   # contents would flatten the ABI away.
                   Compress-Archive -Path $stage -DestinationPath $archive
+                  $archives += $archive
                   Write-Host "symbols archive: $archive ($([math]::Round((Get-Item $archive).Length / 1MB, 1)) MB, $count file(s))"
               }
           } finally { $zip.Dispose() }
+          # Two outputs, on purpose. SYMBOLS_DIR is the staging directory, which is
+          # what upload-artifact wants (it expands directories itself). The release
+          # step gets SYMBOLS_FILES -- the archive paths themselves -- because
+          # softprops/action-gh-release does NOT expand a bare directory in its
+          # `files:` list: v0.3.4 shipped its APK and AAB as release assets and
+          # silently dropped the symbols, because the only entry was a directory.
           "SYMBOLS_DIR=$outDir" >> $env:GITHUB_OUTPUT
+          "SYMBOLS_FILES<<AURELEX_SYMBOLS_EOF" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          $archives | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "AURELEX_SYMBOLS_EOF" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
       - name: Upload release artifacts
         uses: actions/upload-artifact@v4
@@ -709,7 +720,7 @@ jobs:
           files: |
             ${{ steps.artifacts.outputs.APK_PATH }}
             ${{ steps.artifacts.outputs.AAB_PATH }}
-            ${{ steps.symbols.outputs.SYMBOLS_DIR }}
+            ${{ steps.symbols.outputs.SYMBOLS_FILES }}
           generate_release_notes: true
 
       # Runs only for a well-formed release tag (see the version step's gate) and
