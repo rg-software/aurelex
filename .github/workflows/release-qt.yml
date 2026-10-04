@@ -565,22 +565,38 @@ jobs:
                       if ($entry.Length -le 0) { continue }
                       if ($entry.FullName -match '^(?:base/)?lib/([^/]+)/([^/]+\.so)$') {
                           $abi = $Matches[1]; $file = $Matches[2]
-                          if (-not $totals.ContainsKey($abi)) { $totals[$abi] = 0L }
-                          $totals[$abi] += $entry.Length
+                          # Dedupe by library, not by zip entry: the AAB
+                          # (base/lib/<abi>/) and the APK (lib/<abi>/) carry the
+                          # same libraries, so summing every match counted the
+                          # payload twice and reported 97.38 MB against a 52 MB
+                          # ceiling for a set that is really 48.69 MB. Keyed per
+                          # abi+file, so a library present in both artifacts is
+                          # measured once — which is what "what the user
+                          # downloads" means.
+                          $key = "$abi/$file"
+                          if (-not $totals.ContainsKey($key)) { $totals[$key] = 0L }
+                          $totals[$key] = [Math]::Max($totals[$key], $entry.Length)
                           [void]$shippedNames.Add($file)
                       }
                   }
               } finally { $zip.Dispose() }
           }
-          foreach ($abi in $totals.Keys) {
-              $mb = [math]::Round($totals[$abi] / 1MB, 2)
-              if ($totals[$abi] -gt ($payloadCeilingMb * 1MB)) {
+          # Per-ABI totals over the deduplicated library set.
+          $perAbi = @{}
+          foreach ($key in $totals.Keys) {
+              $abi = $key.Split('/')[0]
+              if (-not $perAbi.ContainsKey($abi)) { $perAbi[$abi] = 0L }
+              $perAbi[$abi] += $totals[$key]
+          }
+          foreach ($abi in $perAbi.Keys) {
+              $mb = [math]::Round($perAbi[$abi] / 1MB, 2)
+              if ($perAbi[$abi] -gt ($payloadCeilingMb * 1MB)) {
                   $failures += "payload budget: $abi ships $mb MB of native libraries, over the $payloadCeilingMb MB ceiling -- an unreachable Qt module is probably being staged again"
               } else {
                   Write-Host "  OK  payload       $abi $mb MB (ceiling $payloadCeilingMb MB)"
               }
           }
-          if (-not $totals.Count) { $failures += "payload budget: no lib/<abi>/*.so entries found in either artifact" }
+          if (-not $perAbi.Count) { $failures += "payload budget: no lib/<abi>/*.so entries found in either artifact" }
 
           # Reachability: the shipped names must equal the derived set exactly.
           # A library the app needs but the derivation missed would be caught by
@@ -614,9 +630,9 @@ jobs:
               Write-Host "all $($extracted.Count) shipped libraries are stripped"
           } else {
               Write-Host ""
-              Write-Host "Native symbol / strip verification failed:"
+              Write-Host "Native symbol, strip and payload verification failed:"
               $failures | ForEach-Object { Write-Host "FAIL: $_" -ForegroundColor Red }
-              throw "release artifacts do not satisfy the native debug symbols contract; refusing to publish"
+              throw "release artifacts failed the native debug symbols / stripped-library / native-payload checks; refusing to publish"
           }
 
       # The symbols are already inside the AAB, and Play associates files included
