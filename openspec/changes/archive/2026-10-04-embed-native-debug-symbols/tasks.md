@@ -63,9 +63,9 @@
   `<abi>/<library>.so`, `unversioned` when there is no tag-derived versionCode)
   from the AAB, uploads it as the `aurelex-native-debug-symbols` workflow
   artifact, and adds it to the `Create GitHub release` step's `files`.
-- [ ] 2.5 Confirm the workflow still publishes to internal testing on a throwaway tag, and that the failure path leaves the signed AAB/APK attached (the existing "publish failure does not lose the build" behavior).
-  **Dry-run half done — run 37178228115** (`workflow_dispatch` on `914620d`, exit 0,
-  signed with the release keystore). Everything except the Play step is now proven
+- [x] 2.5 Confirm the workflow still publishes to internal testing on a throwaway tag, and that the failure path leaves the signed AAB/APK attached (the existing "publish failure does not lose the build" behavior).
+  **Dry-run half — run 37178228115** (`workflow_dispatch` on `914620d`, exit 0,
+  signed with the release keystore). Everything except the Play step was proven
   on the runner: `Wrote complete build.gradle (carve-subset fresh tree)` means CI
   took the `New-BaseBuildGradle` path and got `ndkPath` from the here-string;
   `:mergeReleaseNativeDebugMetadata` runs instead of `NO-SOURCE`; **`Unable to
@@ -78,12 +78,27 @@
   confirms the release-asset format: `arm64-v8a/libaurelex_arm64-v8a.so` with
   44,195 symbols including `gd_scan_dicts`.
 
-  Still open: the Play internal-testing publish itself, and that the release keeps
-  its assets if it fails. Those need a real tag, which burns a versionCode on the
-  Play listing (latest release v0.3.3 → 303, so the tag must encode higher).
-  Structurally the behaviour is unchanged — `Create GitHub release` still precedes
-  `Publish AAB to Play`, and the new assertions run before both — but that is
-  reasoning, not a green run.
+  **Publish half — tag `v0.3.4`, run 37185959397, exit 0.** The tag was not
+  throwaway in the end: it is a real shipped release, so 304 is spent on the
+  Play listing and the next tag must encode higher (`v0.3.5` → 305). The Play
+  Developer API now reads back `tracks/internal` as `name='0.3.4'
+  versionCodes=['304'] status=completed`, and the GitHub release carries all
+  three assets with the versionCode in the symbols file name:
+  `aurelex-release.aab` (24,926,557 B), `aurelex-release.apk` (20,827,447 B)
+  and `aurelex-native-debug-symbols-304-arm64-v8a.zip` (4,308,407 B) — the
+  naming D4 asked for, on a real tag rather than a dry run.
+
+  **What the tag also proved about the failure path, and what it did not.** The
+  assertion gate is real: of the three `v0.3.4` runs, `37184713057` failed at
+  *Bootstrap vcpkg* and `37185299795` failed at *Assert native debug symbols*
+  — both **before** artifact upload and release creation, so a symbol-less AAB
+  demonstrably never reached a release. But both failures were early, so no run
+  ever failed *after* `Create GitHub release`, and "a Play-publish failure does
+  not lose the build" remains a structural claim (`Create GitHub release` still
+  precedes `Publish AAB to Play`, and both assertions run before both) rather
+  than an observed one. Provoking it would mean deliberately breaking
+  `PLAY_SERVICE_ACCOUNT_JSON` in a throwaway run; recorded here as the one
+  unobserved edge rather than papered over.
 
 ## 3. Document the manual Play step
 
