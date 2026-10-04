@@ -121,6 +121,11 @@ class EngineController : public QObject
     Q_PROPERTY(QString catalogUpdated READ catalogUpdated NOTIFY catalogChanged)
     Q_PROPERTY(QString catalogLastFetched READ catalogLastFetched NOTIFY catalogChanged)
     Q_PROPERTY(QString remoteCatalogUrl READ remoteCatalogUrl CONSTANT)
+    Q_PROPERTY(QString uiLanguage READ uiLanguage WRITE setUiLanguage NOTIFY uiLanguageChanged)
+
+public:
+    Q_INVOKABLE void setUiLanguage(const QString &lang);
+    QString uiLanguage() const;
 
     // ---------- Download progress (read from shared_prefs/download.xml) ----------
     // Deliberately SEPARATE from the staging/scanning/indexing properties
@@ -378,6 +383,8 @@ public:
     // app-private storage and then scanned + indexed (a one-off import).
     Q_INVOKABLE void addDictionaryFolder();
 
+    Q_PROPERTY(QString uiLanguage READ uiLanguage WRITE setUiLanguage NOTIFY uiLanguageChanged)
+
     // ---------- Remote catalog API (QML-facing) ----------
     // Fetch the manifest now. Never called automatically at startup; the
     // Dictionaries pane calls it when the user asks for the catalog and on an
@@ -484,6 +491,7 @@ signals:
     // together, and a download updates them several times a second.
     void catalogChanged();
     void downloadChanged();
+    void uiLanguageChanged();
 
 private:
     void runScan();    void autoIndexMissing();
@@ -697,6 +705,7 @@ private:
     // across the hand-off so a batch that finishes mid-chain is not missed, and
     // the no-blink rule holds (processingActive never dips between them).
     bool m_stagedRescanPending = false;
+    QString m_uiLanguage = QStringLiteral("en");
 
     // Android system dark-mode (Qt 6.6 QPA doesn't expose it); sampled via JNI
     // on the poller tick. Recomputes and applies the effective dark mode.

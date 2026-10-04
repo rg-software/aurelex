@@ -59,6 +59,19 @@ int main(int argc, char *argv[])
         qInfo().nospace() << "[aurelex] no matching translation catalog for "
                           << primaryLocale << "; using English base strings";
 
+    QString effectiveUiLanguage = QStringLiteral("en");
+    if (!loadedLocale.isEmpty()) {
+        effectiveUiLanguage = loadedLocale;
+        if (effectiveUiLanguage.contains(QLatin1Char('_')))
+            effectiveUiLanguage = effectiveUiLanguage.section(QLatin1Char('_'), 0, 0);
+    } else if (!primaryLocale.isEmpty()) {
+        QString candidate = primaryLocale;
+        if (candidate.contains(QLatin1Char('-')))
+            candidate = candidate.section(QLatin1Char('-'), 0, 0);
+        if (candidate == QStringLiteral("ru") || candidate == QStringLiteral("ja"))
+            effectiveUiLanguage = candidate;
+    }
+
     // Register the Material Icons font (bundled via qt_add_resources("fonts") in
     // CMakeLists.txt) so QML can render
     // glyphs with the "Material Icons" family. See qt-material-ui change design D6.
@@ -93,6 +106,7 @@ int main(int argc, char *argv[])
 
     EngineController engine;
     engine.initialize(home, staged);
+    engine.setUiLanguage(effectiveUiLanguage);
 
     QQmlApplicationEngine qengine;
     qengine.rootContext()->setContextProperty("engine", &engine);

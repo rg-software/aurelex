@@ -3159,9 +3159,14 @@ void EngineController::refreshCatalogEntries()
         // Android uiLanguages() also lists the APK's resource locales, so passing
         // the whole list would let a device whose top language the manifest has
         // no name for fall through to a ru/ja name.
-        const QStringList uiLanguages = QLocale().uiLanguages();
-        const QStringList primaryUiLanguage = uiLanguages.isEmpty()
-            ? QStringList{} : QStringList{ uiLanguages.first() };
+        QStringList primaryUiLanguage;
+        if (!m_uiLanguage.isEmpty()) {
+            primaryUiLanguage = { m_uiLanguage };
+        } else {
+            const QStringList uiLanguages = QLocale().uiLanguages();
+            primaryUiLanguage = uiLanguages.isEmpty()
+                ? QStringList{} : QStringList{ uiLanguages.first() };
+        }
 
         for (const RemoteCatalog::Entry &e : m_manifest.entries) {
             QVariantMap m;
@@ -4133,6 +4138,20 @@ bool EngineController::clipboardHasText()
 
 
 // ---------- Folder-scoped storage (SAF) ----------
+
+void EngineController::setUiLanguage(const QString &lang)
+{
+    if (m_uiLanguage == lang)
+        return;
+    m_uiLanguage = lang;
+    refreshCatalogEntries();
+    emit uiLanguageChanged();
+}
+
+QString EngineController::uiLanguage() const
+{
+    return m_uiLanguage;
+}
 
 void EngineController::addDictionaryFolder()
 {
