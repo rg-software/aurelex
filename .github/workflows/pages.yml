@@ -1,12 +1,13 @@
-name: publish catalog (GitHub Pages)
+name: publish site (GitHub Pages)
 
-# Deploys the COMMITTED catalog/catalog.json to GitHub Pages.
+# Deploys the COMMITTED catalog/catalog.json, plus the static privacy policy
+# page, to GitHub Pages.
 #
-# The document is generated locally by scripts/build-catalog.py, because
-# generating it requires hashing the multi-GB dictionary files, which are not in
-# the repository. CI therefore VALIDATES and SERVES the committed document; it
-# does not rebuild it. The dictionary files themselves are release assets (see
-# scripts/publish-catalog.ps1 and docs/REMOTE-CATALOG.md).
+# The catalog document is generated locally by scripts/build-catalog.py,
+# because generating it requires hashing the multi-GB dictionary files, which
+# are not in the repository. CI therefore VALIDATES and SERVES the committed
+# document; it does not rebuild it. The dictionary files themselves are release
+# assets (see scripts/publish-catalog.ps1 and docs/REMOTE-CATALOG.md).
 
 on:
   push:
@@ -14,6 +15,7 @@ on:
       - main
     paths:
       - "catalog/catalog.json"
+      - "docs/privacy.html"
       - ".github/workflows/pages.yml"
   workflow_dispatch:
 
@@ -47,10 +49,14 @@ jobs:
       - name: Run the catalog tool tests
         run: python -m unittest discover -s scripts/tests -p "test_build_catalog.py"
 
-      - name: Stage the Pages site (catalog document only)
+      - name: Stage the Pages site (catalog document + privacy policy)
         run: |
           mkdir -p _site/catalog
           cp catalog/catalog.json _site/catalog/catalog.json
+          # The privacy policy is the URL the Play Console requires, so it is
+          # served as a directory index (/privacy/) rather than a file path.
+          mkdir -p _site/privacy
+          cp docs/privacy.html _site/privacy/index.html
 
       - name: Configure Pages
         uses: actions/configure-pages@v5

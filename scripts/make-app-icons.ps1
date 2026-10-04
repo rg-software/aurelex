@@ -12,10 +12,16 @@
 #       adaptive-icon foreground (transparent), logo inside the 66/108 safe zone
 #   * app/android/res/mipmap-<dpi>/ic_launcher.png
 #       legacy (pre-API-26) launcher icons, logo on white
-#   * app/android/icon/play-store-icon-512.png
+#   * app/android/store-listing/play-store-icon-512.png
 #       Google Play listing icon, 512x512, flattened on white
-#   * app/android/icon/play-feature-graphic-1024x500.png   (with -FeatureGraphic)
+#   * app/android/store-listing/feature-graphic-1024x500.png   (with -FeatureGraphic)
 #       Google Play feature graphic: gradient background, mark + wordmark + tagline
+#
+# The two store-listing assets are upload fodder, not build inputs: nothing in
+# the Gradle or CMake build reads them. They live with the rest of the listing
+# set (listing.md, screenshots/) because they are one published artifact.
+# app/android/icon/ therefore keeps only the master artwork, which also feeds
+# the launcher icons.
 #
 # Requires ImageMagick 7 (`magick`) on PATH. Re-run after replacing the master.
 
@@ -37,6 +43,7 @@ $ErrorActionPreference = "Stop"
 $RepoRoot = Split-Path -Parent $PSScriptRoot
 $ResDir   = Join-Path $RepoRoot "app/android/res"
 $IconDir  = Join-Path $RepoRoot "app/android/icon"
+$ListDir  = Join-Path $RepoRoot "app/android/store-listing"
 if (-not $Source) { $Source = Join-Path $IconDir "aurelex-icon-1024.png" }
 
 $magickCmd = Get-Command magick -ErrorAction SilentlyContinue
@@ -131,14 +138,14 @@ try {
         Write-Output "  mipmap-$dpi/ic_launcher.png  ($size x $size)"
     }
 
-    $play = Join-Path $IconDir "play-store-icon-512.png"
+    $play = Join-Path $ListDir "play-store-icon-512.png"
     New-Icon -Canvas 512 -ContentLong ([int][Math]::Round($PlayFill * 512)) -Dest $play -Background $Background
-    Write-Output "  icon/play-store-icon-512.png  (512 x 512)"
+    Write-Output "  store-listing/play-store-icon-512.png  (512 x 512)"
 
     if ($FeatureGraphic) {
-        $feature = Join-Path $IconDir "play-feature-graphic-1024x500.png"
+        $feature = Join-Path $ListDir "feature-graphic-1024x500.png"
         New-FeatureGraphic -Dest $feature
-        Write-Output "  icon/play-feature-graphic-1024x500.png  (1024 x 500)"
+        Write-Output "  store-listing/feature-graphic-1024x500.png  (1024 x 500)"
     }
 }
 finally {

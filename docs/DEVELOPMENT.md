@@ -19,8 +19,15 @@ Aurelex. If you are a user, see the top-level `README.md` instead.
   - `REMOTE-CATALOG.md` - the remote catalog's manifest format, hosting, generator workflow, and free-space rules.
   - `KAIKKI-CONVERSION.md` — building DSL dictionaries from kaikki.org extracts.
   - `SIGNING.md` — signing channels, Play/F-Droid split, app identity.
-- `scripts/` — `apply-patches.*`, fixture generators, build helpers, and
-  `kaikki-to-dsl.py` (build DSL dictionaries from kaikki.org Wiktionary extracts).
+  - `privacy.html` — the published privacy policy (source for
+    `https://rg-software.github.io/aurelex/privacy/`, the URL the Play Console
+    requires; `pages.yml` deploys it). The Play listing copy lives in
+    `app/android/store-listing/listing.md`.
+- `scripts/` — `apply-patches.*`, fixture generators, build helpers,
+  `kaikki-to-dsl.py` (build DSL dictionaries from kaikki.org Wiktionary extracts),
+  and the store-asset generators `make-app-icons.ps1` (launcher + Play icon and
+  feature graphic) and `make-store-screenshots.ps1` (device captures → Play
+  screenshots).
 
 ## Working contract (read before changing anything)
 

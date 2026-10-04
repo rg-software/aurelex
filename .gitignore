@@ -56,3 +56,9 @@ docs/DESIGN-v2.md
 .openchamber/
 
 build-app-tests/
+
+# Local credentials — the Play service-account key (PLAY_SERVICE_ACCOUNT_JSON)
+# must never reach the repository; it lives in ~/.play/play-sa.json.
+.play/
+*service-account*.json
+play-sa*.json

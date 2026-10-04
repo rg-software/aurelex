@@ -74,7 +74,7 @@ Everything happens on-device.
 - Two things can touch the network: 1) the remote catalog functionality and 2) remote resources referenced from inside a dictionary article.
 - Google Play build may report crashes to the developer.
 
-See also the [full privacy policy](docs/privacy.html).
+See also the [full privacy policy](https://rg-software.github.io/aurelex/privacy/).
 
 ## Building from source
 
