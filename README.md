@@ -54,6 +54,8 @@ Aurelex online catalog features a selection of dictionaries derived from [Wiktio
 | Japanese (Explanatory) | 111,320 | 0.08% |
 | Russian (Explanatory) | 454,310 | 4.19% |
 
+Other languages and language pairs are planned.
+
 ## Dictionary formats
 
 | Format | Files |
