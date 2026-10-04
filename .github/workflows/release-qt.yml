@@ -279,6 +279,26 @@ jobs:
           Write-Host "release AAB (relative): $aabRel"
           "AAB_REL=$aabRel" >> $env:GITHUB_OUTPUT
 
+      # The Play store listing assets (listing icon, feature graphic, phone
+      # screenshot gallery) are COMMITTED files, not build output: no Gradle or
+      # CMake rule reads them, so nothing else in this workflow looks at them.
+      # Play is therefore the only thing that would reject a malformed set, and
+      # by then the repair is manual and the listing is live. Assert them here,
+      # beside the other pre-publication assertions, so a release cannot ship an
+      # asset set Play would refuse.
+      #
+      # The check reads only the committed bytes and never regenerates an asset,
+      # so unlike scripts/make-store-screenshots.ps1 it needs neither ImageMagick
+      # nor the Montserrat font and runs on a bare runner. The limits live in the
+      # script; app/android/store-listing/listing.md states the same table in
+      # prose and names the script as the enforcing copy, so the two cannot
+      # drift apart silently.
+      - name: Assert the store listing assets match Play's constraints
+        shell: pwsh
+        # No setup-python step: windows-latest ships Python and this workflow
+        # already depends on the preinstalled interpreter (python -m aqt, above).
+        run: python scripts/check-store-assets.py
+
       # Qt's Android TLS is the OpenSSL backend, which dlopen()s
       # libcrypto_3.so / libssl_3.so at run time; the Qt android kit does not ship
       # them, so they are vendored in app/openssl/<abi> and packaged via

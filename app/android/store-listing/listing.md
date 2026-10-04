@@ -26,8 +26,38 @@ from `adb exec-out screencap -p` on a real device; the `NN-` prefix is the
 gallery order (hero first), so re-ordering means renaming captures, and the
 converter strips metadata so an unchanged capture re-converts byte-for-byte.
 
-Play's phone-screenshot rules — 320–3840 px per side, 16:9 or 9:16 — are why the
-converter exists: a phone capture is 1080×2400 (20:9) and would be rejected.
+### Constraints Play enforces
+
+`scripts/check-store-assets.py` is the enforcing copy of this table. CI runs it
+on any change to this directory, and again in the release workflow, so a mistake
+fails in the repository rather than at upload time.
+
+| Asset | Rule Play enforces | Constant in the check |
+|---|---|---|
+| Phone screenshots | 2–8 per language | `MIN_SCREENSHOTS` / `MAX_SCREENSHOTS` |
+| Phone screenshots | 320–3840 px on each side | `MIN_SIDE_PX` / `MAX_SIDE_PX` |
+| Phone screenshots | aspect ratio 16:9 or 9:16 (1% tolerance) | `ACCEPTED_RATIOS` / `RATIO_TOLERANCE` |
+| Phone screenshots | no two files byte-identical | duplicate-content rule |
+| Phone screenshots | `NN-` prefixes unique and contiguous from 1 | ordering rule |
+| App icon | 512×512 PNG | `ICON_SIZE` |
+| Feature graphic | 1024×500 PNG | `FEATURE_GRAPHIC_SIZE` |
+
+The bounds and ratio are why the converter exists: a phone capture is
+1080×2400 (20:9), which Play rejects, so it is scaled and centred on a
+1080×1920 canvas. The duplicate rule exists because a renamed capture leaves the
+previous file behind, and the upload appends in file order — so the orphan
+occupies a gallery slot until someone notices the count is wrong.
+
+**What this check does not cover.** It reads PNG headers, so it validates
+*shape*, not *content*. Specifically it does **not** check:
+
+- the listing **text** limits (app name 30, short description 80, full
+  description 4000 characters) — those are stated at the top of this file and
+  the script never reads this one;
+- whether a screenshot is *appropriate* — that it belongs in the gallery, that
+  its `NN-` position tells the right story, or that what it shows is true. A
+  well-formed capture of the wrong screen passes. The gallery's meaning is
+  judged in review, not by the script.
 
 `docs/screenshots/main.png` is unrelated: that is the README image for GitHub,
 not a Play asset.

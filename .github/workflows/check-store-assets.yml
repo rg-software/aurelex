@@ -1,0 +1,44 @@
+name: check store assets
+
+# The Play store listing assets -- the listing icon, the feature graphic and the
+# phone screenshot gallery -- are committed files, versioned so a re-upload is
+# byte-identical. No build rule reads them, so nothing else in CI looks at them:
+# Play is the only thing that would reject a malformed set, and by then the
+# repair is manual and the listing may already be live.
+#
+# Trigger on the assets, the converter that produces them, and the check itself
+# (the last so the check cannot rot untested). The commit that introduces a
+# mistake is the one that fails.
+#
+# The same check runs in release-qt.yml beside the packaged-artifact assertions.
+# This workflow is the early warning; that one is the backstop.
+
+on:
+  push:
+    branches:
+      - "**"
+    paths:
+      - "app/android/store-listing/**"
+      - "scripts/make-store-screenshots.ps1"
+      - "scripts/check-store-assets.py"
+      - ".github/workflows/check-store-assets.yml"
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # No setup-python: windows-latest ships Python, and release-qt.yml already
+      # relies on the preinstalled interpreter (python -m aqt) with no extra
+      # setup. The check is standard library only, so nothing needs installing --
+      # it reads PNG headers directly rather than shelling out to ImageMagick,
+      # which the converter needs and the runner does not have.
+      #
+      # A pass prints one line naming what it verified (the screenshot count and
+      # dimensions, the two fixed assets, content uniqueness and gallery order),
+      # so the log states what was checked rather than just "ok".
+      - name: Check the committed store listing assets
+        run: python scripts/check-store-assets.py
