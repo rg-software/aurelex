@@ -2,8 +2,6 @@
 <resources>
     <string name="app_name">Aurelex</string>
     <string name="tile_label">Поиск в Aurelex</string>
-    <string name="widget_label">Поиск в Aurelex</string>
-    <string name="widget_search">Искать в Aurelex</string>
     <string name="notification_channel_dict_processing">Подготовка словарей</string>
     <string name="notification_channel_fts_indexing">Полнотекстовая индексация</string>
     <string name="notification_title">Aurelex</string>

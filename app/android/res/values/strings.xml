@@ -2,8 +2,6 @@
 <resources>
     <string name="app_name">Aurelex</string>
     <string name="tile_label">Aurelex Lookup</string>
-    <string name="widget_label">Aurelex Search</string>
-    <string name="widget_search">Search Aurelex</string>
     <string name="notification_channel_dict_processing">Dictionary preparation</string>
     <string name="notification_channel_fts_indexing">Full-text indexing</string>
     <string name="notification_title">Aurelex</string>

@@ -100,18 +100,5 @@
             android:name=".DictionaryDownloadService"
             android:exported="false"
             android:foregroundServiceType="dataSync" />
-
-        <!-- Home-screen search widget -->
-        <receiver
-            android:name=".AurelexSearchWidget"
-            android:label="@string/widget_label"
-            android:exported="true">
-            <intent-filter>
-                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
-            </intent-filter>
-            <meta-data
-                android:name="android.appwidget.provider"
-                android:resource="@xml/appwidget_info" />
-        </receiver>
     </application>
 </manifest>

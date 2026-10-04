@@ -2,8 +2,6 @@
 <resources>
     <string name="app_name">Aurelex</string>
     <string name="tile_label">Aurelex で検索</string>
-    <string name="widget_label">Aurelex で検索</string>
-    <string name="widget_search">Aurelex で検索</string>
     <string name="notification_channel_dict_processing">辞書の準備</string>
     <string name="notification_channel_fts_indexing">全文インデックス作成</string>
     <string name="notification_title">Aurelex</string>

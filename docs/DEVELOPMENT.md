@@ -258,10 +258,6 @@ Not scheduled, not proposed, not promised. Each one is picked up by opening an O
 - **Translate-later / word-list export** — extract headwords/definitions to a file or anki.
 - **Pre-built desktop-generated index caches** — copy indexes alongside dictionaries so the phone
   skips indexing. Boundary work (cache format).
-- **Widget fills search with clipboard** — the widget is currently a styled shortcut (RemoteViews
-  cannot capture typed text). Tapping it could copy the clipboard into the in-app search field,
-  reusing the tile's clipboard-read path. Needs an on-device check that the read happens in the
-  foreground activity (Android 10+), same as the tile.
 - **Tappable group label on history/favorites rows** — the rows already show a group-name line;
   making it jump to that group and re-run the search is the follow-up.
 - **Close the open archived tasks** — `docs/TESTING.md` lists the unverified items, and several
@@ -340,14 +336,14 @@ reasonably convert is worth engine work.
   yourself" path is documented there, and it should stay in sync with this list.
 
 Engine-touching items (pre-built index caches, any native format reader) go through the patch
-pipeline (`patches/` + CI smoke); pure-QML items (word-list export, widget clipboard) do not.
+pipeline (`patches/` + CI smoke); pure-QML items (word-list export) do not.
 
 ## Localization
 
 The app defaults its display language to the system UI language and ships
 **English (untranslated base) + Russian + Japanese**. All product copy lives in
-Qt translation catalogs; Android surfaces (app label, widgets, tiles,
-notifications) use `res/values*/strings.xml`.
+Qt translation catalogs; Android surfaces (app label, tile, notifications) use
+`res/values*/strings.xml`.
 
 ### How it works
 
@@ -446,8 +442,8 @@ Use this when the English is correct and only a translation is wrong or missing
 
 ### Android-managed strings (`res/values*/strings.xml`)
 
-The launcher label, Quick-Settings tile, home-screen widget and notification
-text are Android resources, not Qt catalogs. Edit the English default in
+The launcher label, Quick-Settings tile and notification text are Android
+resources, not Qt catalogs. Edit the English default in
 `app/android/res/values/strings.xml` and mirror the same value into
 `values-ru/` and `values-ja/`. Here the `name` attribute is the key, so the
 English lives in one place and only values differ per locale (`app_name` stays
@@ -482,7 +478,7 @@ locale and cold-starting the app.
 
 **Per-app language (Android 13+ / API 33 and newer) is the fastest loop.** It
 changes only this app, needs no root, and also re-resolves the Android surfaces
-(tile/widget/notification strings):
+(tile/notification strings):
 
 ```powershell
 $adb = "C:\Program Files (x86)\Android\android-sdk\platform-tools\adb.exe"   # or add to PATH

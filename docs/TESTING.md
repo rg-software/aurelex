@@ -478,15 +478,14 @@ cosmetic preference, not a defect.
 | 32b | Tap Remove on a dictionary while it is being indexed | It disappears within a moment; its staged files + index are deleted; other dictionaries keep indexing | ✅ |
 | 32c | Import a dictionary above the auto-index size bound, then run a full-text search over it | Import does not build its index; the first search builds it and its hits appear on completion | ✅ |
 
-## Launcher shortcuts (QS tile + home-screen widget)
+## Launcher shortcut (QS tile)
 
 | # | How to test | Expected | Status |
 | --- | --- | --- | --- |
 | 33 | Quick Settings → add the Aurelex tile | Tile present, labeled, with icon | ✅ |
 | 34 | Copy text, tap the tile | Article for the copied text opens | ✅ |
 | 35 | Tap the tile with an empty clipboard | Search screen opens with focus | ✅ |
-| 36 | Home screen → widget (tappable bar) | Tapping opens the app (the widget is a shortcut, not a text field) | ✅ |
-| 37 | Widget/tile lookup respects the active group | Article rendered against the applied group | 🔶 (unverified on device) |
+| 37 | Tile lookup respects the active group | Article rendered against the applied group | 🔶 (unverified on device) |
 
 ## External lookup entry points
 
@@ -609,7 +608,7 @@ workflow are documented under "Localization" in `docs/DEVELOPMENT.md`.
 | 52 | Set the app/system language to one without a catalog (e.g. **Finnish**), relaunch | Falls back to English, no crash, logcat line `[aurelex] no matching translation catalog for "fi-FI"; using English base strings` | ⬜ (needs a device with a non-RU/JA locale; logcat can confirm the message) |
 | 52a | Set the app language to **English** (`en-US`), relaunch | English base strings — no RU/JA fall-through (regression: `uiLanguages()` lists the APK's resource locales after the primary, so a whole-list scan loaded `ru`) | ✅ (motorola ThinkPhone, Android 15: `no matching translation catalog for "en-US"; using English base strings`; visible UI English — `fix-english-locale-fallthrough`) |
 | 53 | In RU/JA, import a dictionary and let FTS index | Android notifications: channel names ("Dictionary preparation" / "Full-text indexing" under Settings → Apps → Aurelex → Notifications), title, "Preparing dictionaries…", "Indexing (%1 of %2): name" shown in the device language | ⬜ (needs the RU/JA device + a dict import) |
-| 54 | In RU/JA, inspect the Quick Settings tile and home-screen widget | Tile/widget labels localize ("Поиск в Aurelex", "Aurelex で検索") | ⬜ (needs the RU/JA device) |
+| 54 | In RU/JA, inspect the Quick Settings tile | Tile label localizes ("Поиск в Aurelex", "Aurelex で検索") | ⬜ (needs the RU/JA device) |
 | 55 | UIAutomator / Appium dump in RU or JA | `Accessible.name`/`content-desc`/`className` remain stable English IDs (localization never touches the accessibility names) | ⬜ (re-run the existing on-device flows under any locale) |
 
 ## Remote dictionary catalog
@@ -687,7 +686,7 @@ interception.
 - Multi-volume `.mdd` (`demo.1.mdd` … `demo.n.mdd`) is untested on either side —
   the suffix rule should accept it, but no fixture has proven it. Single-file
   `.mdd` images are verified on device (#18.1, #18.5).
-- QS tile / widget active-group (#37) — inherited from `quick-lookup-shortcuts`.
+- QS tile active-group (#37) — inherited from `quick-lookup-shortcuts`.
 - **Native payload filtering.** `app/build.ps1` stages only the Qt libraries the
   app can reach, derived by `scripts/derive-native-payload.ps1` (run it with no
   arguments to print the kept/dropped set with sizes). Consequences worth
@@ -766,7 +765,7 @@ interception.
 Device notes captured in archived changes: **Motorola ThinkPhone (Android 15)**.
 The baseline pass was 2026-09-03 (folder-scoped SAF storage, recursive scan, FTS
 prefix/whole-words, auto-index, history/favorites, theme toggle, external entry
-points, tile/widget); later items were verified on later passes — the tri-state
+points, tile); later items were verified on later passes — the tri-state
 theme control and FTS-indexing interleaving on 2026-09-29, the search-field focus
 and floating-label fixes on 2026-10-01, and the remote-catalog pass on 2026-10-03
 (reverse-tethered over USB). Items still marked ⬜ have **not** been seen on any
