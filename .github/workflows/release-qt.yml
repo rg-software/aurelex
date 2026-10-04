@@ -494,6 +494,76 @@ jobs:
           if ($otherHits.Count) {
               $failures += "unstripped shipped libraries: $($otherHits -join ', ')"
           }
+          # ---- 3. the payload must hold only libraries the app can reach, and
+          # fit a budget. Staging the kit whole shipped 140 libs / 86.32 MB;
+          # the derived reachable set is 52 libs / 48.88 MB (arm64-v8a,
+          # Qt 6.6.3). The ceiling is the coarse backstop for a Qt bump that
+          # quietly widens the kit; the set comparison is the real check, and it
+          # re-derives through the same script app/build.ps1 stages from, so the
+          # two cannot drift apart.
+          #
+          # Payload budget for one ABI's lib/<abi>/. Measured 48.88 MB; the
+          # headroom absorbs a Qt patch bump, and a module re-adding itself
+          # (Widgets 6.45, Designer 5.12, VirtualKeyboard 4.60, ShaderTools 3.38)
+          # blows straight through it. Provenance: scripts/derive-native-payload.ps1.
+          $payloadCeilingMb = 52
+          $totals = @{}
+          $shippedNames = New-Object 'System.Collections.Generic.HashSet[string]'
+          foreach ($artifact in @(
+              @{ Label = "AAB"; Path = $env:AAB_PATH },
+              @{ Label = "APK"; Path = $env:APK_PATH })) {
+              if (-not $artifact.Path -or -not (Test-Path $artifact.Path)) { continue }
+              $zip = [System.IO.Compression.ZipFile]::OpenRead($artifact.Path)
+              try {
+                  foreach ($entry in $zip.Entries) {
+                      if ($entry.Length -le 0) { continue }
+                      if ($entry.FullName -match '^(?:base/)?lib/([^/]+)/([^/]+\.so)$') {
+                          $abi = $Matches[1]; $file = $Matches[2]
+                          if (-not $totals.ContainsKey($abi)) { $totals[$abi] = 0L }
+                          $totals[$abi] += $entry.Length
+                          [void]$shippedNames.Add($file)
+                      }
+                  }
+              } finally { $zip.Dispose() }
+          }
+          foreach ($abi in $totals.Keys) {
+              $mb = [math]::Round($totals[$abi] / 1MB, 2)
+              if ($totals[$abi] -gt ($payloadCeilingMb * 1MB)) {
+                  $failures += "payload budget: $abi ships $mb MB of native libraries, over the $payloadCeilingMb MB ceiling -- an unreachable Qt module is probably being staged again"
+              } else {
+                  Write-Host "  OK  payload       $abi $mb MB (ceiling $payloadCeilingMb MB)"
+              }
+          }
+          if (-not $totals.Count) { $failures += "payload budget: no lib/<abi>/*.so entries found in either artifact" }
+
+          # Reachability: the shipped names must equal the derived set exactly.
+          # A library the app needs but the derivation missed would be caught by
+          # the device matrix, not here; a library it kept but the build dropped
+          # is caught here, before publication.
+          $derive = Join-Path $env:GITHUB_WORKSPACE "scripts/derive-native-payload.ps1"
+          $appLib = Join-Path $env:GITHUB_WORKSPACE "build-qtquick/libaurelex_$($abis[0]).so"
+          if (-not (Test-Path $derive)) {
+              $failures += "payload reachability: $derive is missing -- cannot derive the expected library set"
+          } elseif (-not (Test-Path $appLib)) {
+              $failures += "payload reachability: $appLib is missing -- cannot derive the expected library set (the build should have produced it)"
+          } else {
+              $expected = @(& $derive -Abi $abis[0] -QtBase $env:AURELEX_QT_BASE -NdkRoot $env:AURELEX_NDK_ROOT -AppLib $appLib -Mode List |
+                  ForEach-Object { "$_".Trim() } | Where-Object { $_ } | Sort-Object -Unique)
+              $shipped = @($shippedNames | Sort-Object)
+              $extra = @(Compare-Object $expected $shipped | Where-Object { $_.SideIndicator -eq '=>' } | ForEach-Object { $_.InputObject })
+              $absent = @(Compare-Object $expected $shipped | Where-Object { $_.SideIndicator -eq '<=' } | ForEach-Object { $_.InputObject })
+              Write-Host "  derived $($expected.Count) reachable, shipped $($shipped.Count)"
+              if ($extra.Count) {
+                  $failures += "payload reachability: shipped but unreachable -- $($extra -join ', ')"
+              }
+              if ($absent.Count) {
+                  $failures += "payload reachability: reachable but NOT shipped (the app will fail at run time) -- $($absent -join ', ')"
+              }
+              if (-not $extra.Count -and -not $absent.Count) {
+                  Write-Host "  OK  reachable set shipped exactly ($($expected.Count) libraries)"
+              }
+          }
+
           if (-not $failures) {
               Write-Host "all $($extracted.Count) shipped libraries are stripped"
           } else {

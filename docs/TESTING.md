@@ -687,6 +687,37 @@ interception.
   the suffix rule should accept it, but no fixture has proven it. Single-file
   `.mdd` images are verified on device (#18.1, #18.5).
 - QS tile / widget active-group (#37) — inherited from `quick-lookup-shortcuts`.
+- **Native payload filtering.** `app/build.ps1` stages only the Qt libraries the
+  app can reach, derived by `scripts/derive-native-payload.ps1` (run it with no
+  arguments to print the kept/dropped set with sizes). Consequences worth
+  remembering:
+  - The set is **derived, not hand-listed** — a new `import` in `main.qml` or a
+    new Qt link in `app/CMakeLists.txt` widens the payload automatically. Editing
+    `apk/libs/` by hand achieves nothing: the next build re-derives and overwrites.
+  - The module closure follows both `qmldir` `depends`/`import` lines **and** the
+    `import` statements in a module's `.qml` sources. The second is not optional:
+    `QtQuick.Controls.Material/ApplicationWindow.qml` imports `QtQuick.Window`,
+    whose `qmldir` never mentions it. A `qmldir`-only closure drops it and the app
+    dies at startup with `Type ApplicationWindow unavailable` /
+    `module "QtQuick.Window" is not installed`. `QtQuick.Window` ships its own
+    plugin library, so the plugin filter drops it too and the failure is total.
+  - Three libraries have **no `DT_NEEDED` edge** and would be reported dead by any
+    closure: `libcrypto_3.so` / `libssl_3.so` (`dlopen`'d by Qt at TLS init) and
+    `libc++_shared.so` (injected from the NDK). They are the curated roots, and
+    `build.ps1` asserts all three landed. Dropping the OpenSSL pair does not break
+    the app — it breaks the remote catalog, with "TLS initialization failed",
+    while everything else looks fine.
+  - **Do not trust a `readelf -d` parse that does not filter on `NEEDED`.** It
+    also prints `SONAME` in brackets, and a library's SONAME is its own filename,
+    so every library looks like it links itself.
+  - Module plugin `.so` are deliberately **not** duplicated into `assets/qml/`;
+    the QML engine loads them from `lib/<abi>/`. Verified on device by removing
+    them and re-running the article check.
+  - The pipeline asserts both halves in
+    `.github/workflows/release-qt.yml` ("Assert native debug symbols are in the
+    release artifacts", section 3): a payload-size ceiling and exact equality with
+    the derived set. A filter that drops a needed library fails the release
+    instead of the app.
 - Theme control: the tri-state cycle, both migration paths, live system-switch, the
   article in-place flip, the layout alignment and the glyphs are all verified
   (#23–#25j).
@@ -715,8 +746,6 @@ interception.
 - SAF fallback (`ensureDefaultImportDir`) writes shared `<external>/Aurelex` on
   API 36 and can land on a blocked root instead of app-private storage.
 - Speex (`.spx`) audio is silently skipped rather than explicitly indicated (#20).
-- Release APK/AAB currently package every Qt kit library and plugin, including
-  debug/tooling binaries (`app/build.ps1` staging), rather than a filtered set.
 - FTS indexing now interleaves with other engine calls instead of holding the
   engine mutex for the whole build: existing dictionaries stay usable during a
   build, and the dictionary being built is withheld until its index completes.

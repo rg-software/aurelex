@@ -15,7 +15,7 @@ attaches both — plus the native debug symbols archive — to a GitHub release:
 | --- | --- | --- |
 | `.apk` | `build-qtquick/apk/build/outputs/apk/release/*.apk` | GitHub releases / F-Droid / sideload |
 | `.aab` | `build-qtquick/apk/build/outputs/bundle/release/*.aab` | Google Play upload |
-| native debug symbols | assembled from the AAB into `$RUNNER_TEMP/native-debug-symbols/*.zip` | GitHub release asset → Play Console (manual, see below) |
+| native debug symbols | assembled from the AAB into `$RUNNER_TEMP/native-debug-symbols/*.zip` | GitHub release asset (archived, and the fallback upload source — Play needs none; see below) |
 
 The release workflow locates both by glob, not by name, and fails the job if
 either glob comes up empty — so the exact Gradle-assigned filename is free to
@@ -109,6 +109,40 @@ the following libraries, packaging them as they are:` for *every* jniLib (which
 ships the ~36 MB unstripped engine binary in `base/`), and extracts no symbols at
 all — while the build stays green. Hence the assertion on the artifact rather than
 on the Gradle flag.
+
+## Native payload — what actually ships in `lib/<abi>/`
+
+The artifact carries only the Qt libraries the app can reach, not the whole kit.
+`app/build.ps1` derives the set with `scripts/derive-native-payload.ps1` (run it
+with no arguments to print the kept and dropped libraries with their sizes) and
+stages only those, into both `lib/<abi>/` and `assets/qml/`.
+
+| | before | after |
+| --- | --- | --- |
+| libraries under `lib/<abi>/` | 140 | 52 |
+| bytes under `lib/<abi>/` | 86.32 MB | 48.88 MB |
+| `assets/qml/` | 696 files / 8.12 MB | 293 files / 1.35 MB |
+| release APK | 38.2 MB | 19.9 MB |
+| release AAB | 42.1 MB | 23.8 MB |
+
+Measured on Qt 6.6.3, `arm64-v8a`. The 37 MB is unreachable Qt: Designer,
+ShaderTools, the Widgets stack, the VirtualKeyboard, three unused Controls
+styles, the SQL driver, and the `qmldbg`/`qmllint` developer tooling.
+
+| | |
+| --- | --- |
+| Produced by | `app/build.ps1` (staging) from `scripts/derive-native-payload.ps1` (the derivation) |
+| Verified by | the same release-workflow assertion as above, section 3: a **52 MB** ceiling per ABI plus exact equality between the shipped name set and the derived set |
+| On failure | the release is refused before publication |
+
+The **52 MB** ceiling is a backstop for a Qt bump that quietly widens the kit;
+exact set equality is the real check, and the workflow re-derives the expected
+set through the same script the build stages from, so the two cannot drift. The
+ceiling's headroom over the measured 48.88 MB absorbs a patch bump — the smallest
+module that could reappear undetected is worth far more than that. Both failure
+paths were verified against deliberately broken artifacts: a re-added
+`libQt6Designer` fails on reachability, a removed `libqml_QtWebView_*` fails on
+absence, and the ceiling fires on size.
 
 ### Uploading symbols to Play by hand
 

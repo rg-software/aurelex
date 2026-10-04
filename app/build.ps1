@@ -185,12 +185,48 @@ Copy-Item $soPath $LibOut -Force
 $KitRoot = if ($Abi -eq "arm64-v8a") { "$QtBase/android_arm64_v8a" }
            elseif ($Abi -eq "x86_64") { "$QtBase/android_x86_64" }
            else { throw "unsupported ABI $Abi" }
-Get-ChildItem -Path "$KitRoot/lib" -Filter "*.so" -ErrorAction SilentlyContinue |
-    Copy-Item -Destination $LibOut -Force
-Get-ChildItem -Path "$KitRoot/qml" -Recurse -Filter "libqml_*.so" -ErrorAction SilentlyContinue |
-    Copy-Item -Destination $LibOut -Force
-Get-ChildItem -Path "$KitRoot/plugins" -Recurse -Filter "libplugins_*.so" -ErrorAction SilentlyContinue |
-    Copy-Item -Destination $LibOut -Force
+
+# Stage only the Qt libraries the app can actually reach. Staging the kit whole
+# shipped 140 libs / 86.32 MB of which 96 / 37.97 MB were never loaded (Qt
+# Designer, ShaderTools, the Widgets stack, the VirtualKeyboard, three unused
+# Controls styles, the qmldbg/qmllint developer tooling...). The kept set is
+# derived from the built app library's DT_NEEDED closure plus the app's own QML
+# imports plus a short curated list for the libraries that have no link edge --
+# see scripts/derive-native-payload.ps1 and the trim-release-payload change. It
+# is derived rather than hand-listed so a Qt upgrade cannot silently re-bloat
+# the payload, and so a new `import` in main.qml widens it automatically.
+$DeriveScript = Join-Path $RepoRoot "scripts/derive-native-payload.ps1"
+if (-not (Test-Path $DeriveScript)) { throw "payload derivation script missing: $DeriveScript" }
+$keepNames = @(& $DeriveScript -Abi $Abi -QtBase $QtBase -NdkRoot $NdkRoot -AppLib $soPath -Mode List)
+$keep = New-Object 'System.Collections.Generic.HashSet[string]'
+foreach ($n in $keepNames) { if ($n -and $n.Trim()) { [void]$keep.Add($n.Trim()) } }
+# The derivation must at minimum resolve the app library and the platform
+# plugin. If it does not, the filter is broken and shipping "only what was
+# derived" would produce an APK that cannot start -- fail here instead.
+foreach ($required in @($soName, "libplugins_platforms_qtforandroid_$Abi.so")) {
+    if (-not $keep.Contains($required)) { throw "payload derivation did not resolve $required -- refusing to stage a filtered set that cannot start" }
+}
+
+$kitCandidates = 0; $kitKept = 0; $kitStaged = 0L; $kitDropped = 0L
+foreach ($spec in @(
+    @{ Path = "$KitRoot/lib";     Filter = "*.so" },
+    @{ Path = "$KitRoot/qml";     Filter = "libqml_*.so";     Recurse = $true },
+    @{ Path = "$KitRoot/plugins"; Filter = "libplugins_*.so"; Recurse = $true }
+)) {
+    $items = @(Get-ChildItem -Path $spec.Path -Filter $spec.Filter -Recurse:$([bool]$spec.Recurse) -File -ErrorAction SilentlyContinue)
+    $kitCandidates += $items.Count
+    foreach ($i in $items) {
+        if ($keep.Contains($i.Name)) {
+            Copy-Item -Destination $LibOut -Force -Path $i.FullName
+            $kitKept++
+            $kitStaged += $i.Length
+        } else {
+            $kitDropped += $i.Length
+        }
+    }
+}
+Write-Host ("   Qt kit: {0} candidates -> kept {1} ({2:N2} MB), dropped {3} ({4:N2} MB)" -f `
+    $kitCandidates, $kitKept, ($kitStaged/1MB), ($kitCandidates - $kitKept), ($kitDropped/1MB)) -ForegroundColor DarkGray
 # libc++_shared.so ships from the NDK (host-agnostic path in r23c; the host
 # sysroot is the pre-r23 location). Try both so the script runs on any host OS.
 $cppShared = "$NdkRoot/sources/cxx-stl/llvm-libc++/libs/arm64-v8a/libc++_shared.so"
@@ -218,6 +254,18 @@ $KitJarDir = "$KitRoot/jar"
 if (Test-Path $KitJarDir) {
     Get-ChildItem -Path $KitJarDir -Filter "*.jar" -ErrorAction SilentlyContinue |
         Copy-Item -Destination "$ApkDir/libs/" -Force
+}
+
+# The derivation's curated roots have no link edge, so nothing in the kit walk
+# would put them back if a filter change ever swept them up. libc++_shared is
+# staged by the code path above, so assert it landed; the OpenSSL pair arrives
+# later (androiddeployqt, via QT_ANDROID_EXTRA_LIBS) and is asserted after that
+# step. The OpenSSL pair is what the remote catalog's TLS needs, and its failure
+# mode is invisible until the catalog is opened (see AGENTS.md).
+foreach ($edgeLess in @("libc++_shared.so")) {
+    if (-not (Test-Path (Join-Path $LibOut $edgeLess))) {
+        throw "edge-less run-time library $edgeLess is not staged in $LibOut -- the payload filter must never drop these (see scripts/derive-native-payload.ps1)"
+    }
 }
 
 Write-Host "== [4/5] androiddeployqt (stage + generate project, --no-build) ==" -ForegroundColor Cyan
@@ -270,11 +318,70 @@ if (Test-Path (Join-Path $AppDir "android/assets")) {
 # (Controls/Material/Templates/Layouts ...) into the APK, and --no-build even
 # wipes assets/qml. Qt on Android resolves QML-source modules (QtQuick.Controls
 # & styles are QML-based, unlike the compiled QtQuick core) from the qml import
-# tree under assets:/qml plus their plugin .so in jniLibs. Copy the kit's whole
-# qml tree deterministically so the Material UI modules import at runtime.
+# tree under assets:/qml plus their plugin .so in jniLibs.
+#
+# Copy only the modules the app reaches, using the SAME derived keep-set as the
+# library staging above. Prune per module, not per top-level directory:
+# QtQuick/Controls contains Fusion/, Imagine/ and Universal/ as nested modules,
+# so copying it with -Recurse would pull the styles this filter exists to drop
+# (and leave a dropped library addressable in assets while absent from jniLibs).
+# A file is copied when its nearest module directory at or above it is
+# reachable, which keeps a reachable module's own non-module subdirectories.
 if (Test-Path "$KitRoot/qml") {
-    New-Item -ItemType Directory -Force -Path (Join-Path $ApkDir "assets/qml") | Out-Null
-    Copy-Item (Join-Path $KitRoot "qml/*") (Join-Path $ApkDir "assets/qml/") -Recurse -Force
+    $assetQml = Join-Path $ApkDir "assets/qml"
+    $kitQml = Join-Path $KitRoot "qml"
+    New-Item -ItemType Directory -Force -Path $assetQml | Out-Null
+
+    # Reachable module directories: those holding a kept plugin library.
+    $reachableDirs = New-Object 'System.Collections.Generic.HashSet[string]'
+    Get-ChildItem -LiteralPath $kitQml -Recurse -Filter "libqml_*.so" -File -ErrorAction SilentlyContinue |
+        Where-Object { $keep.Contains($_.Name) } |
+        ForEach-Object { [void]$reachableDirs.Add($_.DirectoryName) }
+    # Every module directory, reachable or not. A nested module (Fusion/ under
+    # Controls/) is its own module, so it must be able to veto its parent's
+    # reachability -- otherwise walking up to the first *reachable* ancestor
+    # would re-admit every dropped style.
+    $moduleDirs = New-Object 'System.Collections.Generic.HashSet[string]'
+    Get-ChildItem -LiteralPath $kitQml -Recurse -Filter "qmldir" -File -ErrorAction SilentlyContinue |
+        ForEach-Object { [void]$moduleDirs.Add($_.DirectoryName) }
+
+    $assetFiles = 0; $assetBytes = 0L
+    foreach ($f in @(Get-ChildItem -LiteralPath $kitQml -Recurse -File -ErrorAction SilentlyContinue)) {
+        # Module plugin libraries are deliberately NOT duplicated here. Measured
+        # on device: with every assets/qml/*.so removed, logcat shows the QML
+        # engine loading each module plugin from base.apk!/lib/<abi>/ (jniLibs)
+        # and the app starts and renders articles normally. They were 0.18 MB
+        # after the module filter; the copy only risks the two locations
+        # disagreeing.
+        if ($f.Extension -eq ".so") { continue }
+        # Nearest module directory at or above this file decides, and the walk
+        # stops there -- a non-module subdirectory of a reachable module is
+        # still that module's content.
+        $d = $f.DirectoryName; $owner = $null
+        while ($d -and $d.StartsWith($kitQml)) {
+            if ($moduleDirs.Contains($d)) { $owner = $d; break }
+            if ($d -eq $kitQml) { break }
+            $d = Split-Path $d -Parent
+        }
+        if (-not $owner -or -not $reachableDirs.Contains($owner)) { continue }
+        $rel = $f.FullName.Substring($kitQml.Length).TrimStart([IO.Path]::DirectorySeparatorChar, '/')
+        $dest = Join-Path $assetQml $rel
+        New-Item -ItemType Directory -Force -Path (Split-Path $dest -Parent) | Out-Null
+        Copy-Item -LiteralPath $f.FullName -Destination $dest -Force
+        $assetFiles++; $assetBytes += $f.Length
+    }
+    Write-Host ("   assets/qml: {0} of {1} modules reachable, copied {2} files ({3:N2} MB, plugin .so not duplicated)" -f `
+        $reachableDirs.Count, $moduleDirs.Count, $assetFiles, ($assetBytes/1MB)) -ForegroundColor DarkGray
+}
+
+# The vendored OpenSSL pair is staged by androiddeployqt from
+# QT_ANDROID_EXTRA_LIBS, and has no link edge either -- Qt dlopen()s it at TLS
+# init. Assert it survived packaging so a filter change can never turn into a
+# catalog that reports "TLS initialization failed" while the app looks healthy.
+foreach ($tls in @("libcrypto_3.so", "libssl_3.so")) {
+    if (-not (Test-Path (Join-Path $LibOut $tls))) {
+        throw "vendored TLS library $tls is not staged in $LibOut -- the remote catalog would fail at run time (see scripts/derive-native-payload.ps1)"
+    }
 }
 
 if ($LASTEXITCODE -ne 0) { throw "androiddeployqt failed" }
