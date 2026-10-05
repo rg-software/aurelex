@@ -285,6 +285,49 @@ candidate id (R-n) is provenance only.
 - **Provenance:** raised by the user 2026-10-04; sized and inventoried from the
   working tree.
 
+### TD-030 — `gd_move_dict` corrupts user-group membership (no index remap) and its documented effect no longer exists
+
+- **Priority:** P2
+- **Location:** `carve/gd_boundary.cc:1026-1046`; `carve/goldendict.h:39-41`
+- **Symptom:** `gd_move_dict` permutes `g_state->dictionaries` but, unlike
+  `gd_remove_dict` (:1067-1074), never remaps `groupDefs[].dictIndices`. It then calls
+  `rebuildGroups()`, which materializes user groups from those now-stale indices
+  (:279-287) — after a move, every user group silently contains different dictionaries.
+  Any later group mutation calls `saveGroupsLocked()`, which resolves the stale indices
+  to IDs and **persists the corruption** to `groups.json`. Separately, the header
+  contract is stale: since the `allOrder` model landed, `rebuildGroups()` materializes
+  the "All" group from `allOrder`, which `gd_move_dict` never touches — so its reorder
+  no longer affects article order at all.
+- **Evidence:** `gd_boundary.cc:1026-1046` (no `groupDefs` remap) vs `:1067-1074`
+  (`gd_remove_dict`'s remap); `goldendict.h:39-41` ("the combined article respects
+  this order").
+- **Why it matters:** Exported boundary API with a latent data-corruption bug and a
+  contract that describes v1. Currently unreachable — `EngineController::moveDictionary`
+  (:1632) is `Q_INVOKABLE` but no QML caller exists (TD-017) and the smoke tool doesn't
+  call it — which is why this is P2, not P1. It becomes P1 the moment someone wires the
+  "reorder the flat dict list" feature to the obvious API.
+- **Direction:** Either delete `gd_move_dict` + `moveDictionary` (the dead v1 path), or
+  fix it: remap `groupDefs` indices exactly as `gd_remove_dict` does, reorder
+  `allOrder`, and re-document.
+- **Provenance:** scan 2026-10-05 (`carve/` + `patches/`), reviewer candidate R-2.
+
+### TD-031 — `gd_suggest` returns a count larger than the lines it wrote (hardcoded 16-cap, undocumented)
+
+- **Priority:** P2
+- **Location:** `carve/gd_boundary.cc:726-735`; `carve/goldendict.h:18-21`
+- **Symptom:** `prefixMatch(..., 100)` is requested (:711), but only
+  `min(16, results.size())` headwords are written (:726-727), while the return value is
+  `results.size()` (up to ~100). The header says "Returns the number of results" with no
+  cap.
+- **Evidence:** `gd_boundary.cc:711`, `:726-727`, `:735`; `goldendict.h:18-21`.
+- **Why it matters:** Today's only consumer ignores the count and splits the
+  NUL-terminated buffer (`EngineController.cpp:2439`), so there is no live defect — but
+  any count-trusting consumer (a second caller, a test, a future format change) walks
+  past the terminator.
+- **Direction:** Return the number of lines actually written, or make the cap a
+  parameter and document it in `goldendict.h`.
+- **Provenance:** scan 2026-10-05 (`carve/` + `patches/`), reviewer candidate R-3.
+
 ---
 
 ## P3 — polish
@@ -359,7 +402,9 @@ candidate id (R-n) is provenance only.
   list; the rule's substance (no Qt-type shims) is unaffected.
 - **Direction:** Update the parenthetical to "Core/XML/Concurrent (+Gui/Widgets as the
   engine needs them)" or drop the enumeration.
-- **Provenance:** scan 2026-10-04, reviewer candidate R-9.
+- **Provenance:** scan 2026-10-04, reviewer candidate R-9. Re-confirmed by the
+  2026-10-05 `carve/` + `patches/` scan (reviewer candidate R-5) — same finding, no
+  new entry.
 
 ### TD-010 — Stale notification channel id and small icon in SIGNING.md
 
@@ -545,3 +590,80 @@ candidate id (R-n) is provenance only.
   shows.
 - **Direction:** Rename the javadoc parameter to `overallPercent`.
 - **Provenance:** scan 2026-10-04 (`app/`), reviewer candidate R-16.
+
+### TD-033 — Stale "FTS is deliberately not exposed." comment in the boundary header
+
+- **Priority:** P3
+- **Location:** `carve/gd_boundary.cc:9`
+- **Symptom:** The file-header comment says "FTS is deliberately not exposed." — the
+  same file implements seven `gd_fts_*` functions.
+- **Evidence:** `gd_boundary.cc:9` vs the `gd_fts_*` implementations at `:1337-1551`.
+- **Why it matters:** Contradicts the file it introduces; misleads a reader about the
+  boundary's surface.
+- **Direction:** Delete the sentence.
+- **Provenance:** scan 2026-10-05 (`carve/` + `patches/`), reviewer candidate R-6.
+
+### TD-035 — Timeout budgets bypass the named constant
+
+- **Priority:** P3
+- **Location:** `carve/gd_boundary.cc:68`, `:700`, `:756`, `:801`, `:868`, `:1501`
+- **Symptom:** `kEngineRequestDeadlineMs` is used only by `fetchResource` (:868);
+  `gd_lookup`, `gd_lookup_in_group`, and `gd_fts_search` hardcode `15000` (:756, :801,
+  :1501), and `gd_suggest` a different `10000` (:700). The constant's own comment says
+  the value "should be re-chosen against measured engine times" — impossible to do
+  coherently while three sites bypass it.
+- **Evidence:** `gd_boundary.cc:62-68` (constant + comment), `:700`, `:756`, `:801`,
+  `:868`, `:1501`.
+- **Why it matters:** The named constant implies a single tunable budget; the bypasses
+  make that a fiction.
+- **Direction:** Route all sites through the constant (or a second named constant for
+  the suggest budget).
+- **Provenance:** scan 2026-10-05 (`carve/` + `patches/`), reviewer candidate R-8.
+
+### TD-036 — Dead code in `gd_scan_dicts`: `ArticleMaker` constructed twice; unused `<QThreadPool>` include
+
+- **Priority:** P3
+- **Location:** `carve/gd_boundary.cc:32`, `:636-639`
+- **Symptom:** `gd_scan_dicts` calls `rebuildGroups()` (:636, which already ends by
+  rebuilding `articleMaker` at :290-291) and then constructs an identical `ArticleMaker`
+  again two lines later (:638-639) — redundant work on every scan. Also
+  `#include <QThreadPool>` (:32) is unused.
+- **Evidence:** `gd_boundary.cc:290-291` (`rebuildGroups`' tail), `:636`, `:638-639`;
+  the only `QThreadPool` occurrence in the file is the include at :32.
+- **Why it matters:** Redundant per-scan work and a dead include in the boundary's hot
+  path.
+- **Direction:** Delete the second construction and the include.
+- **Provenance:** scan 2026-10-05 (`carve/` + `patches/`), reviewer candidate R-9.
+
+### TD-037 — `gd_cleanup` says "Wait (bounded)" but the wait is unbounded
+
+- **Priority:** P3
+- **Location:** `carve/gd_boundary.cc:1553-1572`
+- **Symptom:** The comment says "Wait (bounded)" but the `for(;;)` loop (:1560-1568) has
+  no deadline; if a build wedge ignores cancellation between yield points, cleanup spins
+  forever.
+- **Evidence:** `gd_boundary.cc:1555` (comment) vs `:1560-1568` (loop). Latent only —
+  the app never calls `gd_cleanup` in v1 (the comment says so itself at :1559).
+- **Why it matters:** The comment asserts a bound the code does not enforce.
+- **Direction:** Bound the wait (N seconds, then proceed/delete anyway or abort) or fix
+  the comment.
+- **Provenance:** scan 2026-10-05 (`carve/` + `patches/`), reviewer candidate R-10.
+
+### TD-038 — `#include` + engine-class stub defined *inside* `extern "C"`; the stub is undocumented
+
+- **Priority:** P3
+- **Location:** `carve/gd_boundary.cc:1574-1583`
+- **Symptom:** `#include "audio/internalplayerbackend.hh"` sits inside the `extern "C"`
+  block (which closes at :1583), and `InternalPlayerBackend::anyAvailable()` is defined
+  there. Harmless today (member functions keep C++ linkage), but any free function ever
+  declared in that header silently gets C linkage → link/ODR surprises on an engine bump.
+  The stub itself (a link-symbol shim for `config.cc`) is named nowhere — neither
+  `docs/ENGINE.md`'s patch table nor the CMake comments mention it, unlike the two GUI
+  stubs.
+- **Evidence:** `gd_boundary.cc:1574-1581` inside the block closing at :1583.
+- **Why it matters:** A latent linkage hazard on the next engine bump, plus an
+  undocumented stub.
+- **Direction:** Move the include/definition outside the linkage block; give the stub a
+  one-line note in `carve/CMakeLists.txt`.
+- **Provenance:** scan 2026-10-05 (`carve/` + `patches/`), reviewer candidate R-11.
+

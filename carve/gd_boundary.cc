@@ -577,12 +577,12 @@ int gd_scan_dicts( const char * folder )
     }
     catch ( const std::exception & e ) {
       qWarning( "GD: dictionary load failed for %s: %s", primary.c_str(), e.what() );
-      g_state->lastScanFailures.append( QString::fromLocal8Bit( primary.c_str() ) );
+      g_state->lastScanFailures.append( QString::fromUtf8( primary.c_str() ) );
       return;
     }
     catch ( ... ) {
       qWarning( "GD: dictionary load failed for %s (unknown error)", primary.c_str() );
-      g_state->lastScanFailures.append( QString::fromLocal8Bit( primary.c_str() ) );
+      g_state->lastScanFailures.append( QString::fromUtf8( primary.c_str() ) );
       return;
     }
     // An unopenable/truncated primary does NOT throw in every backend — some
@@ -591,10 +591,10 @@ int gd_scan_dicts( const char * folder )
     // only legitimately-empty primaries are abbreviation files ("*_abrv"), which
     // the backends skip on purpose; never flag those.
     const bool isAbbreviation =
-      QString::fromLocal8Bit( primary.c_str() ).toLower().contains( QLatin1String( "_abrv" ) );
+      QString::fromUtf8( primary.c_str() ).toLower().contains( QLatin1String( "_abrv" ) );
     if ( made.empty() && !isAbbreviation ) {
       qWarning( "GD: dictionary failed to load (unreadable or no entries): %s", primary.c_str() );
-      g_state->lastScanFailures.append( QString::fromLocal8Bit( primary.c_str() ) );
+      g_state->lastScanFailures.append( QString::fromUtf8( primary.c_str() ) );
       return;
     }
     for ( auto & d : made ) {
@@ -653,11 +653,13 @@ int gd_scan_failures( char * out, int out_size )
   if ( !out || out_size <= 0 )
     return -1;
   const QStringList list = g_state->lastScanFailures;
-  g_state->lastScanFailures.clear(); // consume
-  QString joined = list.join( QLatin1Char( '\n' ) );
-  if ( joined.size() + 1 > out_size )
+  // UTF-8, like every other boundary output: QString::size() counts UTF-16
+  // units, which undercounts any non-ASCII payload once encoded.
+  const QByteArray bytes = list.join( QLatin1Char( '\n' ) ).toUtf8();
+  if ( bytes.size() + 1 > out_size )
     return -2;
-  std::memcpy( out, joined.toLocal8Bit().constData(), joined.size() + 1 );
+  g_state->lastScanFailures.clear(); // consume only on a successful copy
+  std::memcpy( out, bytes.constData(), bytes.size() + 1 ); // payload + NUL
   return list.size();
 }
 

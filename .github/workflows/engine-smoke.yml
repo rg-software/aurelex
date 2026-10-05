@@ -203,6 +203,10 @@ jobs:
             || { echo "SMOKE FAILED: unhandled bword: link reached the article"; exit 1; }
           printf '%s' "$out" | grep -q "STARDICT_LINK_REWRITTEN=OK" \
             || { echo "SMOKE FAILED: StarDict cross-reference was not rewritten to a resolvable link"; exit 1; }
+          # Scan-failure reporting (gd_scan_failures): a broken non-ASCII source
+          # is recorded and returned intact — the import-results banner's data.
+          printf '%s' "$out" | grep -q "SCAN_FAILURES=OK" \
+            || { echo "SMOKE FAILED: scan failures were not reported intact"; exit 1; }
           # --- MDict (.mdx) -----------------------------------------------
           # A separate folder so the fixture's headwords do not collide with
           # the StarDict fixture's. This is the gate for the MDX index build:
@@ -245,7 +249,7 @@ jobs:
           done
           # The format-agnostic gates must still run here. Without this the MDX
           # folder would be gated on nothing, since every format block skips.
-          for gate in "INDEX_PLACEMENT=OK" "MARKERS: gdarticlebody=yes"; do
+          for gate in "INDEX_PLACEMENT=OK" "MARKERS: gdarticlebody=yes" "SCAN_FAILURES=OK"; do
             printf '%s' "$mdxout" | grep -q "$gate" \
               || { echo "SMOKE FAILED: MDX run did not enforce $gate"; exit 1; }
           done

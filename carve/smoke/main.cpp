@@ -242,6 +242,55 @@ int main( int argc, char ** argv )
   const int n2 = gd_scan_dicts( dictDir );
   std::printf( "gd_scan_dicts(again) -> %d new (expect 0)\n", n2 );
   const bool dedupOk = n2 == 0;
+
+  // ---- scan-failure reporting smoke (gd_scan_failures) ----
+  // A bulk import of a broken collection records one failure per unloadable
+  // primary; the app renders them as the import-results banner and deletes the
+  // files each names. The failure path is the primary's source path, which
+  // preserves the original file name — so a non-ASCII name (Japanese/Russian
+  // dictionaries are common) is the case that exercises the boundary's UTF-8
+  // handling: gd_scan_failures must size-check and copy the ENCODED bytes, not
+  // the UTF-16 unit count, and terminate the buffer.
+  //
+  // Self-contained: writes a broken non-ASCII .ifo into a subdir of the
+  // per-invocation config dir (never the shared fixture folder — see the
+  // identity block's dupDir note), scans it, and asserts the failure comes back
+  // intact. The name is built from QChar code points so the source carries no
+  // encoding dependency. Platform note: on Windows the path is recorded
+  // through fromLocal8Bit (see gd_boundary.cc), which mojibakes non-ASCII and
+  // — by making the UTF-16 count equal the byte count — masks the truncation
+  // there; the block still gates the path everywhere and catches the
+  // truncation on a UTF-8-local platform (the app's Android target).
+  bool scanFailuresOk = true; // set false by the block below
+  {
+    const QString brokenName = QStringLiteral( "broken-" )
+        + QString( QChar( 0x017C ) ) + QString( QChar( 0x00F3 ) )
+        + QString( QChar( 0x0142 ) ) + QString( QChar( 0x0107 ) )
+        + QString( QChar( 0x0105 ) ) + QStringLiteral( ".ifo" );
+    const QString scanDir = QDir( QString::fromLocal8Bit( configDir ) )
+                              .filePath( QStringLiteral( "scanfail" ) );
+    QDir().mkpath( scanDir );
+    const QString brokenIfo = QDir( scanDir ).filePath( brokenName );
+    {
+      QFile f( brokenIfo );
+      if ( f.open( QIODevice::WriteOnly ) )
+        f.write( "not a stardict ifo\n" );
+    }
+    gd_scan_dicts( scanDir.toLocal8Bit().constData() );
+
+    std::vector< char > failBuf( 16384 );
+    const int failN = gd_scan_failures( failBuf.data(), static_cast< int >( failBuf.size() ) );
+    std::printf( "gd_scan_failures -> %d\n", failN );
+    const QString failStr = QString::fromUtf8( failBuf.data() );
+    // The exact non-ASCII filename must survive the round-trip: a size check on
+    // the wrong unit (UTF-16 vs UTF-8) or a local-codec detour truncates it.
+    const bool failIntact = failN > 0 && failStr.contains( brokenName );
+    std::printf( "SCAN_FAILURES=%s\n", failIntact ? "OK" : "FAIL" );
+    scanFailuresOk = failIntact;
+
+    QFile::remove( brokenIfo );
+    QDir().rmdir( scanDir );
+  }
   bool dictOk = true; // refined by the removal block below
   // Blocks whose fixture may be absent start satisfied and are only lowered by a
   // real failure, so a SKIP cannot make the run fail. Their skip is asserted
@@ -895,7 +944,8 @@ int main( int argc, char ** argv )
   gd_cleanup();
 
   return ( lookSz > 0 && sugN > 0 && ftsOk && dedupOk && dictOk && optPartsOk && groupsOk
-           && resourceThreadOk && reimportOk && stardictLinkOk && identityOk && identityCleanupOk )
+           && resourceThreadOk && reimportOk && stardictLinkOk && identityOk && identityCleanupOk
+           && scanFailuresOk )
              ? 0
              : 1;
 }

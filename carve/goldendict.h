@@ -1,7 +1,10 @@
 // Aurelex C API - the boundary contract between the Android app and the
 // carved goldendict-ng engine (design D2).
 //
-// Kotlin talks to native through exactly these functions (via JNI). Semantics:
+// The Qt app (EngineController) calls these in-process; the carve is linked
+// into the app, not reached over JNI. All `const char *` inputs and `char *`
+// outputs are UTF-8 ("UTF-8 in, UTF-8 out") — the contract does not depend
+// on the platform's local codec. Semantics:
 //
 // - gd_init:      one-time init. config_dir is where engine user data goes
 //                 (HOME override), index_dir is where dictionary indexes are

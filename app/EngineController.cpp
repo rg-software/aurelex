@@ -381,7 +381,7 @@ void EngineController::collectScanFailures() {
         const int n = gd_scan_failures(buf, static_cast<int>(sizeof(buf)));
         QVariantList list;
         if (n <= 0) return list;
-        const QString joined = QString::fromLocal8Bit(buf);
+        const QString joined = QString::fromUtf8(buf);
         const QStringList lines = joined.split('\n', Qt::SkipEmptyParts);
         for (const QString &path : lines) {
             const int removed = StagedCleanup::removeSourceFileSet(path, stagedRoot);
@@ -456,14 +456,14 @@ DictInfoAtIndex readDictInfoAt(int i) {
     // allocation-free on the path that walks every loaded dictionary.
     // gd_dict_info copies the trailing NUL, but the zero-init is kept so a
     // buffer it chose not to fill is still a valid C string -
-    // QString::fromLocal8Bit would otherwise read past it.
+    // QString::fromUtf8 would otherwise read past it.
     char name[kDictInfoBufferSize] = {};
     char file[kDictInfoBufferSize] = {};
     if (gd_dict_info(i, name, static_cast<int>(sizeof(name)),
                      file, static_cast<int>(sizeof(file))) != 0)
         return {};
-    return DictInfoAtIndex{true, QString::fromLocal8Bit(name),
-                           QString::fromLocal8Bit(file)};
+    return DictInfoAtIndex{true, QString::fromUtf8(name),
+                           QString::fromUtf8(file)};
 }
 
 } // namespace
@@ -506,7 +506,7 @@ void EngineController::runScan() {
     QFuture<ScanOutcome> f = QtConcurrent::run([stagedBase]{
         ScanOutcome out;
         if (QDir(stagedBase).exists())
-            gd_scan_dicts(stagedBase.toLocal8Bit().constData());
+            gd_scan_dicts(stagedBase.toUtf8().constData());
         const int n = gd_dict_count();
         out.count = n;
         out.sources.reserve(n);
@@ -652,7 +652,7 @@ void EngineController::autoIndexMissing()
             char idb[128] = {0};
             if (gd_dict_id(i, idb, static_cast<int>(sizeof(idb))) != 0)
                 continue;
-            const QString id = QString::fromLocal8Bit(idb);
+            const QString id = QString::fromUtf8(idb);
             if (failedSnapshot.contains(id))
                 continue; // a previous build failed; never auto-retry it
             char lf[64] = {0}, lt[64] = {0};
@@ -776,7 +776,7 @@ void EngineController::ensureFtsWorker()
             QString name;
             if (gd_dict_info(idx, nb, static_cast<int>(sizeof(nb)),
                              fb, static_cast<int>(sizeof(fb))) == 0)
-                name = QString::fromLocal8Bit(nb);
+                name = QString::fromUtf8(nb);
             // Publish the CURRENT dictionary + count before the (long) build so
             // the UI isn't one item behind.
             emit ftsIndexBatchProgress(done, runTotal, name);
@@ -872,8 +872,8 @@ void EngineController::initialize(const QString &appDir, const QString &stagedDi
     if (migrated > 0)
         qInfo() << "[aurelex] migrated" << migrated << "stray index entries into index/";
     QFuture<int> f = QtConcurrent::run([appDir, indexDir]{
-        return gd_init(appDir.toLocal8Bit().constData(),
-                       indexDir.toLocal8Bit().constData());
+        return gd_init(appDir.toUtf8().constData(),
+                       indexDir.toUtf8().constData());
     });
     auto *w = new QFutureWatcher<int>(this);
     connect(w, &QFutureWatcher<int>::finished, this, [this, w]{
@@ -1026,12 +1026,12 @@ void EngineController::removeDictionaries(const QVariantList &indices) {
             char idbuf[128] = {0};
             QString id;
             if (gd_dict_id(t.engineIndex, idbuf, static_cast<int>(sizeof(idbuf))) == 0)
-                id = QString::fromLocal8Bit(idbuf);
+                id = QString::fromUtf8(idbuf);
             // Cancel any in-flight full-text build for this dictionary and drop
             // it from the queue BEFORE removing it from the engine (D4): the
             // build stops at its next slice, so it cannot reintroduce the
             // removed dictionary.
-            const QByteArray idb = id.toLocal8Bit();
+            const QByteArray idb = id.toUtf8();
             if (!id.isEmpty()) {
                 {
                     QMutexLocker lock(&m_ftsQueueMutex);
@@ -1665,7 +1665,7 @@ void EngineController::refreshGroups() {
             if (rn != 0) continue;
             QVariantMap m;
             m.insert("id", idOut);
-            m.insert("name", QString::fromLocal8Bit(name.data()));
+            m.insert("name", QString::fromUtf8(name.data()));
             m.insert("dictCount", dictCountOut);
             list.append(m);
         }
@@ -1687,7 +1687,7 @@ void EngineController::createGroup(const QString &name) {
     if (!m_ready) return;
     QFuture<QPair<int, int>> f = QtConcurrent::run([name]{
         int idOut = 0;
-        const int rc = gd_group_create(name.toLocal8Bit().constData(), &idOut);
+        const int rc = gd_group_create(name.toUtf8().constData(), &idOut);
         return QPair<int, int>(rc, idOut);
     });
     auto *w = new QFutureWatcher<QPair<int, int>>(this);
@@ -1712,7 +1712,7 @@ void EngineController::createGroup(const QString &name) {
 void EngineController::renameGroup(int groupId, const QString &newName) {
     if (!m_ready) return;
     QFuture<int> f = QtConcurrent::run([groupId, newName]{
-        return gd_group_rename(groupId, newName.toLocal8Bit().constData());
+        return gd_group_rename(groupId, newName.toUtf8().constData());
     });
     auto *w = new QFutureWatcher<int>(this);
     connect(w, &QFutureWatcher<int>::finished, this, [this, newName, w]{
@@ -2327,7 +2327,7 @@ void EngineController::lookup(const QString &word) {
     QFuture<QString> f = QtConcurrent::run(&m_enginePool, [this, word, key, gen]{
         if (gen != m_lookupGeneration.load()) return QString(); // superseded; don't touch the engine
         std::vector<char> buf(1 << 20);
-        const int sz = gd_lookup(word.toLocal8Bit().constData(),
+        const int sz = gd_lookup(word.toUtf8().constData(),
                                  buf.data(), static_cast<int>(buf.size()));
         if (sz <= 0) return QString();
         return QString::fromUtf8(buf.data(), sz);
@@ -2361,7 +2361,7 @@ void EngineController::lookupInGroup(const QString &word, int groupId) {
     QFuture<QString> f = QtConcurrent::run(&m_enginePool, [this, word, groupId, gen]{
         if (gen != m_lookupGeneration.load()) return QString(); // superseded; don't touch the engine
         std::vector<char> buf(1 << 20);
-        const int sz = gd_lookup_in_group(word.toLocal8Bit().constData(), groupId,
+        const int sz = gd_lookup_in_group(word.toUtf8().constData(), groupId,
                                           buf.data(), static_cast<int>(buf.size()));
         if (sz <= 0) return QString();
         return QString::fromUtf8(buf.data(), sz);
@@ -2396,7 +2396,7 @@ void EngineController::lookupInGroupWithSwitch(const QString &word, int groupId)
         int active = 0;
         if (rc == 0) gd_group_active(&active);
         std::vector<char> buf(1 << 20);
-        const int sz = gd_lookup_in_group(word.toLocal8Bit().constData(), target,
+        const int sz = gd_lookup_in_group(word.toUtf8().constData(), target,
                                           buf.data(), static_cast<int>(buf.size()));
         QString html;
         if (sz > 0) html = QString::fromUtf8(buf.data(), sz);
@@ -2433,10 +2433,10 @@ void EngineController::suggest(const QString &prefix) {
     QFuture<QStringList> f = QtConcurrent::run(&m_enginePool, [this, prefix, gen]{
         if (gen != m_suggestGeneration.load()) return QStringList(); // superseded; don't touch the engine
         std::vector<char> buf(1 << 16);
-        const int n = gd_suggest(prefix.toLocal8Bit().constData(),
+        const int n = gd_suggest(prefix.toUtf8().constData(),
                                   buf.data(), static_cast<int>(buf.size()));
         if (n < 0) return QStringList();
-        return QString::fromLocal8Bit(buf.data(), strlen(buf.data())).split('\n', Qt::SkipEmptyParts);
+        return QString::fromUtf8(buf.data(), strlen(buf.data())).split('\n', Qt::SkipEmptyParts);
     });
     auto *w = new QFutureWatcher<QStringList>(this);
     connect(w, &QFutureWatcher<QStringList>::finished, this, [this, prefix, gen, wall, w]{
@@ -2487,7 +2487,7 @@ QVariantList EngineController::ftsIndexStates() const
         if (name.isEmpty()) {
             std::vector<char> buf(kDictInfoBufferSize);
             if (gd_dict_info(i, buf.data(), static_cast<int>(buf.size()), nullptr, 0) == 0) {
-                name = QString::fromLocal8Bit(buf.data());
+                name = QString::fromUtf8(buf.data());
             }
         }
         m.insert("name", name);
@@ -2552,7 +2552,7 @@ void EngineController::runFtsSearch(const QString &norm, int mode, int groupId,
     if (!m_ready) return;
     QFuture<QVariantList> f = QtConcurrent::run([norm, mode, groupId]{
         std::vector<char> buf(1 << 20);
-        const int n = gd_fts_search(norm.toLocal8Bit().constData(), mode, groupId,
+        const int n = gd_fts_search(norm.toUtf8().constData(), mode, groupId,
                                     buf.data(), static_cast<int>(buf.size()));
         qInfo() << "[aurelex]   gd_fts_search rc=" << n;
         if (n < 0) return QVariantList();
@@ -2604,7 +2604,7 @@ void EngineController::runFtsSearch(const QString &norm, int mode, int groupId,
             char idb[128] = {0};
             if (gd_dict_id(i, idb, static_cast<int>(sizeof(idb))) != 0)
                 continue;
-            const QString id = QString::fromLocal8Bit(idb);
+            const QString id = QString::fromUtf8(idb);
             if (failedSnapshot.contains(id))
                 continue;
             ids.append(id);
