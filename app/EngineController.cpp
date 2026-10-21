@@ -3234,6 +3234,30 @@ void EngineController::refreshCatalogEntries()
                 }
             }
             m.insert(QStringLiteral("resourcesPresent"), resourcesPresent);
+            // Update detection: compare the manifest's file SHA-256 with the digest
+            // recorded when this entry was installed from the catalog. A mismatch on
+            // a required dictionary file means a newer dictionary is published; a
+            // mismatch on an optional bundle means a newer bundle is published. The
+            // recorded digest is empty for folder imports / pre-feature installs,
+            // in which case no update is claimed (the entry stays "installed").
+            bool updateAvailable = false;
+            bool bundleUpdateAvailable = false;
+            const QJsonObject recorded = m_installedDigests.value(e.id).toObject();
+            if (RemoteCatalog::isInstalled(e, sources) && !recorded.isEmpty()) {
+                for (const RemoteCatalog::File &f : e.files) {
+                    if (f.sha256.isEmpty()) continue;
+                    const QString rec = recorded.value(f.name).toString();
+                    if (rec.isEmpty()) continue;
+                    if (rec != f.sha256) {
+                        if (f.required && f.role == QLatin1String("dictionary"))
+                            updateAvailable = true;
+                        else if (!f.required && f.role == QLatin1String("resources"))
+                            bundleUpdateAvailable = true;
+                    }
+                }
+            }
+            m.insert(QStringLiteral("updateAvailable"), updateAvailable);
+            m.insert(QStringLiteral("bundleUpdateAvailable"), bundleUpdateAvailable);
             m.insert(QStringLiteral("files"), files);
             m.insert(QStringLiteral("installable"), e.installable);
             m.insert(QStringLiteral("unsupportedReason"), e.unsupportedReason);
@@ -3833,10 +3857,13 @@ void EngineController::recordInstalledDigests(const QStringList &entryNames)
             continue;
         QJsonObject files;
         for (const RemoteCatalog::File &f : entry->files) {
-            if (!f.required || f.role != QLatin1String("dictionary"))
+            // Record both required dictionary files and optional resource bundles,
+            // so a future update check can detect a changed dictionary OR a changed
+            // bundle. Folder imports / pre-feature installs never reach here, so
+            // their digests stay absent and no update is claimed for them.
+            if (f.role != QLatin1String("dictionary")
+                    && f.role != QLatin1String("resources"))
                 continue;
-            // No digest in the manifest means nothing to record; the entry is
-            // simply not identifiable for a future update.
             if (f.sha256.isEmpty())
                 continue;
             files.insert(f.name, f.sha256);

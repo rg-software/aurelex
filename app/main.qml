@@ -1664,7 +1664,7 @@ ColumnLayout {
         // toggle is); selecting clears any audio opt-out, deselecting forgets it.
         function _toggleCatalogSelect(id) {
             const e = dictsPane._catalogEntry(id)
-            if (!e || e.installed || !e.installable) return
+            if (!e || !e.installable || (e.installed && !e.updateAvailable)) return
             const sel = dictsPane.catalogSelected
             const i = sel.indexOf(id)
             if (i >= 0) sel.splice(i, 1)
@@ -1676,7 +1676,11 @@ ColumnLayout {
         // entry: toggle the opt-out. Otherwise nothing (select the row first).
         function _toggleCatalogAudio(id) {
             const e = dictsPane._catalogEntry(id)
-            if (!e || !e.hasOptional || e.resourcesPresent) return
+            if (!e || !e.hasOptional) return
+            // Allow adding the bundle when it is missing, or refreshing it when a
+            // newer dictionary/bundle is published. An up-to-date bundle that is
+            // already present has nothing to do here.
+            if (e.resourcesPresent && !e.bundleUpdateAvailable && !e.updateAvailable) return
             if (e.installed) {
                 dictsPane._startRequests([{ id: e.id, audio: true }])
                 return
@@ -2432,7 +2436,8 @@ text: root._stagingActive
                             width: ListView.view.width
                             height: 76
                             padding: 8
-                            readonly property bool selectable: !catRow.modelData.installed
+                            readonly property bool selectable: (!catRow.modelData.installed
+                                || catRow.modelData.updateAvailable)
                                 && catRow.modelData.installable && !engine.downloadActive
                             readonly property bool selected: dictsPane._catalogIsSelected(catRow.modelData.id)
                             readonly property bool audioOn: catRow.selected
@@ -2440,6 +2445,7 @@ text: root._stagingActive
                             highlighted: catRow.selected
                             Accessible.name: catRow.modelData.name
                                 + (catRow.modelData.installed ? ", installed" : "")
+                                + (catRow.modelData.updateAvailable ? ", update available" : "")
                             Accessible.role: Accessible.ListItem
                             onClicked: dictsPane._toggleCatalogSelect(catRow.modelData.id)
 
@@ -2455,17 +2461,23 @@ text: root._stagingActive
                                         font.pixelSize: 15
                                         font.bold: true
                                         elide: Text.ElideMiddle
-                                        // Installed (downloaded) rows grey out.
-                                        opacity: catRow.modelData.installed ? 0.45
-                                            : (catRow.selectable ? 1.0 : 0.6)
+                                        // Installed (downloaded) rows grey out, unless
+                                        // a newer version is published, in which case
+                                        // the row is live again so the update can be
+                                        // selected.
+                                        opacity: catRow.modelData.updateAvailable ? 1.0
+                                            : (catRow.modelData.installed ? 0.45
+                                                : (catRow.selectable ? 1.0 : 0.6))
                                     }
                                     Label {
                                         Layout.fillWidth: true
-                                        text: catRow.modelData.installed
-                                            ? qsTr("Installed")
-                                            : (catRow.modelData.hasOptional && catRow.selected)
-                                                ? qsTr("%1 + %2 to download").arg(root.fmtSize(catRow.modelData.requiredBytes)).arg(root.fmtSize(catRow.modelData.optionalBytes))
-                                                : qsTr("%1 to download").arg(root.fmtSize(catRow.modelData.requiredBytes))
+                                        text: catRow.modelData.updateAvailable
+                                            ? qsTr("Update available")
+                                            : (catRow.modelData.installed
+                                                ? qsTr("Installed")
+                                                : ((catRow.modelData.hasOptional && catRow.selected)
+                                                    ? qsTr("%1 + %2 to download").arg(root.fmtSize(catRow.modelData.requiredBytes)).arg(root.fmtSize(catRow.modelData.optionalBytes))
+                                                    : qsTr("%1 to download").arg(root.fmtSize(catRow.modelData.requiredBytes))))
                                         font.pixelSize: 11
                                         color: root.uiSubFg
                                         wrapMode: Text.Wrap
@@ -2491,7 +2503,7 @@ text: root._stagingActive
                                     id: audioButton
                                     readonly property bool actionable: catRow.modelData.hasOptional
                                         && (catRow.selected
-                                            || (catRow.modelData.installed && !catRow.modelData.resourcesPresent))
+                                            || (catRow.modelData.installed && (!catRow.modelData.resourcesPresent || catRow.modelData.bundleUpdateAvailable)))
                                     text: catRow.modelData.hasOptional
                                         ? root.icon("music_note")
                                         : root.icon("music_off")
@@ -2500,7 +2512,8 @@ text: root._stagingActive
                                     enabled: audioButton.actionable && !engine.downloadActive
                                     highlighted: (catRow.selected && catRow.audioOn)
                                         || (catRow.modelData.installed && catRow.modelData.hasOptional
-                                            && !catRow.modelData.resourcesPresent)
+                                            && (!catRow.modelData.resourcesPresent
+                                                || catRow.modelData.bundleUpdateAvailable))
                                     Accessible.name: catRow.modelData.hasOptional
                                         ? "Audio for " + catRow.modelData.name
                                         : "No audio for " + catRow.modelData.name

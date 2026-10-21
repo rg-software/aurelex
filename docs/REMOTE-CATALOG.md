@@ -289,14 +289,19 @@ build-catalog-test/Release/catalog_test.exe
 Add a shape to `app/tests/fixtures/catalog.json` if it exercises a new file
 arrangement (an mdict pair, a DSL `.files.zip`, …).
 
-### Installed content identity
+### Installed content identity and updates
 
 When a catalog download succeeds the app records, in `settings.json` under
-`catalogInstalledDigests`, each installed entry's required-file SHA-256
-(`entryId -> { fileName: sha256 }`, matched by entry name, which the generator
-keeps unique). This is **inert** today — no UI reads it and no update check runs
-— but it is the baseline a future "update available" feature compares the
-manifest against, without re-hashing multi-GB files.
+`catalogInstalledDigests`, each installed entry's file SHA-256
+(`entryId -> { fileName: sha256 }`, for both required dictionary files and
+optional resource bundles, matched by entry name, which the generator keeps
+unique). The catalog pane compares the manifest's file SHA-256 against the
+recorded digest: when they differ, the entry is shown as "Update available"
+(instead of "Installed"), the row is un-greyed and selectable, and the audio
+button can refresh the bundle. Selecting and downloading overwrites the staged
+directory in place and re-records the digests. Entries installed before this
+digest was recorded (folder imports, or installs predating the feature) keep the
+old "Installed" behaviour and are never flagged.
 
 ## Privacy
 
