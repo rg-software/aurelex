@@ -644,6 +644,9 @@ the pane makes no catalog request. Format, manifest and hosting rules:
 | 76 | An article whose entry has **no** hidden zone | No control appears, and the article's layout is untouched | ⬜ No installed dictionary produced such an entry (`зоолог` and `кот` both have hidden zones). The rule sets only `background`, so it cannot move anything; still unverified |
 | 77 | Dark theme, a dictionary entry that embeds artwork (photograph, illustration) | The artwork still sits on its light plate — the no-box rule covers the app's own controls, not content images | ⬜ Not verifiable on this device: neither installed dictionary entry embeds artwork |
 | 78 | Engine glyphs other than the two fixed ones (`lsasound.png`, `zipsound.svg`, `text2speech.svg`, `folder-sound.svg`) | No plate behind them either | ⬜ Not present in the articles inspected (`зоолог`, `кот` use only `expand_opt.svg` and `playsound.svg`, plus a 0×0 `dicticon.png`), so no selector was added for them. Re-check with a dictionary that uses them |
+| 79 | An installed entry whose recorded digest differs from the catalog's (outdated dictionary) | The row reads "Update available", is un-greyed and selectable (instead of greyed "Installed") | ✅ (2026-10-22, debug build on 2nd phone, old ja bytes + Oct-3 digests + Oct-21 manifest injected into `settings.json`: flagged. Detection + UI proven) |
+| 80 | Apply an available update | The new content serves (kana lookup resolves), the row returns to "Installed", and `catalogInstalledDigests` is re-recorded with the new sha | ⬜ Not yet run — needs connectivity on the test phone |
+| 81 | Update flow end-to-end against an isolated catalog | Test rig, no production pollution: scratch tag `catalog-test` + branch `test/catalog-update-flow` (`catalog-test/catalog-A.json`, entry `kaikki-ja-test`); dict A (full ja, no `--index-readings`) vs dict B (same + `--index-readings`, +68,912 reading keys, 10× けんでん). Point a debug build at the raw URL via `remoteCatalogUrl` in `settings.json` (writable through `run-as … tee`) | ⬜ Rig built 2026-10-22 (both dicts verified: A 0 けんでん keys, B 10); install-A step pending |
 
 **2026-10-04 device pass (dark-theme article control icons).** ThinkPhone
 (Android 15, Debug build), app locale left at the system default. Reproduced and
@@ -680,6 +683,19 @@ interception.
   `remoteCatalogUrl` to the Pages URL, adds `catalogUrlSchema: 2`, and preserves
   the recorded digests — so an upgrade from ≤ v0.3.2 adopts the shipped catalog
   instead of pinning the retired share.
+
+**2026-10-22 open anomaly (revisit on the next dictionary update).** The main
+phone (release 0.3.6/306) holds the Oct-3 ja install (catalog-sourced — its
+staged dir `f64386db…` equals `md5("kaikki-ja\nau_kaikki_ja-ja.dsl.dz")`, and no
+kaikki files exist on shared storage) with old bytes (no けんでん suggestion),
+probes the live Oct-21 catalog fine — yet its ja row stays greyed "Installed".
+The debug phone, restored from the same backup (same bytes, same digests, same
+code lineage), flags "Update available" correctly (#79). Identical code,
+divergent result; private state on the main phone is unreachable (release build:
+no `run-as`, no root, `adb backup` returns empty on MIUI). Next update is the
+natural retest; if it still doesn't flag, read its `settings.json` via a
+debuggable build signed with the release key (apktool repack, same versionCode,
+`adb install -r` preserves data, `run-as` then works).
 
 ## Known gaps
 
