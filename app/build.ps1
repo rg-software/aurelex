@@ -430,7 +430,7 @@ androidNdkVersion=23.2.8568313
 buildDir=build
 qt5AndroidDir=$qtAndroidDir
 qtAndroidDir=$qtAndroidDir
-qtMinSdkVersion=23
+qtMinSdkVersion=24
 android.suppressUnsupportedCompileSdk=36
 qtTargetAbiList=arm64-v8a
 qtTargetSdkVersion=36
@@ -439,6 +439,7 @@ qtTargetSdkVersion=36
     $gp = Get-Content $gpPath -Raw
     $gp = $gp -replace 'androidCompileSdkVersion=android-\d+', 'androidCompileSdkVersion=android-36'
     $gp = $gp -replace 'androidBuildToolsVersion=[\d.]+', 'androidBuildToolsVersion=35.0.0'
+    $gp = $gp -replace 'qtMinSdkVersion=\d+', 'qtMinSdkVersion=24'
     $gp = $gp -replace 'qtTargetSdkVersion=\d+', 'qtTargetSdkVersion=36'
     if ($gp -notmatch 'suppressUnsupportedCompileSdk') {
         $gp = $gp -replace '(qtTargetSdkVersion=\d+)', "`$1`nandroid.suppressUnsupportedCompileSdk=36"

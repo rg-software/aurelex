@@ -5,7 +5,7 @@ free ones straight from the app. Everything runs on-device. No account, no ads, 
 
 ![Aurelex search and article view](docs/screenshots/main.png)
 
-**[Download the latest release](https://github.com/rg-software/aurelex/releases)** (Android 6.0+, 64-bit ARM)
+**[Download the latest release](https://github.com/rg-software/aurelex/releases)** (Android 7.0+, 64-bit ARM)
 
 ## Install
 

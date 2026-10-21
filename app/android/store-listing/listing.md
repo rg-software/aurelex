@@ -76,7 +76,7 @@ Verified against the source, so the listings cannot drift from the app:
 - No account, no ads, no analytics, no crash SDK. Network use: the catalog
   (`rg-software.github.io`, downloads from `github.com`) and resources an
   article itself references.
-- Requires Android 6.0+ (`minSdk 23`) and a 64-bit **arm64-v8a** device.
+- Requires Android 7.0+ (`minSdk 24`) and a 64-bit **arm64-v8a** device.
 - Interface in English, Russian and Japanese.
 - Engine derived from goldendict-ng; app is GPL v3.
 
@@ -132,5 +132,5 @@ Everything happens on your phone. Your dictionaries are never uploaded, and no l
 OPEN SOURCE
 Aurelex is free software, licensed under the GPL v3. The dictionary engine comes from the GoldenDict-NG project; the app, the catalog pipeline and everything around it are open source in the GitHub repository.
 
-Requires Android 6.0 or later on a 64-bit (arm64) device.
+Requires Android 7.0 or later on a 64-bit (arm64) device.
 ```

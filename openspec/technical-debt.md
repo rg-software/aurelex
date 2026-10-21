@@ -555,7 +555,7 @@ candidate id (R-n) is provenance only.
 - **Priority:** P3
 - **Location:** `app/CMakeLists.txt:11-14`
 - **Symptom:** The comment says "The shipped app targets API 28+" while the code defines
-  `__ANDROID_API__=35` (the build targets platform android-30, minSdk 23, targetSdk 36).
+  `__ANDROID_API__=35` (the build targets platform android-30, minSdk 24, targetSdk 36).
 - **Evidence:** `app/CMakeLists.txt:11-14`.
 - **Why it matters:** Someone may "correct" 35 down to 28 based on the comment.
 - **Direction:** Reword ("iconv needs ≥28; define the full build platform").

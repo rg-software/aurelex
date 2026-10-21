@@ -250,8 +250,8 @@ document the exact fingerprint), not keystore sharing.
 
 The launcher icon is an adaptive icon (`mipmap-anydpi-v26/ic_launcher.xml`,
 `app/android/res/`) with background, foreground, and monochrome layers. `minSdkVersion` is
-**23** (Qt's default, Android 6.0), so the density-specific
-`mipmap-*/ic_launcher.png` legacy fallbacks are kept for API 23–25, which have no
+**24** (Android 7.0), so the density-specific
+`mipmap-*/ic_launcher.png` legacy fallbacks are kept for API 24–25, which have no
 adaptive-icon support. API 26+ uses the adaptive icon.
 
 Known gap (polish TODO): the monochrome (themed-dark) layer is a simple tint of
