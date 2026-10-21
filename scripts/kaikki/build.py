@@ -180,7 +180,7 @@ def build(args) -> Report:
                 reading_head = clean_headword(reading)
                 if reading_head and reading_head not in headwords:
                     headwords.append(reading_head)
-        body = render_card(records, audio, profile, known)
+        body = render_card(records, audio, profile, known, headwords)
         if not body:
             return
         cards.append(("\n".join(headwords), body, word, len(records)))

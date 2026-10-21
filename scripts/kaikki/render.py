@@ -453,6 +453,7 @@ def render_card(
     audio: AudioPlan,
     profile: LangProfile,
     known: Optional[Set[str]] = None,
+    headwords: Optional[Sequence[str]] = None,
 ) -> str:
     """Render a headword's records as one DSL card.
 
@@ -461,7 +462,10 @@ def render_card(
     block, so an interleaved ``noun, verb, noun`` reads ``noun, verb``. The
     visible article is part of speech → readings → forms → senses; examples and
     cross-references go into the DSL optional zone (``[*]…[/*]``), which the
-    reader expands on demand.
+    reader expands on demand. When the card is indexed under more than one
+    headword (alias headwords from opt-in reading or inflection indexing), the
+    article opens with its primary headword as a title line, so an article
+    reached through an alias lookup says which word it defines.
 
     A single transcription shared across the card is hoisted above the first
     part of speech; differing ones stay under their own part of speech. Audio is
@@ -536,6 +540,12 @@ def render_card(
         return bits
 
     lines: List[str] = []
+    if headwords is not None and len(headwords) > 1 and headwords[0]:
+        # Alias card (readings/inflections indexed as extra headwords): name
+        # the article after its primary headword, so a lookup that arrived
+        # through an alias can tell which word it defines. A single-headword
+        # card carries no title and renders exactly as before.
+        lines.append("\t[b]" + escape_dsl(headwords[0]) + "[/b]")
     if hoist:
         hoisted_audio = audio_bits(range(len(records)))
         pron = next(iter(distinct_tr))

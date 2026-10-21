@@ -3161,6 +3161,50 @@ class CardLayoutTests(unittest.TestCase):
         self.assertNotIn("[/opt]", text)
         self.assertEqual(text.count("[*]"), text.count("[/*]"))
 
+    def test_alias_card_opens_with_primary_headword_title(self):
+        ja = TOOL.get_lang_profile("ja")
+        record = {
+            "word": "保護", "pos": "noun",
+            "senses": [{"glosses": ["Protection."]}],
+            "forms": [{"form": "ほご", "tags": ["transliteration"]}],
+        }
+        text = TOOL.render_card([record], self._Audio(), ja, set(), ["保護", "ほご"])
+        lines = text.split("\n")
+        self.assertEqual(lines[0], "\t[b]保護[/b]")
+        # the title comes before everything else, including the readings line
+        self.assertLess(lines.index("\t[b]保護[/b]"), text.index("読み: ほご"))
+
+    def test_single_headword_card_carries_no_title(self):
+        ja = TOOL.get_lang_profile("ja")
+        record = {
+            "word": "保護", "pos": "noun",
+            "senses": [{"glosses": ["Protection."]}],
+            "forms": [{"form": "ほご", "tags": ["transliteration"]}],
+        }
+        titled = TOOL.render_card([record], self._Audio(), ja, set(), ["保護"])
+        untitled = TOOL.render_card([record], self._Audio(), ja, set())
+        self.assertNotIn("[b]", titled)
+        self.assertEqual(titled, untitled)
+
+    def test_title_for_inflection_aliases(self):
+        record = {
+            "word": "run", "pos": "verb",
+            "senses": [{"glosses": ["To move."]}],
+        }
+        text = TOOL.render_card([record], self._Audio(), self.EN, set(), ["run", "ran"])
+        self.assertTrue(text.startswith("\t[b]run[/b]"))
+
+    def test_alias_title_renders_deterministically(self):
+        ja = TOOL.get_lang_profile("ja")
+        record = {
+            "word": "保護", "pos": "noun",
+            "senses": [{"glosses": ["Protection."]}],
+            "forms": [{"form": "ほご", "tags": ["transliteration"]}],
+        }
+        first = TOOL.render_card([record], self._Audio(), ja, set(), ["保護", "ほご"])
+        second = TOOL.render_card([record], self._Audio(), ja, set(), ["保護", "ほご"])
+        self.assertEqual(first, second)
+
 
 class FormPolicyTests(unittest.TestCase):
     """Standard paradigms are kept; register/dialect variants are dropped."""

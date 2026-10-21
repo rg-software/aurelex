@@ -223,6 +223,13 @@ and carries no bullet. A blank line separates consecutive parts of speech, so th
 sections read as blocks rather than one list; it goes strictly between them, so
 none precedes the first (nor follows a transcription hoisted above it).
 
+A card indexed under more than one headword — readings via `--index-readings`,
+inflected forms via `--include-inflections` — opens with its primary (base-form)
+headword as a bold title line above everything else, so an article reached
+through an alias lookup says which word it defines (`ほご` → an article titled
+`保護`). A card with a single headword carries no title line and renders exactly
+as without one, so base-only dictionaries are unaffected.
+
 The engine renders every `[*]…[/*]` as its own hidden `.dsl_opt` span and emits
 a single `[+]` expander per article, which reveals all of that entry's zones at
 once — so per-sense zones need no engine support, and each still shows its own
@@ -365,30 +372,72 @@ presented as IPA when it is not.
 
 The tool deliberately does not build translation dictionaries, because
 kaikki.org's cross-language data is too sparse and too loosely aligned to make
-one that is honest. Measured against the 2026-09-02 snapshot:
+one that is honest. Measured against the pinned snapshots (en 2026-09-02, ru/ja 2026-09-01):
 
 - only **6.7%** of English lexical records carry any Russian translation, and
-  **3.9%** carry one that lines up with a rendered sense;
-- only **English** records carry translations at all (Russian, German and
-  Japanese records carry none), so `en → X` is the only usable direction and
-  `ru → en` cannot be built;
+  **3.9%** carry one that lines up with a rendered sense (full scan of the
+  2026-09-02 snapshot: 956,900 lexical records, 64,463 with Russian, 37,475
+  aligned with the same fuzzy sense-key match the removed learner mode used);
+- translation tables exist in the **native editions too**, and the reverse
+  directions are denser — but still sparse: `ru → en` (2026-09-01 snapshot,
+  477,070 lexical records) has English on 11.31%, aligned 10.68%; `ja → en`
+  (2026-09-01, 134,678 lexical records) has English on 12.31%, aligned 10.79%.
+  The old "only English records carry translations" line holds for the *English
+  edition* (non-English records in it carry ~nothing), not for the native
+  editions. Even the best native direction leaves ~89% of headwords with zero
+  equivalents;
 - Wiktionary's definitions and its translation table use **two different sense
   inventories at different granularity** — `monkey` has 20 English senses but a
   Russian equivalent for 1, and `mirror` has 5 senses and 0 — so any
   sense-to-sense alignment is guesswork;
-- example sentences are almost never translated (3 of 271 sampled), and
+- example sentences are almost never translated (0.29% in the full English
+  scan, 2,190 of 751,834; 3 of 271 in the earlier sample), and
   Wiktionary has no collocation pairs, which is where a bilingual dictionary
   earns its keep.
 
 A faithful translation dictionary would need alignment or AI-assisted work
 over these sources, which is a separate project. Until then the tool builds
-what the data supports well: complete, well-formed monolingual articles.
+what the data supports well: complete, well-formed monolingual articles. The
+native tables are therefore **out of the translation plan** — measured and
+rejected here, not carried into the matrix in [Future](#future-a-translation-dictionary).
 
 ### Choosing the language: build from the right edition
 
-kaikki publishes one extract per Wiktionary edition
-(`kaikki.org/<edition>wiktionary/rawdata.html`), and every gloss in an extract is
-in that edition's language. This tool builds from one edition at a time:
+kaikki publishes one extract per Wiktionary edition, and every gloss in an
+extract is in that edition's language. This tool builds from one edition at a
+time. The buildable set is the English edition plus the "Data extracted from
+non-English wiktionary editions" list on kaikki.org — 21 editions in total:
+
+| Edition | kaikki prefix | Profile | Notes |
+| --- | --- | --- | --- |
+| English | (default `dictionary/`) | `en` | default; `--source-lang en` |
+| Chinese | `zhwiktionary/` | fallback | warned permissive default |
+| Czech | `cswiktionary/` | fallback | |
+| Dutch | `nlwiktionary/` | fallback | |
+| French | `frwiktionary/` | fallback | |
+| German | `dewiktionary/` | `de` | |
+| Greek | `elwiktionary/` | fallback | |
+| Indonesian | `idwiktionary/` | fallback | |
+| Italian | `itwiktionary/` | fallback | |
+| Japanese | `jawiktionary/` | `ja` | readings support |
+| Korean | `kowiktionary/` | fallback | |
+| Kurdish | `kuwiktionary/` | fallback | |
+| Malay | `mswiktionary/` | fallback | |
+| Polish | `plwiktionary/` | fallback | |
+| Portuguese | `ptwiktionary/` | fallback | |
+| Russian | `ruwiktionary/` | `ru` | |
+| Simple English | `simplewiktionary/` | fallback | |
+| Spanish | `eswiktionary/` | fallback | |
+| Thai | `thwiktionary/` | fallback | |
+| Turkish | `trwiktionary/` | fallback | |
+| Vietnamese | `viwiktionary/` | fallback | |
+
+Only `en`, `de`, `ja`, `ru` have a `LangProfile`
+(`scripts/kaikki/profiles.py:300`); any other `--source-lang` builds with the
+permissive fallback and a warning (form filtering, transcription fields and
+sense-tag labels are then generic English-driven). So "can be built" is all 21
+editions, "built well" is the four profiled ones. Verified in practice: en, ru
+and ja (the shipped catalog dictionaries).
 
 - The default edition is the **English Wiktionary**
   (`kaikki.org/dictionary/raw-wiktextract-data.jsonl.gz`), whose glosses are
@@ -407,21 +456,41 @@ keeps their caches apart.
 
 **Not built, not scheduled** — recorded here so the intent and the source
 assessment are not lost. A translation dictionary needs two things Wiktionary
-does not provide well: **sense alignment** (its definitions and its translation
-tables use different sense inventories) and **word/phrase equivalents** (its
-translation coverage is thin; see the numbers above). Candidate sources, with the
-coverage and license that decide whether we can ship them:
+does not provide well: **sense alignment** and **word/phrase equivalents**. The
+native `translations[]` tables were measured against the pinned snapshots
+(en→ru 3.9% sense-aligned, ru→en 10.7%, ja→en 10.8% — see above) and judged too
+sparse in every direction, so they are **not a candidate** and appear nowhere
+below. What remains is one source per job:
 
-| Source | What it gives | Coverage | License |
+| Job | Source | What it gives | How to fetch |
 | --- | --- | --- | --- |
-| **WordNet / Open Multilingual WordNet** | synsets (a sense grouping) and, through OMW, each synset's members across languages — i.e. sense-aligned equivalents | broad for English and, via OMW, many languages; nouns/verbs/adjectives, weak on phrases and collocations | Princeton WordNet license (permissive, attribution); individual OMW wordnets vary (often the WordNet license or CC BY) |
-| **Tatoeba** | pairs of translated sentences, per language | thousands of languages; sentences, not lemmas or senses | sentences CC BY 2.0 FR (attribution), a subset CC0; audio varies per contributor |
-| **BabelNet** | a multilingual semantic network linking WordNet, Wikipedia and Wikidata — the highest coverage, at sense level | the largest of the three; encyclopedic and lexical | **non-commercial / research only**; commercial use needs a Babelscape licence — a blocker for a shipped app |
+| Equivalents, sense-aligned | **WordNet / Open Multilingual WordNet v1** | synsets shared across languages through the Princeton index — equivalents aligned by construction. eng 117,659 synsets / 100% core; jpn 57,184 / 95% core; 28 wordnets, **no Russian and no German** in v1. Nouns/verbs/adjectives; weak on phrases and collocations | `github.com/omwn/omw-data` tab files, or NLTK `wordnet` + `omw-1.4` (`extended_omw` is Wiktionary-derived — same quality caveat as native). Princeton license (permissive, attribution); per-wordnet licenses vary (CC BY, WordNet, MIT, Apache 2.0…) |
+| Equivalents ru↔en | **RuWordNet via `python-ruwordnet`** | Russian wordnet v2.0 (2021): 59,905 synsets, 154,111 senses; nouns/verbs/adjectives with hyper/hyponyms, meronyms, antonyms. Each synset carries `ili`, the link to the English WordNet synset, and the package bundles the linked English subset — the ru→en sense bridge OMW v1 lacks (en→ru works as reverse lookup over the same links) | `pip install ruwordnet` then `ruwordnet download` (~80 MB sqlite; 2021 db default since 0.0.4). Wrapper MIT; the thesaurus itself is **non-commercial** (no research-institution clause) |
+| Russian monolingual aid only | **wiki-ru-wordnet** (`jamsic/ru-wordnet`) — **a different resource from RuWordNet**, despite the name | Russian synsets + hyper/hyponyms mined from ru.wiktionary (~150 MB in memory). Groups Russian senses; carries **no link to English**, so it supplies no equivalents | PyPI `wiki-ru-wordnet`, GitHub, sqlite image. MIT |
+| Example sentences | **Tatoeba** | translated sentence pairs for 400+ languages — sentences, never lemma/sense equivalents. en 2.05M / ru 1.23M / ja 249k sentences | weekly Saturday exports at `downloads.tatoeba.org/exports/`: `sentences.csv` (~760 MB, ~219 MB bz2) + `links.csv` (~458 MB, ~150 MB bz2), joined on sentence id and filtered to a pair — or the on-demand A→B pair tool on `/en/downloads`. `per_language/` dir, `jpn_indices` for ja–en. Sentences CC BY 2.0 FR + CC0 subset; audio per-contributor |
+| Blocked | **BabelNet** | the largest sense-level network (WordNet + Wikipedia + Wikidata) | **unusable for a shipped app even though the project is non-commercial**: §4c requires exercising rights *as a research institution* and §3 limits reproduction to what is *made accessible only to research institutions*. Commercial use needs a Babelscape licence, and the linked resources keep their own licenses |
 
-The decision to pick up later: whether a permissively licensed base
-(WordNet/OMW + Tatoeba) is enough, or the app takes a BabelNet commercial
-licence. Either way the alignment problem is the same one that makes the kaikki
-cross-language data unusable on its own.
+### Language-pair → source matrix
+
+Cells name the source for each job. There is no native column: native tables are
+rejected everywhere (see above).
+
+| L1 → L2 | Equivalents | Sentences |
+| --- | --- | --- |
+| en ↔ ja | **OMW** (both covered) | Tatoeba |
+| ru → en | **RuWordNet `ili`** + bundled en subset | Tatoeba |
+| en → ru | reverse `ili` lookup (same link set, opposite direction) | Tatoeba |
+| en ↔ de/fr/es/… (other OMW v1 languages) | **OMW** where both sides are covered | Tatoeba |
+| ru ↔ ja, ru ↔ de, … | no direct sense link (`ili` is English-only; OMW v1 has no ru) — English pivot or nothing | Tatoeba |
+| languages outside OMW v1 (zh, ko, …) | OMW-extended (Wiktionary-derived: same caveat as native) or nothing | Tatoeba |
+
+Tatoeba sits underneath every cell as translated **example sentences**, never as
+headword equivalents. In practice only en/ru/ja pairs matter to the app; the rest
+of the matrix is for orientation, not a build plan.
+
+The decision to pick up later: whether the permissively licensed base
+(OMW + Tatoeba) plus RuWordNet under its non-commercial terms covers the needed
+pairs, or the app takes a BabelNet commercial licence.
 
 ## Audio
 
