@@ -1710,8 +1710,10 @@ ColumnLayout {
                     && dictsPane.catalogAudioOff.indexOf(e.id) < 0
                 // An installed entry whose bundle is present (or declined) has
                 // nothing to fetch; skip it rather than reporting a space error.
-                if (e.installed && (!audio || e.resourcesPresent)) continue
-                reqs.push({ id: e.id, audio: audio })
+                // An entry with an update available is never skipped: its
+                // required files have changed and must be re-downloaded.
+                if (e.installed && !e.updateAvailable && (!audio || e.resourcesPresent)) continue
+                reqs.push({ id: e.id, audio: audio, update: !!e.updateAvailable })
             }
             return reqs
         }
@@ -2303,11 +2305,11 @@ text: root._stagingActive
                         Label {
                             Layout.fillWidth: true
                             text: engine.catalogLoading
-                                ? qsTr("Checking for updates…")
+                                ? qsTr("Checking the catalog…")
                                 : engine.catalogError.length > 0
-                                    ? qsTr("Update check failed. Using saved catalog.")
+                                    ? qsTr("Catalog check failed. Using saved catalog.")
                                     : engine.catalogLastFetched.length > 0
-                                        ? qsTr("Updated %1").arg(engine.catalogLastFetched)
+                                        ? qsTr("Last checked %1").arg(engine.catalogLastFetched)
                                         : qsTr("Not checked yet")
                             font.pixelSize: 11
                             color: root.uiSubFg

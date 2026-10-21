@@ -1180,6 +1180,73 @@ void EngineController::reloadDictionariesForResources(const QStringList &entryId
     w->setFuture(f);
 }
 
+void EngineController::reloadDictionariesForUpdate(const QStringList &entryIds) {
+    if (entryIds.isEmpty() || !m_ready) return;
+    // Same mapping as the resource reload: entry id -> dictionary basenames ->
+    // loaded dictionaries. An update changes article text, so unlike the audio
+    // path the full-text index must be rebuilt (task 3.2): delete the index
+    // entries before the rescan, otherwise autoIndexMissing sees them as already
+    // built and short-circuits on the unchanged dictionary id.
+    QStringList wanted;
+    for (const QString &id : entryIds) {
+        const RemoteCatalog::Entry *e = findCatalogEntry(id);
+        if (!e) continue;
+        for (const RemoteCatalog::File &f : e->dictionaryFiles())
+            wanted.append(f.name);
+    }
+    if (wanted.isEmpty()) return;
+    QStringList targets;
+    for (const QVariant &v : m_dictionaries) {
+        const QVariantMap d = v.toMap();
+        if (wanted.contains(QFileInfo(d.value("source").toString()).fileName()))
+            targets.append(d.value("name").toString());
+    }
+    if (targets.isEmpty()) {
+        // Nothing loaded under those names: a plain rescan is enough.
+        runScan();
+        return;
+    }
+    qInfo().noquote() << "[aurelex] reloading (update) for:" << targets;
+
+    QVector<int> indices;
+    for (int i = m_dictionaries.size() - 1; i >= 0; --i) {
+        const QVariantMap d = m_dictionaries.at(i).toMap();
+        if (wanted.contains(QFileInfo(d.value("source").toString()).fileName()))
+            indices.append(i);
+    }
+    if (indices.isEmpty()) {
+        runScan();
+        return;
+    }
+
+    m_processingActive = true;
+    emit processingActiveChanged();
+
+    const QString appDir = m_appDir;
+    QFuture<int> f = QtConcurrent::run([indices, targets, appDir]{
+        for (int idx : indices) {
+            const int rc = gd_remove_dict(idx);
+            qInfo() << "[aurelex] update-reload gd_remove_dict idx=" << idx << "rc=" << rc;
+        }
+        // Delete the FTS index entries on disk so the rebuild is not
+        // short-circuited by the unchanged dictionary id.
+        for (const QString &name : targets) {
+            const QStringList removed = IndexCleanup::removeIndexEntries(appDir, name);
+            for (const QString &full : removed)
+                qInfo() << "[aurelex] removed index entry (update)" << full;
+        }
+        return gd_dict_count();
+    });
+    auto *w = new QFutureWatcher<int>(this);
+    connect(w, &QFutureWatcher<int>::finished, this, [this, w]{
+        const int count = w->result();
+        w->deleteLater();
+        qInfo() << "[aurelex] update-reload unloaded; dictionaries now" << count;
+        runScan();
+    });
+    w->setFuture(f);
+}
+
 void EngineController::resolveDuplicateDictionaries(const std::function<void()> &done) {
     fetchIdentityInventory([this, done](const QVector<DictIdentity::Identity> &inv) {
         const QVector<QVector<DictIdentity::Identity>> groups = duplicateGroups(inv);
@@ -3401,10 +3468,12 @@ void EngineController::syncDownloadState()
         // absence, and a leftover would re-show this result forever).
         removeDownloadFile();
         if (published) {
-            // m_audioReloadIds non-empty means this batch was "add audio" for a
-            // dictionary the engine already holds: a plain rescan cannot make
-            // the new resources take effect, so that path unloads + re-adds.
-            if (m_audioReloadIds.isEmpty() && idle) {
+            // An update (required files changed for an installed entry) or an
+            // add-audio batch both need an unload + rescan, so they are deferred
+            // to the poller (which waits for idle). A plain new install just
+            // needs a rescan.
+            const bool needsReload = !m_updateReloadIds.isEmpty() || !m_audioReloadIds.isEmpty();
+            if (!needsReload && idle) {
                 plainRescan = true;
             } else {
                 // Everything else waits for a moment when the engine is ready and
@@ -3416,11 +3485,12 @@ void EngineController::syncDownloadState()
                 m_stagedRescanPending = true;
             }
         } else {
-            // Cancelled, or nothing succeeded: the optional-resource ids belong to
-            // a batch that never published. Dropping them stops a later, unrelated
-            // success from unloading dictionaries "for" a batch that changed
-            // nothing.
+            // Cancelled, or nothing succeeded: the optional-resource / update ids
+            // belong to a batch that never published. Dropping them stops a later,
+            // unrelated success from unloading dictionaries "for" a batch that
+            // changed nothing.
             m_audioReloadIds.clear();
+            m_updateReloadIds.clear();
         }
     }
     // A published batch means the named entries are now installed from the
@@ -3556,6 +3626,7 @@ void EngineController::startCatalogDownload(const QVariantList &requests)
     // service never sees a URL or size the parser did not approve.
     QJsonArray requestsOut;
     QStringList pendingAudioIds;
+    QStringList pendingUpdateIds;
     qint64 need = 0;
     for (const QVariant &v : requests) {
         const QVariantMap r = v.toMap();
@@ -3565,6 +3636,7 @@ void EngineController::startCatalogDownload(const QVariantList &requests)
         // dictionary the engine can never load.
         if (!e || !e->installable) continue;
         const bool wantAudio = r.value(QStringLiteral("audio")).toBool();
+        const bool update = r.value(QStringLiteral("update")).toBool();
         const bool installed = RemoteCatalog::isInstalled(*e, dictionarySources());
         const QVariantList wanted = r.value(QStringLiteral("files")).toList();
         QJsonArray filesOut;
@@ -3573,6 +3645,14 @@ void EngineController::startCatalogDownload(const QVariantList &requests)
             // Legacy explicit selector.
             for (const RemoteCatalog::File &f : e->files)
                 if (wanted.contains(f.name))
+                    chosen.append(f);
+        } else if (installed && update) {
+            // Update an already-installed entry: re-download its required files
+            // (and the optional bundle when audio is opted in). Optional
+            // resources already present are left in place by the service, so a
+            // dict-only update does not delete the audio.
+            for (const RemoteCatalog::File &f : e->files)
+                if (f.required || (wantAudio && !f.required))
                     chosen.append(f);
         } else if (installed) {
             // Already loaded: only a missing optional bundle can be added, and
@@ -3600,6 +3680,7 @@ void EngineController::startCatalogDownload(const QVariantList &requests)
         ro.insert(QStringLiteral("id"), e->id);
         ro.insert(QStringLiteral("name"), e->name);
         ro.insert(QStringLiteral("contentHash"), RemoteCatalog::contentHash(*e));
+        ro.insert(QStringLiteral("update"), update);
         ro.insert(QStringLiteral("files"), filesOut);
         requestsOut.append(ro);
         for (const RemoteCatalog::File &f : chosen) need += f.sizeBytes;
@@ -3619,6 +3700,13 @@ void EngineController::startCatalogDownload(const QVariantList &requests)
             if (!pendingAudioIds.contains(e->id))
                 pendingAudioIds.append(e->id);
         }
+        // An update of an already-installed entry: the required files change, so
+        // the dictionary must be unloaded and its FTS index rebuilt (not just
+        // rescanned) once the new bytes land.
+        if (update && installed && !allOptional) {
+            if (!pendingUpdateIds.contains(e->id))
+                pendingUpdateIds.append(e->id);
+        }
     }
     if (requestsOut.isEmpty()) return;
     if (need > 0) {
@@ -3633,6 +3721,7 @@ void EngineController::startCatalogDownload(const QVariantList &requests)
         }
     }
     m_audioReloadIds = pendingAudioIds;
+    m_updateReloadIds = pendingUpdateIds;
     QJsonObject payload;
     payload.insert(QStringLiteral("requests"), requestsOut);
     // The whole catalog's id→contentHash index, so the service can tell an
@@ -4121,7 +4210,12 @@ void EngineController::pollPendingLookup()
     // idle" can become true many ticks after the outcome was reported.
     if (m_stagedRescanPending && m_ready && !m_processingActive) {
         m_stagedRescanPending = false;
-        if (!m_audioReloadIds.isEmpty()) {
+        if (!m_updateReloadIds.isEmpty()) {
+            const QStringList ids = m_updateReloadIds;
+            m_updateReloadIds.clear();
+            qInfo().noquote() << "[aurelex] reloading for update (deferred):" << ids;
+            reloadDictionariesForUpdate(ids);
+        } else if (!m_audioReloadIds.isEmpty()) {
             const QStringList ids = m_audioReloadIds;
             m_audioReloadIds.clear();
             qInfo().noquote() << "[aurelex] reloading for new resources (deferred):" << ids;

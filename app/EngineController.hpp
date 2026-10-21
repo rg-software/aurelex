@@ -657,11 +657,13 @@ private:
     // unload + rescan rather than a plain rescan, so it is remembered across the
     // download -> tail hand-off. Cleared once the reload has run.
     QStringList m_audioReloadIds;
+    QStringList m_updateReloadIds;
     // Unload every loaded dictionary whose source matches one of the named
     // catalog entries, then rescan so the new resources are picked up. Off the
     // UI thread: gd_remove_dict/gd_scan_dicts serialize on g_engineMutex, which
     // a running FTS build holds for its whole duration.
     void reloadDictionariesForResources(const QStringList &entryIds);
+    void reloadDictionariesForUpdate(const QStringList &entryIds);
     // The sources of every dictionary the engine currently has loaded, MINUS any
     // this session has unloaded but whose list entry has not been re-read yet
     // (m_unloadedSources). This is the input to every "is this staged directory

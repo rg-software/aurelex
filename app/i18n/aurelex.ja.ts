@@ -108,6 +108,21 @@
         <translation>空き容量が少なくなっています</translation>
     </message>
     <message>
+        <location filename="../main.qml" line="2306"/>
+        <source>Checking the catalog…</source>
+        <translation>カタログを確認中…</translation>
+    </message>
+    <message>
+        <location filename="../main.qml" line="2308"/>
+        <source>Catalog check failed. Using saved catalog.</source>
+        <translation>カタログの確認に失敗しました。保存済みを使用します。</translation>
+    </message>
+    <message>
+        <location filename="../main.qml" line="2310"/>
+        <source>Last checked %1</source>
+        <translation>最終確認: %1</translation>
+    </message>
+    <message>
         <location filename="../main.qml" line="3123"/>
         <source>The group is removed. The dictionaries themselves are not deleted.</source>
         <translation>グループを削除しました。辞書自体は削除されません。</translation>
@@ -171,16 +186,6 @@
         <location filename="../main.qml" line="2299"/>
         <source>Dictionary catalog</source>
         <translation>辞書カタログ</translation>
-    </message>
-    <message>
-        <location filename="../main.qml" line="2306"/>
-        <source>Checking for updates…</source>
-        <translation>更新を確認しています…</translation>
-    </message>
-    <message>
-        <location filename="../main.qml" line="2310"/>
-        <source>Updated %1</source>
-        <translation>更新日時 %1</translation>
     </message>
     <message>
         <location filename="../main.qml" line="2311"/>
@@ -319,11 +324,6 @@
         <location filename="../main.qml" line="2088"/>
         <source>Process completed.</source>
         <translation>処理が完了しました。</translation>
-    </message>
-    <message>
-        <location filename="../main.qml" line="2308"/>
-        <source>Update check failed. Using saved catalog.</source>
-        <translation>更新を確認できませんでした。保存済みのカタログを使用します。</translation>
     </message>
     <message>
         <location filename="../main.qml" line="2488"/>

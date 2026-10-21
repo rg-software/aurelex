@@ -108,6 +108,21 @@
         <translation>Мало свободного места</translation>
     </message>
     <message>
+        <location filename="../main.qml" line="2306"/>
+        <source>Checking the catalog…</source>
+        <translation>Проверка каталога…</translation>
+    </message>
+    <message>
+        <location filename="../main.qml" line="2308"/>
+        <source>Catalog check failed. Using saved catalog.</source>
+        <translation>Ошибка проверки каталога. Используется сохранённый.</translation>
+    </message>
+    <message>
+        <location filename="../main.qml" line="2310"/>
+        <source>Last checked %1</source>
+        <translation>Последняя проверка: %1</translation>
+    </message>
+    <message>
         <location filename="../main.qml" line="3123"/>
         <source>The group is removed. The dictionaries themselves are not deleted.</source>
         <translation>Группа удалена. Сами словари не удалены.</translation>
@@ -171,16 +186,6 @@
         <location filename="../main.qml" line="2299"/>
         <source>Dictionary catalog</source>
         <translation>Каталог словарей</translation>
-    </message>
-    <message>
-        <location filename="../main.qml" line="2306"/>
-        <source>Checking for updates…</source>
-        <translation>Проверка обновлений…</translation>
-    </message>
-    <message>
-        <location filename="../main.qml" line="2310"/>
-        <source>Updated %1</source>
-        <translation>Обновлено %1</translation>
     </message>
     <message>
         <location filename="../main.qml" line="2311"/>
@@ -319,11 +324,6 @@
         <location filename="../main.qml" line="2088"/>
         <source>Process completed.</source>
         <translation>Процесс завершён.</translation>
-    </message>
-    <message>
-        <location filename="../main.qml" line="2308"/>
-        <source>Update check failed. Using saved catalog.</source>
-        <translation>Не удалось проверить обновления. Используется сохранённый каталог.</translation>
     </message>
     <message>
         <location filename="../main.qml" line="2488"/>

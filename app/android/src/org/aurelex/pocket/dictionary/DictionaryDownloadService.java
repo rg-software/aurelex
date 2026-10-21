@@ -426,8 +426,11 @@ public class DictionaryDownloadService extends Service {
             return;
         }
         // Already published (a re-install of the same content): nothing to do,
-        // and re-copying would only churn GB-scale files.
-        if (stagedDir.isDirectory()) {
+        // and re-copying would only churn GB-scale files. An *update* is the
+        // exception: the file names are unchanged but the bytes are new, so it
+        // must fall through to the download + publish path below.
+        final boolean isUpdate = request.optBoolean("update", false);
+        if (stagedDir.isDirectory() && !isUpdate) {
             android.util.Log.i(TAG, name + " already present at " + stagedDir);
             state.succeeded.add(name);
             for (int i = 0; i < files.length(); i++) state.filesDone++;
@@ -484,12 +487,60 @@ public class DictionaryDownloadService extends Service {
             return;
         }
         // Publish: temp -> staged. Everything the engine will scan is complete.
-        if (stagedDir.exists()) AurelexActivity.deleteRecursively(stagedDir);
-        if (!tmpDir.renameTo(stagedDir)) {
-            android.util.Log.e(TAG, "publish rename failed for " + name + " (" + tmpDir + ")");
-            state.failed.add(name);
-            state.message = "could not finalise the download";
-            return;
+        if (isUpdate) {
+            // In-place update: overwrite each required/optional file into the
+            // existing staged dir (via a .part + atomic rename over the final
+            // name) so optional resources already present are left untouched and
+            // the installed dictionary stays intact until each new file lands.
+            // A failure on one file leaves the previous version of that file in
+            // place only if its rename did not happen; the service reports failed
+            // and the next run resumes from staging-tmp.
+            if (!stagedDir.isDirectory() && !stagedDir.mkdirs()) {
+                state.failed.add(name);
+                state.message = "could not create the download directory";
+                return;
+            }
+            boolean pubOk = true;
+            for (int i = 0; i < files.length(); i++) {
+                final JSONObject fo = files.optJSONObject(i);
+                if (fo == null) continue;
+                final String fileName = fo.optString("name", "");
+                if (fileName.isEmpty()) continue;
+                final File src = new File(tmpDir, fileName);
+                final File dst = new File(stagedDir, fileName);
+                try {
+                    try {
+                        java.nio.file.Files.move(
+                                src.toPath(), dst.toPath(),
+                                java.nio.file.StandardCopyOption.REPLACE_EXISTING,
+                                java.nio.file.StandardCopyOption.ATOMIC_MOVE);
+                    } catch (java.nio.file.AtomicMoveNotSupportedException amnse) {
+                        java.nio.file.Files.move(
+                                src.toPath(), dst.toPath(),
+                                java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                    }
+                } catch (Exception e) {
+                    android.util.Log.e(TAG, "publish move failed for " + fileName + ": " + e);
+                    pubOk = false;
+                    break;
+                }
+            }
+            if (!pubOk) {
+                state.failed.add(name);
+                state.message = "could not finalise the download";
+                return;
+            }
+            // Drop the scratch dir (now empty of its files) so it does not linger.
+            if (tmpDir.isDirectory()) tmpDir.delete();
+        } else {
+            // Fresh install: atomically publish the whole dir.
+            if (stagedDir.exists()) AurelexActivity.deleteRecursively(stagedDir);
+            if (!tmpDir.renameTo(stagedDir)) {
+                android.util.Log.e(TAG, "publish rename failed for " + name + " (" + tmpDir + ")");
+                state.failed.add(name);
+                state.message = "could not finalise the download";
+                return;
+            }
         }
         state.scratchHashes.remove(hash);
         state.succeeded.add(name);
