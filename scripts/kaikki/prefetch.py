@@ -9,10 +9,10 @@ import tempfile
 from collections import deque
 from typing import Deque, Dict, Iterable, Iterator, List, Optional, Sequence, Set, Tuple
 
-from .audio import AudioPlan, _audio_match_key, _audio_name_variants, _safe_audio_filename, _url_basename, extract_audio, write_bundle
+from .audio import AudioPlan, _audio_match_key, _audio_name_variants, _safe_audio_filename, _url_basename, bundle_entry_names, extract_audio, verify_bundle, write_bundle
 from .constants import RAW_JSONL_URL
 from .dictzip import encode_dsl, make_dictzip, read_dictzip
-from .dsltext import _ICON_ASSET_DIR, _ICON_FILES, collect_audio_refs, rewrite_audio_refs
+from .dsltext import _AUDIO_REF_RE, _ICON_ASSET_DIR, _ICON_FILES, _unescape_dsl, collect_audio_refs, rewrite_audio_refs
 from .inputs import _resolve_inputs
 from .profiles import get_lang_profile
 from .snapshot import Progress, Snapshot, TabularLog, describe_failure, download_cached, failure_is_permanent, verify_sidecar
@@ -848,6 +848,51 @@ def bundle_audio(args) -> int:
             f"archive or the cache",
             file=sys.stderr,
         )
+    # Remove dangling [s] links unless the operator asked to keep them, so the
+    # dictionary never carries a reference to a file that is not in its bundle.
+    if missing and not getattr(args, "keep_unresolved", False):
+        missing_set = set(missing)
+        def _drop(match):
+            name = _unescape_dsl(match.group(1))
+            if name in missing_set:
+                return ""
+            return match.group(0)
+        rewritten = _AUDIO_REF_RE.sub(_drop, text)
+        if rewritten != text:
+            part = dict_path + ".part"
+            with open(part, "wb") as f:
+                f.write(make_dictzip(encode_dsl(rewritten)))
+            os.replace(part, dict_path)
+            print(
+                f"  removed {len(missing):,} dangling reference(s) from the dictionary",
+                file=sys.stderr,
+            )
     print(f"bundled {found:,} of {len(refs):,} referenced recording(s)", file=sys.stderr)
     print(f"wrote {written}", file=sys.stderr)
     return 0
+
+
+def verify_bundle_mode(args) -> int:
+    '''Audit a rendered dictionary's references against its resource bundle.'''
+    dict_path = args.dictionary
+    if not os.path.isfile(dict_path):
+        raise SystemExit(f"no dictionary at {dict_path}")
+    result = verify_bundle(dict_path, getattr(args, "bundle", None))
+    print(f"dictionary: {dict_path}", file=sys.stderr)
+    print(f"  references: {len(result['refs']):,} total", file=sys.stderr)
+    print(f"    audio: {len(result['audio']):,}", file=sys.stderr)
+    print(f"    icons: {len(result['icons']):,}", file=sys.stderr)
+    print(f"    other: {len(result['other']):,}", file=sys.stderr)
+    if result["bundle_path"]:
+        print(f"  bundle: {result['bundle_path']}", file=sys.stderr)
+        print(f"    entries: {len(result['bundle_names']):,}", file=sys.stderr)
+        print(f"    unresolved audio: {len(result['unresolved']):,}", file=sys.stderr)
+        print(f"    case-only matches: {result['case_only']:,}", file=sys.stderr)
+        if result["unresolved"]:
+            print("  unresolved:", file=sys.stderr)
+            for name in result["unresolved"]:
+                print(f"    {name}", file=sys.stderr)
+    else:
+        print("  bundle: (none found)", file=sys.stderr)
+        print(f"  unresolved audio: {len(result['unresolved']):,} (no bundle)", file=sys.stderr)
+    return 1 if result["unresolved"] else 0

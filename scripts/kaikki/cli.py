@@ -9,7 +9,7 @@ from typing import Optional, Sequence
 
 from .build import build
 from .constants import AUDIO_TAR_URL, RAW_JSONL_URL, _PREFETCH_RETRIES, _PREFETCH_SPACING_SECONDS
-from .prefetch import bundle_audio, fetch_list, prefetch_audio
+from .prefetch import bundle_audio, fetch_list, prefetch_audio, verify_bundle_mode
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -337,7 +337,27 @@ def bundle_audio_parser() -> argparse.ArgumentParser:
                         help="re-download a cached audio archive")
     parser.add_argument("--timeout", type=int, default=60,
                         help="network timeout in seconds (default 60)")
+    parser.add_argument("--keep-unresolved", action="store_true",
+                        help="keep [s] links that resolve to no file instead of "
+                             "removing them from the dictionary")
     return parser
+
+
+def verify_bundle_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="kaikki-to-dsl.py verify-bundle",
+        description="Audit a rendered dictionary's [s] references against its "
+        "resource bundle: report how many resolve, how many differ only in case, "
+        "and which are absent entirely. Changes nothing.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument("dictionary",
+                        help="the rendered <name>.dsl.dz to audit")
+    parser.add_argument("--bundle",
+                        help="override the bundle path (default: sibling "
+                             "<base>.dsl.files.zip or <base>.dsl.files/)")
+    return parser
+
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
@@ -355,6 +375,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         return fetch_list(fetch_list_parser().parse_args(argv[1:]))
     if argv and argv[0] == "bundle-audio":
         return bundle_audio(bundle_audio_parser().parse_args(argv[1:]))
+    if argv and argv[0] == "verify-bundle":
+        return verify_bundle_mode(verify_bundle_parser().parse_args(argv[1:]))
     args = build_parser().parse_args(argv)
     report = build(args)
     print(report.summary(), file=sys.stderr)

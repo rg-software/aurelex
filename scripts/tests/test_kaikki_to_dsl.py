@@ -2165,7 +2165,8 @@ class ReuseBundleTests(unittest.TestCase):
             TOOL.build(self.args(tmp, out, "--no-audio"))
             # The next build references audio the reused bundle does not hold.
             with self.captured() as out_err:
-                TOOL.build(self.args(tmp, out, "--reuse-bundle"))
+                with self.assertRaises(SystemExit):
+                    TOOL.build(self.args(tmp, out, "--reuse-bundle"))
             message = out_err.getvalue()
             self.assertIn("lacks", message)
             self.assertIn("referenced resource(s)", message)
@@ -2174,7 +2175,8 @@ class ReuseBundleTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             out = os.path.join(tmp, "out")
             with self.captured() as out_err:
-                TOOL.build(self.args(tmp, out, "--reuse-bundle"))
+                with self.assertRaises(SystemExit):
+                    TOOL.build(self.args(tmp, out, "--reuse-bundle"))
             self.assertIn("no resource bundle", out_err.getvalue())
 
 

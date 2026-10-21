@@ -25,6 +25,7 @@ class Report:
         self.merged_headwords = 0   # headwords merged from non-adjacent records
         self.dropped_cards = 0      # definition-less cards omitted
         self.unlinked_refs = 0      # links left as plain text (target absent)
+        self.unresolved_refs: List[str] = []  # audio refs with no bundle file
 
     def summary(self) -> str:
         return (

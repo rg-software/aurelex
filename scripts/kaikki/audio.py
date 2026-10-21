@@ -401,25 +401,30 @@ def extract_audio(
             owners = key_index.get(_audio_match_key(member.name))
             if not owners:
                 continue
-            target = next((n for n in owners if n in remaining), None)
-            if target is None:
+            # Every owner of this key that is still outstanding gets a copy:
+            # one archive member can satisfy several wanted names that fold to
+            # the same key (e.g. two records whose ogg_url spell the same
+            # recording differently). Writing only the first starves the rest.
+            claimants = [n for n in owners if n in remaining]
+            if not claimants:
                 continue
             data = tar.extractfile(member)
             if data is None:
                 continue
             try:
-                with open(os.path.join(dest_dir, target), "wb") as out:
-                    while True:
-                        block = data.read(1024 * 1024)
-                        if not block:
-                            break
-                        out.write(block)
+                payload = data.read()
             finally:
                 data.close()
-            remaining.discard(target)
-            found += 1
-            if progress is not None:
-                progress.tick()
+            for target in claimants:
+                try:
+                    with open(os.path.join(dest_dir, target), "wb") as out:
+                        out.write(payload)
+                except OSError:
+                    continue
+                remaining.discard(target)
+                found += 1
+                if progress is not None:
+                    progress.tick()
             if not remaining:
                 break
     return found, sorted(remaining)
@@ -466,6 +471,85 @@ def write_bundle(
             shutil.copyfileobj(fsrc, fdst, 1024 * 1024)
         if progress is not None:
             progress.tick()
+
+def find_bundle_path(dict_path: str) -> Optional[str]:
+    """The resource bundle beside a dictionary, if any.
+
+    Checks the canonical ``<base>.dsl.files.zip`` / ``<base>.dsl.files/`` names
+    first, then the legacy ``<base>.dsl.dz.files.zip`` / ``.dsl.dz.files/``
+    spellings. Returns None when no bundle is present.
+    """
+    lower = dict_path.lower()
+    if lower.endswith(".dz"):
+        stem = dict_path[:-len(".dz")]   # keeps the .dsl: "kaikki-en.dsl"
+    elif lower.endswith(".dsl"):
+        stem = dict_path
+    else:
+        stem = dict_path
+    candidates = [
+        stem + ".files.zip",
+        stem + ".files",
+        stem + ".dz.files.zip",
+        stem + ".dz.files",
+    ]
+    # Also handle a dict path that already lacks the .dz (passed as base).
+    for c in candidates:
+        if os.path.exists(c):
+            return c
+    return None
+
+
+def verify_bundle(dict_path: str, bundle_path: Optional[str] = None) -> dict:
+    """Check that every audio-extension ``[s]`` reference in a dictionary
+    resolves to a file in its resource bundle.
+
+    Returns a dict with:
+      - refs: all referenced resource names (first-seen order)
+      - audio: those with an audio extension
+      - icons: those that are vendored sense-marker icons
+      - other: anything else (unrecognised)
+      - bundle_path: the bundle checked (or None)
+      - bundle_names: the bundle's entry names (or None)
+      - unresolved: audio refs with no matching bundle entry (by _audio_match_key)
+      - case_only: how many of those would match under a different case
+    """
+    from .dictzip import read_dictzip
+    from .dsltext import collect_audio_refs, _ICON_FILES
+
+    text = read_dictzip(dict_path)
+    refs = collect_audio_refs(text)
+    audio_refs = [r for r in refs if os.path.splitext(r)[1].lower() in AUDIO_EXTENSIONS]
+    icon_refs = [r for r in refs if r in _ICON_FILES]
+    other_refs = [r for r in refs if r not in audio_refs and r not in icon_refs]
+
+    if bundle_path is None:
+        bundle_path = find_bundle_path(dict_path)
+    bundle_names = bundle_entry_names(bundle_path) if bundle_path else None
+
+    unresolved: List[str] = []
+    case_only = 0
+    if bundle_names is not None:
+        bundle_keys = {_audio_match_key(n) for n in bundle_names}
+        for name in audio_refs:
+            if _audio_match_key(name) not in bundle_keys:
+                unresolved.append(name)
+            elif name not in bundle_names:
+                case_only += 1
+    else:
+        # No bundle at all: every audio ref is unresolved.
+        unresolved = list(audio_refs)
+
+    return {
+        "refs": refs,
+        "audio": audio_refs,
+        "icons": icon_refs,
+        "other": other_refs,
+        "bundle_path": bundle_path,
+        "bundle_names": bundle_names,
+        "unresolved": unresolved,
+        "case_only": case_only,
+    }
+
 
 def bundle_entry_names(path: str) -> Optional[Set[str]]:
     """The entry names of an existing resource bundle, or None when absent.

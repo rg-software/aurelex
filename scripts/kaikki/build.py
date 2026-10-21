@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 import sys
 import tempfile
+import zipfile
 from typing import Dict, List, Optional, Set, Tuple
 
-from .audio import AudioPlan, bundle_entry_names, extract_audio, write_bundle
+from .audio import AudioPlan, _audio_match_key, bundle_entry_names, extract_audio, verify_bundle, write_bundle
 from .constants import WIKTEXTRACT_CITATION, WIKTIONARY_LICENSE
 from .dictzip import encode_dsl, make_dictzip
 from .dsltext import _ICON_ASSET_DIR, _ICON_FILES, _ICON_LEGEND, _icon_ref, _unescape_dsl, clean_headword, escape_dsl, header_arg
@@ -332,31 +334,78 @@ def build(args) -> Report:
         # Render only: keep the bundle already beside the dictionary. A build's
         # references only shrink when cards are pruned or merged, so the existing
         # bundle normally covers the new dictionary; it is checked rather than
-        # assumed, and only its entry names are read.
+        # assumed, and only its entry names are read. Names are compared through
+        # _audio_match_key, so a case-only difference is not a missing resource
+        # but a repairable one.
         required = set(_ICON_FILES)
         required.update(audio.referenced)
         present = bundle_entry_names(bundle_dest)
         if present is None:
             print(
-                f"warning: --reuse-bundle, but there is no resource bundle at "
+                f"error: --reuse-bundle, but there is no resource bundle at "
                 f"{bundle_dest}; the dictionary references resources that are not "
                 f"present",
                 file=sys.stderr,
             )
-        else:
-            absent = sorted(required - present)
-            if absent:
-                print(
-                    f"warning: the reused bundle {bundle_dest} lacks "
-                    f"{len(absent)} referenced resource(s); re-run without "
-                    f"--reuse-bundle to rebuild it",
-                    file=sys.stderr,
+            raise SystemExit(1)
+        present_keys = {_audio_match_key(n) for n in present}
+        repairs = {}   # referenced name -> present name (source of bytes)
+        truly_absent = []
+        for name in required:
+            if name in present:
+                continue
+            if _audio_match_key(name) in present_keys:
+                matched = next(
+                    n for n in present if _audio_match_key(n) == _audio_match_key(name)
                 )
+                repairs[name] = matched
             else:
-                print(
-                    f"reused resource bundle: {bundle_dest} ({len(present):,} files)",
-                    file=sys.stderr,
-                )
+                truly_absent.append(name)
+        if truly_absent:
+            print(
+                f"error: the reused bundle {bundle_dest} lacks "
+                f"{len(truly_absent)} referenced resource(s) (absent under every "
+                f"case):",
+                file=sys.stderr,
+            )
+            for name in sorted(truly_absent):
+                print(f"  {name}", file=sys.stderr)
+            raise SystemExit(1)
+        if repairs:
+            tmp_bundle = bundle_dest + ".repair"
+            src_zf = zipfile.ZipFile(bundle_dest) if os.path.isfile(bundle_dest) else None
+            try:
+                with zipfile.ZipFile(tmp_bundle, "w", compression=zipfile.ZIP_STORED) as zf:
+                    if src_zf is not None:
+                        for info in src_zf.infolist():
+                            with src_zf.open(info) as src, zf.open(info, "w") as dst:
+                                shutil.copyfileobj(src, dst, 1024 * 1024)
+                    for name, source_name in repairs.items():
+                        if src_zf is None:
+                            continue
+                        info = src_zf.getinfo(source_name)
+                        with src_zf.open(info) as src:
+                            new_info = zipfile.ZipInfo(
+                                filename=name, date_time=(1980, 1, 1, 0, 0, 0)
+                            )
+                            new_info.compress_type = zipfile.ZIP_STORED
+                            new_info.external_attr = 0o644 << 16
+                            new_info.file_size = info.file_size
+                            with zf.open(new_info, "w") as dst:
+                                shutil.copyfileobj(src, dst, 1024 * 1024)
+            finally:
+                if src_zf is not None:
+                    src_zf.close()
+            os.replace(tmp_bundle, bundle_dest)
+            print(
+                f"repaired {len(repairs)} case-only resource name(s) in "
+                f"{bundle_dest}",
+                file=sys.stderr,
+            )
+        print(
+            f"reused resource bundle: {bundle_dest} ({len(present):,} files)",
+            file=sys.stderr,
+        )
         report.audio_found = len(audio.referenced)
     else:
         # Every entry is named by its source path, so a recording already in the
@@ -401,4 +450,19 @@ def build(args) -> Report:
     if dead_log is not None:
         dead_log.close()
     print(f"wrote {dz_path}", file=sys.stderr)
+    # Reference integrity: every audio-extension [s] reference in the dictionary
+    # must resolve to a file in its bundle. A mismatch (including a case-only
+    # one that only resolves on a case-insensitive filesystem) is a build
+    # failure rather than a silent dead link.
+    check = verify_bundle(dz_path, bundle_dest)
+    report.unresolved_refs = list(check["unresolved"])
+    if check["unresolved"]:
+        print(
+            f"error: {len(check['unresolved'])} referenced recording(s) have no "
+            f"file in the bundle ({check['case_only']} case-only mismatch(es))",
+            file=sys.stderr,
+        )
+        for name in check["unresolved"]:
+            print(f"  {name}", file=sys.stderr)
+        raise SystemExit(1)
     return report
