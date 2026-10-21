@@ -1,57 +1,57 @@
 ## 1. Reference-resolution check
 
-- [ ] 1.1 Add a reader that returns every `[s]` resource name a rendered
+- [x] 1.1 Add a reader that returns every `[s]` resource name a rendered
       `.dsl.dz` references, reusing `dsltext`'s link parsing and unescaping, and
       unit-test it against a small fixture
-- [ ] 1.2 Classify each referenced name (audio extension via `AUDIO_EXTENSIONS`,
+- [x] 1.2 Classify each referenced name (audio extension via `AUDIO_EXTENSIONS`,
       known icon via `_ICON_FILES`, otherwise unrecognised) and report the three
       groups separately
-- [ ] 1.3 Compare the referenced names with a bundle's entry names through
+- [x] 1.3 Compare the referenced names with a bundle's entry names through
       `_audio_match_key`, returning the unresolved names and how many of those
       exist in the bundle under another case
-- [ ] 1.4 Call it from `build()` after the dictionary and bundle are written, put
+- [x] 1.4 Call it from `build()` after the dictionary and bundle are written, put
       the unresolved names on the report and in its summary, and stream the
       dictionary rather than buffering it
-- [ ] 1.5 Return a non-zero exit status from `cli.main` when the set is
+- [x] 1.5 Return a non-zero exit status from `cli.main` when the set is
       non-empty, matching the other modes' convention
-- [ ] 1.6 Expose the same function as a `verify-bundle <dictionary>` mode that
+- [x] 1.6 Expose the same function as a `verify-bundle <dictionary>` mode that
       reports and changes nothing, and document it in the CLI help
-- [ ] 1.7 Unit-test: all references resolve, one differs only in case, one is
+- [x] 1.7 Unit-test: all references resolve, one differs only in case, one is
       absent entirely, a dictionary that references only icons, and a dictionary
       with no bundle beside it
 
 ## 2. `--reuse-bundle` verification
 
-- [ ] 2.1 Replace the exact set difference with a `_audio_match_key` comparison so
+- [x] 2.1 Replace the exact set difference with a `_audio_match_key` comparison so
       a case-only difference is not a missing resource
-- [ ] 2.2 Repair a case-only difference by adding the entry under the referenced
+- [x] 2.2 Repair a case-only difference by adding the entry under the referenced
       name: stream the existing bundle into a temporary archive beside it and
       replace atomically, doing nothing when no name differs
-- [ ] 2.3 Exit non-zero when a referenced resource is absent under every case, and
+- [x] 2.3 Exit non-zero when a referenced resource is absent under every case, and
       when there is no bundle beside the dictionary at all
-- [ ] 2.4 Report the number of repaired entries and list any resource that could
+- [x] 2.4 Report the number of repaired entries and list any resource that could
       not be satisfied
-- [ ] 2.5 Unit-test with a small fixture bundle: complete reuse, a repairable
+- [x] 2.5 Unit-test with a small fixture bundle: complete reuse, a repairable
       case-only difference, an unsatisfiable reference, and no bundle
 
 ## 3. Multi-claimant archive extraction
 
-- [ ] 3.1 In `extract_audio`, after writing a member for the first claimant of its
+- [x] 3.1 In `extract_audio`, after writing a member for the first claimant of its
       key, copy the extracted file to the remaining claimants of the same key
-- [ ] 3.2 Keep returning a name as missing only when no member claimed it, so a
+- [x] 3.2 Keep returning a name as missing only when no member claimed it, so a
       truly absent recording is still reported
-- [ ] 3.3 Add the regression test from the diagnosis: one member, two wanted names
+- [x] 3.3 Add the regression test from the diagnosis: one member, two wanted names
       differing only in case, both written and neither reported missing
 
 ## 4. References that resolve nowhere
 
-- [ ] 4.1 In `bundle_audio`, collect the references no cache or archive satisfies
+- [x] 4.1 In `bundle_audio`, collect the references no cache or archive satisfies
       and remove their `[s]` links from the dictionary, through the same rewrite
       path that already fixes unsafe names
-- [ ] 4.2 Report how many links were removed and name them
-- [ ] 4.3 Add `--keep-unresolved` so an operator can keep a dangling link instead
+- [x] 4.2 Report how many links were removed and name them
+- [x] 4.3 Add `--keep-unresolved` so an operator can keep a dangling link instead
       of an edited dictionary, and cover both paths with tests
-- [ ] 4.4 Confirm the rewritten dictionary stays a valid dictzip and its digest is
+- [x] 4.4 Confirm the rewritten dictionary stays a valid dictzip and its digest is
       reported for republication
 
 ## 5. Repairing the published en-en pair
