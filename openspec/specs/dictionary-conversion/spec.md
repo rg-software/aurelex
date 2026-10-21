@@ -3,7 +3,7 @@
 ## Purpose
 
 Turns a pinned kaikki.org Wiktionary extract into an offline DSL dictionary for
-a chosen language pair (for example `en/en` or `en/ru`), packaged so it imports
+a chosen language (for example `en` or `ru`), packaged so it imports
 into Aurelex through the existing folder import with article content,
 grammatical forms, bounded pronunciation audio, and required attribution.
 ## Requirements
