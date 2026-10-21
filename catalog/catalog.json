@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updated": "2026-10-03",
+  "updated": "2026-10-21",
   "entries": [
     {
       "id": "kaikki-en",
@@ -49,16 +49,16 @@
           "required": true,
           "name": "au_kaikki_ja-ja.dsl.dz",
           "url": "https://github.com/rg-software/aurelex/releases/download/catalog-data/au_kaikki_ja-ja.dsl.dz",
-          "sizeBytes": 7906514,
-          "sha256": "86e5ce22a2a5468c134812e3aab87dd58fc4d2d903022e84d2d0cc44662baa64"
+          "sizeBytes": 8136264,
+          "sha256": "cb715ca46871cdacd76c8a7443f1b09af10785983cae8fff5c4b679601b32ddc"
         },
         {
           "role": "resources",
           "required": false,
           "name": "au_kaikki_ja-ja.dsl.files.zip",
           "url": "https://github.com/rg-software/aurelex/releases/download/catalog-data/au_kaikki_ja-ja.dsl.files.zip",
-          "sizeBytes": 1516175,
-          "sha256": "060fbec5df35ad8e833a6a87802cc05f5b223e37d7031050ca0e5775ef783025"
+          "sizeBytes": 106934,
+          "sha256": "86564408b09fbe6cd7d19fcdccd6f04c4c0aa4fd07f49f345b94dcc43383c31f"
         }
       ]
     },
