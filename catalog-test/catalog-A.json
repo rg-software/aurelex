@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "updated": "2026-10-21",
+  "entries": [
+    {
+      "id": "kaikki-ja-test",
+      "name": "Aurelex Test JA",
+      "langFrom": "ja",
+      "langTo": "ja",
+      "attribution": "Wiktionary contributors, CC BY-SA 4.0 (via kaikki.org) — test entry",
+      "license": "CC-BY-SA-4.0",
+      "files": [
+        {
+          "role": "dictionary",
+          "required": true,
+          "name": "au_test_ja.dsl.dz",
+          "url": "https://github.com/rg-software/aurelex/releases/download/catalog-test/au_test_ja.dsl.dz",
+          "sizeBytes": 7900340,
+          "sha256": "8bcfa41e6800b3f3bc21d9e41df5e47461452c985f90d436be43810da750c068"
+        },
+        {
+          "role": "resources",
+          "required": false,
+          "name": "au_test_ja.dsl.files.zip",
+          "url": "https://github.com/rg-software/aurelex/releases/download/catalog-test/au_test_ja.dsl.files.zip",
+          "sizeBytes": 2212,
+          "sha256": "956c364f9fb53dd59763699f5dc5a866ec7237bc906d59722b1e656d9a00343b"
+        }
+      ]
+    }
+  ]
+}
