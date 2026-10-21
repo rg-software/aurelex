@@ -1,0 +1,75 @@
+# Cache layout and sharing
+
+The converter caches everything under `--cache-dir` (default `~/.cache/aurelex-kaikki`).
+A single shared layout keeps one copy of the large audio archive and avoids
+per-language collisions on dump dates.
+
+## Recommended layout
+
+```
+<CACHE>/                            # e.g. C:\Users\Maxim\.cache\aurelex-kaikki
+  audio/                            # SHARED across all languages and dump dates
+    wiktionary-audios.tar           # 21.9 GB, single copy
+    wiktionary-audios.tar.sha256
+    wiktionary-audios.tar.keys.txt  # cached member-name index
+  en/
+    2026-09-02/                    # one dir per dump date
+      raw-wiktextract-data.jsonl.gz
+      raw-wiktextract-data.jsonl.gz.sha256
+      audio-cache/                  # Wikimedia fallback downloads (per language)
+      audio-dead.tsv
+      audio-missing.tsv             # from prefetch-audio --list (optional)
+      audio-missing.shard-*.tsv     # from prefetch-audio --split (optional)
+  ru/
+    2026-09-01/
+      ...
+  ja/
+    2026-09-01/
+      ...
+```
+
+## Why this shape
+
+- **The audio archive is one file for everyone.** `wiktionary-audios.tar` is the
+  Wikimedia Commons bulk archive; it does not depend on language or dump date.
+  Keeping a single copy under `audio/` and pointing every build at it with
+  `--audio-tar <CACHE>\audio\wiktionary-audios.tar` saves ~22 GB and lets every
+  dictionary build offline.
+- **Per-language dirs prevent dump-date collisions.** English and Japanese both
+  use dates that can collide with Russian's; nesting under `<lang>/<dump-date>/`
+  keeps `--cache-dir "$CACHE\en"` etc. distinct.
+- **Audio-cache stays per language.** The downloaded fallback files have global
+  MediaWiki names, but the overlap between languages is tiny (a few files), so
+  sharing them is not worth the bookkeeping. Keep them under each dump date.
+- **Future: additional audio sources.** The planned `additional-audio-sources`
+  change (Lingua Libre) is not implemented yet. When it lands, its source index
+  cache will live beside the other caches, keyed by source and corpus language,
+  independent of the dump date (see that change's design). No such cache exists today.
+- **Dead lists and shards are per build.** They encode which recordings were
+  gone and which were fetched; they are small and tied to a dump date + options,
+  so leave them where the prefetcher wrote them.
+
+## Sharing across machines
+
+1. Put `<CACHE>` on a shared drive (or sync it).
+2. On a new machine, point `--cache-dir` and `--audio-tar` at the shared copy.
+3. The build needs only the JSONL and the (shared) tar; with `--no-audio-download`
+   it makes zero network requests.
+4. Only `prefetch-audio` needs the network. Run it once per language on one
+   machine (or shard it with `--split N` across several), then share the filled
+   `audio-cache/` directories.
+
+## Reorganization performed (2026-10-21)
+
+- Moved one copy of `wiktionary-audios.tar` (+ `.sha256`, `.keys.txt`) to
+  `audio/`; deleted the duplicate.
+- Moved `2026-09-02/` to `en/2026-09-02/` and `2026-09-01/` to
+  `ru/2026-09-01/` (the latter is the Russian edition).
+- Deleted the incomplete `wiktionary-audios.tar.part` files under `ja/` and
+  `local/` (the shared complete tar replaces them).
+- Verified the shared tar's sha256 against its sidecar.
+
+## Disk saved
+
+- Duplicate audio tar: ~21.9 GB.
+- Incomplete partial downloads: ~1.6 GB.
