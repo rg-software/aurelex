@@ -501,7 +501,20 @@ public class DictionaryDownloadService extends Service {
                 return;
             }
             boolean pubOk = true;
+            boolean pubCanceled = false;
             for (int i = 0; i < files.length(); i++) {
+                if (sCanceled) {
+                    // A cancel here leaves a partially published directory:
+                    // some files are new, some are still old. Report cancelled
+                    // (never success) so no digest is recorded and the update
+                    // stays offered; the next run re-downloads and completes
+                    // the publish, healing the mix.
+                    pubCanceled = true;
+                    pubOk = false;
+                    state.canceled = true;
+                    state.message = "cancelled";
+                    break;
+                }
                 final JSONObject fo = files.optJSONObject(i);
                 if (fo == null) continue;
                 final String fileName = fo.optString("name", "");
@@ -524,6 +537,9 @@ public class DictionaryDownloadService extends Service {
                     pubOk = false;
                     break;
                 }
+            }
+            if (pubCanceled) {
+                return;
             }
             if (!pubOk) {
                 state.failed.add(name);

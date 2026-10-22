@@ -697,6 +697,16 @@ natural retest; if it still doesn't flag, read its `settings.json` via a
 debuggable build signed with the release key (apktool repack, same versionCode,
 `adb install -r` preserves data, `run-as` then works).
 
+**2026-10-22 follow-up (same session).** The Oct-22 republish (titles +
+85/85 audio) made the main phone flag "Update available" — mechanism confirmed
+there too; the earlier miss was a stale render/probe timing, not logic. Two
+follow-up fixes from the same session: (1) cancel during the update *publish*
+phase now reports cancelled instead of success (`DictionaryDownloadService`;
+previously a late cancel still replaced files and re-recorded digests while the
+engine served stale bytes); (2) an update skips re-downloading an opted-in
+optional bundle whose recorded sha matches the manifest
+(`EngineController::startCatalogDownload`).
+
 ## Known gaps
 
 - Multi-volume `.mdd` (`demo.1.mdd` … `demo.n.mdd`) is untested on either side —

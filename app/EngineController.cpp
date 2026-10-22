@@ -3647,13 +3647,30 @@ void EngineController::startCatalogDownload(const QVariantList &requests)
                 if (wanted.contains(f.name))
                     chosen.append(f);
         } else if (installed && update) {
-            // Update an already-installed entry: re-download its required files
-            // (and the optional bundle when audio is opted in). Optional
+            // Update an already-installed entry: re-download its required
+            // files. The optional bundle rides along only when audio is opted
+            // in and the bundle actually changed (see below). Optional
             // resources already present are left in place by the service, so a
             // dict-only update does not delete the audio.
-            for (const RemoteCatalog::File &f : e->files)
-                if (f.required || (wantAudio && !f.required))
+            const QJsonObject recorded = m_installedDigests.value(e->id).toObject();
+            for (const RemoteCatalog::File &f : e->files) {
+                if (f.required) {
                     chosen.append(f);
+                    continue;
+                }
+                if (!wantAudio)
+                    continue;
+                // The recorded sha matches the manifest: the identical bytes
+                // are already on disk, so re-downloading them is pure waste.
+                // No record (an install predating digest recording) means
+                // unknown: fetch, so a missing bundle cannot survive an update
+                // silently (and the missing-bundle audio path would fetch it on
+                // demand anyway).
+                const QString rec = recorded.value(f.name).toString();
+                if (!rec.isEmpty() && rec == f.sha256)
+                    continue;
+                chosen.append(f);
+            }
         } else if (installed) {
             // Already loaded: only a missing optional bundle can be added, and
             // only when the user asked for audio. Nothing to re-download.
