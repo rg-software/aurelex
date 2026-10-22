@@ -406,7 +406,11 @@ SHALL be shown on the same line as the transcription of the part of speech it
 belongs to — the transcription and its playback controls together — and where a
 part of speech has audio but no transcription, that audio SHALL still be shown.
 Each referenced audio file SHALL be shown at most once on the card, under the
-first part of speech that references it.
+first part of speech that references it. When a card is emitted under more than
+one headword (alias headwords from opt-in reading or inflection indexing), the
+card SHALL open with its primary (base-form) headword as a title line above
+everything else, so an article reached through an alias lookup says which word
+it defines. A card emitted under a single headword SHALL carry no title line.
 
 #### Scenario: Same part of speech is merged
 
@@ -467,6 +471,18 @@ first part of speech that references it.
 
 - **WHEN** two parts of speech of one card reference the same audio file
 - **THEN** that audio file appears once on the card
+
+#### Scenario: An alias card opens with its primary headword
+
+- **WHEN** a card is indexed under its base headword plus alias headwords
+  (readings, inflected forms)
+- **THEN** the article opens with the base headword as a title line above the
+  readings, transcriptions, parts of speech and everything else
+
+#### Scenario: A single-headword card carries no title
+
+- **WHEN** a card is indexed under one headword only
+- **THEN** the article carries no title line and renders exactly as without one
 
 ### Requirement: Grouped sub-senses
 

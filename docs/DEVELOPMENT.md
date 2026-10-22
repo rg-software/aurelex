@@ -265,8 +265,8 @@ Not scheduled, not proposed, not promised. Each one is picked up by opening an O
   between "shipped" and "known to work".
 - **Translation dictionary** — the kaikki converter builds monolingual dictionaries only; a real
   translation dictionary needs sense alignment and word/phrase equivalents that Wiktionary lacks.
-  Candidate sources and their coverage/licenses (WordNet / Open Multilingual WordNet, Tatoeba,
-  BabelNet) are recorded in `docs/KAIKKI-CONVERSION.md` under "Future: a translation dictionary".
+  Candidate sources and their coverage/licenses (WordNet / Open Multilingual WordNet, RuWordNet,
+  Tatoeba, BabelNet) are recorded in `docs/KAIKKI-CONVERSION.md` under "Future: a translation dictionary".
 
 ### Dictionary format coverage
 
