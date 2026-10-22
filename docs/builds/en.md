@@ -33,7 +33,8 @@ python $SCRIPT prefetch-audio `
     --cache-dir "$CACHE\en" `
     --audio-tar $TAR `
     --audio-per-word 3 `
-    --audio-lang US
+    --audio-lang US `
+    --skip-date-check
 ```
 
 For a multi-machine pool, plan shards instead of fetching here:
@@ -43,6 +44,7 @@ python $SCRIPT prefetch-audio `
     --source-lang en --dump-date 2026-09-02 `
     --cache-dir "$CACHE\en" --audio-tar $TAR `
     --audio-per-word 3 --audio-lang US `
+    --skip-date-check `
     --split 4
 # then on each worker:
 #   python $SCRIPT fetch-list "$CACHE\en\2026-09-02\audio-missing.shard-01-of-04.tsv" --into .\fetch-01
@@ -59,7 +61,6 @@ python $SCRIPT `
     --audio-tar $TAR `
     --audio-per-word 3 `
     --audio-lang US `
-    --no-audio-download `
     --skip-date-check `
     --name au_kaikki_en-en `
     --title "Aurelex Kaikki English" `
@@ -69,7 +70,12 @@ python $SCRIPT `
 Notes:
 - `--index-readings` is intentionally omitted: the English profile declares no reading tags, so it would be a no-op.
 - `--include-inflections` is intentionally omitted for clean suggestions (add it if direct lookup of inflected forms matters more).
-- Drop `--no-audio-download` if you want the build to fetch missing files itself instead of relying on the prefetched cache.
+- `--no-audio-download` is intentionally NOT passed: it means tar-only *and*
+  cache-blind (the prefetched/downloaded cache is never consulted), so it
+  would silently drop every recording the bulk archive lacks. With a full
+  cache the build makes no network requests anyway (sidecar-verified files are
+  reused without a request). Pass `--no-audio-download` only for a strict
+  tar-only build, accepting the reduced coverage.
 - Add `--preview` to also write `au_kaikki_en-en.preview.html`.
 
 ## Rebuild / reuse
