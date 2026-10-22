@@ -3494,7 +3494,8 @@ void EngineController::syncDownloadState()
         }
     }
     // A published batch means the named entries are now installed from the
-    // catalog: remember their digests (inert; see recordInstalledDigests).
+    // catalog: remember the digests of the files the batch fetched (see
+    // recordInstalledDigests).
     if (terminal && published)
         recordInstalledDigests(m_downloadSucceeded);
     emit downloadChanged();
@@ -3693,6 +3694,17 @@ void EngineController::startCatalogDownload(const QVariantList &requests)
             filesOut.append(fo);
         }
         if (filesOut.isEmpty()) continue;
+        // Remember what this batch asked for (request-time shas), keyed by the
+        // entry name the service reports success under. The terminal record
+        // consults this — never the live manifest — so a manifest that moved
+        // on mid-batch cannot poison the record (see recordInstalledDigests).
+        QMap<QString, QString> requestedFiles;
+        for (const QJsonValue &fv : filesOut) {
+            const QJsonObject fo = fv.toObject();
+            requestedFiles.insert(fo.value(QStringLiteral("name")).toString(),
+                                  fo.value(QStringLiteral("sha256")).toString());
+        }
+        m_downloadRequested.insert(e->name, requestedFiles);
         QJsonObject ro;
         ro.insert(QStringLiteral("id"), e->id);
         ro.insert(QStringLiteral("name"), e->name);
@@ -3756,6 +3768,7 @@ void EngineController::startCatalogDownload(const QVariantList &requests)
     m_downloadMessage.clear();
     m_downloadSucceeded.clear();
     m_downloadFailed.clear();
+    m_downloadRequested.clear();
     emit downloadChanged();
 #if defined(Q_OS_ANDROID)
     // The Java side resolves its own Context through QtNative.activity(), the
@@ -3809,6 +3822,8 @@ void EngineController::clearDownloadOutcome()
     m_downloadMessage.clear();
     m_downloadSucceeded.clear();
     m_downloadFailed.clear();
+    m_downloadRequested.clear();
+    m_downloadRequested.clear();
     emit downloadChanged();
 }
 
@@ -3895,10 +3910,9 @@ void EngineController::loadSettings()
     // reason regardless.
     m_catalogReachable = m_manifestValid
             && obj.value(QStringLiteral("remoteCatalogReachable")).toBool(false);
-    // Installed catalog content identity (inert): entryId -> { fileName: sha256 },
-    // written when a catalog download succeeds. Nothing reads it yet; it is the
-    // baseline a future update check compares the manifest against. See
-    // public-catalog-hosting.
+    // Installed catalog content identity: entryId -> { fileName: sha256 },
+    // written when a catalog download succeeds (see recordInstalledDigests).
+    // It is the baseline the update check compares the manifest against.
     const QJsonValue installedDigests =
             obj.value(QStringLiteral("catalogInstalledDigests"));
     if (installedDigests.isObject())
@@ -3946,11 +3960,20 @@ void EngineController::cacheManifest()
 
 void EngineController::recordInstalledDigests(const QStringList &entryNames)
 {
-    // Inert bookkeeping (public-catalog-hosting): remember, per catalog entry, the
-    // SHA-256 of the required dictionary files we just installed, so a future
-    // update check can compare manifest vs installed content without re-reading
-    // multi-GB files. The download service reports success by entry NAME, and the
-    // generator guarantees names are unique, so the entry is found by name.
+    // Remember, per catalog entry, the SHA-256 of the files a batch actually
+    // fetched, so a future update check can compare manifest vs installed
+    // content without re-reading multi-GB files. The download service reports
+    // success by entry NAME, and the generator guarantees names are unique, so
+    // the entry is found by name. Crucially this records the shas the batch
+    // was STARTED with (m_downloadRequested), merged into any existing record
+    // — never the manifest's current shas. Recording the live manifest here
+    // would poison the baseline whenever the manifest moved on mid-batch (a
+    // bundle-only top-up would then claim an outdated dictionary is current,
+    // killing its update flag), and whenever only a subset was fetched.
+    // Folder imports / pre-feature installs never reach here, so their digests
+    // stay absent and no update is claimed for them. An entry with no request
+    // record is skipped (fail-closed): missing a record only ever offers one
+    // redundant update, while a wrong record would suppress a real one.
     if (!m_manifestValid || entryNames.isEmpty())
         return;
     bool changed = false;
@@ -3961,18 +3984,14 @@ void EngineController::recordInstalledDigests(const QStringList &entryNames)
         }
         if (!entry)
             continue;
-        QJsonObject files;
-        for (const RemoteCatalog::File &f : entry->files) {
-            // Record both required dictionary files and optional resource bundles,
-            // so a future update check can detect a changed dictionary OR a changed
-            // bundle. Folder imports / pre-feature installs never reach here, so
-            // their digests stay absent and no update is claimed for them.
-            if (f.role != QLatin1String("dictionary")
-                    && f.role != QLatin1String("resources"))
+        const QMap<QString, QString> requested = m_downloadRequested.value(name);
+        if (requested.isEmpty())
+            continue;
+        QJsonObject files = m_installedDigests.value(entry->id).toObject();
+        for (auto it = requested.constBegin(); it != requested.constEnd(); ++it) {
+            if (it.value().isEmpty())
                 continue;
-            if (f.sha256.isEmpty())
-                continue;
-            files.insert(f.name, f.sha256);
+            files.insert(it.key(), it.value());
         }
         if (files.isEmpty())
             continue;
@@ -3981,6 +4000,7 @@ void EngineController::recordInstalledDigests(const QStringList &entryNames)
         m_installedDigests.insert(entry->id, files);
         changed = true;
     }
+    m_downloadRequested.clear();
     if (changed)
         saveSettings();
 }

@@ -916,6 +916,13 @@ private:
     QString m_downloadOutcome;
     QStringList m_downloadSucceeded;
     QStringList m_downloadFailed;
+    // Per started batch, entry NAME -> {file name -> sha256 at request time},
+    // for the files the batch was asked to fetch. A terminal success records
+    // exactly these shas (never the manifest's current ones), so a batch that
+    // fetched a subset (an audio top-up, an opted-out update) cannot poison
+    // the record of files it never touched. Cleared when a batch starts (with
+    // the outcome above) and after a terminal record.
+    QMap<QString, QMap<QString, QString>> m_downloadRequested;
     QString m_downloadMessage;
     QString m_downloadScratchHashes;
 };

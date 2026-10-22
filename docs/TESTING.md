@@ -707,6 +707,16 @@ engine served stale bytes); (2) an update skips re-downloading an opted-in
 optional bundle whose recorded sha matches the manifest
 (`EngineController::startCatalogDownload`).
 
+**2026-10-22 root cause of the vanishing flag (fixed).** Tapping the lit audio
+note on an outdated installed entry ran a bundle-only batch whose success
+re-recorded the *manifest's current* shas for the *whole entry* — including a
+dictionary file it never downloaded. The entry then matched live forever while
+stale bytes sat on disk: a silent, permanent false-negative affecting any user
+who tops up audio on an outdated entry. `recordInstalledDigests` now records
+only the request-time shas of the files the batch actually fetched, merged into
+the existing record (fail-closed on missing request data). A poisoned phone
+heals on its next successful update; no remove/reinstall is needed.
+
 ## Known gaps
 
 - Multi-volume `.mdd` (`demo.1.mdd` … `demo.n.mdd`) is untested on either side —
