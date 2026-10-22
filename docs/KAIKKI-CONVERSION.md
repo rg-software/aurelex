@@ -162,7 +162,11 @@ kana lookup is typed as, so a katakana on-yomi (`ベイ`) also answers `べい`,
 the source's stem hyphen is dropped (`すわ-る` → `すわる`). It is off by default: it
 adds ~1 reading per card to the suggestion list (measured: 200 random headwords
 produced 302 headwords), and ambiguous readings fan out to several articles, as
-they do in any Japanese dictionary.
+they do in any Japanese dictionary. Each homophone keeps its own article, titled
+with its own headword, so a shared reading repeats once per article — that
+repetition is inherent to fan-out (paper kana indexes list homophones
+separately too), and the per-article readings line additionally serves the
+reverse kanji→kana lookup, so it is kept.
 
 ## Article shape
 
