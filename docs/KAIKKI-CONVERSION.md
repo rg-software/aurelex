@@ -458,13 +458,17 @@ keeps their caches apart.
 
 ## Future: a translation dictionary
 
-**Not built, not scheduled** — recorded here so the intent and the source
-assessment are not lost. A translation dictionary needs two things Wiktionary
-does not provide well: **sense alignment** and **word/phrase equivalents**. The
-native `translations[]` tables were measured against the pinned snapshots
-(en→ru 3.9% sense-aligned, ru→en 10.7%, ja→en 10.8% — see above) and judged too
-sparse in every direction, so they are **not a candidate** and appear nowhere
-below. What remains is one source per job:
+**Protocoled as the `bilingual-dictionary` OpenSpec change** (spec:
+`openspec/specs/bilingual-dictionary/` once archived; implementation in
+`scripts/bilingual/`, usage in `docs/BILINGUAL-BUILDER.md`, probe record in
+`docs/BILINGUAL-EXPERIMENT.md`). What follows is the source assessment that
+justified it — kept so the intent is not lost. A translation dictionary needs
+two things Wiktionary does not provide well: **sense alignment** and
+**word/phrase equivalents**. The native `translations[]` tables were measured
+against the pinned snapshots (en→ru 3.9% sense-aligned, ru→en 10.7%, ja→en
+10.8% — see above) and judged too sparse in every direction, so they are
+**not a candidate** and appear nowhere below. What remains is one source per
+job:
 
 | Job | Source | What it gives | How to fetch |
 | --- | --- | --- | --- |
@@ -494,7 +498,9 @@ of the matrix is for orientation, not a build plan.
 
 The decision to pick up later: whether the permissively licensed base
 (OMW + Tatoeba) plus RuWordNet under its non-commercial terms covers the needed
-pairs, or the app takes a BabelNet commercial licence.
+pairs, or the app takes a BabelNet commercial licence. The build is protocoled
+as the `bilingual-dictionary` capability (`openspec/specs/bilingual-dictionary/`
+after archive); the matrix above is its source table.
 
 ## Audio
 

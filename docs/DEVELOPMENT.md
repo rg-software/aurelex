@@ -18,6 +18,10 @@ Aurelex. If you are a user, see the top-level `README.md` instead.
   - `TESTING.md` — the on-device verification checklist (what is verified, what is not).
   - `REMOTE-CATALOG.md` - the remote catalog's manifest format, hosting, generator workflow, and free-space rules.
   - `KAIKKI-CONVERSION.md` — building DSL dictionaries from kaikki.org extracts.
+  - `BILINGUAL-EXPERIMENT.md` — the En→Ru experiment note (WordNet/RuWordNet equivalents +
+    Tatoeba sentences): probes, coverage gates, results. Becomes an OpenSpec change only if a
+    probe says "viable".
+  - `BILINGUAL-BUILDER.md` — the bilingual builder CLI (inputs, caches, outputs).
   - `SIGNING.md` — signing channels, Play/F-Droid split, app identity.
   - `privacy.html` — the published privacy policy (source for
     `https://rg-software.github.io/aurelex/privacy/`, the URL the Play Console
@@ -267,6 +271,7 @@ Not scheduled, not proposed, not promised. Each one is picked up by opening an O
   translation dictionary needs sense alignment and word/phrase equivalents that Wiktionary lacks.
   Candidate sources and their coverage/licenses (WordNet / Open Multilingual WordNet, RuWordNet,
   Tatoeba, BabelNet) are recorded in `docs/KAIKKI-CONVERSION.md` under "Future: a translation dictionary".
+  The build experiment is outlined in `docs/BILINGUAL-EXPERIMENT.md`.
 
 ### Dictionary format coverage
 

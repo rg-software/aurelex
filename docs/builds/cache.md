@@ -59,6 +59,38 @@ per-language collisions on dump dates.
    machine (or shard it with `--split N` across several), then share the filled
    `audio-cache/` directories.
 
+## Bilingual caches (En→Ru builders)
+
+Under a separate root so bilingual downloads never collide with the kaikki
+tree (different pinning: Tatoeba weekly exports, RuWordNet releases):
+
+```
+<BIL>/                                        # e.g. C:\Users\Maxim\.cache\aurelex-bilingual
+  tatoeba/<export-date>/                      # one dir per weekly export
+    eng_sentences.tsv.bz2                     # ~25 MB
+    rus_sentences.tsv.bz2                     # ~15.5 MB
+    eng-rus_links.tsv.bz2                     # ~5 MB, pre-joined pair links
+```
+
+Downloaded once with the three `curl` lines in `en-ru-wordnet.md` (verified
+2026-10-17: 831,236 pairs). A new export is a new dated directory; the date
+travels into provenance. Re-runs and re-builds reuse these files — nothing is
+re-downloaded.
+
+| Input | Where it lives | Shared with |
+| --- | --- | --- |
+| kaikki EN snapshot (`.jsonl.gz`) | `<CACHE>\en\<dump-date>\` | kaikki EN build (read-only here) |
+| bulk audio tar | `<CACHE>\audio\wiktionary-audios.tar` | kaikki builds (read-only here) |
+| per-language audio cache | `<CACHE>\en\<dump-date>\audio-cache\` | filled by the kaikki EN prefetch; bilingual audio reuses fetched files, may add its own downloads |
+| Tatoeba export | `<BIL>\tatoeba\<date>\` | both bilingual recipes |
+| RuWordNet sqlite (~80 MB) | `python-ruwordnet` package `static\` dir | one `ruwordnet download`; reused by every build |
+| English lemma universe | derived from the RuWordNet EN subset (`--all-lemmas`) | computed, not stored |
+
+Rules: never re-download what the pinned files already hold; never write into
+kaikki per-language state from a bilingual run except the shared audio-cache
+(which is append-only by design — sidecar-verified downloads are reused).
+Builder outputs (`dist/`, previews) are disposable; caches are not.
+
 ## Reorganization performed (2026-10-21)
 
 - Moved one copy of `wiktionary-audios.tar` (+ `.sha256`, `.keys.txt`) to
