@@ -49,8 +49,8 @@
           "required": true,
           "name": "au_kaikki_ja-ja.dsl.dz",
           "url": "https://github.com/rg-software/aurelex/releases/download/catalog-data/au_kaikki_ja-ja.dsl.dz",
-          "sizeBytes": 8414829,
-          "sha256": "a460337d4e64c6e9411fe65f1f060ed6c61c05cf2c4a92f6967de0ec365a026f"
+          "sizeBytes": 8139454,
+          "sha256": "d0c88a529ce34e504a2c6afc4f41ea9b4e54862d7a8a301ba04914e220f0be70"
         },
         {
           "role": "resources",
