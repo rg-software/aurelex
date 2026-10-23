@@ -76,9 +76,9 @@
     },
     {
       "id": "tatoeba-en-ru",
-      "name": "Aurelex Tatoeba English-Russian",
+      "name": "Aurelex Tatoeba En-Ru",
       "names": {
-        "ru": "Aurelex Tatoeba английский — русский"
+        "ru": "Aurelex Tatoeba англ/рус"
       },
       "langFrom": "en",
       "langTo": "ru",
@@ -94,9 +94,9 @@
     },
     {
       "id": "tatoeba-ru-en",
-      "name": "Aurelex Tatoeba Russian-English",
+      "name": "Aurelex Tatoeba Ru-En",
       "names": {
-        "ru": "Aurelex Tatoeba русский — английский"
+        "ru": "Aurelex Tatoeba рус/англ"
       },
       "langFrom": "ru",
       "langTo": "en",
@@ -112,9 +112,9 @@
     },
     {
       "id": "wordnet-en-ru",
-      "name": "Aurelex WordNet English-Russian",
+      "name": "Aurelex WordNet En-Ru",
       "names": {
-        "ru": "Aurelex WordNet английский — русский"
+        "ru": "Aurelex WordNet англ/рус"
       },
       "langFrom": "en",
       "langTo": "ru",
