@@ -132,6 +132,29 @@
           "name": "au_wordnet_en-ru.dsl.files.zip"
         }
       ]
+    },
+    {
+      "id": "wordnet-ru-en",
+      "name": "Aurelex WordNet Ru-En",
+      "names": {
+        "ru": "Aurelex WordNet рус/англ"
+      },
+      "langFrom": "ru",
+      "langTo": "en",
+      "attribution": "Princeton WordNet, RuWordNet, Tatoeba (CC BY 2.0 FR), Wiktionary audio (CC BY-SA 4.0)",
+      "license": "Non-commercial use and distribution only",
+      "files": [
+        {
+          "role": "dictionary",
+          "required": true,
+          "name": "au_wordnet_ru-en.dsl.dz"
+        },
+        {
+          "role": "resources",
+          "required": false,
+          "name": "au_wordnet_ru-en.dsl.files.zip"
+        }
+      ]
     }
   ]
 }

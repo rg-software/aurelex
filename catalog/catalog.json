@@ -150,8 +150,8 @@
           "required": true,
           "name": "au_wordnet_en-ru.dsl.dz",
           "url": "https://github.com/rg-software/aurelex/releases/download/catalog-data/au_wordnet_en-ru.dsl.dz",
-          "sizeBytes": 4271940,
-          "sha256": "2513f4cebe9244369a5c2b421c41f65f30a8760a77cd508decd0b72e324eb552"
+          "sizeBytes": 4541258,
+          "sha256": "240a461535b0e09a825301749c7dd0338bd4350b5d5ce5da7896276523415f34"
         },
         {
           "role": "resources",
@@ -160,6 +160,35 @@
           "url": "https://github.com/rg-software/aurelex/releases/download/catalog-data/au_wordnet_en-ru.dsl.files.zip",
           "sizeBytes": 452521070,
           "sha256": "9dd6244dccade0a334746179af27fdb1fd1fbf48a2a8fb957af442c1a50a338a"
+        }
+      ]
+    },
+    {
+      "id": "wordnet-ru-en",
+      "name": "Aurelex WordNet Ru-En",
+      "names": {
+        "ru": "Aurelex WordNet рус/англ"
+      },
+      "langFrom": "ru",
+      "langTo": "en",
+      "attribution": "Princeton WordNet, RuWordNet, Tatoeba (CC BY 2.0 FR), Wiktionary audio (CC BY-SA 4.0)",
+      "license": "Non-commercial use and distribution only",
+      "files": [
+        {
+          "role": "dictionary",
+          "required": true,
+          "name": "au_wordnet_ru-en.dsl.dz",
+          "url": "https://github.com/rg-software/aurelex/releases/download/catalog-data/au_wordnet_ru-en.dsl.dz",
+          "sizeBytes": 4578128,
+          "sha256": "ef3b6b50a515958ef7e4e7f680c6480e3c71bf9d16245c875e3d6a5663e6ccc2"
+        },
+        {
+          "role": "resources",
+          "required": false,
+          "name": "au_wordnet_ru-en.dsl.files.zip",
+          "url": "https://github.com/rg-software/aurelex/releases/download/catalog-data/au_wordnet_ru-en.dsl.files.zip",
+          "sizeBytes": 347431720,
+          "sha256": "b335a9864f45edf7292010f09f9c087636e8d34b6d35e3ffce68c116c846130b"
         }
       ]
     }
