@@ -158,38 +158,33 @@ def build_sample(
                 print(f"examples indexed: {n:,}/{len(words):,}", file=sys.stderr)
 
     cards: List[_dsl.Card] = []
+    rus_freq = corpus.rus_freq if corpus is not None else {}
     for word in words:
         senses = resolved.get(word, [])
         dsl_senses = []
         for sense in senses:
             example = None
+            equivalents = list(sense.equivalents)
             if corpus is not None:
                 example = _tat.select_for_sense(
                     sense.equivalents, word_pairs.get(word, []), corpus.rus_freq
                 )
+                # Rank only where we have a frequency signal; otherwise keep
+                # the RuWordNet member order untouched.
+                equivalents = _eq.rank_equivalents(equivalents, rus_freq)
             dsl_senses.append(
                 _dsl.Sense(
                     definition=sense.definition,
-                    equivalents=list(sense.equivalents),
+                    equivalents=equivalents,
                     synonyms=[s for s in sense.synonyms if s.lower() != word.lower()],
                     example=example,
+                    pos=_eq.russian_pos(sense.pos),
                 )
             )
-        groups: Dict[str, List[_dsl.Sense]] = {}
-        order: List[str] = []
-        for sense, raw in zip(dsl_senses, senses):
-            if raw.pos not in groups:
-                groups[raw.pos] = []
-                order.append(raw.pos)
-            groups[raw.pos].append(sense)
-        for pos in order:
-            cards.append(
-                _dsl.Card(
-                    headword=word,
-                    pos=_eq.russian_pos(pos),
-                    senses=groups[pos],
-                )
-            )
+        # One card per headword; POS sections and per-POS numbering happen in
+        # dsl.emit_card. An empty word still gets a card so the headword list
+        # round-trips (unlinked senses are inside, if any).
+        cards.append(_dsl.Card(headword=word, senses=dsl_senses))
 
     names_by_word: Dict[str, List[str]] = {w: [] for w in words}
     planner = None

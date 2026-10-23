@@ -44,25 +44,23 @@ subset).
 
 ### Dict A article layout (decided)
 
-Senses are numbered by RU synset; the L1 gloss is build-debug only and is not
-displayed. Definitions are in L2 (Russian): the user disambiguates senses in the
-language they fully understand. EN synonyms close each sense as secondary
-material (they repeat across RU groups that share one EN synset — accepted):
+One card per headword, senses grouped under Russian POS sections with
+numbering restarted per section. Equivalents come first — they are the lookup
+answer — with the Russian definition as a subordinate italic line (printed
+bilingual dictionaries lead with translations, qualifiers follow). The L1 gloss
+is build-debug only and is not displayed. EN synonyms close each sense as
+secondary material (they repeat across RU groups that share one EN synset —
+accepted):
 
 give
-    verb
-    1. давать корм (животным); давать пищу …
-        кормить, накормить, покормить … [trn]
-       (syn. feed)
-       [*]
-       ex. EN sentence + RU translation (anchored, see below)
-       [/*]
-    2. полностью посвятить себя чему-либо …
-        погружаться, … [trn]
-       (syn. consecrate, dedicate, devote)
-    3. посвятить (предназначить, отдать)
-        посвятить, … [trn]
-       (syn. consecrate, dedicate, devote)
+    [p]гл.[/p]
+    [m1]1.[/m] [trn]кормить[/trn], [trn]накормить[/trn], …
+    [i]давать корм (животным); давать пищу …[/i]
+    (syn. feed)
+    [*] ex. EN sentence / [trn]RU translation[/trn] (anchored, see below) [/*]
+    [m1]2.[/m] [trn]погружаться[/trn], …
+    [i]полностью посвятить себя чему-либо …[/i]
+    (syn. consecrate, dedicate, devote)
 
 Fallback chain for a missing RU definition (some synsets have none, e.g.
 ПОСВЯТИТЬ): RU synset title (always present and itself descriptive, e.g.
@@ -73,6 +71,10 @@ POS labels are Russian, reusing the repo's own `_RU_POS_LABELS`
 monolingual Russian dictionary. EN glosses are never translated by us. Adverb
 senses (no `ili`) ship definition + synonyms with no equivalents and count
 against coverage.
+Within one RU synset the equivalents are ordered common-first by Russian
+corpus frequency (exact dupes removed, deterministic ties) — ranking, not
+collapsing: dropping a near-duplicate would need semantic judgment
+(окунуться vs окунуться с головой — the idiomatic variant is the valuable one).
 
 Examples live in a per-sense collapsible zone (`[*]…[/*]`), exactly like the
 kaikki cards — and like the removed learner mode, which tucked extras away so

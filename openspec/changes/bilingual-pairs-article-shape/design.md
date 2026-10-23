@@ -54,6 +54,23 @@ sentence-initial capitals do not fool it); otherwise the capitalized form
 stands (proper nouns never occur lowercase). Between several capitalized
 forms the alphabetical one wins; the body is identical either way.
 
+### D5. Equivalents first, definition second
+
+Printed bilingual dictionaries lead with translations and put qualifiers
+second; the reader asked for the same. The numbered `[m1]` marker stays the
+sense anchor (single-digit tags only), the `[trn]` equivalents follow it, and
+the Russian definition drops to a subordinate italic line. One card per
+headword (POS sections inside it) matches the kaikki one-card-per-headword
+rule and avoids duplicate-headword articles.
+
+### D6. Rank, do not collapse, near-duplicate equivalents
+
+Within one RU synset all lemmas share the meaning, so dropping any of them
+would need semantic judgment (e.g. `окунуться` vs `окунуться с головой` —
+the idiomatic variant is the valuable one). Instead the list is ordered
+common-first by Russian corpus frequency, exact dupes removed, deterministic
+ties. The reader hits the clean head term first; the tail stays available.
+
 ## Risks / Trade-offs
 
 - [A proper noun that only ever appears sentence-initially in its pairs is

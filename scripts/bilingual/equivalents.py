@@ -10,9 +10,10 @@ equivalents, and count against coverage.
 from __future__ import annotations
 
 import os
+import re
 import sys
 from dataclasses import dataclass, field
-from typing import Callable, Dict, List, Optional, Sequence, Tuple
+from typing import Callable, Dict, List, Optional, Sequence, Set, Tuple
 
 
 def _ru_pos_labels() -> Dict[str, str]:
@@ -213,9 +214,6 @@ class RuWordNetBackend:
         return out
 
 
-from . import dsl as _dsl
-
-
 def _ruwordnet_db_path() -> str:
     """Locate the installed RuWordNet sqlite (2021 db preferred)."""
     try:
@@ -280,41 +278,24 @@ def kaikki_headwords(snapshot_path: str) -> List[str]:
     return sorted(found)
 
 
-def to_cards(word: str, senses: Sequence[ResolvedSense]) -> List[_dsl.Card]:
-    """Group resolved senses into one DSL card per part of speech.
+def rank_equivalents(equivalents: Sequence[str], freq: Dict[str, int]) -> List[str]:
+    """Order equivalents common-first using Russian corpus frequencies.
 
-    Senses arrive in POS order; each card numbers its senses from 1, which is
-    the spec's per-POS numbering.
+    Within one RU synset the members share the meaning, so the ranking only
+    decides what the eye hits first: everyday words before rare ones
+    (``парламент`` before ``высший законодательный орган государства``).
+    Unknown words sink to the end; ties break shorter-first, then
+    alphabetically, so the order is deterministic. Pure ranking — nothing is
+    dropped; collapsing near-synonyms would need semantic judgment.
     """
-    cards: List[_dsl.Card] = []
-    current: List[ResolvedSense] = []
-    current_pos = None
-    for sense in senses:
-        if sense.pos != current_pos and current:
-            cards.append(_to_card(word, current_pos or "", current))
-            current = []
-        current_pos = sense.pos
-        current.append(sense)
-    if current or current_pos is not None:
-        cards.append(_to_card(word, current_pos or "", current))
-    if not cards:
-        cards.append(_dsl.Card(headword=word))
-    return cards
+    def score(e: str) -> tuple:
+        words = [w.lower() for w in re.findall(r"[а-яёa-z]+", e)]
+        known = [freq.get(w, 0) for w in words] or [0]
+        return (-min(known), len(e), e)
 
-
-def _to_card(word: str, en_pos: str, senses: Sequence[ResolvedSense]) -> _dsl.Card:
-    return _dsl.Card(
-        headword=word,
-        pos=russian_pos(en_pos),
-        senses=[
-            _dsl.Sense(
-                definition=s.definition,
-                equivalents=list(s.equivalents),
-                synonyms=[s for s in s.synonyms if s.lower() != word.lower()],
-            )
-            for s in senses
-        ],
-    )
+    seen: Set[str] = set()
+    unique = [e for e in equivalents if not (e in seen or seen.add(e))]
+    return sorted(unique, key=score)
 
 
 def resolve_word(word: str, backend: Optional[RuWordNetBackend] = None) -> List[ResolvedSense]:

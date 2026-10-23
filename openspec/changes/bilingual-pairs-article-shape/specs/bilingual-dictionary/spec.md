@@ -21,6 +21,32 @@ requirements do not apply to such cards.
 - **THEN** the card shows the pairs as flat `[ex]`/`[trn]` lines with no sense
   numbering and no definition lines
 
+### Requirement: Translation article layout
+
+Each headword SHALL be one article grouping its senses under Russian part-of-speech
+labels (сущ./гл./прил./нареч.), numbered per part of speech. Each sense SHALL lead
+with its numbered `[m1]` marker followed by its `[trn]` equivalents (bounded per
+sense by the stated limit, ordered common-first by Russian corpus frequency),
+then its Russian definition as subordinate italic text, then English synonyms of
+the source synset as secondary material. The English gloss SHALL NOT be displayed.
+
+#### Scenario: Senses are numbered per part of speech
+
+- **WHEN** a card has several senses under one part of speech
+- **THEN** they are numbered in sequence, restarting at each part of speech
+
+#### Scenario: Equivalents lead, definition follows
+
+- **WHEN** a sense is rendered
+- **THEN** its numbered marker and equivalents come first, the Russian
+  definition follows as subordinate text, then synonyms, and no English gloss
+  is shown
+
+#### Scenario: One card per headword
+
+- **WHEN** a headword has senses in several parts of speech
+- **THEN** they render as sections of one article rather than separate cards
+
 ## ADDED Requirements
 
 ### Requirement: Pairs headword eligibility

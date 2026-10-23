@@ -50,13 +50,30 @@ class CardTest(unittest.TestCase):
             ],
         )
         text = "\n".join(_dsl.emit_card(card))
-        def_pos = text.index("передать нечто в дар")
+        num_pos = text.index("[m1]1.[/m]")
         trn_pos = text.index("[trn]дарить[/trn]")
+        def_pos = text.index("[i]передать нечто в дар[/i]")
         syn_pos = text.index("(syn. present)")
         ex_pos = text.index("[*]")
-        self.assertTrue(0 < def_pos < trn_pos < syn_pos < ex_pos)
+        self.assertTrue(0 < num_pos < trn_pos < def_pos < syn_pos < ex_pos)
         self.assertIn("[/*]", text)
         self.assertIn("[trn]Что мне ей подарить?[/trn]", text)
+
+    def test_multi_pos_single_card_restarts_numbering(self):
+        card = _dsl.Card(headword="run", senses=[
+            _dsl.Sense(definition="d1", equivalents=["e1"], pos="сущ."),
+            _dsl.Sense(definition="d2", equivalents=["e2"], pos="сущ."),
+            _dsl.Sense(definition="d3", equivalents=["e3"], pos="гл."),
+        ])
+        text = "\n".join(_dsl.emit_card(card))
+        self.assertEqual(text.count("[p]сущ.[/p]"), 1)
+        self.assertEqual(text.count("[p]гл.[/p]"), 1)
+        # numbering restarts in each POS section
+        self.assertEqual(text.count("[m1]1.[/m]"), 2)
+        self.assertEqual(text.count("[m1]2.[/m]"), 1)
+        self.assertNotIn("[m1]3.[/m]", text)
+        self.assertEqual(text.index("[p]сущ.[/p]"), text.index("[p]сущ.[/p]"))
+        self.assertLess(text.index("[p]сущ.[/p]"), text.index("[p]гл.[/p]"))
 
     def test_equivalent_cap(self):
         sense = _dsl.Sense(definition="d", equivalents=[f"w{i}" for i in range(20)])
@@ -238,6 +255,20 @@ class TatoebaTest(unittest.TestCase):
             _tat.rank_variants(variants, ["уйти", "посвятить"], freq),
             "Решил посвятить себя делу.")
 
+    def test_rank_equivalents_common_first(self):
+        from bilingual import equivalents as _eq
+        from bilingual import tatoeba as _tat
+        freq = _tat.Counter({"парламент": 500, "страны": 400, "высший": 30,
+                             "законодательный": 5, "орган": 300,
+                             "государства": 100, "национальный": 20})
+        ranked = _eq.rank_equivalents(
+            ["высший законодательный орган государства", "национальный парламент",
+             "парламент страны", "неизвестноеслово", "парламент страны"], freq)
+        # exact dupes gone, common-first, unknown last
+        self.assertEqual(ranked[0], "парламент страны")
+        self.assertEqual(ranked[-1], "неизвестноеслово")
+        self.assertEqual(len(ranked), len(set(ranked)))
+
     def test_cap_and_length_ranks_not_filters(self):
         from bilingual import tatoeba as _tat
         pairs = [(f"Sentence number {i} here.", f"Предложение {i}.") for i in range(5)]
@@ -296,11 +327,13 @@ class EquivalentsTest(unittest.TestCase):
     def test_russian_pos_and_cards(self):
         from bilingual import equivalents as _eq
         senses = _eq.resolve_word("give", backend=self.FakeBackend())
-        cards = _eq.to_cards("give", senses)
-        self.assertEqual([c.pos for c in cards], ["гл.", "нареч."])
-        self.assertEqual([len(c.senses) for c in cards], [2, 1])
+        text = "\n".join(_dsl.emit_card(_dsl.Card(
+            headword="give",
+            senses=[_dsl.Sense(definition=s.definition,
+                               equivalents=list(s.equivalents),
+                               synonyms=[x for x in s.synonyms if x != "give"],
+                               pos=_eq.russian_pos(s.pos)) for s in senses])))
         # the headword itself is not its own synonym
-        text = "\n".join(_dsl.emit_card(cards[0]))
         self.assertNotIn("(syn. give,", text)
         self.assertIn("(syn. present)", text)
 
@@ -363,8 +396,9 @@ class EquivalentsTest(unittest.TestCase):
         # numbering rides as text on [m1], kaikki-style, at any sense count
         sense = _dsl.Sense(definition="d", equivalents=["x"])
         lines = _dsl.emit_sense(sense, 12)
-        self.assertIn("    [m1]12. d[/m]", lines)
-        self.assertFalse(any("[m10]" in ln for ln in lines))
+        self.assertIn("    [m1]12.[/m]", lines)
+        self.assertIn("    [i]d[/i]", lines)
+        self.assertFalse(any("[m10" in ln for ln in lines))
 
     def test_empty_synonyms_no_line(self):
         lines = _dsl.emit_sense(

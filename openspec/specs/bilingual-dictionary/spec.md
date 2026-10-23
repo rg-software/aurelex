@@ -45,22 +45,29 @@ kept only as build-debug metadata and never rendered.
 
 ### Requirement: Translation article layout
 
-Each headword article SHALL group senses under Russian part-of-speech labels
-(сущ./гл./прил./нареч.), number senses per part of speech, and render per sense:
-the Russian definition, `[trn]` equivalents (bounded per sense by the stated
-limit), and English synonyms of the source synset as secondary material. The
-English gloss SHALL NOT be displayed.
+Each headword SHALL be one article grouping its senses under Russian part-of-speech
+labels (сущ./гл./прил./нареч.), numbered per part of speech. Each sense SHALL lead
+with its numbered `[m1]` marker followed by its `[trn]` equivalents (bounded per
+sense by the stated limit, ordered common-first by Russian corpus frequency),
+then its Russian definition as subordinate italic text, then English synonyms of
+the source synset as secondary material. The English gloss SHALL NOT be displayed.
 
 #### Scenario: Senses are numbered per part of speech
 
 - **WHEN** a card has several senses under one part of speech
 - **THEN** they are numbered in sequence, restarting at each part of speech
 
-#### Scenario: Equivalents are the answer
+#### Scenario: Equivalents lead, definition follows
 
 - **WHEN** a sense is rendered
-- **THEN** the Russian definition is followed by its equivalents, with synonyms
-  after them, and no English gloss is shown
+- **THEN** its numbered marker and equivalents come first, the Russian
+  definition follows as subordinate text, then synonyms, and no English gloss
+  is shown
+
+#### Scenario: One card per headword
+
+- **WHEN** a headword has senses in several parts of speech
+- **THEN** they render as sections of one article rather than separate cards
 
 ### Requirement: Per-sense example selection
 

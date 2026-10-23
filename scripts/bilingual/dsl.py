@@ -54,13 +54,13 @@ def header_arg(value: Optional[str]) -> str:
 
 @dataclass
 class Sense:
-    """One RU-synset sense: Russian definition, equivalents, EN synonyms,
-    and at most one anchored example pair."""
+    """One RU-synset sense: equivalents lead, Russian definition explains."""
 
     definition: str = ""
     equivalents: List[str] = field(default_factory=list)
     synonyms: List[str] = field(default_factory=list)
     example: Optional[Tuple[str, str]] = None
+    pos: str = ""
 
 
 @dataclass
@@ -78,14 +78,18 @@ class Card:
 def emit_sense(sense: Sense, number: int) -> List[str]:
     """Render one sense as DSL body lines (no headword line).
 
-    Numbering is plain text (``1. definition``), kaikki-style: the reader
-    renders ``[mN]`` by indentation level and only single-digit tags exist, so
-    a global ``[m10]`` counter would be an unknown tag on long cards. Every
-    sense sits at ``[m1]`` — one level under its part of speech.
+    Equivalents come first — they are the lookup answer — with a numbered
+    ``[m1]`` marker, and the Russian definition follows as a subordinate
+    italic line, mirroring printed bilingual dictionaries (translations lead,
+    qualifiers follow). The marker carries only the number: the reader's
+    ``[mN]`` tags are single-digit, so a global ``[m10]`` counter would be an
+    unknown tag on long cards.
     """
-    lines = [f"    [m1]{number}. {escape_dsl(sense.definition)}[/m]"]
+    lines = [f"    [m1]{number}.[/m]"]
     for equiv in sense.equivalents[:EQUIVALENTS_PER_SENSE]:
-        lines.append(f"        [trn]{escape_dsl(equiv)}[/trn]")
+        lines.append(f"    [trn]{escape_dsl(equiv)}[/trn]")
+    if sense.definition:
+        lines.append(f"    [i]{escape_dsl(sense.definition)}[/i]")
     if sense.synonyms:
         kept = ", ".join(escape_dsl(s) for s in sense.synonyms[:SYNONYMS_PER_SENSE])
         lines.append(f"        (syn. {kept})")
@@ -99,7 +103,12 @@ def emit_sense(sense: Sense, number: int) -> List[str]:
 
 
 def emit_card(card: Card) -> List[str]:
-    """Render one card: headword line, POS line, audio, numbered senses."""
+    """Render one card: headword line, audio, then POS sections in order.
+
+    Senses carrying a part of speech start a new `[p]` section when it
+    changes; numbering restarts at each section. Senses without one keep the
+    card-level POS line for backward compatibility.
+    """
     lines = [clean_headword(card.headword)]
     if card.pos:
         lines.append(f"    [p]{escape_dsl(card.pos)}[/p]")
@@ -114,8 +123,17 @@ def emit_card(card: Card) -> List[str]:
         for en, ru in card.pairs:
             lines.append(f"    [ex]{escape_dsl(en)}[/ex]")
             lines.append(f"    [trn]{escape_dsl(ru)}[/trn]")
-    for i, sense in enumerate(card.senses, 1):
-        lines.extend(emit_sense(sense, i))
+    number = 0
+    section: Optional[str] = None
+    for sense in card.senses:
+        if sense.pos and sense.pos != section:
+            section = sense.pos
+            number = 0
+            lines.append(f"    [p]{escape_dsl(section)}[/p]")
+        elif not sense.pos and section is None and card.pos:
+            section = card.pos
+        number += 1
+        lines.extend(emit_sense(sense, number))
     return lines
 
 

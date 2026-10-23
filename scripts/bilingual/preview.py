@@ -17,12 +17,10 @@ def render(cards: Sequence[Card], title: str = "preview") -> str:
             parts.append(f'<p class="pos">{html.escape(card.pos)}</p>')
         for i, sense in enumerate(card.senses, 1):
             parts.append(
-                f'<p class="sense"><b>{i}.</b> {html.escape(sense.definition)}</p>'
+                f'<p class="sense"><b>{i}.</b> {html.escape(", ".join(sense.equivalents))}</p>'
             )
-            if sense.equivalents:
-                parts.append(
-                    f'<p class="trn">{html.escape(", ".join(sense.equivalents))}</p>'
-                )
+            if sense.definition:
+                parts.append(f'<p class="rdef">{html.escape(sense.definition)}</p>')
             if sense.synonyms:
                 parts.append(
                     f'<p class="syn">syn. {html.escape(", ".join(sense.synonyms))}</p>'
@@ -41,6 +39,7 @@ def render(cards: Sequence[Card], title: str = "preview") -> str:
         ".card{border-top:2px solid #888;margin-top:1em}"
         ".pos{color:#888;font-style:italic;margin-bottom:0}"
         ".sense{margin:.5em 0 0}.trn{color:#a0a;margin:.2em 0 0 1em}"
+        ".rdef{color:#060;font-style:italic;margin:.2em 0 0 1em}"
         ".syn{color:#555;margin:.1em 0 0 1em;font-size:90%}"
         ".ex{color:#060;margin:.2em 0 0 1em;font-size:90%}"
         "</style></head><body><h1>"
