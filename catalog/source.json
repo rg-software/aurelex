@@ -109,6 +109,29 @@
           "name": "au_tatoeba_ru-en.dsl.dz"
         }
       ]
+    },
+    {
+      "id": "wordnet-en-ru",
+      "name": "Aurelex WordNet English-Russian",
+      "names": {
+        "ru": "Aurelex WordNet английский — русский"
+      },
+      "langFrom": "en",
+      "langTo": "ru",
+      "attribution": "Princeton WordNet, RuWordNet, Tatoeba (CC BY 2.0 FR), Wiktionary audio (CC BY-SA 4.0)",
+      "license": "Non-commercial use and distribution only",
+      "files": [
+        {
+          "role": "dictionary",
+          "required": true,
+          "name": "au_wordnet_en-ru.dsl.dz"
+        },
+        {
+          "role": "resources",
+          "required": false,
+          "name": "au_wordnet_en-ru.dsl.files.zip"
+        }
+      ]
     }
   ]
 }
