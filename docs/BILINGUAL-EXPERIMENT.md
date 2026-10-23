@@ -56,16 +56,19 @@ give
     [p]гл.[/p]
     [m1]1.[/m] [trn]кормить[/trn], [trn]накормить[/trn], …
     [i]давать корм (животным); давать пищу …[/i]
-    (syn. feed)
     [*] ex. EN sentence / [trn]RU translation[/trn] (anchored, see below) [/*]
+    (syn. feed)
     [m1]2.[/m] [trn]погружаться[/trn], …
-    [i]полностью посвятить себя чему-либо …[/i]
+    [i]полностью посвятить себя чем-либо …[/i]
     (syn. consecrate, dedicate, devote)
 
 Fallback chain for a missing RU definition (some synsets have none, e.g.
 ПОСВЯТИТЬ): RU synset title (always present and itself descriptive, e.g.
-ВЫСЛЕДИТЬ (ОТЫСКАТЬ)), lowercased since titles are stored ALL-CAPS — but only
+ВЫСЛЕДИТЬ (ОТЫСКАТЬ)), sentence-cased since titles are stored ALL-CAPS — but only
 fully-uppercase strings, so natural-case definitions keep their proper nouns.
+Sentence case (not full lowercase) so proper-noun titles survive as titles
+(АМСТЕРДАМ -> Амстердам); the member-lemma equivalents themselves are stored
+lowercase in RuWordNet (столица монголии), which no casing rule can repair.
 POS labels are Russian, reusing the repo's own `_RU_POS_LABELS`
 (сущ./гл./прил./нареч.), so a future build labels POS exactly like the
 monolingual Russian dictionary. EN glosses are never translated by us. Adverb
@@ -106,6 +109,25 @@ equivalents. Verified limits, probe 2026-10-22:
   and qualified against kaikki senses, which do not align with PWN synsets. A
   sense with no anchored Tatoeba pair falls back to an unanchored pair
   (concordance — still bilingual), never to a kaikki example.
+
+Known anchoring limits (accepted, review of the built sample dictionaries):
+
+- Anchors are whole-word and unlemmatized, so inflected forms are invisible:
+  `level` sense 1 (точка) claims `The city\u2019s highest point is 592 meters
+  above sea level` via incidental точка, while sense 2\u2019s уровень appears
+  as уровня (genitive) and never matches. Lemmatizing the RU side would need
+  a morphological dictionary (breaks the stdlib-only runtime contract);
+  word alignment is out of scope.
+- Abbreviations are ambiguous and the matcher cannot disambiguate: `LA`
+  resolves only to Louisiana, but `How was LA?` (the city) matches the
+  letters and lands under the state sense as unanchored-shortest fallback.
+  Anchored pairs displace such mismatches when the corpus has them.
+- `ili` links are occasionally wrong upstream (`ADHD` → ДОБАВИТЬ,
+  likely keyed on the shared abbreviation ADD): equivalents wrong, example
+  right. No code-level guard; a curated denylist remains an option.
+- Single-character headwords (`A` = ampere) match no pairs at all: a
+  one-letter token in running text is overwhelmingly the article, so any
+  hit would illustrate the article, not the headword.
 
 Audio is inherited from kaikki, not rebuilt: Dict A headwords are English
 lemmas, so the kaikki EN build already resolved and bundled their pronunciation

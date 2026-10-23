@@ -158,6 +158,7 @@ def build_sample(
                 print(f"examples indexed: {n:,}/{len(words):,}", file=sys.stderr)
 
     cards: List[_dsl.Card] = []
+    skipped_empty = 0
     rus_freq = corpus.rus_freq if corpus is not None else {}
     for word in words:
         senses = resolved.get(word, [])
@@ -182,9 +183,14 @@ def build_sample(
                 )
             )
         # One card per headword; POS sections and per-POS numbering happen in
-        # dsl.emit_card. An empty word still gets a card so the headword list
-        # round-trips (unlinked senses are inside, if any).
-        cards.append(_dsl.Card(headword=word, senses=dsl_senses))
+        # dsl.emit_card. Headwords with no senses at all get no card: an empty
+        # headword entry is exactly the vacuous article the reviews rejected.
+        if dsl_senses:
+            cards.append(_dsl.Card(headword=word, senses=dsl_senses))
+        else:
+            skipped_empty += 1
+    if skipped_empty:
+        print(f"skipped {skipped_empty:,} headwords with no senses", file=sys.stderr)
 
     names_by_word: Dict[str, List[str]] = {w: [] for w in words}
     planner = None
@@ -214,6 +220,7 @@ def build_sample(
         "ann_path": ann_path,
         "cards": len(cards),
         "cards_out": cards,
+        "skipped_empty": skipped_empty,
         "synsets": eq_report.synsets,
         "synsets_linked": eq_report.synsets_linked,
         "unresolved": check["unresolved"],

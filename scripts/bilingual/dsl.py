@@ -79,26 +79,29 @@ def emit_sense(sense: Sense, number: int) -> List[str]:
     """Render one sense as DSL body lines (no headword line).
 
     Equivalents come first — they are the lookup answer — with a numbered
-    ``[m1]`` marker, and the Russian definition follows as a subordinate
-    italic line, mirroring printed bilingual dictionaries (translations lead,
-    qualifiers follow). The marker carries only the number: the reader's
-    ``[mN]`` tags are single-digit, so a global ``[m10]`` counter would be an
-    unknown tag on long cards.
+    ``[m1]`` marker, then the Russian definition as a subordinate italic line,
+    mirroring printed bilingual dictionaries (translations lead, qualifiers
+    follow). ``number`` 0 means a lone sense: no counter is emitted, since a
+    solitary "1." carries no information. (The reader's ``[mN]`` tags are
+    single-digit, so a global ``[m10]`` counter would be an unknown tag on
+    long cards.)
     """
-    lines = [f"    [m1]{number}.[/m]"]
+    lines = []
+    if number > 0:
+        lines.append(f"    [m1]{number}.[/m]")
     for equiv in sense.equivalents[:EQUIVALENTS_PER_SENSE]:
         lines.append(f"    [trn]{escape_dsl(equiv)}[/trn]")
     if sense.definition:
         lines.append(f"    [i]{escape_dsl(sense.definition)}[/i]")
-    if sense.synonyms:
-        kept = ", ".join(escape_dsl(s) for s in sense.synonyms[:SYNONYMS_PER_SENSE])
-        lines.append(f"        (syn. {kept})")
     if sense.example is not None:
         en, ru = sense.example
         lines.append("        [*]")
         lines.append(f"        [ex]{escape_dsl(en)}[/ex]")
         lines.append(f"        [trn]{escape_dsl(ru)}[/trn]")
         lines.append("        [/*]")
+    if sense.synonyms:
+        kept = ", ".join(escape_dsl(s) for s in sense.synonyms[:SYNONYMS_PER_SENSE])
+        lines.append(f"        (syn. {kept})")
     return lines
 
 
@@ -123,17 +126,29 @@ def emit_card(card: Card) -> List[str]:
         for en, ru in card.pairs:
             lines.append(f"    [ex]{escape_dsl(en)}[/ex]")
             lines.append(f"    [trn]{escape_dsl(ru)}[/trn]")
-    number = 0
     section: Optional[str] = None
+    pending: List[Sense] = []
+
+    def flush() -> None:
+        if not pending:
+            return
+        # A lone sense needs no counter ("1." on a single-sense card, like a
+        # single-definition monolingual entry, carries no information).
+        numbered = len(pending) > 1
+        for i, sense in enumerate(pending, 1):
+            lines.extend(emit_sense(sense, i if numbered else 0))
+        pending.clear()
+
     for sense in card.senses:
         if sense.pos and sense.pos != section:
+            flush()
             section = sense.pos
-            number = 0
             lines.append(f"    [p]{escape_dsl(section)}[/p]")
         elif not sense.pos and section is None and card.pos:
             section = card.pos
-        number += 1
-        lines.extend(emit_sense(sense, number))
+        pending.append(sense)
+    # Senses without a POS all belong to the card-level section.
+    flush()
     return lines
 
 

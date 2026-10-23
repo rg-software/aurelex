@@ -43,21 +43,37 @@ class CardTest(unittest.TestCase):
             senses=[
                 _dsl.Sense(
                     definition="передать нечто в дар",
-                    equivalents=["дарить", "подарить"],
+                    equivalents=["дарить", "подарить", "презентовать"],
                     synonyms=["present"],
                     example=("What shall I give her?", "Что мне ей подарить?"),
-                )
+                ),
+                _dsl.Sense(
+                    definition="давать корм",
+                    equivalents=["кормить"],
+                    synonyms=["feed"],
+                ),
             ],
         )
         text = "\n".join(_dsl.emit_card(card))
         num_pos = text.index("[m1]1.[/m]")
         trn_pos = text.index("[trn]дарить[/trn]")
         def_pos = text.index("[i]передать нечто в дар[/i]")
-        syn_pos = text.index("(syn. present)")
         ex_pos = text.index("[*]")
-        self.assertTrue(0 < num_pos < trn_pos < def_pos < syn_pos < ex_pos)
+        syn_pos = text.index("(syn. present)")
+        # equivalents lead, definition follows, example before trailing synonyms
+        self.assertTrue(0 < num_pos < trn_pos < def_pos < ex_pos < syn_pos)
         self.assertIn("[/*]", text)
         self.assertIn("[trn]Что мне ей подарить?[/trn]", text)
+
+    def test_single_sense_has_no_counter(self):
+        card = _dsl.Card(
+            headword="monkey",
+            senses=[_dsl.Sense(definition="обезьяна", equivalents=["обезьяна"])],
+        )
+        text = "\n".join(_dsl.emit_card(card))
+        self.assertNotIn("[m1]", text)
+        self.assertIn("[trn]обезьяна[/trn]", text)
+        self.assertIn("[i]обезьяна[/i]", text)
 
     def test_multi_pos_single_card_restarts_numbering(self):
         card = _dsl.Card(headword="run", senses=[
@@ -68,8 +84,8 @@ class CardTest(unittest.TestCase):
         text = "\n".join(_dsl.emit_card(card))
         self.assertEqual(text.count("[p]сущ.[/p]"), 1)
         self.assertEqual(text.count("[p]гл.[/p]"), 1)
-        # numbering restarts in each POS section
-        self.assertEqual(text.count("[m1]1.[/m]"), 2)
+        # numbering restarts in each POS section; the lone verb sense is unnumbered
+        self.assertEqual(text.count("[m1]1.[/m]"), 1)
         self.assertEqual(text.count("[m1]2.[/m]"), 1)
         self.assertNotIn("[m1]3.[/m]", text)
         self.assertEqual(text.index("[p]сущ.[/p]"), text.index("[p]сущ.[/p]"))
@@ -174,6 +190,7 @@ class PreviewTest(unittest.TestCase):
                     example=("Eat bread.", "Ешьте хлеб."),
                 )
             ],
+            audio=["En-us-bread.ogg"],
         )
         html = _preview.render([card], "sample")
         self.assertIn("<h2>bread</h2>", html)
@@ -182,6 +199,10 @@ class PreviewTest(unittest.TestCase):
         self.assertIn("хлеб", html)
         self.assertIn("syn. breadstuff", html)
         self.assertIn("Eat bread.", html)
+        self.assertIn("audio: En-us-bread.ogg", html)
+        # preview mirrors article order: equivalents, definition, example, synonyms
+        self.assertLess(html.index("хлеб"), html.index("изделие из муки"))
+        self.assertLess(html.index("Eat bread."), html.index("syn. breadstuff"))
 
 
 class TatoebaTest(unittest.TestCase):
@@ -224,6 +245,17 @@ class TatoebaTest(unittest.TestCase):
         # 'xyzzy' occurs nowhere: must return [] without scanning
         self.assertEqual(_tat.pairs_for("xyzzy", corpus), [])
         self.assertEqual(_tat.pairs_for("bread xyzzy", corpus), [])
+
+    def test_single_char_headword_never_matches(self):
+        # 'A' (ampere) must not match the article in "Be a man": a one-letter
+        # token in running text is never the abbreviation sense.
+        from bilingual import tatoeba as _tat
+        pairs = [("Be a man.", "Будь мужчиной."), ("Buy vitamin A.", "Купи витамин А.")]
+        corpus = _tat.Corpus(pairs=pairs, index=_tat.index_pairs(pairs))
+        self.assertEqual(_tat.pairs_for("A", corpus), [])
+        self.assertEqual(_tat.pairs_for("I", corpus), [])
+        # two-letter words still match normally
+        self.assertEqual(_tat.pairs_for("Be", corpus), [("Be a man.", "Будь мужчиной.")])
 
     def test_dedupe_one_variant_per_sentence(self):
         from bilingual import tatoeba as _tat
@@ -317,8 +349,8 @@ class EquivalentsTest(unittest.TestCase):
         self.assertTrue(all(s.linked for s in senses[:2]))
         # definition kept as-is (natural case)
         self.assertEqual(senses[0].definition, "передать нечто в дар.")
-        # empty definition falls back to the lowercased title
-        self.assertEqual(senses[1].definition, "посвятить (предназначить, отдать)")
+        # empty definition falls back to the sentence-cased title
+        self.assertEqual(senses[1].definition, "Посвятить (предназначить, отдать)")
         # unlinked sense keeps synonyms, ships nothing, counts as unlinked
         self.assertFalse(senses[2].linked)
         self.assertEqual(senses[2].equivalents, [])
@@ -390,6 +422,45 @@ class EquivalentsTest(unittest.TestCase):
         _eq.resolve_words(words, backend=self.FakeBackend(),
                           progress=lambda done, total: seen.append((done, total)))
         self.assertEqual(seen, [(1000, 2500), (2000, 2500)])
+
+    def test_case_variant_lookup_finds_capitalized(self):
+        import sqlite3
+        from bilingual import equivalents as _eq
+        with tempfile.TemporaryDirectory() as tmp:
+            db = os.path.join(tmp, "wn.db")
+            con = sqlite3.connect(db)
+            con.execute("CREATE TABLE wn_sense (key TEXT, name TEXT, synset_id TEXT)")
+            con.executemany("INSERT INTO wn_sense VALUES (?,?,?)", [
+                ("amsterdam%1:15:00::", "Amsterdam", "08949737-n"),
+                ("dog%1:05:00::", "dog", "02084071-n"),
+            ])
+            con.commit()
+            con.close()
+            self.assertEqual(_eq.find_case_variant_synsets(db, "Amsterdam"),
+                             ["08949737-n"])
+            self.assertEqual(_eq.find_case_variant_synsets(db, "AMSTERDAM"),
+                             ["08949737-n"])
+            # exact-lowercase names match too (harmless: the main lookup path
+            # wins first, so the fallback never fires for them in practice)
+            self.assertEqual(_eq.find_case_variant_synsets(db, "dog"),
+                             ["02084071-n"])
+            self.assertEqual(_eq.find_case_variant_synsets(db, "zzz"), [])
+            self.assertEqual(_eq.find_case_variant_synsets(db, ""), [])
+
+    def test_empty_headword_gets_no_card(self):
+        from bilingual import build as _build
+        from bilingual import provenance as _prov
+        with tempfile.TemporaryDirectory() as tmp:
+            out = os.path.join(tmp, "out")
+            summary = _build.build_sample(
+                ["give", "zzznosuchword"], out, "empty-en-ru", "Empty",
+                sources=_prov.Sources(tatoeba_date="2026-10-17"),
+                backend=self.FakeBackend())
+            self.assertEqual(summary["cards"], 1)
+            self.assertEqual(summary["skipped_empty"], 1)
+            text = _package.read(summary["dz_path"])
+            self.assertIn("\ngive\n", text)
+            self.assertNotIn("zzznosuchword", text)
 
     def test_numbering_is_text_not_tag(self):
         # [m10]+ are unknown tags to the reader (single-digit [mN] only);

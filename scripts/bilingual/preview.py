@@ -15,20 +15,29 @@ def render(cards: Sequence[Card], title: str = "preview") -> str:
         parts = []
         if card.pos:
             parts.append(f'<p class="pos">{html.escape(card.pos)}</p>')
+        if card.audio:
+            # The standalone page cannot play the bundled files, but reviewers
+            # need to see which recordings a card carries (the DSL `[s]` refs
+            # they correspond to are verified separately by audio.verify).
+            parts.append(
+                "<p class='aud'>audio: "
+                + html.escape(", ".join(card.audio))
+                + "</p>"
+            )
         for i, sense in enumerate(card.senses, 1):
             parts.append(
                 f'<p class="sense"><b>{i}.</b> {html.escape(", ".join(sense.equivalents))}</p>'
             )
             if sense.definition:
                 parts.append(f'<p class="rdef">{html.escape(sense.definition)}</p>')
-            if sense.synonyms:
-                parts.append(
-                    f'<p class="syn">syn. {html.escape(", ".join(sense.synonyms))}</p>'
-                )
             if sense.example is not None:
                 en, ru = sense.example
                 parts.append(
                     f"<p class='ex'>ex. {html.escape(en)} — {html.escape(ru)}</p>"
+                )
+            if sense.synonyms:
+                parts.append(
+                    f'<p class="syn">syn. {html.escape(", ".join(sense.synonyms))}</p>'
                 )
         for en, ru in card.pairs:
             parts.append(f"<p class='ex'>{html.escape(en)} — {html.escape(ru)}</p>")
@@ -40,6 +49,7 @@ def render(cards: Sequence[Card], title: str = "preview") -> str:
         ".pos{color:#888;font-style:italic;margin-bottom:0}"
         ".sense{margin:.5em 0 0}.trn{color:#a0a;margin:.2em 0 0 1em}"
         ".rdef{color:#060;font-style:italic;margin:.2em 0 0 1em}"
+        ".aud{color:#555;margin:.1em 0 0;font-size:90%}"
         ".syn{color:#555;margin:.1em 0 0 1em;font-size:90%}"
         ".ex{color:#060;margin:.2em 0 0 1em;font-size:90%}"
         "</style></head><body><h1>"

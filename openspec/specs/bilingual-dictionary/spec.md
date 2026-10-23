@@ -46,11 +46,14 @@ kept only as build-debug metadata and never rendered.
 ### Requirement: Translation article layout
 
 Each headword SHALL be one article grouping its senses under Russian part-of-speech
-labels (сущ./гл./прил./нареч.), numbered per part of speech. Each sense SHALL lead
-with its numbered `[m1]` marker followed by its `[trn]` equivalents (bounded per
-sense by the stated limit, ordered common-first by Russian corpus frequency),
-then its Russian definition as subordinate italic text, then English synonyms of
-the source synset as secondary material. The English gloss SHALL NOT be displayed.
+labels (сущ./гл./прил./нареч.), numbered per part of speech (a lone sense in a section
+carries no counter). Each sense SHALL lead with its numbered `[m1]` marker
+followed by its `[trn]` equivalents (bounded per sense by the stated limit,
+ordered common-first by Russian corpus frequency), then its Russian definition
+as subordinate italic text, then at most one anchored example pair, then
+English synonyms of the source synset. The English gloss SHALL NOT be
+displayed. A headword with no resolvable senses at all SHALL be omitted from
+the output and counted.
 
 #### Scenario: Senses are numbered per part of speech
 
@@ -61,13 +64,18 @@ the source synset as secondary material. The English gloss SHALL NOT be displaye
 
 - **WHEN** a sense is rendered
 - **THEN** its numbered marker and equivalents come first, the Russian
-  definition follows as subordinate text, then synonyms, and no English gloss
-  is shown
+  definition follows as subordinate text, then the example pair, then
+  synonyms, and no English gloss is shown
 
-#### Scenario: One card per headword
+#### Scenario: Lone sense has no counter
 
-- **WHEN** a headword has senses in several parts of speech
-- **THEN** they render as sections of one article rather than separate cards
+- **WHEN** a part-of-speech section holds exactly one sense
+- **THEN** no number marker is rendered for it
+
+#### Scenario: Empty headword is omitted
+
+- **WHEN** a headword resolves to no senses at all
+- **THEN** no card is emitted for it and the run counts it as skipped
 
 ### Requirement: Per-sense example selection
 
@@ -76,7 +84,9 @@ cap: pairs group by normalized English text with one Russian variant kept per
 group; ranking prefers pairs whose Russian side contains one of the sense's
 equivalents, then shorter English text. Length is a ranking signal, not a
 filter. A sense with no anchored pair SHALL fall back to an unanchored pair;
-kaikki English-only examples SHALL NOT be used.
+kaikki English-only examples SHALL NOT be used. Single-character headwords
+SHALL match no pairs at all: a one-letter token in running English text is
+overwhelmingly the article, not the headword.
 
 #### Scenario: One variant per sentence
 
@@ -98,6 +108,12 @@ kaikki English-only examples SHALL NOT be used.
 
 - **WHEN** a sense has pairs but none contains a sense equivalent
 - **THEN** the shortest pair is kept as a concordance example
+
+#### Scenario: Single-character headword ships no examples
+
+- **WHEN** the headword is one character long (e.g. "A" = ampere)
+- **THEN** no pairs match it and its senses carry no examples, though the
+  card itself with equivalents is still emitted
 
 ### Requirement: Example placement
 

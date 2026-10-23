@@ -161,15 +161,42 @@ def russian_pos(en_pos: str) -> str:
 
 
 def _sense_definition(group: RuGroup) -> str:
-    """RU definition with the title fallback, lowercased if ALL-CAPS.
+    """RU definition with the title fallback, sentence-cased if ALL-CAPS.
 
-    Synset titles are stored uppercase; natural-case definitions (which may
-    hold proper nouns) pass through untouched.
+    Synset titles are stored uppercase; a lowercased title would destroy
+    proper-noun capitals wholesale ("УЛАН-БАТОР" -> "улан-батор"), so the
+    fallback is sentence case instead ("Улан-батор") — standard dictionary
+    style, and right for single-word proper-noun titles ("АМСТЕРДАМ" ->
+    "Амстердам"). Natural-case definitions (which may hold proper nouns
+    mid-text) pass through untouched.
     """
     text = (group.definition or "").strip() or group.title
     if text.isupper():
-        text = text.lower()
+        text = text.capitalize()
     return text
+
+
+def find_case_variant_synsets(db_path: str, word: str) -> List[str]:
+    """Synset ids whose stored lemma matches ``word`` ignoring case/underscores.
+
+    The wrapper lowercases every query, so this is the only route to
+    capitalized and multiword lemmas (proper nouns, acronyms). Deterministic:
+    de-duplicated and sorted. Returns [] when nothing matches.
+    """
+    import sqlite3
+
+    key = word.strip().lower().replace(" ", "_")
+    if not key:
+        return []
+    con = sqlite3.connect(db_path)
+    try:
+        rows = con.execute(
+            "SELECT DISTINCT synset_id FROM wn_sense WHERE lower(name) = ?",
+            (key,),
+        ).fetchall()
+    finally:
+        con.close()
+    return sorted({r[0] for r in rows if r and r[0]})
 
 
 class RuWordNetBackend:
@@ -191,10 +218,10 @@ class RuWordNetBackend:
         st = os.stat(self.db_path)
         return f"{self.db_path}|{st.st_size}|{int(st.st_mtime)}"
 
-    def en_synsets(self, word: str) -> List[EnSynset]:
+    def _build_synsets(self, synsets) -> List[EnSynset]:
+        """Build EnSynset records from WNSynset objects (shared by both paths)."""
         out = []
-        for sense in self._wn.get_en_senses(word):
-            syn = sense.synset
+        for syn in synsets:
             pos_letter = syn.id.rsplit("-", 1)[-1]
             groups = [
                 RuGroup(
@@ -212,6 +239,24 @@ class RuWordNetBackend:
                 )
             )
         return out
+
+    def en_synsets(self, word: str) -> List[EnSynset]:
+        out = []
+        for sense in self._wn.get_en_senses(word):
+            out.extend(self._build_synsets([sense.synset]))
+        if out:
+            return out
+        # Fallback: the wrapper lowercases every query, so capitalized and
+        # multiword lemmas (proper nouns, acronyms) never match through it.
+        # Match stored names case-insensitively instead; exact-case words
+        # already returned above, so behavior for them is unchanged.
+        found = []
+        for sid in find_case_variant_synsets(self.db_path, word):
+            try:
+                found.extend(self._build_synsets([self._wn.get_en_synset_by_id(sid)]))
+            except Exception:
+                continue  # stale index entry: skip, do not fail the word
+        return found
 
 
 def _ruwordnet_db_path() -> str:

@@ -59,8 +59,14 @@ def pairs_for(word: str, corpus: Corpus) -> List[Tuple[str, str]]:
     A word whose token never occurs in the corpus cannot match anywhere, so
     it returns immediately instead of scanning all pairs; multi-token words
     scan only the smallest token list. The word-boundary regex still decides
-    every candidate.
+    every candidate. Single-character headwords never match at all: in running
+    English text a one-letter token is overwhelmingly the article "a" (or the
+    pronoun "I"), so any hit would illustrate the article, not the headword
+    ("Be a man" for the letter A = ampere). Such headwords keep their card
+    but ship no examples.
     """
+    if len(word) < 2:
+        return []
     pat = re.compile(r"(?<!\w)" + re.escape(word) + r"(?!\w)", re.I)
     toks = _WORD_RE.findall(word.lower())
     if not toks:
