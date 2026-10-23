@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updated": "2026-10-22",
+  "updated": "2026-10-23",
   "entries": [
     {
       "id": "kaikki-en",
@@ -89,6 +89,48 @@
           "url": "https://github.com/rg-software/aurelex/releases/download/catalog-data/au_kaikki_ru-ru.dsl.files.zip",
           "sizeBytes": 347430462,
           "sha256": "46330ce90f64154667f9184c5d3c07fb097d5e7b8dec67c7995bfc8b81b26659"
+        }
+      ]
+    },
+    {
+      "id": "tatoeba-en-ru",
+      "name": "Aurelex Tatoeba English-Russian",
+      "names": {
+        "ru": "Aurelex Tatoeba английский — русский"
+      },
+      "langFrom": "en",
+      "langTo": "ru",
+      "attribution": "Tatoeba contributors, CC BY 2.0 FR",
+      "license": "CC-BY-2.0-FR",
+      "files": [
+        {
+          "role": "dictionary",
+          "required": true,
+          "name": "au_tatoeba_en-ru.dsl.dz",
+          "url": "https://github.com/rg-software/aurelex/releases/download/catalog-data/au_tatoeba_en-ru.dsl.dz",
+          "sizeBytes": 5351166,
+          "sha256": "31918c38d560e2acd1b926b607cab7b2230c9b63257b8b4e31bf67cab1f7dfc2"
+        }
+      ]
+    },
+    {
+      "id": "tatoeba-ru-en",
+      "name": "Aurelex Tatoeba Russian-English",
+      "names": {
+        "ru": "Aurelex Tatoeba русский — английский"
+      },
+      "langFrom": "ru",
+      "langTo": "en",
+      "attribution": "Tatoeba contributors, CC BY 2.0 FR",
+      "license": "CC-BY-2.0-FR",
+      "files": [
+        {
+          "role": "dictionary",
+          "required": true,
+          "name": "au_tatoeba_ru-en.dsl.dz",
+          "url": "https://github.com/rg-software/aurelex/releases/download/catalog-data/au_tatoeba_ru-en.dsl.dz",
+          "sizeBytes": 3588200,
+          "sha256": "2c29dd1097bdaedd290e6932bf3890a092f33cbac4b9382869a4f30a0d1005c4"
         }
       ]
     }

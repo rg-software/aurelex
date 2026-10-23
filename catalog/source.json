@@ -73,6 +73,42 @@
           "name": "au_kaikki_ru-ru.dsl.files.zip"
         }
       ]
+    },
+    {
+      "id": "tatoeba-en-ru",
+      "name": "Aurelex Tatoeba English-Russian",
+      "names": {
+        "ru": "Aurelex Tatoeba английский — русский"
+      },
+      "langFrom": "en",
+      "langTo": "ru",
+      "attribution": "Tatoeba contributors, CC BY 2.0 FR",
+      "license": "CC-BY-2.0-FR",
+      "files": [
+        {
+          "role": "dictionary",
+          "required": true,
+          "name": "au_tatoeba_en-ru.dsl.dz"
+        }
+      ]
+    },
+    {
+      "id": "tatoeba-ru-en",
+      "name": "Aurelex Tatoeba Russian-English",
+      "names": {
+        "ru": "Aurelex Tatoeba русский — английский"
+      },
+      "langFrom": "ru",
+      "langTo": "en",
+      "attribution": "Tatoeba contributors, CC BY 2.0 FR",
+      "license": "CC-BY-2.0-FR",
+      "files": [
+        {
+          "role": "dictionary",
+          "required": true,
+          "name": "au_tatoeba_ru-en.dsl.dz"
+        }
+      ]
     }
   ]
 }
