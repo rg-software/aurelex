@@ -81,6 +81,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--resolve-cache", default=None, metavar="FILE",
                         help="Cache resolved equivalents here (keyed by thesaurus file + headwords); reruns skip resolution")
     parser.add_argument("--keep-pairs", type=int, default=5, help="Pairs kept per headword in pairs mode (default 5)")
+    parser.add_argument(
+        "--source-lang",
+        choices=("en", "ru"),
+        default="en",
+        help="Pairs mode headword side: English (default) or Russian headwords "
+        "matched against the Russian side of the same pairs (needs the "
+        "source-language kaikki snapshot via --snapshot)",
+    )
     return parser
 
 
@@ -98,7 +106,8 @@ def read_words(args: argparse.Namespace) -> list[str]:
         if not args.snapshot:
             print("error: --all-kaikki needs --snapshot", file=sys.stderr)
             raise SystemExit(2)
-        words.extend(_eq.kaikki_headwords(args.snapshot))
+        snap_lang = "ru" if getattr(args, "source_lang", "en") == "ru" else "en"
+        words.extend(_eq.kaikki_headwords(args.snapshot, snap_lang))
     seen = set()
     unique = []
     for word in words:
@@ -161,8 +170,11 @@ def main(argv: list[str] | None = None) -> int:
         if corpus is None:
             print("error: pairs mode needs --tatoeba-dir", file=sys.stderr)
             return 2
+        if args.source_lang == "ru":
+            corpus = corpus.flipped()
         sources = _prov.Sources(
             tatoeba_date=args.tatoeba_date, equivalents=False,
+            direction="ru-en" if args.source_lang == "ru" else "en-ru",
         )
         summary = _build.build_pairs(
             words, args.out_dir, args.name, args.title,

@@ -295,9 +295,11 @@ def english_lemma_universe(db_path: Optional[str] = None) -> List[str]:
     return sorted({str(name).replace("_", " ") for (name,) in rows if name})
 
 
-def kaikki_headwords(snapshot_path: str) -> List[str]:
-    """Every lexical, non-inflected EN headword in a kaikki snapshot.
+def kaikki_headwords(snapshot_path: str, lang: str = "en") -> List[str]:
+    """Every lexical, non-inflected headword in a kaikki snapshot.
 
+    ``lang`` selects the snapshot language; the pairs mode passes its source
+    language, so the ru→en universe comes from the kaikki RU snapshot.
     The pairs dictionary iterates this universe and keeps the headwords that
     have Tatoeba pairs (about 1 in 20); the rest ship no card at all.
     """
@@ -308,7 +310,7 @@ def kaikki_headwords(snapshot_path: str) -> List[str]:
 
     found: Set[str] = set()
     tick = 0
-    for _line_no, record in _ksource.iter_records(snapshot_path, None, "en"):
+    for _line_no, record in _ksource.iter_records(snapshot_path, None, lang):
         tick += 1
         if tick % 1000000 == 0:
             print(f"snapshot scan: {tick:,} lines", file=sys.stderr)

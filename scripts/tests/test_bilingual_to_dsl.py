@@ -246,6 +246,31 @@ class TatoebaTest(unittest.TestCase):
         self.assertEqual(_tat.pairs_for("xyzzy", corpus), [])
         self.assertEqual(_tat.pairs_for("bread xyzzy", corpus), [])
 
+    def test_flipped_view_matches_russian(self):
+        # the ru->en view searches the Russian side with the Russian tokenizer
+        from bilingual import tatoeba as _tat
+        pairs = [("Eat bread.", "Ешь хлеб."), ("I like bread.", "Люблю хлеб.")]
+        corpus = _tat.Corpus(
+            pairs=pairs, index=_tat.index_pairs(pairs),
+            index_ru=_tat.index_pairs([(ru, en) for en, ru in pairs], lang="ru"))
+        ru = corpus.flipped()
+        self.assertEqual(ru.lang, "ru")
+        self.assertEqual(
+            _tat.pairs_for("хлеб", ru),
+            [("Ешь хлеб.", "Eat bread."), ("Люблю хлеб.", "I like bread.")])
+        self.assertEqual(
+            _tat.pairs_for("ешь", ru), [("Ешь хлеб.", "Eat bread.")])
+        self.assertEqual(_tat.pairs_for("я", ru), [])  # single-char: nothing
+        self.assertEqual(_tat.pairs_for("dog", ru), [])  # latin invisible here
+
+    def test_flipped_select_dedupes_russian_side(self):
+        # dedupe key and variant roles follow tuple position, not language
+        from bilingual import tatoeba as _tat
+        kept = _tat.select(
+            [("Ешь хлеб.", "Eat bread."), ("Ешь хлеб.", "Кушай хлеб.")],
+            [], _tat.Counter(), keep=3)
+        self.assertEqual(kept, [("Ешь хлеб.", "Eat bread.")])
+
     def test_single_char_headword_never_matches(self):
         # 'A' (ampere) must not match the article in "Be a man": a one-letter
         # token in running text is never the abbreviation sense.
@@ -606,6 +631,53 @@ class PairsBuildTest(unittest.TestCase):
             self.assertTrue(os.path.isfile(os.path.join(out, "cli-pairs.dsl.dz")))
             self.assertTrue(os.path.isfile(os.path.join(out, "cli-pairs.preview.html")))
 
+    def test_build_pairs_russian_direction(self):
+        # flipped view: Russian headwords match the RU side, case merges on
+        # the RU spelling, junk is dropped, roles render [ex]RU/[trn]EN
+        from bilingual import build as _build
+        from bilingual import provenance as _prov
+        with tempfile.TemporaryDirectory() as tmp:
+            tat_dir = self._tat_dir(tmp)
+            import sys as _sys
+            _sys.path.insert(0, SCRIPTS)
+            from bilingual import tatoeba as _tat
+            corpus = _tat.acquire(
+                os.path.join(tat_dir, "eng_sentences.tsv.bz2"),
+                os.path.join(tat_dir, "rus_sentences.tsv.bz2"),
+                os.path.join(tat_dir, "eng-rus_links.tsv.bz2"),
+                "2026-10-17").flipped()
+            out = os.path.join(tmp, "out")
+            summary = _build.build_pairs(
+                ["Хлеб", "хлеб", "007", "dog"], out, "pairs-ru-en", "Pairs",
+                sources=_prov.Sources(tatoeba_date="2026-10-17",
+                                      equivalents=False, direction="ru-en"),
+                corpus=corpus, keep=3)
+            self.assertEqual(summary["cards"], 1)
+            self.assertEqual(summary["skipped_shape"], 1)
+            text = _package.read(summary["dz_path"])
+            self.assertIn("\nхлеб\n", text)
+            self.assertNotIn("\nХлеб\n", text)
+            self.assertIn("[ex]Люблю хлеб.[/ex]", text)
+            self.assertIn("[trn]I like bread.[/trn]", text)
+            self.assertIn("Russian-English", text)
+            self.assertIn("rus-eng", text)
+
+    def test_cli_pairs_mode_source_lang_ru(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tat_dir = self._tat_dir(tmp)
+            out = os.path.join(tmp, "out")
+            rc = _cli.main(["--mode", "pairs", "--tatoeba-dir", tat_dir,
+                            "--tatoeba-date", "2026-10-17",
+                            "--source-lang", "ru",
+                            "--word", "хлеб", "--out-dir", out,
+                            "--name", "cli-ru-en"])
+            self.assertEqual(rc, 0)
+            text = _package.read(os.path.join(out, "cli-ru-en.dsl.dz"))
+            self.assertIn("\nхлеб\n", text)
+            self.assertIn("[ex]Люблю хлеб.[/ex]", text)
+            self.assertIn("[trn]I like bread.[/trn]", text)
+            self.assertIn("Russian-English", text)
+
     def test_cli_translation_mode_stubbed(self):
         # Hermetic: stub the RuWordNet backend, no snapshot, no audio, no net.
         from bilingual import build as _build
@@ -667,6 +739,15 @@ class PairsBuildTest(unittest.TestCase):
                 for r in recs:
                     f.write(_json.dumps(r) + "\n")
             self.assertEqual(_eq.kaikki_headwords(snap), ["bread"])
+            # language filter follows the snapshot language, not the default
+            recs.append({"word": "хлеб", "lang_code": "ru", "pos": "noun",
+                         "senses": [{"glosses": ["хлеб"]}]})
+            with open(snap, "w", encoding="utf-8") as f:
+                for r in recs:
+                    f.write(_json.dumps(r) + "\n")
+            self.assertEqual(_eq.kaikki_headwords(snap), ["bread"])
+            self.assertEqual(_eq.kaikki_headwords(snap, "ru"), ["хлеб"])
+            self.assertEqual(_eq.kaikki_headwords(snap, "fr"), ["pain"])
 
     def test_all_kaikki_needs_snapshot(self):
         with self.assertRaises(SystemExit) as ctx:
@@ -718,6 +799,20 @@ class ProvenanceTest(unittest.TestCase):
                 [_dsl.Card(headword="bread")], tmp, "prov-en-ru", "Prov",
                 about=_prov.about_card("Prov", sources, 1))
             self.assertLess(text.index("About Prov"), text.index("\nbread\n"))
+
+    def test_reversed_direction_names_it(self):
+        from bilingual import provenance as _prov
+        sources = _prov.Sources(tatoeba_date="2026-10-17", equivalents=False,
+                                direction="ru-en")
+        text = "\n".join(_prov.description_lines("R", sources, 5))
+        self.assertIn("a Russian-English example-sentences dictionary", text)
+        self.assertIn("Tatoeba rus-eng pairs, snapshot 2026-10-17", text)
+        self.assertNotIn("eng-rus", text)
+        # default direction keeps the old wording verbatim
+        old = "\n".join(_prov.description_lines(
+            "E", _prov.Sources(tatoeba_date="2026-10-17", equivalents=False), 5))
+        self.assertIn("an English-Russian example-sentences dictionary", old)
+        self.assertIn("Tatoeba eng-rus pairs", old)
 
 
 class AudioTest(unittest.TestCase):

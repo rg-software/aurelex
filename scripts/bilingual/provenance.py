@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from typing import Tuple
 
 from . import dsl as _dsl
 
@@ -26,6 +27,16 @@ class Sources:
     tatoeba_date: str = "unknown"
     kaikki_dump_date: str = "unknown"
     equivalents: bool = True
+    direction: str = "en-ru"
+
+
+def _pair_kind(sources: Sources) -> Tuple[str, str]:
+    """(kind phrase, pair label) for the build direction."""
+    if sources.direction == "ru-en":
+        return ("a Russian-English example-sentences dictionary",
+                "Tatoeba rus-eng pairs")
+    return ("an English-Russian example-sentences dictionary",
+            "Tatoeba eng-rus pairs")
 
 
 def description_lines(title: str, sources: Sources, card_count: int) -> list:
@@ -38,7 +49,7 @@ def description_lines(title: str, sources: Sources, card_count: int) -> list:
     commercial use the thesaurus forbids) and the Tatoeba attribution.
     """
     kind = "an English-Russian translation dictionary" if sources.equivalents \
-        else "an English-Russian example-sentences dictionary"
+        else _pair_kind(sources)[0]
     if sources.equivalents:
         lines = [
             f"{title}: {kind}",
@@ -53,11 +64,12 @@ def description_lines(title: str, sources: Sources, card_count: int) -> list:
             "Princeton WordNet, RuWordNet, and Tatoeba (CC BY 2.0 FR).",
         ]
     else:
+        _kind, pair_label = _pair_kind(sources)
         lines = [
             f"{title}: {kind}",
             "",
             "This is a derivative work, based on "
-            f"Tatoeba eng-rus pairs, snapshot {sources.tatoeba_date}.",
+            f"{pair_label}, snapshot {sources.tatoeba_date}.",
             "",
             "License: CC BY 2.0 FR.",
         ]

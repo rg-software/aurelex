@@ -12,6 +12,11 @@ by normalized English text and keep one Russian variant per group; rank
 anchored-first (Russian side contains a Dict-A equivalent as a whole word),
 then rarest anchor, then shortest; length ranks, never filters. A sense with
 no anchored pair falls back to an unanchored (concordance) pair.
+
+The corpus is symmetric: both frequency counters and both inverted indexes
+are built in the same acquisition pass, and :meth:`Corpus.flipped` swaps the
+pair order so the Russian→English dictionary reuses every selection
+function unchanged (matching, dedupe, ranking, case merge, hygiene rules).
 """
 
 from __future__ import annotations
@@ -28,28 +33,54 @@ from .constants import EXAMPLES_PER_HEADWORD, PREFERRED_EXAMPLE_LENGTH
 
 @dataclass
 class Corpus:
-    """Tatoeba slice: pairs, Russian token frequencies, pinned date, EN index."""
+    """Tatoeba slice: pairs, per-side token frequencies, pinned date, indexes.
+
+    ``pairs`` are always (source, target) in build order — English→Russian
+    as acquired. ``flipped()`` returns the Russian→English view with the
+    pair order, counters, indexes, and tokenizer swapped, so the selection
+    machinery cannot tell which direction it serves.
+    """
 
     pairs: List[Tuple[str, str]] = field(default_factory=list)
     rus_freq: Counter = field(default_factory=Counter)
     date: str = ""
     index: Dict[str, List[int]] = field(default_factory=dict)
+    eng_freq: Counter = field(default_factory=Counter)
+    index_ru: Dict[str, List[int]] = field(default_factory=dict)
+    lang: str = "en"
+
+    def flipped(self) -> "Corpus":
+        """Russian→English view of this corpus (new object, shared date)."""
+        return Corpus(
+            pairs=[(ru, en) for en, ru in self.pairs],
+            rus_freq=self.eng_freq,
+            date=self.date,
+            index=self.index_ru,
+            eng_freq=self.rus_freq,
+            index_ru=self.index,
+            lang="ru" if self.lang == "en" else "en",
+        )
 
 
 _WORD_RE = re.compile(r"[a-z0-9']+")
+_RU_WORD_RE = re.compile(r"[а-яё0-9]+")
+_TOKENIZERS = {"en": _WORD_RE, "ru": _RU_WORD_RE}
 
 
-def index_pairs(pairs: Sequence[Tuple[str, str]]) -> Dict[str, List[int]]:
-    """Inverted index over English tokens: token -> pair positions.
+def index_pairs(pairs: Sequence[Tuple[str, str]],
+                lang: str = "en") -> Dict[str, List[int]]:
+    """Inverted index over source-side tokens: token -> pair positions.
 
     Built once per build; without it a full dictionary pays a regex scan of
     all pairs per headword (~35k × 831k searches). Lookup stays exact: the
     index only narrows candidates, the word-boundary regex still decides.
+    ``lang`` selects the tokenizer (`en` or `ru` word regex).
     """
+    tok = _TOKENIZERS[lang]
     index: Dict[str, List[int]] = {}
-    for i, (en, _ru) in enumerate(pairs):
-        for tok in set(_WORD_RE.findall(en.lower())):
-            index.setdefault(tok, []).append(i)
+    for i, (src, _tgt) in enumerate(pairs):
+        for t in set(tok.findall(src.lower())):
+            index.setdefault(t, []).append(i)
     return index
 
 
@@ -59,7 +90,9 @@ def pairs_for(word: str, corpus: Corpus) -> List[Tuple[str, str]]:
     A word whose token never occurs in the corpus cannot match anywhere, so
     it returns immediately instead of scanning all pairs; multi-token words
     scan only the smallest token list. The word-boundary regex still decides
-    every candidate. Single-character headwords never match at all: in running
+    every candidate. The match side follows the corpus view: on a flipped
+    (Russian→English) corpus the Russian text is searched with the Russian
+    tokenizer. Single-character headwords never match at all: in running
     English text a one-letter token is overwhelmingly the article "a" (or the
     pronoun "I"), so any hit would illustrate the article, not the headword
     ("Be a man" for the letter A = ampere). Such headwords keep their card
@@ -68,7 +101,8 @@ def pairs_for(word: str, corpus: Corpus) -> List[Tuple[str, str]]:
     if len(word) < 2:
         return []
     pat = re.compile(r"(?<!\w)" + re.escape(word) + r"(?!\w)", re.I)
-    toks = _WORD_RE.findall(word.lower())
+    tok = _TOKENIZERS[corpus.lang]
+    toks = tok.findall(word.lower())
     if not toks:
         return []
     lists = []
@@ -128,8 +162,13 @@ def acquire(eng_path: str, rus_path: str, links_path: str, date: str) -> Corpus:
     freq: Counter = Counter()
     for text in rus.values():
         freq.update(re.findall(r"[а-яё]+", text.lower()))
+    eng_freq: Counter = Counter()
+    for text in eng.values():
+        eng_freq.update(_WORD_RE.findall(text.lower()))
     by_en = index_pairs(pairs)
-    return Corpus(pairs=pairs, rus_freq=freq, date=date, index=by_en)
+    by_ru = index_pairs([(ru, en) for en, ru in pairs], lang="ru")
+    return Corpus(pairs=pairs, rus_freq=freq, date=date, index=by_en,
+                  eng_freq=eng_freq, index_ru=by_ru)
 
 
 def _normalize(text: str) -> str:
