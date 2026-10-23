@@ -98,7 +98,8 @@ along with the entry currently being transferred. The system SHALL keep the
 transfer running when the app is in the background, and SHALL NOT require any
 storage permission to download. A completed download SHALL place the entry's
 files in the app's private dictionary storage and make the dictionary available
-in the main list.
+in the main list. While a download batch is in progress, name taps on catalog
+entries SHALL NOT change the selection.
 
 #### Scenario: Downloading a single entry
 - **WHEN** the user selects one catalog entry and starts the download
@@ -134,6 +135,11 @@ in the main list.
 - **WHEN** a dictionary has been downloaded from the catalog
 - **THEN** it is stored permanently in the app, is listed with the other
   dictionaries, and remains available after the app restarts
+
+#### Scenario: Taps during a download change nothing
+- **WHEN** the user taps a catalog entry while a download batch is in progress
+- **THEN** the selection is unchanged and the entry's highlight state does not
+  change
 
 ### Requirement: Cancelling a download
 The system SHALL let the user cancel a download in progress, and that cancel

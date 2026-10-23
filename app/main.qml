@@ -1661,8 +1661,11 @@ ColumnLayout {
             return dictsPane.catalogSelected.indexOf(id) >= 0
         }
         // Name tap: installed entries are not selectable (only their audio
-        // toggle is); selecting clears any audio opt-out, deselecting forgets it.
+        // toggle is); while a batch runs nothing is selectable (the master
+        // button is Cancel-only, so a highlight could promise no action).
+        // Selecting clears any audio opt-out, deselecting forgets it.
         function _toggleCatalogSelect(id) {
+            if (engine.downloadActive) return
             const e = dictsPane._catalogEntry(id)
             if (!e || !e.installable || (e.installed && !e.updateAvailable)) return
             const sel = dictsPane.catalogSelected
