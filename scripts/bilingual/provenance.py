@@ -48,8 +48,13 @@ def description_lines(title: str, sources: Sources, card_count: int) -> list:
     the RuWordNet non-commercial term (a bare CC BY 2.0 FR would permit
     commercial use the thesaurus forbids) and the Tatoeba attribution.
     """
-    kind = "an English-Russian translation dictionary" if sources.equivalents \
-        else _pair_kind(sources)[0]
+    if sources.equivalents and sources.direction == "ru-en":
+        kind = "a Russian-English translation dictionary"
+    elif sources.equivalents:
+        kind = "an English-Russian translation dictionary"
+    else:
+        kind = _pair_kind(sources)[0]
+    pair_label = "rus-eng" if sources.direction == "ru-en" else "eng-rus"
     if sources.equivalents:
         lines = [
             f"{title}: {kind}",
@@ -57,7 +62,7 @@ def description_lines(title: str, sources: Sources, card_count: int) -> list:
             "This is a derivative work, based on:",
             sources.pwn,
             sources.ruwordnet,
-            f"Tatoeba eng-rus pairs, snapshot {sources.tatoeba_date}",
+            f"Tatoeba {pair_label} pairs, snapshot {sources.tatoeba_date}",
             f"Wiktionary / kaikki.org audio, snapshot {sources.kaikki_dump_date}",
             "",
             "Non-commercial use and distribution only, with attribution to "

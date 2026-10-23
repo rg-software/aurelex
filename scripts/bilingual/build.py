@@ -126,6 +126,8 @@ def build_sample(
     audio_enabled: bool = True,
     backend=None,
     resolve_cache: Optional[str] = None,
+    direction: str = "en-ru",
+    audio_lang_code: str = "en",
 ) -> Dict[str, object]:
     """Build one import-ready sample pair; return a summary for verification."""
     shown = title or name
@@ -146,6 +148,7 @@ def build_sample(
     resolved, eq_report = _eq.resolve_words(
         words, backend, progress=_progress,
         cache_path=resolve_cache, cache_id=cache_id,
+        direction=direction,
     )
     print(f"resolved {eq_report.synsets_linked:,}/{eq_report.synsets:,} synsets linked",
           file=sys.stderr)
@@ -179,7 +182,10 @@ def build_sample(
                     equivalents=equivalents,
                     synonyms=[s for s in sense.synonyms if s.lower() != word.lower()],
                     example=example,
-                    pos=_eq.russian_pos(sense.pos),
+                    # POS labels are the target language's; the resolver
+                    # already sets English labels for the reverse direction.
+                    pos=(sense.pos if direction == "ru-en"
+                         else _eq.russian_pos(sense.pos)),
                 )
             )
         # One card per headword; POS sections and per-POS numbering happen in
@@ -200,7 +206,7 @@ def build_sample(
             list(words), snapshot_path,
             per_word=per_word_audio, audio_lang=audio_lang,
             enabled=audio_enabled, archive_path=archive_path,
-            download_dir=download_dir,
+            download_dir=download_dir, lang=audio_lang_code,
         )
         cards = _audio.attach_audio(cards, names_by_word)
 

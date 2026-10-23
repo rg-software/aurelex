@@ -346,6 +346,18 @@ class TatoebaTest(unittest.TestCase):
             _tat.select_for_sense(["нетакого"], pairs, freq),
             ("I go.", "Иду."))
 
+    def test_sense_select_works_on_flipped_pairs(self):
+        # reverse direction: pairs are (source, target) = (ru, en), so the
+        # anchor always checks the second element — no code change needed
+        from bilingual import tatoeba as _tat
+        flipped = [("Ешь хлеб.", "Eat bread."), ("Иду.", "I go.")]
+        self.assertEqual(
+            _tat.select_for_sense(["bread"], flipped, _tat.Counter()),
+            ("Ешь хлеб.", "Eat bread."))
+        self.assertEqual(
+            _tat.select_for_sense(["нетакого"], flipped, _tat.Counter()),
+            ("Иду.", "I go."))
+
 
 class EquivalentsTest(unittest.TestCase):
     class FakeBackend:
@@ -366,6 +378,39 @@ class EquivalentsTest(unittest.TestCase):
                 ),
                 _eq.EnSynset(pos="adverb", lemmas=["anyway"], groups=[]),
             ]
+
+    class FakeRuBackend:
+        def ru_synsets(self, word):
+            from bilingual import equivalents as _eq
+            if word != "хлеб":
+                return []
+            return [
+                _eq.EnSynset(
+                    pos="noun",
+                    lemmas=["хлеб", "хлебушек"],
+                    groups=[
+                        _eq.RuGroup(title="", definition="food made from dough",
+                                    lemmas=["bread", "breadstuff"]),
+                    ],
+                ),
+                _eq.EnSynset(pos="noun", lemmas=["хлебный злак"], groups=[]),
+            ]
+
+    def test_reverse_resolution_verbatim_gloss(self):
+        from bilingual import equivalents as _eq
+        senses = _eq.resolve_word("хлеб", backend=self.FakeRuBackend(),
+                                  direction="ru-en")
+        self.assertEqual(len(senses), 2)
+        self.assertTrue(senses[0].linked)
+        # EN equivalents verbatim, gloss untouched, RU lemmas as synonyms
+        self.assertEqual(senses[0].equivalents, ["bread", "breadstuff"])
+        self.assertEqual(senses[0].definition, "food made from dough")
+        self.assertEqual(senses[0].synonyms, ["хлеб", "хлебушек"])
+        self.assertEqual(senses[0].pos, "noun")
+        # unlinked RU synset: synonyms only, no equivalents
+        self.assertFalse(senses[1].linked)
+        self.assertEqual(senses[1].equivalents, [])
+        self.assertEqual(senses[1].synonyms, ["хлебный злак"])
 
     def test_resolution_counts_and_fallbacks(self):
         from bilingual import equivalents as _eq
@@ -486,6 +531,39 @@ class EquivalentsTest(unittest.TestCase):
             text = _package.read(summary["dz_path"])
             self.assertIn("\ngive\n", text)
             self.assertNotIn("zzznosuchword", text)
+
+    def test_reverse_sample_build_end_to_end(self):
+        # ru->en through build_sample: flipped corpus, RU resolver, English
+        # POS labels, EN-anchored example, RU audio untouched (no snapshot)
+        from bilingual import build as _build
+        from bilingual import provenance as _prov
+        with tempfile.TemporaryDirectory() as tmp:
+            import sys as _sys
+            _sys.path.insert(0, SCRIPTS)
+            from bilingual import tatoeba as _tat
+            pairs = [("Eat bread.", "Ешь хлеб."), ("I go.", "Иду.")]
+            corpus = _tat.Corpus(
+                pairs=pairs, index=_tat.index_pairs(pairs),
+                index_ru=_tat.index_pairs([(ru, en) for en, ru in pairs],
+                                          lang="ru")).flipped()
+            out = os.path.join(tmp, "out")
+            summary = _build.build_sample(
+                ["хлеб", "zzz"], out, "rev-en-ru", "Rev",
+                sources=_prov.Sources(tatoeba_date="2026-10-17",
+                                      equivalents=True, direction="ru-en"),
+                corpus=corpus, backend=self.FakeRuBackend(),
+                direction="ru-en")
+            self.assertEqual(summary["cards"], 1)
+            self.assertEqual(summary["skipped_empty"], 1)
+            text = _package.read(summary["dz_path"])
+            self.assertIn("\nхлеб\n", text)
+            self.assertIn("    [p]noun[/p]", text)
+            self.assertIn("[trn]bread[/trn]", text)
+            self.assertIn("[i]food made from dough[/i]", text)
+            self.assertIn("(syn. хлебушек)", text)
+            self.assertIn("[ex]Ешь хлеб.[/ex]", text)
+            self.assertIn("[trn]Eat bread.[/trn]", text)
+            self.assertIn("a Russian-English translation dictionary", text)
 
     def test_numbering_is_text_not_tag(self):
         # [m10]+ are unknown tags to the reader (single-digit [mN] only);
@@ -814,6 +892,20 @@ class ProvenanceTest(unittest.TestCase):
         self.assertIn("an English-Russian example-sentences dictionary", old)
         self.assertIn("Tatoeba eng-rus pairs", old)
 
+    def test_reversed_translation_names_it(self):
+        from bilingual import provenance as _prov
+        sources = _prov.Sources(tatoeba_date="2026-10-17", kaikki_dump_date="2026-09-01",
+                                equivalents=True, direction="ru-en")
+        text = "\n".join(_prov.description_lines("R", sources, 5))
+        self.assertIn("a Russian-English translation dictionary", text)
+        self.assertIn("Tatoeba rus-eng pairs, snapshot 2026-10-17", text)
+        self.assertIn("Non-commercial use and distribution only", text)
+        # default direction keeps the old wording verbatim
+        old = "\n".join(_prov.description_lines(
+            "E", _prov.Sources(tatoeba_date="2026-10-17", equivalents=True), 5))
+        self.assertIn("an English-Russian translation dictionary", old)
+        self.assertIn("Tatoeba eng-rus pairs", old)
+
 
 class AudioTest(unittest.TestCase):
     def _fixture(self, tmp):
@@ -862,6 +954,30 @@ class AudioTest(unittest.TestCase):
             # bread: US ogg preferred, uk ogg second; .txt skipped, dupe merged
             self.assertEqual(names["bread"], ["En-us-bread.ogg", "En-uk-bread.ogg"])
             self.assertEqual(names["silent"], [])
+
+    def test_collect_records_follows_snapshot_language(self):
+        # the reverse dictionary reuses the RU stage: same filter, RU records
+        import json as _json
+        from bilingual import audio as _aud
+        with tempfile.TemporaryDirectory() as tmp:
+            snap = os.path.join(tmp, "ru.jsonl")
+            recs = [
+                {"word": "хлеб", "lang_code": "ru", "pos": "noun",
+                 "senses": [{"glosses": ["хлеб"]}],
+                 "sounds": [{"audio": "Ru-хлеб.ogg",
+                             "ogg_url": "https://upload.wikimedia.org/x/Ru-хлеб.ogg"}]},
+                {"word": "bread", "lang_code": "en", "pos": "noun",
+                 "senses": [{"glosses": ["baked"]}], "sounds": []},
+            ]
+            with open(snap, "w", encoding="utf-8") as f:
+                for r in recs:
+                    f.write(_json.dumps(r) + "\n")
+            found = _aud.collect_records(snap, ["хлеб", "bread"], lang="ru")
+            self.assertEqual(set(found), {"хлеб", "bread"})
+            self.assertEqual(len(found["хлеб"]), 1)
+            self.assertEqual(found["bread"], [])
+            self.assertEqual(
+                _aud.collect_records(snap, ["хлеб"], lang="en"), {"хлеб": []})
 
     def test_verbatim_against_kaikki_planner(self):
         # Independent cross-check: kaikki's own AudioPlan over the same fixture

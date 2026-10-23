@@ -85,9 +85,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--source-lang",
         choices=("en", "ru"),
         default="en",
-        help="Pairs mode headword side: English (default) or Russian headwords "
-        "matched against the Russian side of the same pairs (needs the "
-        "source-language kaikki snapshot via --snapshot)",
+        help="Dictionary source side (default: en). ru matches headwords "
+        "against the Russian side of the same pairs (needs the "
+        "source-language kaikki snapshot via --snapshot); with --mode "
+        "translation it walks the ili bridge backwards (RU→EN equivalents).",
     )
     return parser
 
@@ -140,11 +141,15 @@ def main(argv: list[str] | None = None) -> int:
     mode = getattr(args, "mode", "skeleton")
     if mode == "translation":
         corpus = _load_corpus(args)
+        direction = "ru-en" if args.source_lang == "ru" else "en-ru"
+        if direction == "ru-en" and corpus is not None:
+            corpus = corpus.flipped()
         sources = _prov.Sources(
             pwn=args.ruwordnet_pwn,
             ruwordnet=args.ruwordnet_version,
             tatoeba_date=args.tatoeba_date,
             kaikki_dump_date=args.kaikki_dump_date,
+            direction=direction,
         )
         summary = _build.build_sample(
             words, args.out_dir, args.name, args.title,
@@ -157,6 +162,8 @@ def main(argv: list[str] | None = None) -> int:
             audio_lang=args.audio_lang,
             audio_enabled=not args.no_audio,
             resolve_cache=args.resolve_cache,
+            direction=direction,
+            audio_lang_code="ru" if direction == "ru-en" else "en",
         )
         print(f"wrote {summary['dz_path']} ({summary['cards']} cards, "
               f"{summary['synsets_linked']}/{summary['synsets']} synsets linked)")

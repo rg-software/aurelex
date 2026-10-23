@@ -49,18 +49,20 @@ class _TickPrinter:
                   file=sys.stderr)
 
 
-def collect_records(snapshot_path: str, words: Sequence[str]) -> Dict[str, List[dict]]:
-    """Gather candidate (lexical, non-inflected) EN records per headword.
+def collect_records(snapshot_path: str, words: Sequence[str],
+                    lang: str = "en") -> Dict[str, List[dict]]:
+    """Gather candidate (lexical, non-inflected) records per headword.
 
     One streaming pass over the snapshot; the filter mirrors the records the
-    kaikki EN build itself indexes and renders. Prints a coarse line count to
-    stderr — a full snapshot scan takes minutes.
+    kaikki build itself indexes and renders. Prints a coarse line count to
+    stderr — a full snapshot scan takes minutes. ``lang`` selects the
+    snapshot language (the reverse dictionary reuses the RU stage verbatim).
     """
     _, ksource = _kaikki()
     wanted = set(words)
     found: Dict[str, List[dict]] = {w: [] for w in words}
     tick = 0
-    for _line_no, record in ksource.iter_records(snapshot_path, None, "en"):
+    for _line_no, record in ksource.iter_records(snapshot_path, None, lang):
         tick += 1
         if tick % 1000000 == 0:
             print(f"snapshot scan: {tick:,} lines", file=sys.stderr)
@@ -86,6 +88,7 @@ def plan_words(
     downloader=None,
     dead: Sequence[str] = (),
     available: Optional[Set[str]] = None,
+    lang: str = "en",
 ):
     """Run the kaikki audio planner over Dict A headwords.
 
@@ -108,7 +111,7 @@ def plan_words(
         planner.on_cached = report_cached
     names: Dict[str, List[str]] = {}
     if enabled and per_word > 0:
-        records_by_word = collect_records(snapshot_path, words)
+        records_by_word = collect_records(snapshot_path, words, lang)
         total = len(records_by_word)
         for n, (word, records) in enumerate(records_by_word.items(), 1):
             if n == 1 or n % 5000 == 0:

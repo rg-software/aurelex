@@ -176,6 +176,18 @@ def _sense_definition(group: RuGroup) -> str:
     return text
 
 
+def _gloss_definition(group: RuGroup) -> str:
+    """PWN gloss for the reverse direction: verbatim, never re-cased.
+
+    Glosses are natural-case English ("a city of central European Russia"),
+    so the sentence-case rule of :func:`_sense_definition` does not apply.
+    A gloss-less EN synset falls back to its own lemmas rather than an empty
+    line.
+    """
+    text = (group.definition or "").strip()
+    return text or ", ".join(group.lemmas)
+
+
 def find_case_variant_synsets(db_path: str, word: str) -> List[str]:
     """Synset ids whose stored lemma matches ``word`` ignoring case/underscores.
 
@@ -239,6 +251,51 @@ class RuWordNetBackend:
                 )
             )
         return out
+
+    def ru_synsets(self, word: str) -> List[EnSynset]:
+        """Mirror of :meth:`en_synsets` for the reverse direction.
+
+        Reuses the same record shapes: the RU synset plays the ``EnSynset``
+        role (POS, member lemmas, linked groups) and each linked EN synset
+        plays the ``RuGroup`` role (gloss as definition, EN lemmas verbatim).
+        No case-variant fallback is needed here — the wrapper uppercases
+        every RU query and the stored lemmas are uppercase, so lookups are
+        case-insensitive by construction. POS comes from the linked EN
+        synsets (bridge pairs always agree); unlinked RU synsets fall back
+        to their own id suffix.
+        """
+        out = []
+        for sense in self._wn.get_senses(word):
+            syn = sense.synset
+            groups = [
+                RuGroup(
+                    title="",
+                    definition=(es.definition or "").strip(),
+                    lemmas=sorted({s.name.replace("_", " ") for s in es.senses if s.name}),
+                )
+                for es in (syn.ili or [])
+            ]
+            if groups:
+                pos = self._pos_from_ili(syn)
+            else:
+                pos = _EN_POS.get(syn.id.rsplit("-", 1)[-1].lower(), "?")
+            out.append(
+                EnSynset(
+                    pos=pos,
+                    lemmas=sorted({s.name.lower() for s in syn.senses if s.name}),
+                    groups=groups,
+                )
+            )
+        return out
+
+    @staticmethod
+    def _pos_from_ili(syn) -> str:
+        """POS from the first linked EN synset id (PWN letters)."""
+        for es in syn.ili or []:
+            letter = (es.id or "").rsplit("-", 1)[-1]
+            if letter in _EN_POS:
+                return _EN_POS[letter]
+        return "?"
 
     def en_synsets(self, word: str) -> List[EnSynset]:
         out = []
@@ -345,11 +402,21 @@ def rank_equivalents(equivalents: Sequence[str], freq: Dict[str, int]) -> List[s
     return sorted(unique, key=score)
 
 
-def resolve_word(word: str, backend: Optional[RuWordNetBackend] = None) -> List[ResolvedSense]:
-    """Resolve one headword to card senses, grouped per RU synset."""
+def resolve_word(word: str, backend: Optional[RuWordNetBackend] = None,
+                 direction: str = "en-ru") -> List[ResolvedSense]:
+    """Resolve one headword to card senses, grouped per target synset.
+
+    ``direction`` picks the walk: ``"en-ru"`` (each linked RU synset is one
+    sense with a RU definition) or ``"ru-en"`` (each linked EN synset is one
+    sense with the verbatim PWN gloss). POS labels are always the target
+    language's (the backend sets them).
+    """
     backend = backend or RuWordNetBackend()
     senses: List[ResolvedSense] = []
-    for syn in backend.en_synsets(word):
+    synsets = (backend.ru_synsets(word) if direction == "ru-en"
+               else backend.en_synsets(word))
+    define = _gloss_definition if direction == "ru-en" else _sense_definition
+    for syn in synsets:
         if not syn.groups:
             senses.append(
                 ResolvedSense(
@@ -365,7 +432,7 @@ def resolve_word(word: str, backend: Optional[RuWordNetBackend] = None) -> List[
             senses.append(
                 ResolvedSense(
                     pos=syn.pos,
-                    definition=_sense_definition(group),
+                    definition=define(group),
                     equivalents=list(group.lemmas),
                     synonyms=syn.lemmas,
                     linked=True,
@@ -380,6 +447,7 @@ def resolve_words(
     progress: Optional[Callable[[int, int], None]] = None,
     cache_path: Optional[str] = None,
     cache_id: Optional[str] = None,
+    direction: str = "en-ru",
 ) -> Tuple[Dict[str, List[ResolvedSense]], ResolutionReport]:
     """Resolve headwords, counting coverage (unlinked senses included).
 
@@ -388,6 +456,8 @@ def resolve_words(
     (e.g. the RuWordNet sqlite identity), a completed resolution is stored as
     JSON and reused verbatim on later runs over the same headwords — the
     thesaurus is pinned, so the result is deterministic and never recomputed.
+    ``direction`` (``"en-ru"`` or ``"ru-en"``) picks which way the `ili`
+    bridge is walked; POS labels are always the target language's.
     """
     if cache_path is not None and cache_id is not None and os.path.isfile(cache_path):
         hit = _load_cached(words, cache_path, cache_id, progress)
@@ -397,11 +467,13 @@ def resolve_words(
     report = ResolutionReport()
     cards: Dict[str, List[ResolvedSense]] = {}
     total = len(words)
+    define = _gloss_definition if direction == "ru-en" else _sense_definition
     for word in words:
         report.words += 1
         if progress is not None and report.words % 1000 == 0:
             progress(report.words, total)
-        synsets = backend.en_synsets(word)
+        synsets = (backend.ru_synsets(word) if direction == "ru-en"
+                   else backend.en_synsets(word))
         if not synsets:
             report.words_no_en += 1
             cards[word] = []
@@ -422,7 +494,7 @@ def resolve_words(
                 cards[word].append(
                     ResolvedSense(
                         pos=syn.pos,
-                        definition=_sense_definition(group),
+                        definition=define(group),
                         equivalents=list(group.lemmas),
                         synonyms=syn.lemmas,
                         linked=True,
