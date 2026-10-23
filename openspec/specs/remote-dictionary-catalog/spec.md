@@ -345,6 +345,8 @@ keeps its identity, list position and group membership, reload it without
 requiring an app restart, and rebuild its full-text index, because the article
 content changed. An update that fails SHALL leave the previously installed
 dictionary intact and usable, and SHALL NOT leave a partially written dictionary.
+A catalog install SHALL record the batch's file digests at terminal, so the
+record survives to the next probe.
 
 #### Scenario: An update is detected
 - **WHEN** an installed catalog entry's recorded digest for a required file
@@ -379,4 +381,9 @@ dictionary intact and usable, and SHALL NOT leave a partially written dictionary
 - **WHEN** an update fails partway
 - **THEN** the previously installed dictionary remains loaded and searchable, and
   no partially written dictionary is exposed
+
+#### Scenario: A catalog install records its baseline
+- **WHEN** a catalog batch completes and its entries land
+- **THEN** the requested file digests are recorded for each landed entry, so a
+  later probe can compare them against the catalog
 

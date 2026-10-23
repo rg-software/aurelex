@@ -3624,11 +3624,15 @@ void EngineController::startCatalogDownload(const QVariantList &requests)
         return;
     }
     // Build the transfer request from the CURRENTLY PARSED manifest, so the
-    // service never sees a URL or size the parser did not approve.
+    // service never sees a URL or size the parser did not approve. The
+    // request-time SHAs are remembered per entry below and consulted when
+    // the batch lands; drop the previous batch's records first so a stale
+    // map can never leak into a later record.
     QJsonArray requestsOut;
     QStringList pendingAudioIds;
     QStringList pendingUpdateIds;
     qint64 need = 0;
+    m_downloadRequested.clear();
     for (const QVariant &v : requests) {
         const QVariantMap r = v.toMap();
         const RemoteCatalog::Entry *e = findCatalogEntry(r.value(QStringLiteral("id")).toString());
@@ -3768,7 +3772,6 @@ void EngineController::startCatalogDownload(const QVariantList &requests)
     m_downloadMessage.clear();
     m_downloadSucceeded.clear();
     m_downloadFailed.clear();
-    m_downloadRequested.clear();
     emit downloadChanged();
 #if defined(Q_OS_ANDROID)
     // The Java side resolves its own Context through QtNative.activity(), the
