@@ -28,6 +28,27 @@ def _kaikki():
     return kaudio, ksource
 
 
+class _TickPrinter:
+    """Duck-typed progress sink for kaikki's tick callbacks.
+
+    Prints ``label: done/total`` every ``every`` ticks (and on the first
+    tick) so the silent minutes — tar extraction, bundle zipping — stay
+    visible on stderr.
+    """
+
+    def __init__(self, label: str, total: int, every: int = 1000) -> None:
+        self._label = label
+        self._total = total
+        self._every = every
+        self._done = 0
+
+    def tick(self) -> None:
+        self._done += 1
+        if self._done == 1 or self._done % self._every == 0:
+            print(f"{self._label}: {self._done:,}/{self._total:,}",
+                  file=sys.stderr)
+
+
 def collect_records(snapshot_path: str, words: Sequence[str]) -> Dict[str, List[dict]]:
     """Gather candidate (lexical, non-inflected) EN records per headword.
 
@@ -87,7 +108,11 @@ def plan_words(
         planner.on_cached = report_cached
     names: Dict[str, List[str]] = {}
     if enabled and per_word > 0:
-        for word, records in collect_records(snapshot_path, words).items():
+        records_by_word = collect_records(snapshot_path, words)
+        total = len(records_by_word)
+        for n, (word, records) in enumerate(records_by_word.items(), 1):
+            if n == 1 or n % 5000 == 0:
+                print(f"audio planned: {n:,}/{total:,}", file=sys.stderr)
             chosen: List[str] = []
             seen: Set[str] = set()
             for record in records:
@@ -139,6 +164,7 @@ def bundle_for(
     kaudio, _ksource = _kaikki()
     if not planner.referenced:
         return None
+    print(f"bundling {len(planner.referenced):,} recordings", file=sys.stderr)
     base = dict_path[:-len(".dz")] if dict_path.lower().endswith(".dz") else dict_path
     dest = base + ".files.zip" if layout == "zip" else base + ".files"
     fetched = {
@@ -155,13 +181,23 @@ def bundle_for(
                 if name not in fetched
             }
             if wanted:
-                found, missing = kaudio.extract_audio(archive_path, wanted, tmp)
+                found, missing = kaudio.extract_audio(
+                    archive_path, wanted, tmp,
+                    progress=_TickPrinter("extracting audio", len(wanted)),
+                )
                 _ = found
+                print(f"extracting audio: done "
+                      f"({len(wanted) - len(missing):,}/{len(wanted):,})",
+                      file=sys.stderr)
                 missing_set = set(missing)
                 for name in wanted:
                     if name not in missing_set:
                         sources[name] = os.path.join(tmp, name)
-        kaudio.write_bundle(sources, dest, layout)
+        kaudio.write_bundle(
+            sources, dest, layout,
+            progress=_TickPrinter("writing bundle", len(sources)),
+        )
+        print(f"writing bundle: done ({len(sources):,} files)", file=sys.stderr)
     return dest
 
 

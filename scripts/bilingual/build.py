@@ -195,6 +195,7 @@ def build_sample(
     names_by_word: Dict[str, List[str]] = {w: [] for w in words}
     planner = None
     if snapshot_path is not None:
+        print(f"planning audio: {len(words):,} headwords", file=sys.stderr)
         names_by_word, planner = _audio.plan_words(
             list(words), snapshot_path,
             per_word=per_word_audio, audio_lang=audio_lang,
@@ -213,6 +214,7 @@ def build_sample(
     ann_path = os.path.join(out_dir, f"{name}.ann")
     _prov.write_annotation(ann_path, shown, sources, len(cards))
 
+    print(f"verifying {len(cards):,} cards", file=sys.stderr)
     check = _audio.verify(dz_path, bundle_path)
     return {
         "dz_path": dz_path,
