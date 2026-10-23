@@ -48,6 +48,7 @@ python $SCRIPT --mode translation --all-lemmas --sample 25 --sample-mode first -
   --snapshot $SNAP --kaikki-dump-date 2026-09-02 `
   --tatoeba-dir $TAT --tatoeba-date 2026-10-17 `
   --audio-tar $TAR --audio-cache-dir $ACACHE --audio-per-word 3 --audio-lang US `
+  --resolve-cache $BIL\resolve-en-ru.sample.json `
   --out-dir dist --name au_wordnet_en-ru --title "Aurelex WordNet EN-RU"
 ```
 
@@ -61,6 +62,7 @@ python $SCRIPT --mode translation --all-lemmas `
   --snapshot $SNAP --kaikki-dump-date 2026-09-02 `
   --tatoeba-dir $TAT --tatoeba-date 2026-10-17 `
   --audio-tar $TAR --audio-cache-dir $ACACHE --audio-per-word 3 --audio-lang US `
+  --resolve-cache $BIL\resolve-en-ru.json `
   --out-dir dist --name au_wordnet_en-ru --title "Aurelex WordNet EN-RU"
 ```
 
@@ -78,6 +80,12 @@ cache (re-run the kaikki EN prefetch), do not ship around it.
 - `--no-audio` skips the snapshot and the archive entirely (then `--snapshot`
   is not needed); the dictionary still imports, without pronunciations.
 - Rebuilds are deterministic: same inputs yield byte-identical output.
+Rebuilds are also cheap: `--resolve-cache` stores the resolved equivalents
+(keyed by thesaurus file + headword list), so only the first build pays the
+hours-long resolution; later runs reuse it verbatim.
+Expect hours on a desktop: one full snapshot scan (~10 min), per-headword
+equivalent resolution, one Tatoeba join over 831k pairs (indexed once per
+build), and archive lookups — the same cost class as a kaikki full build.
 
 ## Verify
 

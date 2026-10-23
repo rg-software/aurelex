@@ -12,6 +12,8 @@ plumbing the spec's packaging and provenance requirements need:
 from __future__ import annotations
 
 import os
+import re
+import sys
 from typing import Dict, List, Optional, Sequence
 
 from . import audio as _audio
@@ -20,6 +22,26 @@ from . import equivalents as _eq
 from . import package as _package
 from . import provenance as _prov
 from . import tatoeba as _tat
+
+
+def _choose_case(key: str, forms: Sequence[str],
+                 pairs: Sequence[Tuple[str, str]]) -> str:
+    """Pick one headword per case-variant group.
+
+    Your own heuristic: look at how the card body spells it. The lowercase
+    form wins when it occurs as a whole word in the group's own pairs
+    (common noun used lowercase somewhere, even mid-sentence); otherwise the
+    capitalized form stands (proper names like Sisyphus never occur
+    lowercase). Single-form groups keep their form. Deterministic.
+    """
+    if len(forms) == 1:
+        only = forms[0]
+        if only == key:
+            return only
+    pat = re.compile(r"(?<!\w)" + re.escape(key) + r"(?!\w)")
+    if any(pat.search(en) for en, _ in pairs):
+        return key
+    return sorted(forms)[0]
 
 
 def build_pairs(
@@ -42,11 +64,30 @@ def build_pairs(
     corpus = corpus or _tat.Corpus()
 
     cards: List[_dsl.Card] = []
+    skipped = 0
+    skipped_shape = 0
+    by_lower: Dict[str, List[str]] = {}
     for word in words:
-        pat = _tat.re.compile(r"(?<!\w)" + _tat.re.escape(word) + r"(?!\w)", _tat.re.I)
-        headword_pairs = [(en, ru) for en, ru in corpus.pairs if pat.search(en)]
+        if not word or not word[0].isalpha():
+            skipped_shape += 1
+            continue
+        by_lower.setdefault(word.lower(), []).append(word)
+    print(f"pairs dictionary: {len(by_lower):,} case-folded headwords to check",
+          file=sys.stderr)
+    n = 0
+    for key in sorted(by_lower):
+        n += 1
+        if n % 50000 == 0:
+            print(f"pairs selected: {n:,}/{len(by_lower):,}", file=sys.stderr)
+        headword_pairs = _tat.pairs_for(key, corpus)
         kept = _tat.select(headword_pairs, (), corpus.rus_freq, keep=keep)
-        cards.append(_dsl.Card(headword=word, pairs=list(kept)))
+        if not kept:
+            skipped += 1
+            continue
+        cards.append(_dsl.Card(headword=_choose_case(key, by_lower[key], headword_pairs),
+                               pairs=list(kept)))
+    print(f"pairs dictionary: {len(cards):,} cards, {skipped:,} without pairs "
+          f"and {skipped_shape:,} ill-shaped headwords skipped", file=sys.stderr)
 
     about = _prov.about_card(shown, sources, len(cards))
     dz_path, _text = _package.build(cards, out_dir, name, shown, about=about)
@@ -61,6 +102,8 @@ def build_pairs(
         "ann_path": ann_path,
         "cards": len(cards),
         "cards_out": cards,
+        "skipped_empty": skipped,
+        "skipped_shape": skipped_shape,
         "synsets": 0,
         "synsets_linked": 0,
         "unresolved": check["unresolved"],
@@ -82,17 +125,37 @@ def build_sample(
     audio_lang: Optional[str] = None,
     audio_enabled: bool = True,
     backend=None,
+    resolve_cache: Optional[str] = None,
 ) -> Dict[str, object]:
     """Build one import-ready sample pair; return a summary for verification."""
     shown = title or name
     sources = sources or _prov.Sources()
 
-    resolved, eq_report = _eq.resolve_words(words, backend)
+    cache_id = None
+    if resolve_cache is not None and backend is None:
+        try:
+            db_path = _eq._ruwordnet_db_path()  # noqa: SLF001
+            st = os.stat(db_path)
+            cache_id = f"{db_path}|{st.st_size}|{int(st.st_mtime)}"
+        except (RuntimeError, OSError):
+            cache_id = None
+
+    def _progress(done: int, total: int) -> None:
+        print(f"resolving equivalents: {done:,}/{total:,}", file=sys.stderr)
+
+    resolved, eq_report = _eq.resolve_words(
+        words, backend, progress=_progress,
+        cache_path=resolve_cache, cache_id=cache_id,
+    )
+    print(f"resolved {eq_report.synsets_linked:,}/{eq_report.synsets:,} synsets linked",
+          file=sys.stderr)
+    print(f"indexing examples: {len(words):,} headwords", file=sys.stderr)
     word_pairs: Dict[str, List] = {}
     if corpus is not None:
-        for word in words:
-            pat = _tat.re.compile(r"(?<!\w)" + _tat.re.escape(word) + r"(?!\w)", _tat.re.I)
-            word_pairs[word] = [(en, ru) for en, ru in corpus.pairs if pat.search(en)]
+        for n, word in enumerate(words, 1):
+            word_pairs[word] = _tat.pairs_for(word, corpus)
+            if n % 5000 == 0:
+                print(f"examples indexed: {n:,}/{len(words):,}", file=sys.stderr)
 
     cards: List[_dsl.Card] = []
     for word in words:

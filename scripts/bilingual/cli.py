@@ -62,6 +62,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--all-lemmas", action="store_true",
         help="Use every English lemma in the RuWordNet EN subset as headwords",
     )
+    parser.add_argument(
+        "--all-kaikki", action="store_true",
+        help="Use every lexical EN headword in --snapshot as headwords "
+        "(pairs mode: keeps only headwords with pairs)",
+    )
     parser.add_argument("--snapshot", default=None, help="Pinned kaikki EN snapshot (.jsonl.gz) for audio planning")
     parser.add_argument("--audio-tar", default=None, help="Shared bulk audio archive (wiktionary-audios.tar)")
     parser.add_argument("--audio-cache-dir", default=None, help="Download cache dir for recordings the archive lacks")
@@ -73,7 +78,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--kaikki-dump-date", default="unknown", help="Kaikki EN snapshot dump date (recorded in provenance)")
     parser.add_argument("--ruwordnet-pwn", default="Princeton WordNet 3.0", help="PWN version label for provenance")
     parser.add_argument("--ruwordnet-version", default="RuWordNet 2.0 (2021)", help="RuWordNet version label for provenance")
-    parser.add_argument("--keep-pairs", type=int, default=3, help="Pairs kept per headword in pairs mode (default 3)")
+    parser.add_argument("--resolve-cache", default=None, metavar="FILE",
+                        help="Cache resolved equivalents here (keyed by thesaurus file + headwords); reruns skip resolution")
+    parser.add_argument("--keep-pairs", type=int, default=5, help="Pairs kept per headword in pairs mode (default 5)")
     return parser
 
 
@@ -87,6 +94,11 @@ def read_words(args: argparse.Namespace) -> list[str]:
             words.extend(ln.strip() for ln in f if ln.strip())
     if getattr(args, "all_lemmas", False):
         words.extend(_eq.english_lemma_universe())
+    if getattr(args, "all_kaikki", False):
+        if not args.snapshot:
+            print("error: --all-kaikki needs --snapshot", file=sys.stderr)
+            raise SystemExit(2)
+        words.extend(_eq.kaikki_headwords(args.snapshot))
     seen = set()
     unique = []
     for word in words:
@@ -135,6 +147,7 @@ def main(argv: list[str] | None = None) -> int:
             per_word_audio=args.audio_per_word,
             audio_lang=args.audio_lang,
             audio_enabled=not args.no_audio,
+            resolve_cache=args.resolve_cache,
         )
         print(f"wrote {summary['dz_path']} ({summary['cards']} cards, "
               f"{summary['synsets_linked']}/{summary['synsets']} synsets linked)")

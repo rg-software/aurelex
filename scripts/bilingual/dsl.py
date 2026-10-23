@@ -93,7 +93,7 @@ def emit_sense(sense: Sense, number: int) -> List[str]:
         en, ru = sense.example
         lines.append("        [*]")
         lines.append(f"        [ex]{escape_dsl(en)}[/ex]")
-        lines.append(f"        [ex]{escape_dsl(ru)}[/ex]")
+        lines.append(f"        [trn]{escape_dsl(ru)}[/trn]")
         lines.append("        [/*]")
     return lines
 
@@ -108,11 +108,12 @@ def emit_card(card: Card) -> List[str]:
     for comment in card.comments:
         lines.append(f"    [com]{escape_dsl(comment)}[/com]")
     if card.pairs:
-        lines.append("    [*]")
+        # Pairs ARE the article here (no senses to annotate), so they are not
+        # hidden behind a zone — a card that is only a [+] button helps nobody.
+        # The Russian line is marked [trn]: it is a translation, not an example.
         for en, ru in card.pairs:
             lines.append(f"    [ex]{escape_dsl(en)}[/ex]")
-            lines.append(f"    [ex]{escape_dsl(ru)}[/ex]")
-        lines.append("    [/*]")
+            lines.append(f"    [trn]{escape_dsl(ru)}[/trn]")
     for i, sense in enumerate(card.senses, 1):
         lines.extend(emit_sense(sense, i))
     return lines

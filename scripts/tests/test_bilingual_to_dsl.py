@@ -56,6 +56,7 @@ class CardTest(unittest.TestCase):
         ex_pos = text.index("[*]")
         self.assertTrue(0 < def_pos < trn_pos < syn_pos < ex_pos)
         self.assertIn("[/*]", text)
+        self.assertIn("[trn]Что мне ей подарить?[/trn]", text)
 
     def test_equivalent_cap(self):
         sense = _dsl.Sense(definition="d", equivalents=[f"w{i}" for i in range(20)])
@@ -188,6 +189,25 @@ class TatoebaTest(unittest.TestCase):
             self.assertEqual(len(corpus.pairs), 2)
             self.assertIn(("Eat bread.", "Ешь хлеб."), corpus.pairs)
 
+    def test_index_matches_regex_scan(self):
+        from bilingual import tatoeba as _tat
+        pairs = [("Eat bread.", "Ешь хлеб."), ("I like bread.", "Люблю хлеб."),
+                 ("Breads are nice.", "Хлеба хороши."), ("Good dog!", "Хорошая собака!")]
+        corpus = _tat.Corpus(pairs=pairs, index=_tat.index_pairs(pairs))
+        # 'bread' must not match 'Breads'; multiword falls back to full scan
+        self.assertEqual(_tat.pairs_for("bread", corpus),
+                         [("Eat bread.", "Ешь хлеб."), ("I like bread.", "Люблю хлеб.")])
+        self.assertEqual(_tat.pairs_for("hot dog", corpus), [])
+        self.assertEqual(_tat.pairs_for("dog", corpus), [("Good dog!", "Хорошая собака!")])
+
+    def test_absent_token_skips_scan(self):
+        from bilingual import tatoeba as _tat
+        pairs = [("Eat bread.", "Ешь хлеб.")]
+        corpus = _tat.Corpus(pairs=pairs, index=_tat.index_pairs(pairs))
+        # 'xyzzy' occurs nowhere: must return [] without scanning
+        self.assertEqual(_tat.pairs_for("xyzzy", corpus), [])
+        self.assertEqual(_tat.pairs_for("bread xyzzy", corpus), [])
+
     def test_dedupe_one_variant_per_sentence(self):
         from bilingual import tatoeba as _tat
         pairs = [("Eat bread.", "Ешь хлеб."), ("Eat bread.", "Кушай хлеб."),
@@ -293,6 +313,51 @@ class EquivalentsTest(unittest.TestCase):
         self.assertEqual(report.synsets, 2)
         self.assertEqual(report.synsets_linked, 1)
 
+    def test_resolve_cache_hit_miss_and_corrupt(self):
+        import json as _json
+        from bilingual import equivalents as _eq
+
+        class ExplodingBackend:
+            def en_synsets(self, word):
+                raise AssertionError("must not resolve on a cache hit")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cache = os.path.join(tmp, "resolve.json")
+            first, _ = _eq.resolve_words(
+                ["give"], backend=self.FakeBackend(),
+                cache_path=cache, cache_id="db-v1")
+            self.assertTrue(os.path.isfile(cache))
+            # hit: backend would explode, cached cards come back identical
+            second, rep = _eq.resolve_words(
+                ["give"], backend=ExplodingBackend(),
+                cache_path=cache, cache_id="db-v1")
+            self.assertEqual(
+                [s.equivalents for s in second["give"]],
+                [s.equivalents for s in first["give"]])
+            self.assertEqual((rep.words, rep.synsets), (1, 2))
+            # stale key (different words / new db): rebuilds through the backend
+            third, _ = _eq.resolve_words(
+                ["give", "zzz"], backend=self.FakeBackend(),
+                cache_path=cache, cache_id="db-v1")
+            self.assertEqual(set(third), {"give", "zzz"})
+            # corrupt cache file: ignored, rebuilt
+            with open(cache, "w", encoding="utf-8") as f:
+                f.write("{not json")
+            fourth, _ = _eq.resolve_words(
+                ["give"], backend=self.FakeBackend(),
+                cache_path=cache, cache_id="db-v1")
+            self.assertEqual(
+                [s.equivalents for s in fourth["give"]],
+                [s.equivalents for s in first["give"]])
+
+    def test_progress_callback_fires(self):
+        from bilingual import equivalents as _eq
+        seen = []
+        words = ["w%d" % i for i in range(2500)]
+        _eq.resolve_words(words, backend=self.FakeBackend(),
+                          progress=lambda done, total: seen.append((done, total)))
+        self.assertEqual(seen, [(1000, 2500), (2000, 2500)])
+
     def test_numbering_is_text_not_tag(self):
         # [m10]+ are unknown tags to the reader (single-digit [mN] only);
         # numbering rides as text on [m1], kaikki-style, at any sense count
@@ -306,15 +371,16 @@ class EquivalentsTest(unittest.TestCase):
             _dsl.Sense(definition="d", equivalents=["x"], synonyms=[]), 1)
         self.assertFalse(any("(syn." in ln for ln in lines))
 
-    def test_pairs_card_zone(self):
+    def test_pairs_card_flat_with_marked_translation(self):
         card = _dsl.Card(headword="dog",
                          pairs=[("Good dog!", "Хорошая собака!")])
         text = "\n".join(_dsl.emit_card(card))
-        self.assertIn("[*]", text)
-        self.assertIn("[ex]Good dog![/ex]", text)
-        self.assertIn("[ex]Хорошая собака![/ex]", text)
-        self.assertIn("[/*]", text)
+        # pairs ARE the article: no zone, no sense numbering; the Russian
+        # line is marked as a translation, not an example
+        self.assertNotIn("[*]", text)
         self.assertNotIn("[m1]", text)
+        self.assertIn("[ex]Good dog![/ex]", text)
+        self.assertIn("[trn]Хорошая собака![/trn]", text)
 
     def test_pairs_preview(self):
         html = _preview.render([_dsl.Card(headword="dog",
@@ -355,7 +421,7 @@ class PairsBuildTest(unittest.TestCase):
                 ["dog", "bread", "zzz"], out, "pairs-en-ru", "Pairs",
                 sources=_prov.Sources(tatoeba_date="2026-10-17", equivalents=False),
                 corpus=corpus, keep=3)
-            self.assertEqual(summary["cards"], 3)
+            self.assertEqual(summary["cards"], 2)
             self.assertEqual(summary["unresolved"], [])
             text = _package.read(summary["dz_path"])
             self.assertIn("About Pairs", text)
@@ -363,6 +429,65 @@ class PairsBuildTest(unittest.TestCase):
             self.assertNotIn("RuWordNet thesaurus, non-commercial", text)
             self.assertNotIn("Princeton WordNet", text)
             self.assertIn("[ex]Good dog![/ex]", text)
+
+    def test_junk_headwords_skipped(self):
+        # stray quotes, suffix fragments, numbers and empties never get cards
+        from bilingual import build as _build
+        from bilingual import provenance as _prov
+        with tempfile.TemporaryDirectory() as tmp:
+            tat_dir = self._tat_dir(tmp)
+            import sys as _sys
+            _sys.path.insert(0, SCRIPTS)
+            from bilingual import tatoeba as _tat
+            corpus = _tat.acquire(
+                os.path.join(tat_dir, "eng_sentences.tsv.bz2"),
+                os.path.join(tat_dir, "rus_sentences.tsv.bz2"),
+                os.path.join(tat_dir, "eng-rus_links.tsv.bz2"),
+                "2026-10-17")
+            out = os.path.join(tmp, "out")
+            summary = _build.build_pairs(
+                ["dog", "'dog", "-er", "007", ""], out, "junk",
+                sources=_prov.Sources(tatoeba_date="2026-10-17", equivalents=False),
+                corpus=corpus, keep=3)
+            self.assertEqual(summary["cards"], 1)
+            self.assertEqual(summary["skipped_shape"], 4)
+            text = _package.read(summary["dz_path"])
+            self.assertIn("\ndog\n", text)
+            self.assertNotIn("'dog", text)
+
+    def test_case_variants_merge_to_attested_form(self):
+        # maduro/Maduro with identical bodies collapse into one card; the
+        # lowercase form wins when the pairs spell it lowercase (common noun),
+        # otherwise the capitalized form stands (proper noun: Sisyphus)
+        from bilingual import build as _build
+        from bilingual import provenance as _prov
+        with tempfile.TemporaryDirectory() as tmp:
+            eng = os.path.join(tmp, "eng.tsv")
+            rus = os.path.join(tmp, "rus.tsv")
+            links = os.path.join(tmp, "links.tsv")
+            with open(eng, "w", encoding="utf-8") as f:
+                f.write("1\teng\tGood dog!\n2\ten\tSisyphus pushes rock.\n"
+                        "3\ten\tAA and Aa play.\n")
+            with open(rus, "w", encoding="utf-8") as f:
+                f.write("10\trus\tХороший пёсик!\n11\trus\tСизиф толкает камень.\n"
+                        "12\trus\tАА и Аа играют.\n")
+            with open(links, "w", encoding="utf-8") as f:
+                f.write("1\t10\n2\t11\n3\t12\n")
+            import sys as _sys
+            _sys.path.insert(0, SCRIPTS)
+            from bilingual import tatoeba as _tat
+            corpus = _tat.acquire(eng, rus, links, "2026-10-17")
+            out = os.path.join(tmp, "out")
+            summary = _build.build_pairs(
+                ["Dog", "dog", "Sisyphus", "AA", "Aa", "zzz"], out, "case",
+                sources=_prov.Sources(tatoeba_date="2026-10-17", equivalents=False),
+                corpus=corpus, keep=3)
+            self.assertEqual(summary["cards"], 3)
+            text = _package.read(summary["dz_path"])
+            for head in ("\ndog\n", "\nSisyphus\n", "\nAA\n"):
+                self.assertIn(head, text)
+            for head in ("\nDog\n", "\nAa\n"):
+                self.assertNotIn(head, text)
 
     def test_cli_pairs_mode(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -382,7 +507,7 @@ class PairsBuildTest(unittest.TestCase):
         from bilingual import equivalents as _eq
         real = _eq.resolve_words
 
-        def fake(words, backend=None):
+        def fake(words, backend=None, progress=None, **_kw):
             cards = {"dog": [("сущ.", "домашнее животное",
                                ["собака"], ["doggo"], True)]}
             from bilingual import equivalents as _e2
@@ -419,6 +544,29 @@ class PairsBuildTest(unittest.TestCase):
             con.commit()
             con.close()
             self.assertEqual(_eq.english_lemma_universe(db), ["dog", "hot dog"])
+
+    def test_kaikki_headwords_from_fixture_snapshot(self):
+        import json as _json
+        from bilingual import equivalents as _eq
+        recs = [
+            {"word": "bread", "lang_code": "en", "pos": "noun",
+             "senses": [{"glosses": ["baked"]}]},
+            {"word": "ran", "lang_code": "en", "pos": "verb",
+             "senses": [{"glosses": ["past"], "form_of": [{"word": "run"}]}]},
+            {"word": "pain", "lang_code": "fr", "pos": "noun",
+             "senses": [{"glosses": ["bread"]}]},
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            snap = os.path.join(tmp, "s.jsonl")
+            with open(snap, "w", encoding="utf-8") as f:
+                for r in recs:
+                    f.write(_json.dumps(r) + "\n")
+            self.assertEqual(_eq.kaikki_headwords(snap), ["bread"])
+
+    def test_all_kaikki_needs_snapshot(self):
+        with self.assertRaises(SystemExit) as ctx:
+            _cli.main(["--mode", "pairs", "--all-kaikki"])
+        self.assertEqual(ctx.exception.code, 2)
 
     def test_comments_emit_after_audio(self):
         card = _dsl.Card(headword="About X", comments=["line one", "line two"])

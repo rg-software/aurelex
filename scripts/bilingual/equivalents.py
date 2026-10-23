@@ -12,7 +12,7 @@ from __future__ import annotations
 import os
 import sys
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 
 def _ru_pos_labels() -> Dict[str, str]:
@@ -66,6 +66,92 @@ class ResolutionReport:
     synsets_linked: int = 0
 
 
+def _serialise(senses: Sequence[ResolvedSense]) -> List[dict]:
+    return [
+        {
+            "pos": s.pos,
+            "definition": s.definition,
+            "equivalents": list(s.equivalents),
+            "synonyms": list(s.synonyms),
+            "linked": s.linked,
+        }
+        for s in senses
+    ]
+
+
+def _deserialise(rows: List[dict]) -> List[ResolvedSense]:
+    return [
+        ResolvedSense(
+            pos=r.get("pos", ""),
+            definition=r.get("definition", ""),
+            equivalents=list(r.get("equivalents", [])),
+            synonyms=list(r.get("synonyms", [])),
+            linked=bool(r.get("linked", False)),
+        )
+        for r in rows
+    ]
+
+
+def _cache_key(db_id: str, words: Sequence[str]) -> str:
+    import hashlib
+
+    h = hashlib.sha256()
+    h.update(db_id.encode("utf-8"))
+    h.update(b"\x00")
+    for w in sorted(words):
+        h.update(w.encode("utf-8"))
+        h.update(b"\x00")
+    return h.hexdigest()
+
+
+def _load_cached(
+    words: Sequence[str], cache_path: str, cache_id: str,
+    progress: Optional[Callable[[int, int], None]] = None,
+) -> Optional[Tuple[Dict[str, List[ResolvedSense]], ResolutionReport]]:
+    """Return the cached resolution when it matches, else None."""
+    import json as _json
+
+    try:
+        with open(cache_path, encoding="utf-8") as f:
+            payload = _json.load(f)
+        if payload.get("key") != _cache_key(cache_id, words):
+            return None
+        report = ResolutionReport(
+            words=payload["report"]["words"],
+            words_no_en=payload["report"]["words_no_en"],
+            synsets=payload["report"]["synsets"],
+            synsets_linked=payload["report"]["synsets_linked"],
+        )
+        cards = {
+            w: _deserialise(senses) for w, senses in payload.get("cards", {}).items()
+        }
+        if progress is not None:
+            progress(report.words, len(words))
+        return cards, report
+    except (OSError, ValueError, KeyError):
+        return None  # missing or corrupt cache: rebuild it
+
+
+def _save_cached(
+    path: str, db_id: str, words: Sequence[str],
+    cards: Dict[str, List[ResolvedSense]], report: ResolutionReport,
+) -> None:
+    import json as _json
+
+    payload = {
+        "key": _cache_key(db_id, words),
+        "report": {
+            "words": report.words,
+            "words_no_en": report.words_no_en,
+            "synsets": report.synsets,
+            "synsets_linked": report.synsets_linked,
+        },
+        "cards": {w: _serialise(senses) for w, senses in cards.items()},
+    }
+    with open(path, "w", encoding="utf-8") as f:
+        _json.dump(payload, f, ensure_ascii=False)
+
+
 def russian_pos(en_pos: str) -> str:
     """Map an English POS name to the Russian card label."""
     labels = _ru_pos_labels()
@@ -96,7 +182,13 @@ class RuWordNetBackend:
                 "Dict A needs the `ruwordnet` package: "
                 "`pip install ruwordnet && ruwordnet download`"
             ) from exc
+        self.db_path = _ruwordnet_db_path()
         self._wn = RuWordNet()
+
+    def db_identity(self) -> str:
+        """Fingerprint the thesaurus file for the resolve cache."""
+        st = os.stat(self.db_path)
+        return f"{self.db_path}|{st.st_size}|{int(st.st_mtime)}"
 
     def en_synsets(self, word: str) -> List[EnSynset]:
         out = []
@@ -124,6 +216,23 @@ class RuWordNetBackend:
 from . import dsl as _dsl
 
 
+def _ruwordnet_db_path() -> str:
+    """Locate the installed RuWordNet sqlite (2021 db preferred)."""
+    try:
+        import ruwordnet as _pkg
+    except ImportError as exc:
+        raise RuntimeError(
+            "EN lemma universe needs the `ruwordnet` package: "
+            "`pip install ruwordnet && ruwordnet download`"
+        ) from exc
+    static = os.path.join(os.path.dirname(_pkg.__file__), "static")
+    for cand in ("ruwordnet-2021.db", "ruwordnet.db"):
+        path = os.path.join(static, cand)
+        if os.path.isfile(path):
+            return path
+    raise RuntimeError("no RuWordNet sqlite found; run `ruwordnet download`")
+
+
 def english_lemma_universe(db_path: Optional[str] = None) -> List[str]:
     """Every English lemma in the bundled EN subset (max-coverage headwords).
 
@@ -134,26 +243,41 @@ def english_lemma_universe(db_path: Optional[str] = None) -> List[str]:
     import sqlite3
 
     if db_path is None:
-        try:
-            import ruwordnet as _pkg
-        except ImportError as exc:
-            raise RuntimeError(
-                "EN lemma universe needs the `ruwordnet` package: "
-                "`pip install ruwordnet && ruwordnet download`"
-            ) from exc
-        static = os.path.join(os.path.dirname(_pkg.__file__), "static")
-        for cand in ("ruwordnet-2021.db", "ruwordnet.db"):
-            if os.path.isfile(os.path.join(static, cand)):
-                db_path = os.path.join(static, cand)
-                break
-        if db_path is None:
-            raise RuntimeError("no RuWordNet sqlite found; run `ruwordnet download`")
+        db_path = _ruwordnet_db_path()
     con = sqlite3.connect(db_path)
     try:
         rows = con.execute("SELECT DISTINCT name FROM wn_sense").fetchall()
     finally:
         con.close()
     return sorted({str(name).replace("_", " ") for (name,) in rows if name})
+
+
+def kaikki_headwords(snapshot_path: str) -> List[str]:
+    """Every lexical, non-inflected EN headword in a kaikki snapshot.
+
+    The pairs dictionary iterates this universe and keeps the headwords that
+    have Tatoeba pairs (about 1 in 20); the rest ship no card at all.
+    """
+    scripts = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    if scripts not in sys.path:
+        sys.path.insert(0, scripts)
+    from kaikki import source as _ksource
+
+    found: Set[str] = set()
+    tick = 0
+    for _line_no, record in _ksource.iter_records(snapshot_path, None, "en"):
+        tick += 1
+        if tick % 1000000 == 0:
+            print(f"snapshot scan: {tick:,} lines", file=sys.stderr)
+        if record is None:
+            continue
+        word = record.get("word")
+        if not word:
+            continue
+        if not _ksource.is_lexical(record) or _ksource.is_inflected(record):
+            continue
+        found.add(str(word))
+    return sorted(found)
 
 
 def to_cards(word: str, senses: Sequence[ResolvedSense]) -> List[_dsl.Card]:
@@ -224,14 +348,31 @@ def resolve_word(word: str, backend: Optional[RuWordNetBackend] = None) -> List[
 
 
 def resolve_words(
-    words: Sequence[str], backend: Optional[RuWordNetBackend] = None
+    words: Sequence[str], backend: Optional[RuWordNetBackend] = None,
+    progress: Optional[Callable[[int, int], None]] = None,
+    cache_path: Optional[str] = None,
+    cache_id: Optional[str] = None,
 ) -> Tuple[Dict[str, List[ResolvedSense]], ResolutionReport]:
-    """Resolve headwords, counting coverage (unlinked senses included)."""
+    """Resolve headwords, counting coverage (unlinked senses included).
+
+    ``progress(done, total)`` is called every 1,000 headwords so an
+    hours-long full build is not silent. With ``cache_path`` + ``cache_id``
+    (e.g. the RuWordNet sqlite identity), a completed resolution is stored as
+    JSON and reused verbatim on later runs over the same headwords — the
+    thesaurus is pinned, so the result is deterministic and never recomputed.
+    """
+    if cache_path is not None and cache_id is not None and os.path.isfile(cache_path):
+        hit = _load_cached(words, cache_path, cache_id, progress)
+        if hit is not None:
+            return hit
     backend = backend or RuWordNetBackend()
     report = ResolutionReport()
     cards: Dict[str, List[ResolvedSense]] = {}
+    total = len(words)
     for word in words:
         report.words += 1
+        if progress is not None and report.words % 1000 == 0:
+            progress(report.words, total)
         synsets = backend.en_synsets(word)
         if not synsets:
             report.words_no_en += 1
@@ -262,4 +403,6 @@ def resolve_words(
         cards[word].sort(
             key=lambda s: POS_ORDER.index(s.pos) if s.pos in POS_ORDER else 99
         )
+    if cache_path is not None and cache_id is not None:
+        _save_cached(cache_path, cache_id, words, cards, report)
     return cards, report

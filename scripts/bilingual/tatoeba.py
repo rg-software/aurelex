@@ -28,11 +28,51 @@ from .constants import EXAMPLES_PER_HEADWORD, PREFERRED_EXAMPLE_LENGTH
 
 @dataclass
 class Corpus:
-    """Loaded Tatoeba slice: pairs plus Russian token frequencies."""
+    """Tatoeba slice: pairs, Russian token frequencies, pinned date, EN index."""
 
     pairs: List[Tuple[str, str]] = field(default_factory=list)
     rus_freq: Counter = field(default_factory=Counter)
     date: str = ""
+    index: Dict[str, List[int]] = field(default_factory=dict)
+
+
+_WORD_RE = re.compile(r"[a-z0-9']+")
+
+
+def index_pairs(pairs: Sequence[Tuple[str, str]]) -> Dict[str, List[int]]:
+    """Inverted index over English tokens: token -> pair positions.
+
+    Built once per build; without it a full dictionary pays a regex scan of
+    all pairs per headword (~35k × 831k searches). Lookup stays exact: the
+    index only narrows candidates, the word-boundary regex still decides.
+    """
+    index: Dict[str, List[int]] = {}
+    for i, (en, _ru) in enumerate(pairs):
+        for tok in set(_WORD_RE.findall(en.lower())):
+            index.setdefault(tok, []).append(i)
+    return index
+
+
+def pairs_for(word: str, corpus: Corpus) -> List[Tuple[str, str]]:
+    """Candidate pairs for a headword: index hit, then exact regex check.
+
+    A word whose token never occurs in the corpus cannot match anywhere, so
+    it returns immediately instead of scanning all pairs; multi-token words
+    scan only the smallest token list. The word-boundary regex still decides
+    every candidate.
+    """
+    pat = re.compile(r"(?<!\w)" + re.escape(word) + r"(?!\w)", re.I)
+    toks = _WORD_RE.findall(word.lower())
+    if not toks:
+        return []
+    lists = []
+    for tok in toks:
+        hit = corpus.index.get(tok)
+        if hit is None:
+            return []
+        lists.append(hit)
+    cands = (corpus.pairs[i] for i in min(lists, key=len))
+    return [p for p in cands if pat.search(p[0])]
 
 
 def load_sentences(path: str) -> Dict[int, str]:
@@ -82,7 +122,8 @@ def acquire(eng_path: str, rus_path: str, links_path: str, date: str) -> Corpus:
     freq: Counter = Counter()
     for text in rus.values():
         freq.update(re.findall(r"[а-яё]+", text.lower()))
-    return Corpus(pairs=pairs, rus_freq=freq, date=date)
+    by_en = index_pairs(pairs)
+    return Corpus(pairs=pairs, rus_freq=freq, date=date, index=by_en)
 
 
 def _normalize(text: str) -> str:
@@ -138,20 +179,21 @@ def select(
     a headword with only long pairs still ships its best.
     """
     by_en: Dict[str, List[str]] = {}
-    order: List[str] = []
+    first_en: Dict[str, str] = {}
     for en, ru in pairs:
         norm = _normalize(en)
         if norm not in by_en:
             by_en[norm] = []
-            order.append(norm)
+            first_en[norm] = en
         by_en[norm].append(ru)
+    order = list(by_en)
     pats = _compile([e.lower() for e in equivalents])
     ranked = []
     for norm in order:
         variant = rank_variants(by_en[norm], equivalents, rus_freq)
         if variant is None:
             continue
-        en_text = next(en for en, _ru in pairs if _normalize(en) == norm)
+        en_text = first_en[norm]
         lowered = variant.lower()
         anchors = [e for e, p in pats if p.search(lowered)]
         score = min([_rarity(e, rus_freq) for e in anchors], default=None)

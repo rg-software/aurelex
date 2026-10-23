@@ -165,9 +165,12 @@ files): `dictA-sample.dsl` + `.preview.html`, `dictB-sample.dsl` + `.preview.htm
 | --- | --- | --- |
 | Dict A 50-word probe (bundled EN subset) | 50/50 words resolve; 215 en synsets, **215 linked (100%)**; 1,304 ru lemmas | 100% is a subset artifact — the bundled EN set contains only linked synsets. Sense grouping clean on eyeball; article-shape decisions (L2 defs, RU POS, zoned examples) validated here |
 | Dict A core-5000 (full-PWN denominator) | 4,953 distinct core synsets; 4,187 linked (**84.5%**): nouns 84.3%, verbs 88.0%, adjectives 81.5%, satellites 77.1%; 30 keys (0.6%) unresolvable through NLTK (sense-key drift) | **Gate passes** — clearly above native ~11%. Overall `ili` covers 21,138/117,659 EN synsets (~18%); core vocabulary is covered far better than the long tail. Satellite figure verified genuine (table holds `-s` ids; no `-a` aliasing) |
-| Dict B (Tatoeba eng→rus) | **831,236 pairs**; 26.8% of eng sentences linked; 0/50 words with zero pairs (476 for `moon` … 32,634 for `know`) | raw counts are unusable directly — the selection funnel (dedupe EN text → one RU variant per text, prefer Dict-A-anchored → length ≤140 → keep 3) collapses `know` 32,634 → 19,076 distinct EN → 3 kept (`Let me know.` / `I must know.` / `Let Tom know.`); `time` 13,556 → 3; `moon` 476 → 3. One EN sentence often has several RU variants (real translation variants). Same per-headword-cap pattern as the converter's example qualification |
+| Dict B (Tatoeba eng→rus) | **831,236 pairs**; 26.8% of eng sentences linked; 0/50 words with zero pairs (476 for `moon` … 32,634 for `know`) | raw counts are unusable directly — the selection funnel (dedupe EN text → one RU variant per text, prefer Dict-A-anchored → length ≤140 → keep 3 in the probe) collapses `know` 32,634 → 19,076 distinct EN → 3 kept (`Let me know.` / `I must know.` / `Let Tom know.`); `time` 13,556 → 3; `moon` 476 → 3. One EN sentence often has several RU variants (real translation variants). Same per-headword-cap pattern as the converter's example qualification |
+| Pairs universe and keep-N | 860,950 lexical kaikki EN headwords; 40,210 have ≥1 pair (**4.7%**) | full `--mode pairs --all-kaikki` build: **46,099 cards** (of 884k universe; probe counted a slightly smaller one), 6.01 MB `.dsl.dz`, smoke-verified (`gd_lookup` returns full flat articles, no markup warnings). Default keep **5** (+2.4 MB over k=3: 85,700 → 117,228 pairs) |
 | Composition (b) | **21.1%** of word-touching pairs contain a Dict-A equivalent in the RU side | lower bound (lemma-vs-inflected matching). Architecture viable: A gives words, B gives sentences |
 | End-to-end sample (7.1) | `give`/`bread`/`dog` → 4 cards, 15/15 synsets linked; `.dsl.dz` + `.dsl.files.zip` (8 audio: archive + 3 Wikimedia fetches) + `.ann`; `verify_bundle` **0 unresolved** | real-reader verified via the host smoke tool: `gd_lookup` returns full articles (11 numbered senses, `dsl_trn` equivalents, `dsl_opt` zones with working expander, `gdau://` audio resolving to bytes); the build also surfaced and fixed two emitter bugs (`[/opt]`→`[/*]`, `[m10]+`→text numbering) |
+| Full-build feasibility | EN lemma universe 35,676; Tatoeba acquire+index 55.8 s for 831,236 pairs; 13-word lookup 2.39 s | per-headword regex over all pairs (~35k × 831k) would never finish — the inverted index (exact word-boundary regex still decides) makes the full build the same cost class as a kaikki full build (hours, desktop) |
+| Headword universe vs usage | 35,676 lemmas (~24% of PWN's ~148k) but 73.7% of content-word tokens covered (Tatoeba EN, naive stemming, function words excluded) | small headword count, large usage coverage: the linked set skews to core vocabulary (core-5000: 84.5%). The missing long tail is rare words — a source gap, not a pipeline gap |
 
 Dict A rendering fixes needed before any real build (all probe artifacts, not data
 problems): POS must come from the synset (probe hardcoded `n.`); RuWordNet
@@ -178,3 +181,39 @@ Gate status: **passed** 2026-10-22 — core-5000 coverage is 84.5%, clearly abov
 native ~11%, with clean sense grouping on eyeball. Proceed to builders. Known ceiling from
 the schema: `interlingual_index_relation` covers 21,138 EN synsets (~18% of
 PWN's 117k) — directionally 2–4x native, same-unknown representativeness caveat.
+
+### Pairs article decisions (from the 2026-10-23 review of the built dictionary)
+
+Measured on the full build: 192 of 46,099 cards (0.4%) had junk headwords —
+stray-quote duplicates (`'dog`, `'is`), suffix fragments (`-er`, `-x`), bare
+numbers (`007`, `1-800`). General rule, no case list: a headword must start
+with a Unicode letter, else no card (reported as ill-shaped skips, alongside
+the no-pairs skips). This costs a handful of legitimate clippings (`'cause`,
+`'em`) — findable via full-text search anyway.
+
+Pairs are the whole article, so they are **not** collapsed: flat `[ex]`/`[trn]`
+lines, the Russian line marked `[trn]` since it is a translation, not an
+example. Same `[trn]`-for-RU convention now applies to Dict A sense examples
+(the equivalents were already `[trn]`). Verified through the real reader:
+`gd_lookup("bread")` returns flat pairs with no zone and no warnings; the same
+shape holds for every card by construction.
+
+Case variants with identical bodies (`maduro`/`Maduro`, 5,223 groups) collapse
+into one card: the lowercase form wins when it occurs as a whole word anywhere
+in the group's own pairs (the card-body heuristic — common nouns surface
+lowercase somewhere; mid-sentence, so sentence-initial capitals do not fool
+it), otherwise the capitalized form stands (`Sisyphus`, `Sint Maarten`, proper
+nouns never occur lowercase). Between several capitalized forms the
+alphabetical one wins; pairs are identical either way since matching is
+case-insensitive.
+
+Deliberately NOT stripped: leading `a`/`the`. Checked against the snapshot,
+`A Special` / `A battery` / `A band` / `A flat` / `A major` / `The Hague` /
+`a priori` are all legitimate headwords (special police units, myofibril
+bands, tube batteries, musical keys, cities, Latin borrowings) — stripping the
+article would corrupt them (`A major` → `major` changes the meaning). `a 1`
+is not a kaikki headword at all.
+
+Note: this contradicts the archived `bilingual-dictionary` spec's
+"single collapsible zone" requirement for examples-only cards — it needs a
+delta in the next change.

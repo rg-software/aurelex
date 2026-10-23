@@ -32,12 +32,17 @@ def collect_records(snapshot_path: str, words: Sequence[str]) -> Dict[str, List[
     """Gather candidate (lexical, non-inflected) EN records per headword.
 
     One streaming pass over the snapshot; the filter mirrors the records the
-    kaikki EN build itself indexes and renders.
+    kaikki EN build itself indexes and renders. Prints a coarse line count to
+    stderr — a full snapshot scan takes minutes.
     """
     _, ksource = _kaikki()
     wanted = set(words)
     found: Dict[str, List[dict]] = {w: [] for w in words}
+    tick = 0
     for _line_no, record in ksource.iter_records(snapshot_path, None, "en"):
+        tick += 1
+        if tick % 1000000 == 0:
+            print(f"snapshot scan: {tick:,} lines", file=sys.stderr)
         if record is None:
             continue
         word = record.get("word")
@@ -75,6 +80,11 @@ def plan_words(
         per_word, audio_lang, enabled, available, downloader, dead=dead
     )
     planner.download_dir = download_dir
+    if download_dir is not None:
+        def report_cached(count: int) -> None:
+            if count == 1 or count % 1000 == 0:
+                print(f"audio cached: {count:,}", file=sys.stderr)
+        planner.on_cached = report_cached
     names: Dict[str, List[str]] = {}
     if enabled and per_word > 0:
         for word, records in collect_records(snapshot_path, words).items():

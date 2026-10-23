@@ -16,12 +16,18 @@ Modes (`--mode`):
 - `pairs` — example-sentences dictionary: keep-N concordance pairs per
   headword, Tatoeba-only provenance, no audio, no bundle.
 
-Headwords come from `--word` (repeatable), `--words-file` (one per line), or
+Headwords come from `--word` (repeatable), `--words-file` (one per line),
 `--all-lemmas` (every English lemma in the RuWordNet EN subset — needs the
-`ruwordnet` package + downloaded db).
+`ruwordnet` package + downloaded db), or `--all-kaikki` (every lexical kaikki
+EN headword from `--snapshot` — the pairs dictionary universe).
 
 Sample either mode before a full run (`--sample N --preview`); `random` spreads
 across the list deterministically.
+
+Long builds print coarse progress to stderr (same habit as the kaikki tool):
+`resolving equivalents: N/M` every 1,000 headwords, `snapshot scan: N lines`
+every 1M snapshot lines, `audio cached: N` every 1,000 cache hits, plus one
+line per audio download or unresolvable recording. Nothing prints per card.
 
 ## Options
 
@@ -30,6 +36,8 @@ across the list deterministically.
 | `--mode {skeleton,translation,pairs}` | What to build (default `skeleton`). |
 | `--word WORD` / `--words-file FILE` | Headwords (repeatable / one per line). |
 | `--all-lemmas` | Use the full RuWordNet EN lemma universe. |
+| `--all-kaikki` | Use the full lexical kaikki EN headword universe (needs `--snapshot`). |
+| `--resolve-cache FILE` | Cache resolved equivalents here (keyed by thesaurus file + headwords); reruns skip resolution. |
 | `--sample N` / `--sample-mode {first,random}` | Bounded deterministic subset. |
 | `--preview` | Also write `<name>.preview.html`. |
 | `--out-dir DIR` | Output directory (default `dist`). |
@@ -39,7 +47,7 @@ across the list deterministically.
 | `--audio-cache-dir DIR` | Download cache dir for recordings the archive lacks. |
 | `--no-audio` / `--audio-per-word N` / `--audio-lang TAG` | Audio controls (defaults: on, 3, none). |
 | `--tatoeba-dir DIR` / `--tatoeba-date DATE` | Per-pair Tatoeba files + pinned export date. |
-| `--keep-pairs N` | Pairs kept per headword in pairs mode (default 3). |
+| `--keep-pairs N` | Pairs kept per headword in pairs mode (default 5). |
 | `--kaikki-dump-date DATE` | Snapshot dump date recorded in provenance. |
 | `--ruwordnet-pwn TEXT` / `--ruwordnet-version TEXT` | Version labels for provenance. |
 

@@ -12,12 +12,14 @@ This is the builder's pairs mode (`--mode pairs`). Design and spec:
 
 - Python 3.9+ (standard library only). For `--all-lemmas` only: the `ruwordnet`
   package with its database (one-time, `pip install ruwordnet` + `ruwordnet download`);
-  otherwise any `--words-file` works with no extra dependency.
+  `--all-kaikki` needs only the kaikki snapshot below. Any `--words-file`
+  works with no extra dependency.
 - Cache populated (see `cache.md`). Variables used below:
 
 ```powershell
 $BIL   = "C:\Users\Maxim\.cache\aurelex-bilingual"  # bilingual cache
 $TAT   = "$BIL\tatoeba\2026-10-17"                  # pinned Tatoeba export
+$SNAP  = "C:\Users\Maxim\.cache\aurelex-kaikki\en\2026-09-02\raw-wiktextract-data.jsonl.gz"
 $SCRIPT = "scripts\bilingual-to-dsl.py"
 ```
 
@@ -39,24 +41,31 @@ Sizes on 2026-10-17: sentences EN ~25 MB, RU ~15.5 MB, links ~5 MB (831,236 pair
 ```powershell
 python $SCRIPT --mode pairs --words-file words.txt --sample 25 --sample-mode first --preview `
   --tatoeba-dir $TAT --tatoeba-date 2026-10-17 `
-  --keep-pairs 3 --out-dir dist --name au_tatoeba_en-ru --title "Aurelex Tatoeba EN-RU"
+  --keep-pairs 5 --out-dir dist --name au_tatoeba_en-ru --title "Aurelex Tatoeba EN-RU"
 ```
 
 Open `dist/au_tatoeba_en-ru.preview.html` and check the funnel (dedupe → anchored
-preference → shortest, keep 3) before the full run.
+preference → shortest, keep 5) before the full run.
 
 ## Step 1 — build (offline)
 
 ```powershell
-python $SCRIPT --mode pairs --all-lemmas `
+python $SCRIPT --mode pairs --all-kaikki --snapshot $SNAP `
   --tatoeba-dir $TAT --tatoeba-date 2026-10-17 `
-  --keep-pairs 3 --out-dir dist --name au_tatoeba_en-ru --title "Aurelex Tatoeba EN-RU"
+  --keep-pairs 5 --out-dir dist --name au_tatoeba_en-ru --title "Aurelex Tatoeba EN-RU"
 ```
 
 ## Notes
 
-- Every headword ships 1–3 pairs (or none, if Tatoeba has no sentence containing
-  it) — article size scales with headwords, never with the 831k pair total.
+- `--all-kaikki` iterates the lexical kaikki EN headwords (~884k; needs
+  `--snapshot $SNAP`) and keeps the ~40k with pairs; the rest ship no card.
+  Expected output: ~117k pairs, ~9 MB of DSL text.
+- Every headword ships 1–5 pairs — article size scales with headwords, never
+  with the 831k pair total. Headwords must start with a letter (stray quotes,
+  suffix fragments and bare numbers are dropped and counted); headwords
+  differing only in case merge into one card, keeping the lowercase form when
+  the pairs spell it lowercase and the capitalized form otherwise
+  (`Sisyphus` stays, `maduro`/`Maduro` collapse).
 - The dictionary carries no audio and no equivalents; provenance names Tatoeba
   CC BY 2.0 FR only. It imports through the same folder import unchanged.
 - Rebuilds are deterministic: same inputs yield byte-identical output.
