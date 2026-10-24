@@ -5,7 +5,9 @@ Lets a user install dictionaries from a curated online catalog without
 sideloading files, covering catalog availability, browsing, batch download with
 progress and cancellation, optional audio bundles, integrity and free-space
 preflight, and the downloaded dictionary's arrival in the app's dictionary set.
+
 ## Requirements
+
 ### Requirement: Catalog availability
 The system SHALL provide a single curated catalog of installable dictionaries
 published as one static document at a location compiled into the app, and SHALL
@@ -334,7 +336,7 @@ has an available update.
 
 ### Requirement: Updating an installed catalog entry
 On a catalog probe, the system SHALL compare each entry installed from the catalog
-against the catalog, and SHALL mark an entry as having an update available when
+against the catalog, and SHALL mark an entry as having an available update when
 any of its required dictionary files' recorded SHA-256 differs from the catalog's.
 Update detection SHALL apply only to entries installed from the catalog: a
 dictionary with no recorded digest (one not installed from the catalog) SHALL NOT
@@ -346,7 +348,9 @@ requiring an app restart, and rebuild its full-text index, because the article
 content changed. An update that fails SHALL leave the previously installed
 dictionary intact and usable, and SHALL NOT leave a partially written dictionary.
 A catalog install SHALL record the batch's file digests at terminal, so the
-record survives to the next probe.
+record survives to the next probe. The free-space preflight for an update SHALL
+count the required files plus the optional bundle exactly when audio is
+requested — never zero for a genuine update.
 
 #### Scenario: An update is detected
 - **WHEN** an installed catalog entry's recorded digest for a required file
@@ -387,3 +391,8 @@ record survives to the next probe.
 - **THEN** the requested file digests are recorded for each landed entry, so a
   later probe can compare them against the catalog
 
+#### Scenario: An update preflight counts the update
+- **WHEN** the user starts an available update
+- **THEN** the free-space preflight counts the entry's required files (plus
+  the optional bundle only when audio is requested), so a genuine update is
+  never classified as nothing to download

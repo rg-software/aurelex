@@ -382,6 +382,8 @@ class EquivalentsTest(unittest.TestCase):
     class FakeRuBackend:
         def ru_synsets(self, word):
             from bilingual import equivalents as _eq
+            if word == "пустой":
+                return [_eq.EnSynset(pos="noun", lemmas=["пустой"], groups=[])]
             if word != "хлеб":
                 return []
             return [
@@ -564,6 +566,27 @@ class EquivalentsTest(unittest.TestCase):
             self.assertIn("[ex]Ешь хлеб.[/ex]", text)
             self.assertIn("[trn]Eat bread.[/trn]", text)
             self.assertIn("a Russian-English translation dictionary", text)
+            # the unlinked shell (synonyms but no equivalents, no definition)
+            # is omitted: no numbered section, no synonyms line for it, and
+            # the lone survivor carries no counter
+            self.assertNotIn("хлебный злак", text)
+            self.assertNotIn("[m1]", text)
+
+    def test_unlinked_only_headword_gets_no_card(self):
+        # resolve still counts the unlinked synset (coverage), but with
+        # nothing displayable the headword joins skipped_empty
+        from bilingual import build as _build
+        from bilingual import provenance as _prov
+        with tempfile.TemporaryDirectory() as tmp:
+            out = os.path.join(tmp, "out")
+            summary = _build.build_sample(
+                ["пустой"], out, "rev-empty", "Rev",
+                sources=_prov.Sources(equivalents=True, direction="ru-en"),
+                backend=self.FakeRuBackend(), direction="ru-en")
+            self.assertEqual(summary["cards"], 0)
+            self.assertEqual(summary["skipped_empty"], 1)
+            self.assertEqual(summary["synsets"], 1)
+            self.assertEqual(summary["synsets_linked"], 0)
 
     def test_numbering_is_text_not_tag(self):
         # [m10]+ are unknown tags to the reader (single-digit [mN] only);
@@ -838,6 +861,35 @@ class PairsBuildTest(unittest.TestCase):
         self.assertIn("[com]line one[/com]", text)
         self.assertIn("[com]line two[/com]", text)
 
+    def test_transcription_line_after_headword(self):
+        card = _dsl.Card(headword="bread", transcription="bɹɛd",
+                         senses=[_dsl.Sense(definition="d",
+                                            equivalents=["хлеб"])])
+        lines = _dsl.emit_card(card)
+        self.assertEqual(lines[0], "bread")
+        self.assertEqual(lines[1], "    [t]bɹɛd[/t]")
+        # brackets are escaped once at emit (the picker value is raw)
+        card = _dsl.Card(headword="хлеб", transcription="[xlʲep]")
+        lines = _dsl.emit_card(card)
+        self.assertEqual(lines[1], "    [t]\\[xlʲep\\][/t]")
+        self.assertEqual(_dsl.unescape_dsl("\\[xlʲep\\]"), "[xlʲep]")
+        # no transcription, no line (and no placeholder)
+        bare = _dsl.emit_card(_dsl.Card(headword="x"))
+        self.assertEqual(bare, ["x"])
+
+    def test_headers_name_direction_languages(self):
+        from bilingual import build as _build
+        self.assertEqual(_build._pair_langs("en-ru"),
+                         {"index_lang": "English", "contents_lang": "Russian"})
+        self.assertEqual(_build._pair_langs("ru-en"),
+                         {"index_lang": "Russian", "contents_lang": "English"})
+        text = _dsl.assemble([], "n", "T", **_build._pair_langs("ru-en"))
+        self.assertIn('#INDEX_LANGUAGE "Russian"', text)
+        self.assertIn('#CONTENTS_LANGUAGE "English"', text)
+        text = _dsl.assemble([], "n", "T", **_build._pair_langs("en-ru"))
+        self.assertIn('#INDEX_LANGUAGE "English"', text)
+        self.assertIn('#CONTENTS_LANGUAGE "Russian"', text)
+
 
 class ProvenanceTest(unittest.TestCase):
     ITEMS = ["Princeton WordNet", "RuWordNet", "Non-commercial",
@@ -978,6 +1030,61 @@ class AudioTest(unittest.TestCase):
             self.assertEqual(found["bread"], [])
             self.assertEqual(
                 _aud.collect_records(snap, ["хлеб"], lang="en"), {"хлеб": []})
+
+    def test_transcribe_words_picks_notation(self):
+        import json as _json
+        from bilingual import audio as _aud
+        with tempfile.TemporaryDirectory() as tmp:
+            snap = os.path.join(tmp, "tr.jsonl")
+            recs = [
+                {"word": "bread", "lang_code": "en", "pos": "noun",
+                 "senses": [{"glosses": ["baked"]}],
+                 "sounds": [{"audio": "En-us-bread.ogg",
+                             "ogg_url": "https://x/En-us-bread.ogg",
+                             "ipa": "bɹɛd"}]},
+                {"word": "bread", "lang_code": "en", "pos": "verb",
+                 "senses": [{"glosses": ["bake"]}],
+                 "sounds": [{"ipa": "bɹɛd"},
+                            {"ipa": "bred", "tags": ["X-SAMPA"]}]},
+                {"word": "lead", "lang_code": "en", "pos": "noun",
+                 "senses": [{"glosses": ["metal"]}],
+                 "sounds": [{"enpr": "lEd"}]},
+                {"word": "silent", "lang_code": "en", "pos": "noun",
+                 "senses": [{"glosses": ["quiet"]}], "sounds": []},
+                {"word": "xsampa", "lang_code": "en", "pos": "noun",
+                 "senses": [{"glosses": ["x"]}],
+                 "sounds": [{"ipa": "zzz", "tags": ["X-SAMPA"]}]},
+            ]
+            with open(snap, "w", encoding="utf-8") as f:
+                for r in recs:
+                    f.write(_json.dumps(r) + "\n")
+            got = _aud.transcribe_words(
+                ["bread", "lead", "silent", "xsampa", "missing"], snap)
+            # most common across records wins; X-SAMPA-tagged sounds are skipped
+            self.assertEqual(got["bread"], "bɹɛd")
+            # enPR keeps its label, IPA does not take one
+            self.assertEqual(got["lead"], "enPR: lEd")
+            # no transcribed record: absent, not empty
+            self.assertNotIn("silent", got)
+            self.assertNotIn("xsampa", got)
+            self.assertNotIn("missing", got)
+
+    def test_transcribe_tie_goes_first_seen(self):
+        import json as _json
+        from bilingual import audio as _aud
+        with tempfile.TemporaryDirectory() as tmp:
+            snap = os.path.join(tmp, "tie.jsonl")
+            recs = [
+                {"word": "w", "lang_code": "en", "pos": "noun",
+                 "senses": [{"glosses": ["a"]}], "sounds": [{"ipa": "AAA"}]},
+                {"word": "w", "lang_code": "en", "pos": "verb",
+                 "senses": [{"glosses": ["b"]}], "sounds": [{"ipa": "BBB"}]},
+            ]
+            with open(snap, "w", encoding="utf-8") as f:
+                for r in recs:
+                    f.write(_json.dumps(r) + "\n")
+            self.assertEqual(
+                _aud.transcribe_words(["w"], snap), {"w": "AAA"})
 
     def test_verbatim_against_kaikki_planner(self):
         # Independent cross-check: kaikki's own AudioPlan over the same fixture

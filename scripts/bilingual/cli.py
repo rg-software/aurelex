@@ -177,15 +177,17 @@ def main(argv: list[str] | None = None) -> int:
         if corpus is None:
             print("error: pairs mode needs --tatoeba-dir", file=sys.stderr)
             return 2
-        if args.source_lang == "ru":
+        direction = "ru-en" if args.source_lang == "ru" else "en-ru"
+        if direction == "ru-en":
             corpus = corpus.flipped()
         sources = _prov.Sources(
             tatoeba_date=args.tatoeba_date, equivalents=False,
-            direction="ru-en" if args.source_lang == "ru" else "en-ru",
+            direction=direction,
         )
         summary = _build.build_pairs(
             words, args.out_dir, args.name, args.title,
             sources=sources, corpus=corpus, keep=args.keep_pairs,
+            direction=direction,
         )
         print(f"wrote {summary['dz_path']} ({summary['cards']} cards)")
         cards = summary["cards_out"]

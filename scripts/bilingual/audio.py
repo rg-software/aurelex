@@ -49,6 +49,9 @@ class _TickPrinter:
                   file=sys.stderr)
 
 
+_records_cache: Dict[str, Dict[str, List[dict]]] = {}
+
+
 def collect_records(snapshot_path: str, words: Sequence[str],
                     lang: str = "en") -> Dict[str, List[dict]]:
     """Gather candidate (lexical, non-inflected) records per headword.
@@ -57,7 +60,12 @@ def collect_records(snapshot_path: str, words: Sequence[str],
     kaikki build itself indexes and renders. Prints a coarse line count to
     stderr — a full snapshot scan takes minutes. ``lang`` selects the
     snapshot language (the reverse dictionary reuses the RU stage verbatim).
+    Results memoize per snapshot path + language in-process, so the audio
+    planner and the transcription picker share the single pass.
     """
+    key = f"{snapshot_path}\x00{lang}"
+    if key in _records_cache:
+        return _records_cache[key]
     _, ksource = _kaikki()
     wanted = set(words)
     found: Dict[str, List[dict]] = {w: [] for w in words}
@@ -74,7 +82,52 @@ def collect_records(snapshot_path: str, words: Sequence[str],
         if not ksource.is_lexical(record) or ksource.is_inflected(record):
             continue
         found[str(word)].append(record)
+    _records_cache[key] = found
     return found
+
+
+def _profile(lang: str):
+    scripts = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    if scripts not in sys.path:
+        sys.path.insert(0, scripts)
+    from kaikki.profiles import get_lang_profile
+
+    return get_lang_profile(lang)
+
+
+def transcribe_words(words: Sequence[str], snapshot_path: str,
+                     lang: str = "en") -> Dict[str, str]:
+    """One pronunciation transcription per headword, from the kaikki stage.
+
+    Reuses the memoized snapshot scan: no second pass. Per-record text comes
+    from kaikki's own notation picker (IPA unlabeled, enPR labeled,
+    X-SAMPA-tagged sounds skipped); across a headword's records the most
+    common value wins, first-seen breaking ties, so the choice is
+    deterministic for a pinned snapshot. Headwords with no transcribed
+    record are absent from the result. Values are raw text (kaikki's picker
+    output unescaped); the DSL emitter escapes at render time.
+    """
+    # Same-repo private reuse, documented: copying this picker would let the
+    # notation discipline drift from kaikki's silently.
+    from kaikki.render import _record_transcription  # noqa: SLF001
+    from . import dsl as _dsl
+
+    profile = _profile(lang)
+    out: Dict[str, str] = {}
+    for word, records in collect_records(snapshot_path, words, lang).items():
+        counts: Dict[str, int] = {}
+        order: List[str] = []
+        for record in records:
+            text = _dsl.unescape_dsl(_record_transcription(record, profile))
+            if not text:
+                continue
+            if text not in counts:
+                counts[text] = 0
+                order.append(text)
+            counts[text] += 1
+        if order:
+            out[word] = max(order, key=lambda t: (counts[t], -order.index(t)))
+    return out
 
 
 def plan_words(
@@ -144,6 +197,7 @@ def attach_audio(
             _dsl.Card(
                 headword=card.headword,
                 pos=card.pos,
+                transcription=card.transcription,
                 senses=card.senses,
                 audio=list(names),
             )

@@ -44,6 +44,13 @@ def _choose_case(key: str, forms: Sequence[str],
     return sorted(forms)[0]
 
 
+def _pair_langs(direction: str) -> Dict[str, str]:
+    """DSL header languages for a build direction, as `package.build` kwargs."""
+    if direction == "ru-en":
+        return {"index_lang": "Russian", "contents_lang": "English"}
+    return {"index_lang": "English", "contents_lang": "Russian"}
+
+
 def build_pairs(
     words: Sequence[str],
     out_dir: str,
@@ -52,6 +59,7 @@ def build_pairs(
     sources: Optional[_prov.Sources] = None,
     corpus: Optional[_tat.Corpus] = None,
     keep: int = 3,
+    direction: str = "en-ru",
 ) -> Dict[str, object]:
     """Build the sentence-example dictionary: headword → kept pairs, no senses.
 
@@ -90,7 +98,8 @@ def build_pairs(
           f"and {skipped_shape:,} ill-shaped headwords skipped", file=sys.stderr)
 
     about = _prov.about_card(shown, sources, len(cards))
-    dz_path, _text = _package.build(cards, out_dir, name, shown, about=about)
+    dz_path, _text = _package.build(cards, out_dir, name, shown, about=about,
+                                    **_pair_langs(direction))
 
     ann_path = os.path.join(out_dir, f"{name}.ann")
     _prov.write_annotation(ann_path, shown, sources, len(cards))
@@ -167,6 +176,12 @@ def build_sample(
         senses = resolved.get(word, [])
         dsl_senses = []
         for sense in senses:
+            # A sense with neither equivalents nor a definition is a numbered
+            # shell: the unlinked shells the reviews rejected. It stays
+            # counted in coverage (resolve-level) but renders nothing — not
+            # even its concordance example or untranslatable synonyms.
+            if not sense.equivalents and not sense.definition:
+                continue
             example = None
             equivalents = list(sense.equivalents)
             if corpus is not None:
@@ -209,9 +224,18 @@ def build_sample(
             download_dir=download_dir, lang=audio_lang_code,
         )
         cards = _audio.attach_audio(cards, names_by_word)
+        # Transcription rides the same snapshot scan (memoized: no second
+        # pass) and is independent of the audio switch — a silent card
+        # keeps its text.
+        transcriptions = _audio.transcribe_words(
+            list(words), snapshot_path, lang=audio_lang_code)
+        for card in cards:
+            if card.headword in transcriptions:
+                card.transcription = transcriptions[card.headword]
 
     about = _prov.about_card(shown, sources, len(cards))
-    dz_path, _text = _package.build(cards, out_dir, name, shown, about=about)
+    dz_path, _text = _package.build(cards, out_dir, name, shown, about=about,
+                                    **_pair_langs(direction))
 
     bundle_path = None
     if planner is not None:

@@ -26,6 +26,8 @@ def build(
     name: str,
     title: str | None = None,
     about: Card | None = None,
+    index_lang: str = "English",
+    contents_lang: str = "Russian",
 ) -> Tuple[str, str]:
     """Write ``<name>.dsl.dz`` deterministically; return (dz_path, dsl_text).
 
@@ -33,7 +35,7 @@ def build(
     order, headers are fixed-order, and the dictzip writer pins chunk order
     and per-entry metadata.
     """
-    text = _dsl.assemble(cards, name, title, about)
+    text = _dsl.assemble(cards, name, title, about, index_lang, contents_lang)
     dz = _dictzip()
     os.makedirs(out_dir, exist_ok=True)
     path = os.path.join(out_dir, f"{name}.dsl.dz")

@@ -24,6 +24,10 @@ def render(cards: Sequence[Card], title: str = "preview") -> str:
                 + html.escape(", ".join(card.audio))
                 + "</p>"
             )
+        if card.transcription:
+            parts.append(
+                f'<p class="pron">/{html.escape(card.transcription)}/</p>'
+            )
         for i, sense in enumerate(card.senses, 1):
             parts.append(
                 f'<p class="sense"><b>{i}.</b> {html.escape(", ".join(sense.equivalents))}</p>'
@@ -50,6 +54,7 @@ def render(cards: Sequence[Card], title: str = "preview") -> str:
         ".sense{margin:.5em 0 0}.trn{color:#a0a;margin:.2em 0 0 1em}"
         ".rdef{color:#060;font-style:italic;margin:.2em 0 0 1em}"
         ".aud{color:#555;margin:.1em 0 0;font-size:90%}"
+        ".pron{color:#555;margin:.1em 0 0;font-size:110%}"
         ".syn{color:#555;margin:.1em 0 0 1em;font-size:90%}"
         ".ex{color:#060;margin:.2em 0 0 1em;font-size:90%}"
         "</style></head><body><h1>"

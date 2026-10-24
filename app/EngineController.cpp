@@ -3567,7 +3567,11 @@ qint64 EngineController::sumRequestedBytes(const RemoteCatalog::Entry &e,
 {
     // An explicit file list wins (legacy callers); otherwise the `audio` flag
     // decides: a fresh install gets required (+ optional when audio is on), an
-    // already-installed entry gets only the optional bundle.
+    // already-installed entry gets only the optional bundle. An update is the
+    // exception: it refetches required files, so they count here exactly as
+    // the transfer chooses them in startCatalogDownload (required always,
+    // optional only when audio is on) — otherwise an audio-off update
+    // preflights to zero bytes and dies as "nothing", silently.
     const QVariantList wanted = request.value(QStringLiteral("files")).toList();
     if (!wanted.isEmpty()) {
         qint64 sum = 0;
@@ -3580,6 +3584,14 @@ qint64 EngineController::sumRequestedBytes(const RemoteCatalog::Entry &e,
         return sum;
     }
     const bool audio = request.value(QStringLiteral("audio")).toBool();
+    const bool update = request.value(QStringLiteral("update")).toBool();
+    if (RemoteCatalog::isInstalled(e, dictionarySources()) && update) {
+        qint64 sum = 0;
+        for (const RemoteCatalog::File &f : e.files)
+            if (f.required || (audio && !f.required))
+                sum += f.sizeBytes;
+        return sum;
+    }
     if (RemoteCatalog::isInstalled(e, dictionarySources())) {
         qint64 sum = 0;
         if (audio)

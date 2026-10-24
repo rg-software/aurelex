@@ -8,7 +8,7 @@ _SCRIPT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 # DSL tags this builder emits. Subset of the reader's tag set; anything else is
 # a bug, not a fallback.
-READER_TAGS = {"p", "m", "trn", "ex", "com"}
+READER_TAGS = {"p", "m", "trn", "ex", "com", "t"}
 
 # Per-sense equivalent cap and per-sense example count (spec: at most one
 # example pair per sense; length ranks, never filters).

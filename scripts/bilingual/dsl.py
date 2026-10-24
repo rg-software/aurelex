@@ -38,6 +38,27 @@ def escape_dsl(text: Optional[str]) -> str:
     return s.strip()
 
 
+def unescape_dsl(text: str) -> str:
+    """Reverse :func:`escape_dsl` for values escaped elsewhere.
+
+    kaikki's per-record transcription picker returns DSL-ready text; the
+    builder stores the raw value (so the HTML preview and any future plain-
+    text consumer are not shown escapes) and re-escapes at emit time.
+    """
+    out: List[str] = []
+    it = iter(range(len(text)))
+    i = 0
+    while i < len(text):
+        ch = text[i]
+        if ch == "\\" and i + 1 < len(text) and text[i + 1] in "\\[]<>":
+            out.append(text[i + 1])
+            i += 2
+        else:
+            out.append(ch)
+            i += 1
+    return "".join(out)
+
+
 def clean_headword(word: Optional[str]) -> str:
     """Sanitise a headword line (column 0, no indentation)."""
     hw = escape_dsl(word)
@@ -69,6 +90,7 @@ class Card:
 
     headword: str = ""
     pos: str = ""
+    transcription: str = ""
     senses: List[Sense] = field(default_factory=list)
     audio: List[str] = field(default_factory=list)
     comments: List[str] = field(default_factory=list)
@@ -113,6 +135,8 @@ def emit_card(card: Card) -> List[str]:
     card-level POS line for backward compatibility.
     """
     lines = [clean_headword(card.headword)]
+    if card.transcription:
+        lines.append(f"    [t]{escape_dsl(card.transcription)}[/t]")
     if card.pos:
         lines.append(f"    [p]{escape_dsl(card.pos)}[/p]")
     for name in card.audio:
@@ -155,17 +179,20 @@ def emit_card(card: Card) -> List[str]:
 def assemble(
     cards: Sequence[Card], name: str, title: Optional[str] = None,
     about: Optional[Card] = None,
+    index_lang: str = "English", contents_lang: str = "Russian",
 ) -> str:
     """Assemble the full DSL text: headers, about card, cards in headword order.
 
     Deterministic: same cards always yield the same text (cards sorted by
     headword; header order fixed; the about card always opens the dictionary).
+    The language headers follow the build direction — the app classifies the
+    dictionary from them, so ru→en dictionaries must not claim English/Russian.
     """
     shown = title or name
     out = [
         f'#NAME "{header_arg(shown)}"',
-        '#INDEX_LANGUAGE "English"',
-        '#CONTENTS_LANGUAGE "Russian"',
+        f'#INDEX_LANGUAGE "{header_arg(index_lang)}"',
+        f'#CONTENTS_LANGUAGE "{header_arg(contents_lang)}"',
         "",
     ]
     if about is not None:

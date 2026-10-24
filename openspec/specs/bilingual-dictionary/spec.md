@@ -12,8 +12,9 @@ equivalents and Tatoeba example sentences, packaged for the existing folder impo
 The system SHALL resolve Russian equivalents through Princeton WordNet synsets
 bridged to RuWordNet synsets via their `ili` links, so equivalents inherit the
 synset's sense grouping with no fuzzy sense-key matching. Senses with no `ili`
-link (including all adverb senses) SHALL ship without equivalents and SHALL be
-counted in the build report.
+link (including all adverb senses) SHALL resolve without equivalents and SHALL be
+counted in the build report. A sense with neither equivalents nor a definition
+SHALL be omitted from the article.
 
 #### Scenario: Linked sense resolves
 
@@ -24,7 +25,13 @@ counted in the build report.
 #### Scenario: Unlinked sense is counted
 
 - **WHEN** an English synset has no `ili` link
-- **THEN** the sense ships with no equivalents and the run counts it as uncovered
+- **THEN** the sense resolves with no equivalents and the run counts it as uncovered
+
+#### Scenario: Content-free sense is omitted
+
+- **WHEN** a sense carries neither equivalents nor a definition
+- **THEN** no numbered section is rendered for it, though it stays counted
+  in coverage
 
 ### Requirement: Russian definitions
 
@@ -149,7 +156,9 @@ resource bundle. A headword silent in the kaikki EN build SHALL be silent here.
 
 The output SHALL be a dictzip `.dsl.dz` plus a sibling resource bundle that the
 existing folder import resolves, byte-identical across rebuilds from the same
-inputs. The output SHALL introduce no app, engine, or boundary change.
+inputs. The output SHALL introduce no app, engine, or boundary change. The
+`#INDEX_LANGUAGE` / `#CONTENTS_LANGUAGE` headers SHALL name the build
+direction's source and target languages.
 
 #### Scenario: Existing import consumes the output
 
@@ -161,6 +170,13 @@ inputs. The output SHALL introduce no app, engine, or boundary change.
 - **WHEN** the tool runs twice on the same inputs
 - **THEN** the two outputs are byte-identical
 
+#### Scenario: Headers name the direction languages
+
+- **WHEN** a dictionary is built in either direction
+- **THEN** `#INDEX_LANGUAGE` names the source language and
+  `#CONTENTS_LANGUAGE` names the target language, so the app classifies
+  the dictionary under the correct pair
+
 ### Requirement: Reverse equivalent resolution
 
 The system SHALL resolve Russian headwords through RuWordNet synsets
@@ -168,7 +184,9 @@ bridged to Princeton WordNet via `ili`: each linked EN synset becomes one
 card sense with the EN member lemmas as equivalents (verbatim,
 underscores rendered as spaces); fellow RU lemmas of the source synset
 become the sense synonyms. A RU synset with no `ili` link SHALL resolve
-unlinked: synonyms only, no equivalents, counted against coverage.
+unlinked: synonyms only, no equivalents, counted against coverage. A sense
+with neither equivalents nor a definition SHALL be omitted from the
+article.
 
 #### Scenario: RU headword resolves through ili
 
@@ -179,8 +197,14 @@ unlinked: synonyms only, no equivalents, counted against coverage.
 #### Scenario: Unlinked RU synset ships synonyms only
 
 - **WHEN** a Russian headword's synset has no `ili` link
-- **THEN** the sense carries synonyms but no equivalents and counts as
+- **THEN** the sense resolves with synonyms but no equivalents and counts as
   unlinked
+
+#### Scenario: Content-free reverse sense is omitted
+
+- **WHEN** a reverse sense carries neither equivalents nor a definition
+- **THEN** no numbered section is rendered for it, though it stays counted
+  in coverage
 
 ### Requirement: English definitions
 
@@ -246,6 +270,32 @@ silent here.
 - **WHEN** a headword carries recordings in the kaikki RU build
 - **THEN** the reverse card references the same recordings and the bundle
   carries them
+
+### Requirement: Headword pronunciation
+
+Each translation card SHALL show the headword's pronunciation transcription
+as a `[t]` line directly under the headword, whenever the source-language
+kaikki snapshot holds one for that headword. The transcription is the most
+common value across the headword's kaikki records (first-seen wins ties),
+picked with the kaikki notation discipline (IPA unlabeled, other notations
+labeled, mismatched-notation sounds skipped). The line is present whether
+or not the card carries audio recordings.
+
+#### Scenario: Transcription under the headword
+
+- **WHEN** the kaikki snapshot holds a transcription for the headword
+- **THEN** the article shows it as a `[t]` line between the headword and
+  the rest of the card
+
+#### Scenario: No transcription, no line
+
+- **WHEN** no kaikki record for the headword carries a transcription
+- **THEN** the card carries no `[t]` line (and no placeholder)
+
+#### Scenario: Disagreement collapses to most common
+
+- **WHEN** the headword's records carry different transcriptions
+- **THEN** the article shows the most common one, first-seen winning ties
 
 ### Requirement: Sample and preview output
 
