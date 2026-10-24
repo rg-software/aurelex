@@ -150,8 +150,8 @@
           "required": true,
           "name": "au_wordnet_en-ru.dsl.dz",
           "url": "https://github.com/rg-software/aurelex/releases/download/catalog-data/au_wordnet_en-ru.dsl.dz",
-          "sizeBytes": 4541258,
-          "sha256": "240a461535b0e09a825301749c7dd0338bd4350b5d5ce5da7896276523415f34"
+          "sizeBytes": 4780366,
+          "sha256": "552d8e783c07f19b34d1fc655b1af9382b1c46d40a60e5ac12b96f1b8386312a"
         },
         {
           "role": "resources",
@@ -179,8 +179,8 @@
           "required": true,
           "name": "au_wordnet_ru-en.dsl.dz",
           "url": "https://github.com/rg-software/aurelex/releases/download/catalog-data/au_wordnet_ru-en.dsl.dz",
-          "sizeBytes": 4578128,
-          "sha256": "ef3b6b50a515958ef7e4e7f680c6480e3c71bf9d16245c875e3d6a5663e6ccc2"
+          "sizeBytes": 3896112,
+          "sha256": "318c97e250e2c26e9013049f2718d5306766819fad7561d945eb84e08e1c914e"
         },
         {
           "role": "resources",
