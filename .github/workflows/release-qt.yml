@@ -12,7 +12,7 @@ name: release build (Qt)
 # the publish gate, the same predicate that derives the versionCode. If the Play
 # publish fails, the signed APK + AAB are already attached to the GitHub release.
 #
-# Why Windows: app/build.ps1 targets a Windows aqt 6.6.3
+# Why Windows: app/build.ps1 targets a Windows aqt 6.9.3
 # layout. The carve (engine/) compiles under the same script. Build time is
 # ~25-40 min on a 4-vcpu windows-latest runner (xapian dominates; cached on
 # the 2nd run, see the vcpkg cache step below).
@@ -41,12 +41,12 @@ jobs:
     env:
       QT_ROOT: ${{ github.workspace }}\qt
       VCPKG_ROOT: ${{ github.workspace }}\vcpkg
-      NDK_ROOT: ${{ github.workspace }}\ndk\android-ndk-r23c
+      NDK_ROOT: ${{ github.workspace }}\ndk\android-ndk-r30
       ANDROID_SDK_ROOT: ${{ github.workspace }}\android-sdk
-      AURELEX_QT_BASE: ${{ github.workspace }}\qt\6.6.3
-      AURELEX_QT_HOST: ${{ github.workspace }}\qt\6.6.3\mingw_64
+      AURELEX_QT_BASE: ${{ github.workspace }}\qt\6.9.3
+      AURELEX_QT_HOST: ${{ github.workspace }}\qt\6.9.3\mingw_64
       AURELEX_VCPKG_BASE: ${{ github.workspace }}\vcpkg
-      AURELEX_NDK_ROOT: ${{ github.workspace }}\ndk\android-ndk-r23c
+      AURELEX_NDK_ROOT: ${{ github.workspace }}\ndk\android-ndk-r30
       AURELEX_ANDROID_SDK: ${{ github.workspace }}\android-sdk
       # The ABI the app is built and packaged for, and the single source of
       # truth for it: passed to app/build.ps1 -Abi, and re-exported as
@@ -92,23 +92,23 @@ jobs:
         run: |
           # androiddeployqt --no-build in the carve-subset kit generates no
           # gradlew.bat / gradle-wrapper.jar; build.ps1 falls back to a Gradle
-          # install pointed at by AURELEX_GRADLE_HOME. Use the same 8.3 the
-          # wrapper properties pin.
+          # install pointed at by AURELEX_GRADLE_HOME. Use Gradle 8.10, the
+          # version Qt 6.9 itself pairs with AGP 8.6.0 (build.ps1 pins that AGP).
           $zip = "$env:RUNNER_TEMP\gradle.zip"
           $dst = "$env:RUNNER_TEMP\gradle-dist"
-          Invoke-WebRequest -UseBasicParsing -Uri "https://services.gradle.org/distributions/gradle-8.3-bin.zip" -OutFile $zip
+          Invoke-WebRequest -UseBasicParsing -Uri "https://services.gradle.org/distributions/gradle-8.10-bin.zip" -OutFile $zip
           Expand-Archive -Path $zip -DestinationPath $dst -Force
-          "AURELEX_GRADLE_HOME=$dst\gradle-8.3" >> $env:GITHUB_ENV
+          "AURELEX_GRADLE_HOME=$dst\gradle-8.10" >> $env:GITHUB_ENV
 
-      - name: Install NDK r23c
+      - name: Install NDK r30
         shell: pwsh
         run: |
-          $zip = "$env:RUNNER_TEMP\android-ndk-r23c-windows.zip"
-          Invoke-WebRequest -UseBasicParsing -Uri "https://dl.google.com/android/repository/android-ndk-r23c-windows.zip" -OutFile $zip
+          $zip = "$env:RUNNER_TEMP\android-ndk-r30-windows.zip"
+          Invoke-WebRequest -UseBasicParsing -Uri "https://dl.google.com/android/repository/android-ndk-r30-windows.zip" -OutFile $zip
           Expand-Archive -Path $zip -DestinationPath "$env:GITHUB_WORKSPACE\ndk" -Force
-          # Expand-Archive creates .../android-ndk-r23c/...; normalize.
+          # Expand-Archive creates .../android-ndk-r30/...; normalize.
           if (-not (Test-Path "$env:NDK_ROOT")) {
-            Rename-Item (Join-Path "$env:GITHUB_WORKSPACE\ndk" "android-ndk-r23c") "android-ndk-r23c" -ErrorAction SilentlyContinue
+            Rename-Item (Join-Path "$env:GITHUB_WORKSPACE\ndk" "android-ndk-r30") "android-ndk-r30" -ErrorAction SilentlyContinue
           }
 
       - name: Install Android SDK (command-line tools)
@@ -141,7 +141,7 @@ jobs:
             throw "build-tools/36.0.0 not installed under $env:ANDROID_SDK_ROOT"
           }
 
-      - name: Install Qt 6.6.3 (host + android kits)
+      - name: Install Qt 6.9.3 (host + android kits)
         shell: pwsh
         run: |
           # Pin py7zr==1.1.0: the 1.1.3 path-sanitization change (miurahr/py7zr#743)
@@ -153,12 +153,12 @@ jobs:
           # and the Qt android target uses the NDK's own clang so the host
           # compiler doesn't need to be MSVC. The carve is C++17 and links
           # only against vcpkg + Qt + Android system libs, which MinGW handles.
-          python -m aqt install-qt windows desktop 6.6.3 win64_mingw -O "$env:QT_ROOT"
+          python -m aqt install-qt windows desktop 6.9.3 win64_mingw -O "$env:QT_ROOT"
           # Android kits — what the carve links against. qtwebview is a
           # separate module (not in the base archives); it depends on
           # qtwebchannel (the qwebchannel.js transport). Install both.
-          python -m aqt install-qt windows android 6.6.3 android_arm64_v8a -O "$env:QT_ROOT" --modules qtwebview qtwebchannel
-          python -m aqt install-qt windows android 6.6.3 android_x86_64 -O "$env:QT_ROOT" --modules qtwebview qtwebchannel
+          python -m aqt install-qt windows android 6.9.3 android_arm64_v8a -O "$env:QT_ROOT" --modules qtwebview qtwebchannel
+          python -m aqt install-qt windows android 6.9.3 android_x86_64 -O "$env:QT_ROOT" --modules qtwebview qtwebchannel
           $deploy = "$env:AURELEX_QT_HOST\bin\androiddeployqt.exe"
           "AURELEX_DEPLOYQT=$deploy" >> $env:GITHUB_ENV
           if (-not (Test-Path $deploy)) { throw "androiddeployqt.exe not at $deploy" }
@@ -543,7 +543,7 @@ jobs:
           # ---- 3. the payload must hold only libraries the app can reach, and
           # fit a budget. Staging the kit whole shipped 140 libs / 86.32 MB;
           # the derived reachable set is 52 libs / 48.88 MB (arm64-v8a,
-          # Qt 6.6.3). The ceiling is the coarse backstop for a Qt bump that
+          # Qt 6.9.3). The ceiling is the coarse backstop for a Qt bump that
           # quietly widens the kit; the set comparison is the real check, and it
           # re-derives through the same script app/build.ps1 stages from, so the
           # two cannot drift apart.
@@ -634,6 +634,100 @@ jobs:
               $failures | ForEach-Object { Write-Host "FAIL: $_" -ForegroundColor Red }
               throw "release artifacts failed the native debug symbols / stripped-library / native-payload checks; refusing to publish"
           }
+
+      # Google Play requires 16 KB page-size compliance for updates targeting
+      # API 35+ (support-16kb-pages change): every shipped .so must be 16 KB
+      # ELF-aligned (LOAD align 2**14, RELRO-safe) and the installable artifact
+      # 16 KB zip-aligned. Same per-ABI shape as the TLS/symbols assertions:
+      # a failure here fails the release before publication, not on a device.
+      - name: Assert 16 KB page-size compliance
+        shell: pwsh
+        env:
+          APK_PATH: ${{ steps.artifacts.outputs.APK_PATH }}
+          AAB_PATH: ${{ steps.artifacts.outputs.AAB_PATH }}
+          PACKAGED_ABIS: ${{ steps.artifacts.outputs.PACKAGED_ABIS }}
+        run: |
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $abis = @($env:PACKAGED_ABIS -split "," | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+          if (-not $abis) { throw "PACKAGED_ABIS not set by the artifacts step" }
+          $readelf = Join-Path $env:AURELEX_NDK_ROOT "toolchains/llvm/prebuilt/windows-x86_64/bin/llvm-readelf.exe"
+          if (-not (Test-Path $readelf)) { throw "llvm-readelf not found at $readelf -- cannot verify 16 KB ELF alignment" }
+
+          # Extract every shipped .so from both artifacts (deduped by name: the
+          # APK's lib/<abi>/ and the AAB's base/lib/<abi>/ carry the same set).
+          $work = Join-Path $env:RUNNER_TEMP "aligncheck"
+          if (Test-Path $work) { Remove-Item $work -Recurse -Force }
+          $extracted = @{}
+          foreach ($artifact in @(
+              @{ Label = "APK"; Path = $env:APK_PATH },
+              @{ Label = "AAB"; Path = $env:AAB_PATH })) {
+              if (-not $artifact.Path -or -not (Test-Path $artifact.Path)) {
+                  throw "$($artifact.Label): not found: $($artifact.Path)"
+              }
+              $zip = [System.IO.Compression.ZipFile]::OpenRead($artifact.Path)
+              try {
+                  foreach ($entry in @($zip.Entries | Where-Object { $_.FullName -match '(^|/)lib/[^/]+/[^/]+\.so$' -and $_.Length -gt 0 })) {
+                      $target = Join-Path $work $entry.FullName.Replace('/', [IO.Path]::DirectorySeparatorChar)
+                      New-Item -ItemType Directory -Force -Path (Split-Path $target -Parent) | Out-Null
+                      [System.IO.Compression.ZipFileExtensions]::ExtractToFile($entry, $target, $true)
+                      $leaf = Split-Path $target -Leaf
+                      if (-not $extracted.ContainsKey($leaf)) { $extracted[$leaf] = $target }
+                  }
+              } finally { $zip.Dispose() }
+          }
+          if (-not $extracted.Count) { throw "no .so entries extracted from the artifacts -- the 16 KB check would vacuously pass" }
+          Write-Host "Checking $($extracted.Count) distinct shipped libraries for 16 KB ELF alignment ..."
+          $failures = @()
+          foreach ($leaf in $extracted.Keys) {
+              $out = @(& $readelf -W --program-headers $extracted[$leaf] 2>&1)
+              if ($LASTEXITCODE -ne 0) { throw "llvm-readelf failed on $leaf (exit $LASTEXITCODE)" }
+              $loads = @()
+              $relro = $null
+              foreach ($line in $out) {
+                  $t = "$line".Trim()
+                  if ($t -match '^LOAD\s') {
+                      if ($t -match '\s(0x[0-9a-fA-F]+)\s*$') {
+                          $loads += @{ Align = [Convert]::ToUInt64($Matches[1], 16); Line = $t }
+                      }
+                      if ($t -match '^\S+\s+\S+\s+(0x[0-9a-fA-F]+)\s+\S+\s+\S+\s+(0x[0-9a-fA-F]+)') {
+                          $loads += @{ VirtAddr = [Convert]::ToUInt64($Matches[1], 16); MemSiz = [Convert]::ToUInt64($Matches[2], 16) }
+                      }
+                  } elseif ($t -match '^GNU_RELRO\s') {
+                      if ($t -match '^\S+\s+\S+\s+(0x[0-9a-fA-F]+)\s+\S+\s+\S+\s+(0x[0-9a-fA-F]+)') {
+                          $relro = @{ VirtAddr = [Convert]::ToUInt64($Matches[1], 16); MemSiz = [Convert]::ToUInt64($Matches[2], 16) }
+                      }
+                  }
+              }
+              foreach ($l in ($loads | Where-Object { $_.ContainsKey('Align') })) {
+                  if ($l.Align -lt 0x4000) { $failures += "$leaf is UNALIGNED: $($l.Line)" }
+              }
+              if ($relro) {
+                  $end = ($relro.VirtAddr + $relro.MemSiz) % 0x4000
+                  $ownSegment = @($loads | Where-Object { $_.ContainsKey('VirtAddr') -and $_.VirtAddr -eq $relro.VirtAddr -and $_.MemSiz -eq $relro.MemSiz }).Count -gt 0
+                  if ($end -ne 0 -and -not $ownSegment) {
+                      $failures += "$leaf has a RELRO segment ending mid-page (VirtAddr+MemSiz % 0x4000 = 0x$($end.ToString('x')))"
+                  }
+              }
+          }
+          if (-not $failures) {
+              Write-Host "  OK  ELF  all $($extracted.Count) libraries 16 KB-aligned (LOAD align >= 0x4000, RELRO page-safe)"
+          }
+
+          # The installable APK must additionally be 16 KB zip-aligned
+          # (PAGE_ALIGNMENT_16K comes from AGP 8.5.1+ with uncompressed jniLibs).
+          $zipalign = Join-Path $env:AURELEX_ANDROID_SDK "build-tools/36.0.0/zipalign.exe"
+          if (-not (Test-Path $zipalign)) { throw "zipalign not found at $zipalign -- cannot verify 16 KB zip alignment" }
+          & $zipalign -c -P 16 4 $env:APK_PATH
+          if ($LASTEXITCODE -ne 0) { $failures += "APK failed 'zipalign -c -P 16 4' (exit $LASTEXITCODE)" }
+          else { Write-Host "  OK  ZIP  APK passes 'zipalign -c -P 16 4'" }
+
+          if ($failures) {
+              Write-Host ""
+              Write-Host "16 KB page-size verification failed:"
+              $failures | ForEach-Object { Write-Host "FAIL: $_" -ForegroundColor Red }
+              throw "release artifacts are not 16 KB page-size compliant; refusing to publish"
+          }
+          Write-Host "16 KB page-size compliance verified for: $($abis -join ', ')"
 
       # The symbols are already inside the AAB, and Play associates files included
       # in a bundle by standard Gradle tasks automatically -- so this archive is

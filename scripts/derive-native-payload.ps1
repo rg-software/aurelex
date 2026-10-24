@@ -48,8 +48,8 @@
 [CmdletBinding()]
 param(
     [string]$Abi        = "arm64-v8a",
-    [string]$QtBase     = $(if ($env:AURELEX_QT_BASE) { $env:AURELEX_QT_BASE } else { "C:\Qt\6.6.3" }),
-    [string]$NdkRoot    = $(if ($env:AURELEX_NDK_ROOT) { $env:AURELEX_NDK_ROOT } else { "C:\Program Files (x86)\Android\AndroidNDK\android-ndk-r23c" }),
+    [string]$QtBase     = $(if ($env:AURELEX_QT_BASE) { $env:AURELEX_QT_BASE } else { "C:\Qt\6.9.3" }),
+    [string]$NdkRoot    = $(if ($env:AURELEX_NDK_ROOT) { $env:AURELEX_NDK_ROOT } else { "C:\Program Files (x86)\Android\AndroidNDK\android-ndk-r30" }),
     [string]$AppLib,
     [string]$AppQml     = "app/main.qml",
     [ValidateSet("Derive", "List", "Json")]

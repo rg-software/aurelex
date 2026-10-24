@@ -9,12 +9,12 @@ set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 
 # The Qt android toolchain doesn't define __ANDROID_API__, but bionic's iconv.h/
-# libc APIs guard on it (`#if __ANDROID_API__ >= 28`). The shipped app targets
-# API 28+; define it here so iconv and friends are declared.
+# libc APIs guard on it (`#if __ANDROID_API__ >= 28`). iconv needs API 28+; define
+# the full build platform (35) here so iconv and friends are declared.
 add_compile_definitions(__ANDROID_API__=35)
 
 if(NOT QT_BASE)
-    message(FATAL_ERROR "QT_BASE must be set (C:/Qt/6.6.3)")
+    message(FATAL_ERROR "QT_BASE must be set (C:/Qt/6.9.3)")
 endif()
 if(NOT QT_HOST_PATH)
     message(FATAL_ERROR "QT_HOST_PATH must be set (host desktop kit)")
@@ -103,6 +103,15 @@ target_link_libraries(aurelex PRIVATE
     xapian z bz2 lzma lzo2 fmt
 )
 
+# 16 KB page-size compliance (support-16kb-pages): align ELF LOAD segments to
+# 16 KB. No-op under NDK r28+ (the default there), so with NDK r30 this only
+# guards against a future toolchain downgrade: an older NDK would otherwise
+# silently ship 4 KB-aligned libraries that Play rejects for API 35+ targets.
+target_link_options(aurelex PRIVATE
+    "-Wl,-z,max-page-size=16384"
+    "-Wl,-z,common-page-size=16384"
+)
+
 qt_add_qml_module(aurelex
     URI Aurelex
     VERSION 1.0
@@ -173,6 +182,6 @@ else()
     )
 endif()
 endif() # ANDROID
-# NOTE: qt_add_apk_target is absent from the installed Qt 6.6.3 carve subset
+# NOTE: qt_add_apk_target is absent from the installed Qt 6.9.3 carve subset
 # (no Qt6AndroidDeployQt cmake package). The APK is packaged manually with
 # androiddeployqt (see README notes).

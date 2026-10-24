@@ -550,17 +550,6 @@ candidate id (R-n) is provenance only.
   stays `kMaxResourceBytes`).
 - **Provenance:** scan 2026-10-04 (`app/`), reviewer candidate R-13.
 
-### TD-025 — CMake comment/code drift on the API level
-
-- **Priority:** P3
-- **Location:** `app/CMakeLists.txt:11-14`
-- **Symptom:** The comment says "The shipped app targets API 28+" while the code defines
-  `__ANDROID_API__=35` (the build targets platform android-30, minSdk 24, targetSdk 36).
-- **Evidence:** `app/CMakeLists.txt:11-14`.
-- **Why it matters:** Someone may "correct" 35 down to 28 based on the comment.
-- **Direction:** Reword ("iconv needs ≥28; define the full build platform").
-- **Provenance:** scan 2026-10-04 (`app/`), reviewer candidate R-14.
-
 ### TD-026 — Manifest `id` charset: docs promise `[A-Za-z0-9._-]+`, the parser accepts far more
 
 - **Priority:** P3

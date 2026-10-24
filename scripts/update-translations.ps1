@@ -25,8 +25,8 @@ $AppDir   = Join-Path $RepoRoot "app"
 $I18nDir  = Join-Path $AppDir "i18n"
 
 # Local defaults assume the Unity-2025 install layout; CI overrides via env.
-$QtBase = if ($env:AURELEX_QT_BASE) { $env:AURELEX_QT_BASE } else { "C:\Qt\6.6.3" }
-$QtHost = if ($env:AURELEX_QT_HOST) { $env:AURELEX_QT_HOST } else { "$QtBase\msvc2019_64" }
+$QtBase = if ($env:AURELEX_QT_BASE) { $env:AURELEX_QT_BASE } else { "C:\Qt\6.9.3" }
+$QtHost = if ($env:AURELEX_QT_HOST) { $env:AURELEX_QT_HOST } else { "$QtBase\msvc2022_64" }
 
 $Lupdate  = Join-Path $QtHost "bin\lupdate.exe"
 $Lrelease = Join-Path $QtHost "bin\lrelease.exe"

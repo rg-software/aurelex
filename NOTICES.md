@@ -31,7 +31,7 @@ this repository together with the exact upstream revision it pins — see
 | Component | Version | License | Notes |
 |---|---|---|---|
 | [goldendict-ng](https://github.com/xiaoyifang/goldendict-ng) engine | pinned tag (see `docs/ENGINE.md`) | GPL-3.0-or-later | Selected sources are compiled into `carve/`; the submodule keeps its own `LICENSE.txt` and copyright notices. |
-| [Qt](https://www.qt.io/) | 6.6.3 | LGPL-3.0 (or GPL-3.0 / commercial) | Modules used: Core, Gui, Widgets, Xml, Concurrent, Network, Qml, Quick, QuickControls2, WebView. Qt is dynamically linked. |
+| [Qt](https://www.qt.io/) | 6.9.3 | LGPL-3.0 (or GPL-3.0 / commercial) | Modules used: Core, Gui, Widgets, Xml, Concurrent, Network, Qml, Quick, QuickControls2, WebView. Qt is dynamically linked. |
 | [Xapian](https://xapian.org/) (xapian-core) | 1.4.22 | GPL-2.0-or-later | Full-text search index. |
 | [zlib](https://zlib.net/) | per vcpkg baseline `2026.07.29` | Zlib | Deflate; used by the dictionary formats and the engine. |
 | [bzip2](https://sourceware.org/bzip2/) | per vcpkg baseline `2026.07.29` | bzip2-1.0.6 (BSD-like) | Compression. |

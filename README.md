@@ -5,7 +5,7 @@ free ones straight from the app. Everything runs on-device. No account, no ads, 
 
 ![Aurelex search and article view](docs/screenshots/main.png)
 
-**[Download the latest release](https://github.com/rg-software/aurelex/releases)** (Android 7.0+, 64-bit ARM)
+**[Download the latest release](https://github.com/rg-software/aurelex/releases)** (Android 9.0+, 64-bit ARM)
 
 ## Install
 
@@ -102,7 +102,7 @@ See also the [full privacy policy](https://rg-software.github.io/aurelex/privacy
 
 ## Building from source
 
-Requirements: JDK 17, the Android SDK and NDK, Qt 6.6.3 (Android and desktop kits), PowerShell 7, and the vcpkg dependencies listed in the docs.
+Requirements: JDK 17, the Android SDK and NDK, Qt 6.9.3 (Android and desktop kits), PowerShell 7, and the vcpkg dependencies listed in the docs.
 
 ```powershell
 git clone --recursive https://github.com/rg-software/aurelex.git

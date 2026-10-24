@@ -45,7 +45,7 @@ The repository rules for agents and contributors live in `AGENTS.md`. Key rules:
 ## Building the app
 
 The app is a Qt Quick/WebView Android app built from `app/`.
-Requirements: JDK 17, Android SDK + NDK r23c, Qt 6.6.3 android + desktop kits, vcpkg deps
+Requirements: JDK 17, Android SDK + NDK r30, Qt 6.9.3 android + desktop kits, vcpkg deps
 (`zlib bzip2 liblzma lzo fmt xapian`), and **PowerShell 7 (`pwsh`)** — the script
 uses PS7-only syntax and UTF-8 characters; running it under the legacy
 `powershell` 5.1 misdecodes the UTF-8 and fails to parse. On a fresh clone,
@@ -111,7 +111,7 @@ code, plus `RemoteCatalog.cpp` for `catalog_test`) — so these build and run in
 seconds on a desktop Qt.
 
 ```powershell
-cmake -S app/tests -B build-app-tests -DCMAKE_PREFIX_PATH=C:/Qt/6.6.3/msvc2019_64 -G Ninja
+cmake -S app/tests -B build-app-tests -DCMAKE_PREFIX_PATH=C:/Qt/6.9.3/msvc2022_64 -G Ninja
 cmake --build build-app-tests --config Release
 foreach ($t in @('article_server_test','index_migration_test','index_cleanup_test','dictionary_index_test','staged_cleanup_test','staging_rules_test','catalog_test')) {
   & "build-app-tests/$t.exe"; if ($LASTEXITCODE -ne 0) { throw "$t failed" }
@@ -400,7 +400,7 @@ the Qt surface only; the Android strings are the separate, already key-based
 **Finding a string.** Grep the two files above, or — for "does this text already
 exist, and where?" — read the catalog: `app/i18n/aurelex.ru.ts` lists every
 source string with its `filename`/`line` and context, and `linguist.exe`
-(`C:\Qt\6.6.3\msvc2019_64\bin`) opens it as a searchable table. The `.ts` is a
+(`C:\Qt\6.9.3\msvc2022_64\bin`) opens it as a searchable table. The `.ts` is a
 generated inventory, not an editing surface (see the rules below).
 
 1. Write or edit the string in the file for its context, above. Keep `%1`-style
@@ -412,7 +412,7 @@ generated inventory, not an editing surface (see the rules below).
    drops any message whose source no longer exists (`-no-obsolete`); `lrelease`
    then recompiles the `.qm`. Add `-NoCompile` to refresh the `.ts` only.
    Requires Qt's `lupdate`/`lrelease` (`AURELEX_QT_BASE`/`AURELEX_QT_HOST`
-   default to `C:\Qt\6.6.3` / `msvc2019_64`).
+   default to `C:\Qt\6.9.3` / `msvc2022_64`).
 3. The changed string is now a `<message>` with an *empty* `<translation>` in
    **every** catalog — no translation carries over, because the key changed.
    Fill it in each one (next subsection). An empty `<translation>` is not an
@@ -440,7 +440,7 @@ Use this when the English is correct and only a translation is wrong or missing
    `pwsh -File .\scripts\update-translations.ps1 -Languages @("ru","ja")`
    (re-extracting is harmless when the sources did not change). To re-emit a
    single catalog without touching the `.ts`, `lrelease` alone works:
-   `& "C:\Qt\6.6.3\msvc2019_64\bin\lrelease.exe" app\i18n\aurelex.ru.ts -qm app\i18n\aurelex_ru.qm`
+   `& "C:\Qt\6.9.3\msvc2022_64\bin\lrelease.exe" app\i18n\aurelex.ru.ts -qm app\i18n\aurelex_ru.qm`
 3. **Commit the compiled `app/i18n/aurelex_<lang>.qm`.** The `.qm` is the
    shipped artifact — embedded by the `qt_add_resources(aurelex "i18n" ...)`
    block in `app/CMakeLists.txt`; the `.ts` is the editable source.
@@ -523,7 +523,7 @@ an English or unsupported primary language. Treat it as "the locale did not
 apply" only when you were expecting a language that has a catalog.
 
 **Known gap:** the app declares no `android:localeConfig` (there is no
-`app/android/res/xml/locales_config.xml`, and AGP 7.4.1 cannot auto-generate
+`app/android/res/xml/locales_config.xml`, and AGP 8.6.0 cannot auto-generate
 one), so the app is not listed under *Settings → Apps → Aurelex → Language*, and
 `cmd locale set-app-locales` may be refused on some builds. Making the system
 picker real means adding `res/xml/locales_config.xml` (listing `en`, `ru`,

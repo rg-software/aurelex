@@ -125,7 +125,7 @@ stages only those, into both `lib/<abi>/` and `assets/qml/`.
 | release APK | 38.2 MB | 19.9 MB |
 | release AAB | 42.1 MB | 23.8 MB |
 
-Measured on Qt 6.6.3, `arm64-v8a`. The 37 MB is unreachable Qt: Designer,
+Measured on Qt 6.9.3, `arm64-v8a`. The 37 MB is unreachable Qt: Designer,
 ShaderTools, the Widgets stack, the VirtualKeyboard, three unused Controls
 styles, the SQL driver, and the `qmldbg`/`qmllint` developer tooling.
 
@@ -250,9 +250,10 @@ document the exact fingerprint), not keystore sharing.
 
 The launcher icon is an adaptive icon (`mipmap-anydpi-v26/ic_launcher.xml`,
 `app/android/res/`) with background, foreground, and monochrome layers. `minSdkVersion` is
-**24** (Android 7.0), so the density-specific
-`mipmap-*/ic_launcher.png` legacy fallbacks are kept for API 24–25, which have no
-adaptive-icon support. API 26+ uses the adaptive icon.
+**28** (Android 9.0), so every supported device uses the adaptive icon (API 26+).
+The density-specific `mipmap-*/ic_launcher.png` legacy fallbacks are leftovers
+from the earlier API 24 floor (API 24–25 have no adaptive-icon support) and are
+no longer reached.
 
 Known gap (polish TODO): the monochrome (themed-dark) layer is a simple tint of
 the book glyph — it was added to satisfy adaptive-icon schema, but hasn't been

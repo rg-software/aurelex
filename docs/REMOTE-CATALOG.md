@@ -281,7 +281,7 @@ The app's parser is the contract. `catalog_test` builds against a desktop Qt Cor
 and runs the checked-in fixtures:
 
 ```powershell
-cmake -S app/tests -B build-catalog-test -DCMAKE_PREFIX_PATH=C:/Qt/6.6.3/msvc2019_64
+cmake -S app/tests -B build-catalog-test -DCMAKE_PREFIX_PATH=C:/Qt/6.9.3/msvc2022_64
 cmake --build build-catalog-test --config Release --target catalog_test
 build-catalog-test/Release/catalog_test.exe
 ```

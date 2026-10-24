@@ -7,7 +7,7 @@
 #
 # Build (host):
 #   cmake -S app/tests -B build-article-server-test \
-#         -DCMAKE_PREFIX_PATH=C:/Qt/6.6.3/msvc2019_64 -G "Visual Studio 17 2022" -A x64
+#         -DCMAKE_PREFIX_PATH=C:/Qt/6.9.3/msvc2022_64 -G "Visual Studio 17 2022" -A x64
 #   cmake --build build-article-server-test --config Release
 #   build-article-server-test/Release/article_server_test.exe
 cmake_minimum_required(VERSION 3.18)

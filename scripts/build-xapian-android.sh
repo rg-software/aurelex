@@ -15,7 +15,7 @@
 # Usage (from the repo root):
 #   scripts/build-xapian-android.sh <ndk-root> <abi> <install-prefix> [workdir]
 #
-#   ndk-root       Android NDK root (a directory like .../android-ndk-r23c).
+#   ndk-root       Android NDK root (a directory like .../android-ndk-r30).
 #   abi            arm64-v8a | x86_64            (matches app abiFilters)
 #   install-prefix vcpkg triplet root to install into, e.g.
 #                  <vcpkg-root>/installed/arm64-android. Headers land in

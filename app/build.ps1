@@ -2,17 +2,20 @@
 # One command: cmake configure -> ninja -> stage .so -> androiddeployqt ->
 # gradle overrides -> gradle assembleDebug.
 #
-# Toolchain facts (proven 2026-09-02, see openspec/changes/qt-quick-frontend/design.md):
-# - Qt android kits: C:\Qt\6.6.3\android_arm64_v8a (+ android_x86_64, host msvc2019_64)
-# - ANDROID_PLATFORM=android-30 (NDK r23c caps at 33; carve needs iconv >= 28,
-#   pthread_cond_clockwait >= 30)
+# Toolchain facts (proven 2026-09-02, see openspec/changes/qt-quick-frontend/design.md;
+# 16 KB refresh: openspec/changes/support-16kb-pages/design.md):
+# - Qt android kits: C:\Qt\6.9.3\android_arm64_v8a (+ android_x86_64, host msvc2022_64)
+# - ANDROID_PLATFORM=android-30 (carve needs iconv >= 28,
+#   pthread_cond_clockwait >= 30; still present in NDK r30 sysroots)
+# - NDK r30 LTS (16 KB ELF alignment by default) — Play's 16 KB page-size requirement
 # - NDK bionic sysroot include needed for iconv.h
-# - Gradle must run under JDK 17 (AGP 7.4.1 + JDK 21 -> D8 NPE); Unity ships 17.0.9
+# - Gradle must run under JDK 17 (AGP 8.x still runs on 17); Unity ships 17.0.9
 # - compileSdk is bumped to android-36 for Play's targetSdk 36 requirement.
-#   AGP 7.4.1 predates SDK 36, so android.suppressUnsupportedCompileSdk silences
-#   its "not supported" warning. AGP's default aapt2 (7.4.1-8841542) cannot link
+#   AGP 8.6.0 predates SDK 36, so android.suppressUnsupportedCompileSdk silences
+#   its "not supported" warning. AGP's default aapt2 cannot link
 #   against SDK 36's android.jar, so gradle.properties pins
 #   android.aapt2FromMavenOverride to the aapt2 from build-tools 36.0.0.
+# - minSdk is 28 (Android 9.0): Qt 6.9 supports API 28+ only (16 KB change).
 # - androiddeployqt regenerates local.properties/gradle.properties -> re-apply overrides
 # - Qt has no qt_add_apk_target in the aqt carve subset -> package via androiddeployqt
 
@@ -36,14 +39,15 @@ $BuildDir   = Join-Path $RepoRoot "build-qtquick"
 $ApkDir     = Join-Path $BuildDir "apk"
 
 # Local defaults assume the Unity-2025 install layout; CI overrides via env.
-$QtBase     = if ($env:AURELEX_QT_BASE)     { $env:AURELEX_QT_BASE }     else { "C:\Qt\6.6.3" }
-$QtHost     = if ($env:AURELEX_QT_HOST)     { $env:AURELEX_QT_HOST }     else { "$QtBase\msvc2019_64" }
+$QtBase     = if ($env:AURELEX_QT_BASE)     { $env:AURELEX_QT_BASE }     else { "C:\Qt\6.9.3" }
+$QtHost     = if ($env:AURELEX_QT_HOST)     { $env:AURELEX_QT_HOST }     else { "$QtBase\msvc2022_64" }
 $VcpkgBase  = if ($env:AURELEX_VCPKG_BASE)  { $env:AURELEX_VCPKG_BASE }  else { "C:\vcpkg" }
-$NdkRoot    = if ($env:AURELEX_NDK_ROOT)    { $env:AURELEX_NDK_ROOT }    else { "C:\Program Files (x86)\Android\AndroidNDK\android-ndk-r23c" }
+$NdkRoot    = if ($env:AURELEX_NDK_ROOT)    { $env:AURELEX_NDK_ROOT }    else { "C:\Program Files (x86)\Android\AndroidNDK\android-ndk-r30" }
 $RealSdk    = if ($env:AURELEX_ANDROID_SDK) { $env:AURELEX_ANDROID_SDK } else { "C:\Program Files (x86)\Android\android-sdk" }
 # JDK: CI overrides via AURELEX_JDK17 (actions/setup-java). Locally, hardcode
-# the Unity 17 used for the proven AGP 7.4.1 setup — never pick up the host
-# JAVA_HOME, which may be JDK 21+ and triggers the D8 NPE (see header comment).
+# the Unity 17 used for the proven setup — never pick up the host
+# JAVA_HOME, which may be a newer JDK with its own Gradle incompatibilities
+# (see header comment: AGP 8.x runs on JDK 17).
 $Jdk17 = if ($env:AURELEX_JDK17) { $env:AURELEX_JDK17 } else {
     "C:\Program Files\Unity\Hub\Editor\6000.0.62f1\Editor\Data\PlaybackEngines\AndroidPlayer\OpenJDK"
 }
@@ -227,7 +231,7 @@ foreach ($spec in @(
 }
 Write-Host ("   Qt kit: {0} candidates -> kept {1} ({2:N2} MB), dropped {3} ({4:N2} MB)" -f `
     $kitCandidates, $kitKept, ($kitStaged/1MB), ($kitCandidates - $kitKept), ($kitDropped/1MB)) -ForegroundColor DarkGray
-# libc++_shared.so ships from the NDK (host-agnostic path in r23c; the host
+# libc++_shared.so ships from the NDK (host-agnostic path in older NDKs; the host
 # sysroot is the pre-r23 location). Try both so the script runs on any host OS.
 $cppShared = "$NdkRoot/sources/cxx-stl/llvm-libc++/libs/arm64-v8a/libc++_shared.so"
 if (-not (Test-Path $cppShared)) {
@@ -394,7 +398,7 @@ $sdkDir = if ($env:AURELEX_ANDROID_SDK) { $env:AURELEX_ANDROID_SDK } else { "C:\
 $sdkProp = ($sdkDir -replace '\\', '/') -replace ':', '\:'
 Set-Content (Join-Path $ApkDir "local.properties") "sdk.dir=$sdkProp" -NoNewline
 $gpPath = Join-Path $ApkDir "gradle.properties"
-# aapt2 from AGP 7.4.1's default Maven artifact (7.4.1-8841542) cannot link
+# aapt2 from AGP's default Maven artifact cannot link
 # against SDK 36's android.jar, so override aapt2 with the newer binary shipped
 # in build-tools 36.0.0. The property key is android.aapt2FromMavenOverride.
 $aapt2Name = if ($IsWindows) { "aapt2.exe" } else { "aapt2" }
@@ -402,8 +406,8 @@ $Aapt2Exe = (Join-Path $sdkDir "build-tools/36.0.0/$aapt2Name") -replace '\\', '
 # AGP runs its native toolchain (llvm-strip, llvm-objcopy) out of an NDK it has
 # located itself, and the only place it looks is inside the Android SDK
 # (<sdk>/ndk/<androidNdkVersion>). Ours is installed outside the SDK tree (see
-# $NdkRoot above: C:\Program Files (x86)\Android\AndroidNDK\android-ndk-r23c on a
-# dev box, $GITHUB_WORKSPACE/ndk/android-ndk-r23c in CI), so AGP found no NDK at
+# $NdkRoot above: C:\Program Files (x86)\Android\AndroidNDK\android-ndk-r30 on a
+# dev box, $GITHUB_WORKSPACE/ndk/android-ndk-r30 in CI), so AGP found no NDK at
 # all: stripReleaseDebugSymbols logged "Unable to strip the following libraries,
 # packaging them as they are:" for every jniLib (shipping the ~36 MB unstripped
 # engine library in base/), and extractReleaseNativeSymbolTables produced nothing,
@@ -417,7 +421,7 @@ $ndkPathGroovy = ($NdkRoot -replace '\\', '/')
 # a fresh tree (it exists locally only because a prior run left it behind). If
 # absent, write one with our pinned values; otherwise patch the existing file.
 if (-not (Test-Path $gpPath)) {
-    $qtAndroidDir = if ($env:AURELEX_QT_BASE) { "$($env:AURELEX_QT_BASE)/android_arm64_v8a/./src/android/java" } else { "C:/Qt/6.6.3/android_arm64_v8a/./src/android/java" }
+    $qtAndroidDir = if ($env:AURELEX_QT_BASE) { "$($env:AURELEX_QT_BASE)/android_arm64_v8a/./src/android/java" } else { "C:/Qt/6.9.3/android_arm64_v8a/./src/android/java" }
     # .properties treats \x sequences as escapes; use forward slashes only.
     $qtAndroidDir = $qtAndroidDir -replace '\\', '/'
     @"
@@ -426,11 +430,11 @@ android.useAndroidX=true
 android.aapt2FromMavenOverride=$Aapt2Exe
 androidBuildToolsVersion=35.0.0
 androidCompileSdkVersion=android-36
-androidNdkVersion=23.2.8568313
+androidNdkVersion=30.0.16248370
 buildDir=build
 qt5AndroidDir=$qtAndroidDir
 qtAndroidDir=$qtAndroidDir
-qtMinSdkVersion=24
+qtMinSdkVersion=28
 android.suppressUnsupportedCompileSdk=36
 qtTargetAbiList=arm64-v8a
 qtTargetSdkVersion=36
@@ -439,7 +443,8 @@ qtTargetSdkVersion=36
     $gp = Get-Content $gpPath -Raw
     $gp = $gp -replace 'androidCompileSdkVersion=android-\d+', 'androidCompileSdkVersion=android-36'
     $gp = $gp -replace 'androidBuildToolsVersion=[\d.]+', 'androidBuildToolsVersion=35.0.0'
-    $gp = $gp -replace 'qtMinSdkVersion=\d+', 'qtMinSdkVersion=24'
+    $gp = $gp -replace 'qtMinSdkVersion=\d+', 'qtMinSdkVersion=28'
+    $gp = $gp -replace 'androidNdkVersion=[\d.]+', 'androidNdkVersion=30.0.16248370'
     $gp = $gp -replace 'qtTargetSdkVersion=\d+', 'qtTargetSdkVersion=36'
     if ($gp -notmatch 'suppressUnsupportedCompileSdk') {
         $gp = $gp -replace '(qtTargetSdkVersion=\d+)', "`$1`nandroid.suppressUnsupportedCompileSdk=36"
@@ -465,7 +470,7 @@ function New-BaseBuildGradle {
     @"
 buildscript {
     repositories { google(); mavenCentral() }
-    dependencies { classpath 'com.android.tools.build:gradle:7.4.1' }
+    dependencies { classpath 'com.android.tools.build:gradle:8.6.0' }
 }
 repositories { google(); mavenCentral() }
 apply plugin: 'com.android.application'
@@ -476,6 +481,8 @@ dependencies {
 }
 
 android {
+    // AGP 8.x mandates a namespace (the manifest's package is ignored).
+    namespace "org.aurelex.pocket.dictionary"
     compileSdkVersion androidCompileSdkVersion
     buildToolsVersion androidBuildToolsVersion
     ndkVersion androidNdkVersion
@@ -484,7 +491,10 @@ android {
     // symbols are extracted (see the ndkPath note in build.ps1).
     ndkPath "$NdkPath"
 
-    packagingOptions.jniLibs.useLegacyPackaging true
+    // 16 KB page-size compliance (support-16kb-pages): ship uncompressed
+    // native libraries so AGP zip-aligns them to 16 KB (PAGE_ALIGNMENT_16K).
+    // The old `true` (compressed legacy packaging) was the pre-8.5 fallback.
+    packagingOptions.jniLibs.useLegacyPackaging false
 
     sourceSets {
         main {

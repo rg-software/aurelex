@@ -2,7 +2,7 @@
 
 Qt's TLS on Android is its OpenSSL backend: `libQt6Network` / the
 `qopensslbackend` plugin `dlopen()` `libcrypto_3.so` and `libssl_3.so` at run
-time. The Qt 6.6.3 Android kit does **not** ship these libraries, and Android's
+time. The Qt Android kit does **not** ship these libraries, and Android's
 own TLS (BoringSSL) is not usable by Qt. Without them every
 `QNetworkAccessManager` HTTPS request fails immediately with
 `QSslSocket::connectToHostEncrypted: TLS initialization failed`, with no
@@ -55,6 +55,12 @@ Qt 6 looks for). OpenSSL version reported by both `libcrypto_3.so` builds:
 Each file was verified byte-identical to the upstream commit above by comparing
 git blob hashes (`git hash-object` against the upstream blob SHA), so the digests
 are not merely a local record — they identify these exact upstream bytes.
+
+16 KB page sizes: the pinned revision postdates upstream's 16 KB rebuild
+(`32ebe30`, "Update 16KB page size binaries", Oct 2025) and keeps its flags, so
+all four libraries are 16 KB ELF-aligned (`LOAD align 0x4000`, RELRO page-safe —
+verified with `llvm-readelf`). No binary change was needed for the 16 KB
+migration; this note is the record that the check was done.
 
 To upgrade: replace the files from a newer upstream commit, then update the
 commit SHA, the version, and this table in the same commit. The diff of the table
