@@ -8,7 +8,6 @@ import android.media.MediaPlayer;
 import android.os.Bundle;
 
 import org.qtproject.qt.android.bindings.QtActivity;
-import org.qtproject.qt.android.QtNative;
 
 import java.util.HashSet;
 import java.util.Set;
@@ -29,6 +28,14 @@ public class AurelexActivity extends QtActivity {
     private static final int REQUEST_PICK_DICTIONARY_FOLDER = 2001;
 
     private static MediaPlayer sAudioPlayer = null;
+
+    /**
+     * Activity instance for the static JNI entry points below. Qt 6.8 changed
+     * {@code QtNative.activity()} from public to package-private, so the
+     * statics can no longer reach the activity through QtNative. The activity
+     * sets this on creation; all readers null-check, as they did before.
+     */
+    private static volatile android.app.Activity sActivity = null;
 
     /**
      * Plays pronunciation audio from the loopback ArticleServer URL
@@ -87,6 +94,7 @@ public class AurelexActivity extends QtActivity {
     @Override
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        sActivity = this;
 
         // Workaround for QTBUG-122886 (Qt 6.6): QtActivityDelegate's display
         // listener fires setActivityDisplayRotation on a null mLayout when a
@@ -176,7 +184,7 @@ public class AurelexActivity extends QtActivity {
      */
     public static boolean isNightModeActive() {
         try {
-            android.app.Activity activity = QtNative.activity();
+            android.app.Activity activity = sActivity;
             if (activity == null) return false;
             int uiMode = activity.getResources().getConfiguration().uiMode;
             return (uiMode & Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES;
@@ -201,7 +209,7 @@ public class AurelexActivity extends QtActivity {
     private static int[] cutoutSafeInsets() {
         try {
             if (android.os.Build.VERSION.SDK_INT < 28) return new int[] {0, 0, 0, 0};
-            android.app.Activity activity = QtNative.activity();
+            android.app.Activity activity = sActivity;
             if (activity == null) return new int[] {0, 0, 0, 0};
             android.view.WindowInsets wi = activity.getWindow().getDecorView().getRootWindowInsets();
             if (wi == null) return new int[] {0, 0, 0, 0};
@@ -237,7 +245,7 @@ public class AurelexActivity extends QtActivity {
     public static int getSystemInsetTop() {
         try {
             final int cutout = cutoutSafeInsets()[1];
-            android.app.Activity activity = QtNative.activity();
+            android.app.Activity activity = sActivity;
             if (activity != null) {
                 android.view.WindowInsets wi = activity.getWindow().getDecorView().getRootWindowInsets();
                 if (wi != null && wi.getSystemWindowInsetTop() > 0)
@@ -261,7 +269,7 @@ public class AurelexActivity extends QtActivity {
     public static int getSystemInsetBottom() {
         try {
             final int cutout = cutoutSafeInsets()[3];
-            android.app.Activity activity = QtNative.activity();
+            android.app.Activity activity = sActivity;
             if (activity != null) {
                 android.view.WindowInsets wi = activity.getWindow().getDecorView().getRootWindowInsets();
                 if (wi != null && wi.getSystemWindowInsetBottom() > 0)
@@ -291,7 +299,7 @@ public class AurelexActivity extends QtActivity {
         final int cutout = cutoutSafeInsets()[0];
         if (cutout == 0) return 0;
         try {
-            android.app.Activity activity = QtNative.activity();
+            android.app.Activity activity = sActivity;
             if (activity != null) {
                 android.view.WindowInsets wi = activity.getWindow().getDecorView().getRootWindowInsets();
                 if (wi != null) return Math.max(wi.getSystemWindowInsetLeft(), cutout);
@@ -311,7 +319,7 @@ public class AurelexActivity extends QtActivity {
         final int cutout = cutoutSafeInsets()[2];
         if (cutout == 0) return 0;
         try {
-            android.app.Activity activity = QtNative.activity();
+            android.app.Activity activity = sActivity;
             if (activity != null) {
                 android.view.WindowInsets wi = activity.getWindow().getDecorView().getRootWindowInsets();
                 if (wi != null) return Math.max(wi.getSystemWindowInsetRight(), cutout);
@@ -343,7 +351,7 @@ public class AurelexActivity extends QtActivity {
      */
     public static void syncSystemBarAppearance() {
         try {
-            android.app.Activity activity = QtNative.activity();
+            android.app.Activity activity = sActivity;
             if (activity == null) return;
             android.view.Window window = activity.getWindow();
             if (window == null) return;
@@ -365,7 +373,7 @@ public class AurelexActivity extends QtActivity {
 
     private static void setSystemBarAppearanceInternal(boolean dark) {
         try {
-            android.app.Activity activity = QtNative.activity();
+            android.app.Activity activity = sActivity;
             if (activity == null) return;
             android.view.Window window = activity.getWindow();
             if (window == null) return;
@@ -424,7 +432,7 @@ public class AurelexActivity extends QtActivity {
      */
     public static void pickDictionaryFolder() {
         try {
-            android.app.Activity activity = QtNative.activity();
+            android.app.Activity activity = sActivity;
             if (activity == null) return;
             android.content.Intent intent =
                     new android.content.Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
@@ -570,7 +578,7 @@ public class AurelexActivity extends QtActivity {
 
     /**
      * stageTree variant that obtains the ContentResolver from an explicit
-     * Context instead of QtNative.activity() — used by StagingService, which
+     * Context instead of sActivity — used by StagingService, which
      * keeps copying even when no Activity is reachable (backgrounded app).
      */
     static int stageTree(android.net.Uri treeUri, String destDir, java.io.File stageRoot,
@@ -580,7 +588,7 @@ public class AurelexActivity extends QtActivity {
             cr = ctx.getContentResolver();
         } else {
             try {
-                cr = QtNative.activity().getContentResolver();
+                cr = sActivity.getContentResolver();
             } catch (Exception e) {
                 return -1;
             }
@@ -807,7 +815,7 @@ public class AurelexActivity extends QtActivity {
      */
     public static void startIndexing() {
         try {
-            final android.app.Activity a = QtNative.activity();
+            final android.app.Activity a = sActivity;
             if (a != null) IndexingService.start(a.getApplicationContext());
         } catch (Exception e) {
             android.util.Log.w(TAG, "startIndexing failed: " + e);
@@ -816,7 +824,7 @@ public class AurelexActivity extends QtActivity {
 
     public static void stopIndexing() {
         try {
-            final android.app.Activity a = QtNative.activity();
+            final android.app.Activity a = sActivity;
             if (a != null) IndexingService.stop(a.getApplicationContext());
         } catch (Exception e) {
             android.util.Log.w(TAG, "stopIndexing failed: " + e);
@@ -849,11 +857,11 @@ public class AurelexActivity extends QtActivity {
      * PARSED manifest (so no URL or size reaches the service unvetted), and from
      * the optional-audio follow-up for an already-installed entry.
      *
-     * Resolves its own Context via QtNative.activity(), like startIndexing().
+     * Resolves its own Context via sActivity, like startIndexing().
      */
     public static boolean startDictionaryDownload(String payloadJson) {
         try {
-            final android.app.Activity a = QtNative.activity();
+            final android.app.Activity a = sActivity;
             if (a == null) {
                 android.util.Log.w(TAG, "startDictionaryDownload: no activity");
                 return false;
@@ -1043,6 +1051,7 @@ public class AurelexActivity extends QtActivity {
 
     @Override
     protected void onDestroy() {
+        sActivity = null;
         // Qt 6.6 cannot start the Qt app a second time in the same process:
         // the second startApplication blocks forever on QtThread's semaphore
         // (QtLayout.onSizeChanged -> QtNative.startApplication -> Semaphore

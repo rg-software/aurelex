@@ -53,6 +53,16 @@ No script change: both build from the NDK in the environment, so the NDK bump re
 **D7 — Verification joins the release assertions, per ABI.**
 After the existing TLS/symbols/payload steps: extract `lib/<abi>/*.so`, run `llvm-readelf` (`LOAD align 2**14`, RELRO formula), run `zipalign -c -P 16` on the APK and `bundletool dump config | grep PAGE_ALIGNMENT_16K` on the AAB. Payload ceiling re-baselined by measuring the new kit once (`derive-native-payload.ps1` output + ~headroom), not by deleting the check.
 
+**D9 — Qt 6.8 made `QtNative.activity()` package-private; cache the activity.**
+`AurelexActivity`'s static JNI entry points reached the activity through
+`QtNative.activity()`, which does not compile under Qt 6.9 (found by the CI
+`compileReleaseJavaWithJavac` failure, v0.4.2). The fix holds the instance in a
+`private static volatile Activity sActivity` set in `onCreate` (cleared in
+`onDestroy`) and uses it in the 13 static call sites — no JNI signature changes,
+no behavior change. Alternative (pass the activity from C++ via
+`QNativeInterface::QAndroidApplication::context()`) was rejected: it would
+change every JNI call site on both sides for no gain.
+
 **D8 — minSdk 24 → 28; user-facing copy moves in the same change.**
 Qt 6.9 supports API 28+ only, so `qtMinSdkVersion` 24 → 28 in `build.ps1` (template + patch regex). The app already ships below Qt 6.6's supported floor (26), so this makes the floor honest rather than newly risky. `README.md` ("Android 7.0+"), `app/android/store-listing/listing.md` (both spots), and `docs/SIGNING.md` (`minSdkVersion` 24) all move to Android 9.0 / API 28 together — a store listing that promises 7.0 while the manifest requires 9.0 is the failure this avoids.
 
