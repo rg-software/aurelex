@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updated": "2026-10-23",
+  "updated": "2026-10-24",
   "entries": [
     {
       "id": "kaikki-en",
@@ -108,8 +108,8 @@
           "required": true,
           "name": "au_tatoeba_en-ru.dsl.dz",
           "url": "https://github.com/rg-software/aurelex/releases/download/catalog-data/au_tatoeba_en-ru.dsl.dz",
-          "sizeBytes": 5351166,
-          "sha256": "31918c38d560e2acd1b926b607cab7b2230c9b63257b8b4e31bf67cab1f7dfc2"
+          "sizeBytes": 5346462,
+          "sha256": "cb3dfcff14484c45a71e4c1a9d5b1a51c06a9cdf5ff6e463fc008d06f788bd4f"
         }
       ]
     },
@@ -129,8 +129,8 @@
           "required": true,
           "name": "au_tatoeba_ru-en.dsl.dz",
           "url": "https://github.com/rg-software/aurelex/releases/download/catalog-data/au_tatoeba_ru-en.dsl.dz",
-          "sizeBytes": 3588200,
-          "sha256": "2c29dd1097bdaedd290e6932bf3890a092f33cbac4b9382869a4f30a0d1005c4"
+          "sizeBytes": 3588197,
+          "sha256": "c8663ee7f16905f88ae8f3a6ef9639a7893b018816c9809cb20d2c50a8386339"
         }
       ]
     },
