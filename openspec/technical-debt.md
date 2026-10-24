@@ -23,6 +23,40 @@ candidate id (R-n) is provenance only.
 
 ---
 
+## P1 — will cause defects or block work soon
+
+### TD-039 — `apply-patches.ps1` reports success on a failed patch and keeps going (exit 0)
+
+- **Priority:** P1
+- **Location:** `scripts/apply-patches.ps1:16-28`
+- **Symptom:** No `$LASTEXITCODE` check anywhere. Under `$ErrorActionPreference = "Stop"`, a native command's non-zero exit does not throw, so when `git apply --check` fails the script still runs `git apply`, moves to the next patch, and prints "patches applied to engine/" with exit 0 — on a partially-patched tree.
+- **Evidence:** Lines 20-21 run check then apply with no exit-code handling; line 28 prints success unconditionally. The `.sh` twin (`scripts/apply-patches.sh:14-24`) normalizes CRLF, prints the engine HEAD on failure and `exit 1`; the `.ps1` does none of that and enumerates via `Get-ChildItem` without `Sort-Object`. CI only runs the `.sh` (`engine-smoke.yml:46`, `release-qt.yml:227`); the `.ps1` is the path AGENTS.md, README and ENGINE.md tell humans to use.
+- **Why it matters:** A Windows build proceeds on a silently inconsistent engine tree; missing load-bearing patches reproduce exactly the on-device hangs the patch set exists to prevent, with no error pointing at the cause.
+- **Direction:** Capture `$LASTEXITCODE` after `--check`, `throw`/`exit 1` on failure with the engine HEAD; add `Sort-Object Name`, CRLF normalization parity, and skip-already-applied detection (`git apply --reverse --check`).
+- **Provenance:** he9-debt scan 2026-10-24 (`scripts/`), reviewer candidate R-1 (build-scripts track). Verified against the working tree.
+
+### TD-040 — `backup-cache.py --compress` hard-fails: `gzip.open()` takes no `mtime` argument
+
+- **Priority:** P1
+- **Location:** `scripts/backup-cache.py:90`
+- **Symptom:** The documented `--compress` path crashes with `TypeError: open() got an unexpected keyword argument 'mtime'` — `gzip.open` has no `mtime` parameter (it belongs to `gzip.GzipFile`).
+- **Evidence:** Line 90 `gzip.open(tmp_out, "wb", mtime=0)`; `gzip.open` signature is `(filename, mode, compresslevel, encoding, errors, newline)`. Documented in `--help` (:53-54), `backup-cache.ps1:13`, and `docs/builds/cache.md:105`.
+- **Why it matters:** The documented compressed-backup recipe fails for the first user who wants a smaller archive; the default plain-`.tar` path works, so the breakage waits silently.
+- **Direction:** `gzip.GzipFile(fileobj=io.open(tmp_out, "wb"), mode="wb", mtime=0)` (keeps the deterministic-timestamp intent) or drop `mtime=0`; add a smoke check in `scripts/tests`.
+- **Provenance:** he9-debt scan 2026-10-24 (`scripts/`), reviewer candidate R-2 (build-scripts track). Verified against the working tree.
+
+### TD-041 — `bundle-audio` drop-dangling rewrite reuses stale text, clobbering the safe-name rewrite
+
+- **Priority:** P1
+- **Location:** `scripts/kaikki/prefetch.py:832-869`, specifically `:860`
+- **Symptom:** The safe-name `rename` rewrite writes `rewrite_audio_refs(text, rename)`, but the missing-drop pass then rewrites from the **original** `text` (`rewritten = _AUDIO_REF_RE.sub(_drop, text)`) and overwrites the file. When both `rename` and `missing` are non-empty, the second write discards the first: present-but-renamed refs revert to unsafe names (dangling against a bundle holding safe names), and a missing-and-renamed ref is never dropped (`missing_set` holds safe names, the original text holds raw names).
+- **Evidence:** `:832-843` (rename pass) vs `:853-869` (drop pass from stale `text`); `missing` holds safe names (`wanted` keyed by safe at :814, `extract_audio` at :820); no final `verify_bundle` runs before return 0.
+- **Why it matters:** A recovery run over a dictionary with one quoted-name recording and one gone recording ships `[s]` links to files not in the bundle; audio silently breaks and the run's own "rewrote N reference(s)" message contradicts the file it wrote.
+- **Direction:** Chain the rewrites on one variable, drop by both raw and safe names, then run `verify_bundle` before returning 0. ~5 lines + a test covering rename∧missing together.
+- **Provenance:** he9-debt scan 2026-10-24 (`scripts/`), reviewer candidate R-1 (converter track). Verified against the working tree.
+
+---
+
 ## P2 — maintainability / docs / tests class
 
 ### TD-001 — Host-test loop and target table omit `dict_identity_test`
@@ -327,6 +361,186 @@ candidate id (R-n) is provenance only.
 - **Direction:** Return the number of lines actually written, or make the cap a
   parameter and document it in `goldendict.h`.
 - **Provenance:** scan 2026-10-05 (`carve/` + `patches/`), reviewer candidate R-3.
+
+### TD-042 — `validate_catalog` skips the id-charset and `names` checks the deploy gate depends on
+
+- **Priority:** P2
+- **Location:** `scripts/catalogtool/core.py:136-186` (vs `:62-100`)
+- **Symptom:** The CI deploy gate (`.github/workflows/pages.yml:47` runs `build-catalog.py validate`) checks id presence/uniqueness but never applies `_ID_RE` (defined at :23, applied only by `validate_source` at :81) and never inspects `names` — while the module docstring (:140-141) claims it checks "the shape the app's parser depends on".
+- **Evidence:** `validate_catalog` :149-160 (no charset check, no `names` block) vs `validate_source` :81, :95-100. Companion to TD-026 (app-side `isValidToken` gap) — this is the generator-side twin, not a duplicate.
+- **Why it matters:** A hand-edited `catalog/catalog.json` with `names: "str"` or a non-charset id deploys green while the app's parser rejects the whole manifest — the catalog feature goes dark for all users while CI stayed green.
+- **Direction:** Apply `_ID_RE` and the `names`-object shape check in `validate_catalog`; add the two negative tests. Coordinate with TD-026's app-side fix.
+- **Provenance:** he9-debt scan 2026-10-24 (`scripts/`), reviewer candidate R-1 (catalog track). Verified against the working tree.
+
+### TD-043 — Publish identity guard silently bypassed when the live catalog is unreachable
+
+- **Priority:** P2
+- **Location:** `scripts/publish-catalog.ps1:60-65`, `:82-85`
+- **Symptom:** On `Invoke-WebRequest` failure the script only warns ("treating all files as new") and takes the else branch that skips `diff` entirely and uploads every file with `--clobber` — no identity-violation check runs. `REMOTE-CATALOG.md:266-268` promises the tool "refuses to publish if `diff` reports an identity violation".
+- **Evidence:** `:60-65` (fetch failure → warn) vs `:82-85` (upload all, no diff). The committed `catalog/catalog.json` is the last published snapshot (REMOTE-CATALOG.md:224) and could serve as the diff source when Pages is down.
+- **Why it matters:** A rename published during a Pages outage breaks installed-detection/contentHash for existing users with no refusal — the append-only contract (REMOTE-CATALOG.md:272-276) loses its only enforcement exactly when the network is flaky.
+- **Direction:** On live-fetch failure, diff against the committed `catalog/catalog.json` (refusing if absent/stale); only then fall back to treat-all-as-new for the upload set, never for the violation check.
+- **Provenance:** he9-debt scan 2026-10-24 (`scripts/`), reviewer candidate R-2 (catalog track). Verified against the working tree.
+
+### TD-044 — No cross-entry file-name uniqueness anywhere; `_index_files` silently collapses duplicates
+
+- **Priority:** P2
+- **Location:** `scripts/catalogtool/core.py:105-117`, `:164-173`, `:299-308`, `:352-354`
+- **Symptom:** Both validators enforce file-name uniqueness per entry only; `build_catalog` never checks across entries; `_index_files` keys by name so two entries sharing a name overwrite each other, and `changed_entries` then reports only one affected entry.
+- **Evidence:** `validate_source` :105-117, `validate_catalog` :164-173 (per-entry `seen_file_names` only); `_index_files` :303; `diff_catalogs` :352-354. REMOTE-CATALOG.md:124 / :274-276 make file `name` the installed-detection key with a stable, append-only contract.
+- **Why it matters:** A new entry reusing an existing asset name passes build+validate, and updating "its" dictionary silently changes the other entry's payload (same URL, self-consistent manifest, but ambiguous detection and diff).
+- **Direction:** Repo-level `seen_file_names` across entries in both validators (and assert in `diff`), mirroring the duplicate-entry-name rationale at :89-94.
+- **Provenance:** he9-debt scan 2026-10-24 (`scripts/`), reviewer candidate R-3 (catalog track). Verified against the working tree.
+
+### TD-045 — `file_url` does not percent-encode file names; `_is_basename` admits URL-hostile names
+
+- **Priority:** P2
+- **Location:** `scripts/catalogtool/core.py:39-46`, `:58-59`, `:175`
+- **Symptom:** `file_url` concatenates `name` unencoded (:59) while `_is_basename` accepts spaces, `#`, `?`, `%`, non-ASCII (:39-46); `validate_catalog` checks only the `https://` prefix (:175). Latent — today's names are controlled ASCII.
+- **Evidence:** `:39-46` vs `:59`; REMOTE-CATALOG.md:124 restricts only path separators/`..`.
+- **Why it matters:** A manifest carrying `my dict.dsl.dz` (or `#frag`) validates and deploys, then the app-side download of that entry fails confusingly.
+- **Direction:** `urllib.parse.quote(name)` in `file_url`, or restrict `_is_basename` to the release-asset charset and state it in REMOTE-CATALOG.md:124.
+- **Provenance:** he9-debt scan 2026-10-24 (`scripts/`), reviewer candidate R-4 (catalog track). Verified against the working tree.
+
+### TD-046 — CI-enforcing asset checker has zero tests while sibling validators have suites
+
+- **Priority:** P2
+- **Location:** `scripts/check-store-assets.py:1-298` (whole file); `scripts/tests/` (suites only for build-catalog, bilingual, kaikki)
+- **Symptom:** The script gates releases (`release-qt.yml:326`, `check-store-assets.yml:44`) and contains non-trivial pure logic — `read_geometry` bounds (:67-83), ratio-tolerance (:155-159), duplicate detection (:170-185), NN-contiguity (:188-213) — with no coverage.
+- **Evidence:** No `test_check_store_assets*` in `scripts/tests/`; CI pattern `-p "test_build_catalog.py"`.
+- **Why it matters:** A checker regression green-lights bad store assets — the silent-pass failure class it exists to prevent.
+- **Direction:** One unittest file over the pure functions (fixture PNG headers need only ~33 bytes).
+- **Provenance:** he9-debt scan 2026-10-24 (`scripts/`), reviewer candidate R-5 (catalog track). Verified against the working tree.
+
+### TD-047 — Example-dict generator never exercises the multi-chunk dictzip invariant it documents
+
+- **Priority:** P2
+- **Location:** `scripts/make-example-dicts.py:120`, `:128-149`
+- **Symptom:** `chunk_length=16384` (:120) vs fixtures of 829/330/405 bytes — every generated `.dz` is one data chunk plus a 2-byte Z_FINISH epilogue appended as its own chunk (:147-149). The docstring's invariant (later-chunk back-references reaching into an earlier chunk) lives at boundaries where real data crosses; no fixture has one, and the trailing-epilogue-as-chunk deviates from real `dictzip`.
+- **Evidence:** Module docstring :128-133; verified by generating to a temp dir (`chunk_len=16384, chunks=2`, compressed `(500, 2)` — chunk 2 is the flush epilogue, zero data). CI (`engine-smoke.yml:97-108`) asserts only lookups.
+- **Why it matters:** The `.dsl.dz` reader's random-access path is regression-guarded vacuously; the next engine bump can reintroduce the unreadable-past-chunk-1 defect and CI stays green.
+- **Direction:** Scale one fixture past `chunk_length` so chunk 2 carries data; fold the finish output into the final data chunk; assert the smoke tool resolves a headword whose article lives in chunk 2.
+- **Provenance:** he9-debt scan 2026-10-24 (`scripts/`), reviewer candidate R-3 (build-scripts track). Verified against the working tree.
+
+### TD-048 — `make-smoke-mdx.py --encoding` advertises a switch but only writes the header attribute
+
+- **Priority:** P2
+- **Location:** `scripts/make-smoke-mdx.py:40`, `:160-172`, `:231-237`
+- **Symptom:** `enc` is threaded only into the header `('Encoding', encoding)` attribute (:166) while every body/key is `encode("utf-16-le")` (:72, :82, :101-114, :172). `--encoding UTF-8` emits a self-inconsistent file (declared UTF-8, encoded UTF-16LE). Argv parsing is also fragile (`--encoding` with no value → bare `IndexError` at :236; unknown flags silently ignored).
+- **Evidence:** Usage at :40, :233; no caller uses the flag (`engine-smoke.yml:124` calls it without it). Latent.
+- **Why it matters:** A trap for whoever tests the non-UTF-16 MDX path: a plausible fixture that fails confusingly or passes with garbage article text.
+- **Direction:** Either implement the payload encodings for the advertised values or restrict via `argparse` `choices` (which also fixes the parsing fragility).
+- **Provenance:** he9-debt scan 2026-10-24 (`scripts/`), reviewer candidate R-4 (build-scripts track). Verified against the working tree.
+
+### TD-049 — Symbol-subset font regenerates from an unpinned upstream `master` URL
+
+- **Priority:** P2
+- **Location:** `scripts/build_symbol_subset.py:52-55`, `:61-67`
+- **Symptom:** `VAR_SOURCE_URL` points at `raw.githubusercontent.com/.../master/...ttf` with no tag/commit and no checksum; `load_source` downloads it verbatim. A later re-run silently instances a different upstream font (the normalization pass at :84-96 exists because upstream metrics drift).
+- **Evidence:** :52-55 (URL), :61-67 (unverified download); repo precedent is pinned inputs with recorded provenance (AGENTS.md `app/openssl/README.md`; `XAPIAN_SHA512` in `build-xapian-android.sh:32`).
+- **Why it matters:** Non-reproducible asset regeneration; two rebuilds on different dates can ship visibly different icons with nothing recording which upstream revision produced the committed font.
+- **Direction:** Pin a commit/tag in the URL, record it plus a sha256 in a provenance comment next to `GLYPHS`.
+- **Provenance:** he9-debt scan 2026-10-24 (`scripts/`), reviewer candidate R-5 (build-scripts track). Verified against the working tree.
+
+### TD-050 — Scripts still carry the Qt 6.6.3 / msvc2019_64 / NDK r23c generation; everything else moved on
+
+- **Priority:** P2
+- **Location:** `scripts/update-translations.ps1:27-29`; `scripts/build-xapian-android.sh:18`
+- **Symptom:** `update-translations.ps1` defaults to `C:\Qt\6.6.3` + `msvc2019_64`; the current generation is Qt 6.9.3 + `msvc2022_64` (`app/build.ps1:42-43`) and NDK r30 (`app/build.ps1:45`, `release-qt.yml:44,106`); the xapian usage example still cites `android-ndk-r23c`.
+- **Evidence:** Single-source-of-truth rule: `support-16kb-pages` design.md:7 ("pinned in three places that must move together"). The DEVELOPMENT.md sites are that change's task 1.2 scope (already-addressed there); the two script sites are named in no task of that change and would survive it.
+- **Why it matters:** On a machine with only the 6.9.3 kit the script fails its own loud "lupdate not found" check until env vars are set; the r23c mention misleads a fresh reader about the expected NDK.
+- **Direction:** Fold both script sites into `support-16kb-pages` task 1.2's blast radius (defaults to `C:\Qt\6.9.3` / `msvc2022_64`, updated usage string).
+- **Provenance:** he9-debt scan 2026-10-24 (`scripts/`), reviewer candidate R-6 (build-scripts track). Verified against the working tree.
+
+### TD-051 — Shard-name guard misses Windows drive-relative names (`C:evil.ogg`)
+
+- **Priority:** P2
+- **Location:** `scripts/kaikki/prefetch.py:628-651`
+- **Symptom:** The guard consults `os.path.isabs(name)` only when `len(parts) > 1`; `C:evil.ogg` splits to one part, passes every check, and `os.path.join(into, "C:evil.ogg")` yields drive-relative `C:evil.ogg`, resolved against drive C's cwd — outside `--into`. Docstring promises "a list file from somewhere else cannot write outside `--into`".
+- **Evidence:** :640-647 (guard); `open(..., "wb")` downstream writes the joined path.
+- **Why it matters:** A crafted shard file can write outside the target directory on Windows. Exploit path is narrow (shards come from the operator's own machines) — hardening, not P0.
+- **Direction:** Reject any name where `os.path.isabs(os.path.splitdrive(name)[0] + os.sep)`, or require `ntpath`-safe plain names (also allow one safe subdirectory for the `sub/gone.ogg` case).
+- **Provenance:** he9-debt scan 2026-10-24 (`scripts/`), reviewer candidate R-2 (converter track). Verified against the working tree.
+
+### TD-052 — `--reuse-bundle` repair crashes on a directory bundle (`IsADirectoryError` traceback)
+
+- **Priority:** P2
+- **Location:** `scripts/kaikki/build.py:376-399`
+- **Symptom:** With a case-only mismatch and `--audio-layout dir`, `src_zf` is `None`; the repair loop skips every entry (`if src_zf is None: continue`), writes an empty zip to `bundle_dest + ".repair"`, then `os.replace(tmp_bundle, bundle_dest)` targets a directory → unhandled traceback instead of the designed "repaired N name(s)" outcome.
+- **Evidence:** :376-399 (loop + replace); no `except` around the replace.
+- **Why it matters:** Crash on a reachable (if narrow) path — reuse of a dir-layout bundle whose entry casing drifted. No data loss (replace fails before clobbering) but a raw traceback instead of recovery.
+- **Direction:** For a dir bundle, copy the mismatched files under their required names inside the directory; or refuse `--reuse-bundle` with a case-mismatched dir bundle with a clear message.
+- **Provenance:** he9-debt scan 2026-10-24 (`scripts/`), reviewer candidate R-3 (converter track). Verified against the working tree.
+
+### TD-053 — `--audio-per-word` documented per headword but applied per record
+
+- **Priority:** P2
+- **Location:** `scripts/kaikki/cli.py:107`; `scripts/kaikki/render.py:484`; `scripts/kaikki/prefetch.py:87-94`
+- **Symptom:** Help says "max audio files per headword (default 3)"; `render_card` calls `audio.plan(record)` for every record (:484), each with its own budget, and card-wide de-dup removes only identical names. A noun+verb headword with distinct recordings per record carries up to `per_word × records` links.
+- **Evidence:** `:107` (help) vs `:484` + `_plan` (per-record planning); build and prefetcher agree with each other and both disagree with the help text.
+- **Why it matters:** Bundles exceed the advertised cap for multi-POS headwords; disk/rate-limit budgets sized from the documented number undershoot.
+- **Direction:** Cap card-wide in `render_card`/`_plan` (batch records before planning, as bilingual does), or reword the help to "per record of a headword".
+- **Provenance:** he9-debt scan 2026-10-24 (`scripts/`), reviewer candidate R-4 (converter track). Verified against the working tree.
+
+### TD-054 — Bilingual caps audio per word, kaikki plans per record — divergence untested and undocumented
+
+- **Priority:** P2
+- **Location:** `scripts/bilingual/audio.py:148-183`; `scripts/kaikki/render.py:484`; `scripts/bilingual/audio.py:52,66-86`; `scripts/tests/test_bilingual_to_dsl.py:1089-1118`
+- **Symptom:** `plan_words` breaks out once `len(chosen) >= per_word` (:179-182) while kaikki's `render_card` plans every record — for a multi-record headword the converters reference different file sets, contradicting the `plan_words` docstring ("the union of what the kaikki EN card for that headword carries", :148-151).
+- **Evidence:** Both cross-check tests use single-record words (`bread`), so the interaction is never exercised.
+- **Why it matters:** The "run the kaikki stage verbatim" guarantee (`audio.py:1-9`) silently fails exactly for multi-POS headwords; no test would notice.
+- **Direction:** Add a two-record fixture to the cross-check test; then match kaikki's per-record semantics or document the intentional difference.
+- **Provenance:** he9-debt scan 2026-10-24 (`scripts/`), reviewer candidate R-5 (converter track). Verified against the working tree.
+
+### TD-055 — Full kaikki build buffers every rendered card body in RAM
+
+- **Priority:** P2
+- **Location:** `scripts/kaikki/build.py:162`, `:258-276`
+- **Symptom:** `cards` accumulates `(headwords, body, word, count)` for the whole dictionary before the definition-less pruning / `unlink_absent_refs` pass; nothing spills to disk. The flagship full EN build is ~1M cards.
+- **Evidence:** `:162` (accumulator), `:258-276` (second pass over the full list); the tool otherwise streams (snapshot, tar, bundle).
+- **Why it matters:** Peak memory scales with the whole dictionary (GB-scale for EN); an OOM kill mid-build loses the run.
+- **Direction:** Two-pass over a temp spill file (write bodies to a temp `.dsl`, then stream the pruning pass), or prune with a bounded LRU plus deferred second render for split/referenced words.
+- **Provenance:** he9-debt scan 2026-10-24 (`scripts/`), reviewer candidate R-6 (converter track). Verified against the working tree.
+
+### TD-056 — Bilingual `collect_records` memo holds every wanted record dict process-wide
+
+- **Priority:** P2
+- **Location:** `scripts/bilingual/audio.py:52`; `:66-86`; `scripts/bilingual/build.py:220-231`
+- **Symptom:** `_records_cache` is module-global keyed by snapshot+lang storing all parsed record dicts for the requested words; with `--all-lemmas` the word list is every EN lemma, so the memo approaches the whole snapshot's lexical records, pinned for the process lifetime even after bundling.
+- **Evidence:** `:52` (cache), `:66-86` (fill), `build.py:220-231` (transcription pass pins it).
+- **Why it matters:** A full translation build with audio can OOM where the streaming monolingual build succeeds; memory is never released.
+- **Direction:** Store only the fields the two consumers need (sounds/forms), or restructure to one streaming pass that plans audio and picks transcriptions per word and drops the record dicts.
+- **Provenance:** he9-debt scan 2026-10-24 (`scripts/`), reviewer candidate R-7 (converter track). Verified against the working tree.
+
+### TD-057 — DSL text utilities duplicated verbatim across the two converters
+
+- **Priority:** P2
+- **Location:** `scripts/bilingual/dsl.py:23-73` vs `scripts/kaikki/dsltext.py:13-40`, `:176-188`
+- **Symptom:** `escape_dsl`, `unescape_dsl`/`_unescape_dsl`, `clean_headword`, `header_arg` are byte-identical copies (bilingual's docstring even says "Same contract as the kaikki builder"), while bilingual already cross-imports `kaikki.dictzip`, `kaikki.audio`, `kaikki.source`, `kaikki.render._record_transcription`, `kaikki.profiles._RU_POS_LABELS`.
+- **Evidence:** Side-by-side diff of the two ranges; repo's own stated pattern is a single source of truth (`kaikki/dictzip.py:1`; `bilingual/audio.py:1-9,110-112`).
+- **Why it matters:** An escaping fix (new DSL metacharacter, normalization change) applied to one converter leaves the other emitting markup-breaking DSL; the duplicates are the only DSL-correctness code outside the shared-source discipline.
+- **Direction:** Have `bilingual.dsl` import the four functions from `kaikki.dsltext` (established pattern) and keep thin aliases for the tests.
+- **Provenance:** he9-debt scan 2026-10-24 (`scripts/`), reviewer candidate R-8 (converter track). Verified against the working tree.
+
+### TD-058 — `resolve_word` duplicates `resolve_words` expansion and is production-dead
+
+- **Priority:** P2
+- **Location:** `scripts/bilingual/equivalents.py:405-442` vs `:471-505`
+- **Symptom:** The synset→senses block (shell vs per-group expansion, POS sort) appears in both functions; only `resolve_words` is called by `build.py` — `resolve_word`'s callers are all tests.
+- **Evidence:** Grep: `resolve_word(` callers are tests only; `resolve_words` is the build path.
+- **Why it matters:** The shell-sense policy (the one reviews rejected unlinked shells for) must be edited in two places; a one-sided edit changes test-visible behavior away from shipped behavior.
+- **Direction:** Reimplement `resolve_word` as `resolve_words([word], backend, direction)[word]` or delete it and port the tests.
+- **Provenance:** he9-debt scan 2026-10-24 (`scripts/`), reviewer candidate R-9 (converter track). Verified against the working tree.
+
+### TD-059 — `extract_audio` swallows per-target `OSError`, misreporting disk failures as archive misses
+
+- **Priority:** P2
+- **Location:** `scripts/kaikki/audio.py:418-423` (vs `scripts/kaikki/build.py:439-443`, `scripts/kaikki/prefetch.py:846-849`)
+- **Symptom:** A failed member write (`except OSError: continue`) leaves the name in `remaining`, so the build reports "not found in the archive while bundling" and `bundle-audio` reports "not found in the archive or the cache" — even though the member was in the archive and the failure was disk-full or a refused filename.
+- **Evidence:** `:418-423` (swallow+continue) vs the two summary sites that only know found/missing.
+- **Why it matters:** An operator with a full disk is told the archive lacks the files and re-runs the prefetcher against Wikimedia forever instead of freeing space.
+- **Direction:** Distinguish write failure from lookup miss: return `(found, missing, write_failed)` or log the `OSError` text with the target name so the summary can say why.
+- **Provenance:** he9-debt scan 2026-10-24 (`scripts/`), reviewer candidate R-10 (converter track). Verified against the working tree.
 
 ---
 
@@ -655,4 +869,64 @@ candidate id (R-n) is provenance only.
 - **Direction:** Move the include/definition outside the linkage block; give the stub a
   one-line note in `carve/CMakeLists.txt`.
 - **Provenance:** scan 2026-10-05 (`carve/` + `patches/`), reviewer candidate R-11.
+
+### TD-060 — Store-asset checker crashes with `ZeroDivisionError` on a zero-dimension PNG
+
+- **Priority:** P3
+- **Location:** `scripts/check-store-assets.py:149-159`
+- **Symptom:** `actual = shot.width / shot.height` runs before the per-side bound check can `continue` — a corrupt 0-height PNG (passes the IHDR signature check) crashes the run and discards all collected violations. Exit code stays nonzero so CI still fails; only the diagnostics are lost. The module docstring (:15-16) promises every violation is reported.
+- **Evidence:** `:155` (division) vs `:149-154` (append-but-never-skip bounds block).
+- **Why it matters:** One corrupt file hides every other violation in the run.
+- **Direction:** Reject `width == 0 or height == 0` inside `read_geometry`.
+- **Provenance:** he9-debt scan 2026-10-24 (`scripts/`), reviewer candidate R-6 (catalog track). Verified against the working tree.
+
+### TD-061 — `derive-native-payload.ps1` reads QML imports from `main.qml` only
+
+- **Priority:** P3
+- **Location:** `scripts/derive-native-payload.ps1:54`, `:240-247`
+- **Symptom:** The `-AppQml` default and the import scan assume a single QML file (glob confirms exactly one exists today); the design claim "a new `import` in main.qml widens it automatically" (`app/build.ps1:201`) silently assumes that stays true. A second `.qml` file's imports would be invisible to the closure and to CI's set-equality check (`release-qt.yml:601-627`), caught only by the device matrix.
+- **Evidence:** `:54` (default), `:240-247` (scan); the two `Write-Warning` "ASSERTION CHANGED" guards (:218, :231) don't fail the run — acceptable, since the 52 MB payload ceiling (`release-qt.yml:555, 593-594`) backstops both.
+- **Why it matters:** A second QML file silently narrows the native-payload closure.
+- **Direction:** Scan every `app/**/*.qml`, or document the single-file constraint next to the param.
+- **Provenance:** he9-debt scan 2026-10-24 (`scripts/`), reviewer candidate R-7 (catalog track). Verified against the working tree.
+
+### TD-062 — Catalog CLI handles only `CatalogError`; malformed inputs produce raw tracebacks
+
+- **Priority:** P3
+- **Location:** `scripts/catalogtool/cli.py:154-158` (handler) vs `scripts/catalogtool/core.py:125-126`, `:303`, `:333-350`
+- **Symptom:** `load_source`'s `json.load` and `diff_catalogs`' direct key access on unvalidated documents raise `ValueError`/`KeyError` past the handler (`_read_json` wraps its own reads, but `build --source bad.json` and `diff` against a malformed published doc traceback). Exit code is still nonzero — message quality only.
+- **Evidence:** Handler at `cli.py:154-158` catches `CatalogError` only.
+- **Why it matters:** Operators debugging a bad source/diff get a traceback instead of the tool's clean error shape.
+- **Direction:** Wrap the same two exception families at `main()`.
+- **Provenance:** he9-debt scan 2026-10-24 (`scripts/`), reviewer candidate R-8 (catalog track). Verified against the working tree.
+
+### TD-063 — Dead reference to `openspec/changes/public-catalog-hosting` in `catalogtool`
+
+- **Priority:** P3
+- **Location:** `scripts/catalogtool/__init__.py:9`
+- **Symptom:** Module docstring cites `openspec/changes/public-catalog-hosting/`; the change was archived (same defect class as TD-006, different site).
+- **Evidence:** The change lives at `openspec/changes/archive/2026-10-03-public-catalog-hosting/`.
+- **Why it matters:** Doc link points at a non-existent path.
+- **Direction:** Update the path to the archive location.
+- **Provenance:** he9-debt scan 2026-10-24 (`scripts/`), reviewer candidate R-9 (catalog track). Verified against the working tree.
+
+### TD-064 — `validate_catalog` requires `sha256` on every file though the manifest contract marks it optional
+
+- **Priority:** P3
+- **Location:** `scripts/catalogtool/core.py:180-181`; `docs/REMOTE-CATALOG.md:127`
+- **Symptom:** The doc says sha256 absent → "accepted without verification"; `validate` rejects sha256-absent files (`:180-181` requires 64 lowercase hex). Stricter-than-contract is the safe direction, but the docstring's "shape the app's parser depends on" (:140-141) is wrong and `validate` can't be used on a legitimately minimal manifest.
+- **Evidence:** `:180-181` vs REMOTE-CATALOG.md:127; the app accepts sha256-absent files.
+- **Why it matters:** The validator rejects documents the contract calls legal.
+- **Direction:** Make sha256 optional in `validate_catalog` (still required when produced by `build`), or reword the docstring to "the shape the *built* document has".
+- **Provenance:** he9-debt scan 2026-10-24 (`scripts/`), reviewer candidate R-11 (catalog track). Verified against the working tree.
+
+### TD-065 — Kaikki cross-ref caps don't compose (effective bound exceeds the documented cap)
+
+- **Priority:** P3
+- **Location:** `scripts/kaikki/render.py:47-61`, `:517-525`
+- **Symptom:** `_cross_refs(limit=12)` caps per record but the card-level `>= 8` break only exits the inner loop — the effective bound is 8 + (records − 1), not the documented "capped".
+- **Evidence:** `:47-61` (per-record limit) vs `:517-525` (inner-loop break).
+- **Why it matters:** Cards carry more cross-refs than the documented cap; unbounded-ish growth per multi-record headword.
+- **Direction:** Break the outer loop (or count card-wide) so the cap composes.
+- **Provenance:** he9-debt scan 2026-10-24 (`scripts/`), reviewer candidate R-14 (converter track). Verified against the working tree.
 
