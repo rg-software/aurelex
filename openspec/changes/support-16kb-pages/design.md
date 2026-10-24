@@ -66,6 +66,19 @@ change every JNI call site on both sides for no gain.
 **D8 — minSdk 24 → 28; user-facing copy moves in the same change.**
 Qt 6.9 supports API 28+ only, so `qtMinSdkVersion` 24 → 28 in `build.ps1` (template + patch regex). The app already ships below Qt 6.6's supported floor (26), so this makes the floor honest rather than newly risky. `README.md` ("Android 7.0+"), `app/android/store-listing/listing.md` (both spots), and `docs/SIGNING.md` (`minSdkVersion` 24) all move to Android 9.0 / API 28 together — a store listing that promises 7.0 while the manifest requires 9.0 is the failure this avoids.
 
+**D10 — Qt 6.9.3 `loadHtml` renders percent-encoded; load baseless + CORS the server.**
+Qt 6.9.3's Android `loadHtml` passes `QUrl::toPercentEncoding(html)` into
+`loadDataWithBaseURL`, whose data path does not decode — the article shows as
+encoded text (found on device, tagged release). Qt fixed it upstream in 6.12
+(raw html with an http base, encoded only for empty/data bases). Until the Qt
+bump, `main.qml` calls `loadHtml(html, "")`: the empty base takes the
+decoding `loadData` path on both Qt versions, and every subresource URL is
+already absolute so no base is needed for resolution. The page origin becomes
+opaque, so `ArticleServer` now sends `Access-Control-Allow-Origin: *` on every
+reply and answers OPTIONS preflights (204) — otherwise Dark Reader's
+stylesheet fetch is CORS-blocked in dark mode. Covered by
+`article_server_test` (CORS header assertion + preflight check).
+
 ## Risks / Trade-offs
 
 - [Qt bump widens/changes the reachable set] → Re-run `derive-native-payload.ps1`, update the 52-lib/52 MB expectations and the ceiling in the same change; CI set-equality check catches drift.

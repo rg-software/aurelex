@@ -130,7 +130,8 @@ private:
     void deliverResourceResult(Delivery *d);   // takes ownership of d
 
     static void writeReply(Connection *conn, int status, const QString &statusText,
-                           const QString &contentType, const QByteArray &body, qint64 bodyLengthOverride = -1);
+                           const QString &contentType, const QByteArray &body, qint64 bodyLengthOverride = -1,
+                           const QString &extraHeaders = QString());
     static void writeNotFound(Connection *conn);
     static void writeBadRequest(Connection *conn, const QString &reason);
     static void writeServerError(Connection *conn, const QString &reason);

@@ -410,7 +410,13 @@ ApplicationWindow {
             // A suggestion injected before this blank load finishes gets wiped;
             // flag it so _renderSuggestOverlay defers (see _blankPending).
             root._blankPending = true
-            root.inlineWv.loadHtml(root.uiBlankHtml(), engine.articleBaseUrl)
+            // No base URL on purpose (support-16kb-pages): Qt 6.9.3 percent-
+            // encodes loadHtml input and only decodes it on the loadData path
+            // (empty base); with an http base the encoded source renders as
+            // text. Fixed upstream in Qt 6.12 (raw html + loadDataWithBaseURL
+            // for non-data bases). All article subresources are absolute
+            // loopback URLs, so no base is needed for resolution.
+            root.inlineWv.loadHtml(root.uiBlankHtml(), "")
         }
     }
 
@@ -677,7 +683,7 @@ ApplicationWindow {
         if (root.inlineWv && !root.inlineArticle && root.currentHtml.length === 0
             && engine.articleBaseUrl.length > 5) {
             root._blankPending = true
-            root.inlineWv.loadHtml(root.uiBlankHtml(), engine.articleBaseUrl)
+            root.inlineWv.loadHtml(root.uiBlankHtml(), "")
         }
     }
     function _showArticle(word, html) {
@@ -1570,7 +1576,7 @@ ColumnLayout {
                                         root._requestedWord = word
                                         engine.lookup(word)
                                     }
-                                    searchArticleView.loadHtml(root.uiBlankHtml(), engine.articleBaseUrl)
+                                    searchArticleView.loadHtml(root.uiBlankHtml(), "")
                                     return
                                 }
                                 if (u.indexOf("gdlookup://") === 0) {
@@ -1580,12 +1586,12 @@ ColumnLayout {
                                         root._requestedWord = word
                                         engine.lookup(word)
                                     }
-                                    searchArticleView.loadHtml(root.uiBlankHtml(), engine.articleBaseUrl)
+                                    searchArticleView.loadHtml(root.uiBlankHtml(), "")
                                     return
                                 }
                                 if (base.length > 0 && u.indexOf(base + "/gdau/") === 0) {
                                     engine.playAudio(u)
-                                    searchArticleView.loadHtml(root.uiBlankHtml(), engine.articleBaseUrl)
+                                    searchArticleView.loadHtml(root.uiBlankHtml(), "")
                                     return
                                 }
                             }
@@ -3603,10 +3609,12 @@ text: root._stagingActive
     property real loadedAtHeight: 0
     function _loadArticleNow() {
         const html = engine.rewriteArticleUrls(currentHtml)
-        const base = engine.articleBaseUrl.length > 0 ? engine.articleBaseUrl + "/" : ""
+        // No base URL (see _blankInline): Qt 6.9.3 renders loadHtml input
+        // percent-encoded unless it takes the loadData path, which needs an
+        // empty base. All subresources are absolute loopback URLs.
         if (root.inlineWv) {
             loadedAtHeight = root.inlineWv.height
-            root.inlineWv.loadHtml(html, base)
+            root.inlineWv.loadHtml(html, "")
         }
     }
     // Flip the OPEN article's dark mode in place via the injected gdSetDarkMode

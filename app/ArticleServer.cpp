@@ -261,6 +261,19 @@ ArticleServer::Route ArticleServer::classify(const QString &pathIn) {
 void ArticleServer::handle(Connection *conn, const QString &method, const QString &pathIn, const QString &rawHeaders) {
     Q_UNUSED(rawHeaders);
     if (!conn || !conn->alive()) return;
+    // CORS preflight: with the article loaded baseless (Qt 6.9.3 loadHtml
+    // workaround, see main.qml _blankInline), the page origin is opaque, so
+    // Dark Reader's stylesheet fetch preflights cross-origin. Answer the
+    // preflight directly; the loopback socket only ever serves this app.
+    if (method == QStringLiteral("OPTIONS")) {
+        writeReply(conn, 204, QStringLiteral("No Content"), QStringLiteral("text/plain"),
+                   QByteArray(), -1,
+                   QStringLiteral("Access-Control-Allow-Methods: GET, HEAD, OPTIONS\r\n"
+                                  "Access-Control-Allow-Headers: *\r\n"
+                                  "Access-Control-Max-Age: 86400\r\n"));
+        conn->socket->disconnectFromHost();
+        return;
+    }
     if (method != QStringLiteral("GET") && method != QStringLiteral("HEAD")) {
         writeBadRequest(conn, QStringLiteral("method %1 not allowed").arg(method));
         conn->socket->disconnectFromHost();
@@ -384,19 +397,27 @@ void ArticleServer::deliverResourceResult(Delivery *d) {
 }
 
 void ArticleServer::writeReply(Connection *conn, int status, const QString &statusText,
-                               const QString &contentType, const QByteArray &body, qint64 bodyLengthOverride) {
+                               const QString &contentType, const QByteArray &body, qint64 bodyLengthOverride,
+                               const QString &extraHeaders) {
     if (!conn || !conn->alive()) return; // died while the engine ran
     const qint64 len = (bodyLengthOverride < 0) ? body.size() : bodyLengthOverride;
+    // CORS: the article page may carry an opaque origin (baseless loadHtml on
+    // Qt 6.9.3, see main.qml), so Dark Reader's stylesheet fetch and any other
+    // subresource fetch must be allowed cross-origin. The socket binds
+    // localhost only, so a wildcard origin exposes nothing beyond this app.
     const QByteArray headers =
         QStringLiteral("HTTP/1.1 %1 %2\r\n"
                        "Content-Type: %3\r\n"
                        "Content-Length: %4\r\n"
+                       "Access-Control-Allow-Origin: *\r\n"
+                       "%5"
                        "Cache-Control: no-cache\r\n"
                        "Connection: close\r\n\r\n")
             .arg(status)
             .arg(statusText)
             .arg(contentType)
             .arg(len)
+            .arg(extraHeaders)
             .toUtf8();
     conn->socket->write(headers);
     if (bodyLengthOverride != 0) conn->socket->write(body);

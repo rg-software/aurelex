@@ -103,7 +103,11 @@ public:
     }
 
     void get(quint16 port, const QByteArray &path) {
-        const QByteArray req = "GET " + path + " HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n";
+        request("GET", port, path);
+    }
+
+    void request(const QByteArray &method, quint16 port, const QByteArray &path) {
+        const QByteArray req = method + " " + path + " HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n";
         connect(&sock, &QTcpSocket::connected, this, [this, req] {
             sock.write(req);
             sock.flush();
@@ -157,13 +161,13 @@ int main(int argc, char **argv) {
     const quint16 port = server.port();
 
     // One client per connection, kept alive for the whole run.
-    Client clientHang, clientOk, clientAbandon, clientAfter;
+    Client clientHang, clientOk, clientAbandon, clientAfter, clientOpts;
 
     // A simple tick-driven state machine, so no check depends on an arbitrary
     // sleep being long enough.
     enum Step {
         StartHang, WaitHangActive, StartOk, WaitOk, ReleaseHangs, WaitHangDone,
-        AbandonStart, AbandonAbort, StartAfter, WaitAfter, Done
+        AbandonStart, AbandonAbort, StartAfter, WaitAfter, WaitOpts, Done
     };
     Step step = StartHang;
     int ticks = 0;
@@ -200,6 +204,8 @@ int main(int argc, char **argv) {
                     fail("second request did not get a 200: " + clientOk.resp.left(48));
                 else if (!clientOk.resp.contains("OK:bres://d1/ok"))
                     fail("second request body wrong: " + clientOk.resp.right(48));
+                else if (!clientOk.resp.contains("Access-Control-Allow-Origin: *"))
+                    fail("second request missing CORS header: " + clientOk.resp.left(200));
                 else if (hangsActive() < 1)
                     fail("second request was served only after the first finished — no slot isolation");
                 else
@@ -263,9 +269,28 @@ int main(int argc, char **argv) {
                     pass("request after an abandoned one still resolves (no residue)");
                 else
                     fail("request after abandon failed: " + clientAfter.resp.left(48));
-                step = Done;
+                clientOpts.request("OPTIONS", port, "/bres/d1/ok3");
+                step = WaitOpts;
+                ticks = 0;
             } else if (++ticks > 120) {
                 fail("request after abandon never completed");
+                step = Done;
+            }
+            break;
+
+        case WaitOpts:
+            if (clientOpts.done) {
+                if (!clientOpts.resp.startsWith("HTTP/1.1 204"))
+                    fail("OPTIONS preflight did not get a 204: " + clientOpts.resp.left(48));
+                else if (!clientOpts.resp.contains("Access-Control-Allow-Origin: *"))
+                    fail("OPTIONS preflight missing CORS origin header: " + clientOpts.resp.left(200));
+                else if (!clientOpts.resp.contains("Access-Control-Allow-Methods:"))
+                    fail("OPTIONS preflight missing CORS methods header: " + clientOpts.resp.left(200));
+                else
+                    pass("OPTIONS preflight answered with CORS headers");
+                step = Done;
+            } else if (++ticks > 80) {
+                fail("OPTIONS preflight never completed");
                 step = Done;
             }
             break;

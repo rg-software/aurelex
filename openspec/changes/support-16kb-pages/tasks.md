@@ -36,3 +36,10 @@
 
 - [ ] 7.1 Boot a 16 KB emulator image (or 16 KB developer option), confirm `adb shell getconf PAGE_SIZE` returns `16384`, install the Release APK, and verify launch with no backcompat dialog plus a dictionary lookup rendering an article.
 - [ ] 7.2 Run the `docs/TESTING.md` hardware pass (lookup, article, audio, groups, FTS, catalog TLS) on the 16 KB build and verify no regressions vs. the 4 KB baseline.
+
+## 8. Qt 6.9.3 loadHtml rendering fix
+
+- [x] 8.1 Call `loadHtml` without a base URL in `app/main.qml` (7 sites) so Qt 6.9.3 takes its decoding `loadData` path; subresources are absolute loopback URLs and need no base.
+- [x] 8.2 Send `Access-Control-Allow-Origin: *` on every `ArticleServer` reply and answer OPTIONS preflights (204), so Dark Reader's stylesheet fetch keeps working from the opaque page origin.
+- [x] 8.3 Extend `article_server_test` with a CORS-header assertion and an OPTIONS preflight check, and verify the suite passes on host.
+- [ ] 8.4 Verify on device: article renders (not encoded text), dark mode re-colors, find/zoom/links/audio/history overlay work on the article surface.
