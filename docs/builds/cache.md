@@ -91,6 +91,32 @@ kaikki per-language state from a bilingual run except the shared audio-cache
 (which is append-only by design — sidecar-verified downloads are reused).
 Builder outputs (`dist/`, previews) are disposable; caches are not.
 
+## Backup (single archive)
+
+The caches live under several top-level directories
+(`~/.cache/aurelex-kaikki`, `~/.cache/aurelex-bilingual`, ...), which is
+correct per the shared-cache convention but awkward to back up as several
+sync-library roots. `scripts/backup-cache.ps1` traverses every
+`~/.cache/aurelex-*` directory and writes ONE archive plus a SHA-256
+sidecar, so there is a single backup unit to store:
+
+```powershell
+pwsh -File scripts/backup-cache.ps1                       # ~/aurelex-cache-backup-<date>.tar
+pwsh -File scripts/backup-cache.ps1 -Compress -Out D:\backups\aurelex-cache.tar.gz
+```
+
+The default is a plain `.tar` (store-only): the big blobs are already
+compressed, so gzip would spend an hour of CPU for ~zero bytes saved.
+Paths inside the archive are relative to `~/.cache`, so a restore lands
+back where the builders look:
+
+```powershell
+tar -xf ~/aurelex-cache-backup-2026-10-24.tar -C ~/.cache
+```
+
+Nothing is deleted or modified by a backup run. Re-run after a prefetch or
+a resolve-cache refresh; builder outputs need no backup.
+
 ## Reorganization performed (2026-10-21)
 
 - Moved one copy of `wiktionary-audios.tar` (+ `.sha256`, `.keys.txt`) to

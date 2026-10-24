@@ -8,6 +8,8 @@ Per-dictionary build recipes and cache sharing notes.
 - `ja.md` — Japanese (`au_kaikki_ja-ja`).
 - `en-ru-wordnet.md` — En→Ru translation dictionary (`au_wordnet_en-ru`).
 - `en-ru-tatoeba.md` — En→Ru example-sentences dictionary (`au_tatoeba_en-ru`).
+- `ru-en-wordnet.md` — Ru→En translation dictionary (`au_wordnet_ru-en`).
+- `ru-en-tatoeba.md` — Ru→En example-sentences dictionary (`au_tatoeba_ru-en`).
 
 Each recipe is self-contained: set the variables at the top, run Step 1 (prefetch)
 until it exits 0, then Step 2 (build). All builds are offline once the cache is
