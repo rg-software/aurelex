@@ -194,8 +194,12 @@ Get-ChildItem -LiteralPath $vendoredDir -Filter "*.so" -File -EA SilentlyContinu
 
 $cppShared = Join-Path $NdkRoot "sources/cxx-stl/llvm-libc++/libs/$Abi/libc++_shared.so"
 if (-not (Test-Path $cppShared)) {
+    # NDK r28+ dropped the sources/ copy; the remaining sysroot copy is keyed
+    # by the clang target triple, not the ABI name (arm64-v8a vs
+    # aarch64-linux-android).
+    $triple = if ($Abi -eq "arm64-v8a") { "aarch64-linux-android" } else { "x86_64-linux-android" }
     $prebuilt = if ($IsWindows) { "windows-x86_64" } else { "linux-x86_64" }
-    $cppShared = Join-Path $NdkRoot "toolchains/llvm/prebuilt/$prebuilt/sysroot/usr/lib/$Abi/libc++_shared.so"
+    $cppShared = Join-Path $NdkRoot "toolchains/llvm/prebuilt/$prebuilt/sysroot/usr/lib/$triple/libc++_shared.so"
 }
 if (Test-Path $cppShared) {
     $index["libc++_shared.so"] = $cppShared
