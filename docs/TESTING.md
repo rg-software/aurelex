@@ -707,6 +707,19 @@ engine served stale bytes); (2) an update skips re-downloading an opted-in
 optional bundle whose recorded sha matches the manifest
 (`EngineController::startCatalogDownload`).
 
+**2026-10-25 device pass (Qt 6.9.3 render fix).** Debug build on the 16 KB
+toolchain (NDK r30 + Qt 6.9.3 + AGP 8.6.0). The tagged v0.4.3 release showed
+the article as percent-encoded source text — Qt 6.9.3's `loadHtml` encodes its
+input and its `loadDataWithBaseURL` path does not decode (fixed upstream in Qt
+6.12; the app now loads baseless, see `support-16kb-pages` D10). After the fix:
+the article renders styled text, the dark/light switch re-colors it in place
+(the new CORS headers keep Dark Reader's fetch working from the opaque page),
+and rotation keeps cutout clearance. The import-results banner seen in the same
+session ("Aurelex Basic ... already installed") is the #20c same-name guard,
+not a delete failure: the source folder holds both `aurelex-basic.dsl` and
+`aurelex-basic.dsl.dz`, and logcat shows every staged file and index entry was
+removed `ok=true` before the reimport re-copied them.
+
 **2026-10-22 root cause of the vanishing flag (fixed).** Tapping the lit audio
 note on an outdated installed entry ran a bundle-only batch whose success
 re-recorded the *manifest's current* shas for the *whole entry* — including a
