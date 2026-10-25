@@ -62,6 +62,10 @@ $env:JAVA_HOME         = $Jdk17
 $env:ANDROID_SDK_ROOT  = $RealSdk
 $env:ANDROID_HOME      = $RealSdk
 $env:ANDROID_NDK_ROOT  = $NdkRoot
+# vcpkg's android toolchain reads ANDROID_NDK_HOME, not ANDROID_NDK_ROOT (and a
+# stale machine-wide ANDROID_NDK_HOME silently pins an old NDK). Point both at
+# the NDK we build with so a vcpkg triplet rebuild cannot mix toolchains.
+$env:ANDROID_NDK_HOME  = $NdkRoot
 
 $gradleTask = "assemble$Configuration"
 

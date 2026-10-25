@@ -102,25 +102,49 @@ if [ "${WITH_SPACES}" = "1" ]; then
   TOOL_DIR="${WORK}/bin"
   mkdir -p "${TOOL_DIR}"
   wrap_tool() {
-    local name="$1" exe="$2" extra="$3"
+    local name="$1" exe="$2" extra="$3" conv="$4"
     if [ ! -e "${TOOL_DIR}/${name}" ]; then
       # MSYS2 sh executes a POSIX-slashed path cleanly (/d/...); Windows
       # drive paths (D:/...) as an exec target are hit-or-miss under MSYS2's
       # path handling, so convert. conv=$(cygpath -m ...) would give D:/; we
       # want /d/ which is what `cygpath` gives by default on MSYS2.
       local unix="$(cygpath -u "${NDK_BIN}/${exe}" 2>/dev/null || echo "${NDK_BIN}/${exe}")"
-      cat > "${TOOL_DIR}/${name}" <<EOF
+      if [ "${conv}" = "1" ]; then
+        # File-operating tools (ar/ranlib/strip) receive absolute POSIX paths
+        # from libtool, and the native .exe cannot open /c/... when the
+        # runtime's own conversion is off (MSYS2_ARG_CONV_EXCL='*' is honored
+        # by current MSYS2 but was ignored by older Git-Bash runtimes, which
+        # is why this only bites on newer shells). Convert existing-file
+        # operands to Windows form explicitly instead of relying on the
+        # runtime. Flags (starting with -) pass through untouched.
+        cat > "${TOOL_DIR}/${name}" <<EOF
+#!/bin/sh
+_n=\$#
+_i=0
+while [ \$_i -lt \$_n ]; do
+  _a="\$1"; shift
+  case "\$_a" in
+  -*) set -- "\$@" "\$_a" ;;
+  *)  if [ -e "\$_a" ]; then set -- "\$@" "\$(cygpath -m "\$_a")"; else set -- "\$@" "\$_a"; fi ;;
+  esac
+  _i=\$((_i+1))
+done
+exec "${unix}" ${extra} "\$@"
+EOF
+      else
+        cat > "${TOOL_DIR}/${name}" <<EOF
 #!/bin/sh
 exec "${unix}" ${extra} "\$@"
 EOF
+      fi
       chmod +x "${TOOL_DIR}/${name}"
     fi
   }
-  wrap_tool "${CLANG_TARGET}-clang"          "clang.exe"   "--target=${CLANG_TARGET}-linux-android${XAPIAN_MIN_API}"
-  wrap_tool "${CLANG_TARGET}-clang++"        "clang++.exe" "--target=${CLANG_TARGET}-linux-android${XAPIAN_MIN_API}"
-  wrap_tool "llvm-ar"                        "llvm-ar.exe"     ""
-  wrap_tool "llvm-ranlib"                    "llvm-ranlib.exe" ""
-  wrap_tool "llvm-strip"                     "llvm-strip.exe"  ""
+  wrap_tool "${CLANG_TARGET}-clang"          "clang.exe"   "--target=${CLANG_TARGET}-linux-android${XAPIAN_MIN_API}" 0
+  wrap_tool "${CLANG_TARGET}-clang++"        "clang++.exe" "--target=${CLANG_TARGET}-linux-android${XAPIAN_MIN_API}" 0
+  wrap_tool "llvm-ar"                        "llvm-ar.exe"     "" 1
+  wrap_tool "llvm-ranlib"                    "llvm-ranlib.exe" "" 1
+  wrap_tool "llvm-strip"                     "llvm-strip.exe"  "" 1
   CC="${TOOL_DIR}/${CLANG_TARGET}-clang"
   CXX="${TOOL_DIR}/${CLANG_TARGET}-clang++"
   AR="${TOOL_DIR}/llvm-ar"
