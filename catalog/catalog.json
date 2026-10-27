@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updated": "2026-10-24",
+  "updated": "2026-10-27",
   "entries": [
     {
       "id": "kaikki-en",
@@ -108,8 +108,8 @@
           "required": true,
           "name": "au_tatoeba_en-ru.dsl.dz",
           "url": "https://github.com/rg-software/aurelex/releases/download/catalog-data/au_tatoeba_en-ru.dsl.dz",
-          "sizeBytes": 5346462,
-          "sha256": "cb3dfcff14484c45a71e4c1a9d5b1a51c06a9cdf5ff6e463fc008d06f788bd4f"
+          "sizeBytes": 5401079,
+          "sha256": "0debb8500deb7b7ce2bb656c1a9316354156b16ab1bc63d211f470ef2b2578ed"
         }
       ]
     },
@@ -129,8 +129,8 @@
           "required": true,
           "name": "au_tatoeba_ru-en.dsl.dz",
           "url": "https://github.com/rg-software/aurelex/releases/download/catalog-data/au_tatoeba_ru-en.dsl.dz",
-          "sizeBytes": 3588197,
-          "sha256": "c8663ee7f16905f88ae8f3a6ef9639a7893b018816c9809cb20d2c50a8386339"
+          "sizeBytes": 3676476,
+          "sha256": "97167e50640cfab7695980bad24a5c87c412d59518eaff3bd267901f28b99bbd"
         }
       ]
     },
@@ -150,8 +150,8 @@
           "required": true,
           "name": "au_wordnet_en-ru.dsl.dz",
           "url": "https://github.com/rg-software/aurelex/releases/download/catalog-data/au_wordnet_en-ru.dsl.dz",
-          "sizeBytes": 4780366,
-          "sha256": "552d8e783c07f19b34d1fc655b1af9382b1c46d40a60e5ac12b96f1b8386312a"
+          "sizeBytes": 5033059,
+          "sha256": "c205d94f67a90624e56326ea0f0102402ffd550ad2d68e03bf78eeafe54767c8"
         },
         {
           "role": "resources",
@@ -179,16 +179,224 @@
           "required": true,
           "name": "au_wordnet_ru-en.dsl.dz",
           "url": "https://github.com/rg-software/aurelex/releases/download/catalog-data/au_wordnet_ru-en.dsl.dz",
-          "sizeBytes": 3896112,
-          "sha256": "318c97e250e2c26e9013049f2718d5306766819fad7561d945eb84e08e1c914e"
+          "sizeBytes": 4036357,
+          "sha256": "f72b1c0ce2c776bd5533e9a0ac25f87a676f9e207902ac8c90fbc1ad399e493a"
         },
         {
           "role": "resources",
           "required": false,
           "name": "au_wordnet_ru-en.dsl.files.zip",
           "url": "https://github.com/rg-software/aurelex/releases/download/catalog-data/au_wordnet_ru-en.dsl.files.zip",
-          "sizeBytes": 347431720,
-          "sha256": "b335a9864f45edf7292010f09f9c087636e8d34b6d35e3ffce68c116c846130b"
+          "sizeBytes": 199168085,
+          "sha256": "0f7b50b57e92122a9692964af49d8b87b0129449fd49fd348604f5d3159f0065"
+        }
+      ]
+    },
+    {
+      "id": "tatoeba-en-ja",
+      "name": "Aurelex Tatoeba En-Ja",
+      "names": {
+        "ru": "Aurelex Tatoeba англ/яп",
+        "ja": "Aurelex Tatoeba 英日"
+      },
+      "langFrom": "en",
+      "langTo": "ja",
+      "attribution": "Tatoeba contributors, CC BY 2.0 FR",
+      "license": "CC-BY-2.0-FR",
+      "files": [
+        {
+          "role": "dictionary",
+          "required": true,
+          "name": "au_tatoeba_en-ja.dsl.dz",
+          "url": "https://github.com/rg-software/aurelex/releases/download/catalog-data/au_tatoeba_en-ja.dsl.dz",
+          "sizeBytes": 4425204,
+          "sha256": "8d746c61b3cf0087e21b6c91f491967fc6cb9df30d1d4e67043cdb92f87ce8e7"
+        }
+      ]
+    },
+    {
+      "id": "tatoeba-ja-en",
+      "name": "Aurelex Tatoeba Ja-En",
+      "names": {
+        "ru": "Aurelex Tatoeba яп/англ",
+        "ja": "Aurelex Tatoeba 日英"
+      },
+      "langFrom": "ja",
+      "langTo": "en",
+      "attribution": "Tatoeba contributors, CC BY 2.0 FR",
+      "license": "CC-BY-2.0-FR",
+      "files": [
+        {
+          "role": "dictionary",
+          "required": true,
+          "name": "au_tatoeba_ja-en.dsl.dz",
+          "url": "https://github.com/rg-software/aurelex/releases/download/catalog-data/au_tatoeba_ja-en.dsl.dz",
+          "sizeBytes": 4145633,
+          "sha256": "ad2c46ec3452f256f6d40ffc1c635d97139cddc460e969e41a51cf37028d11ff"
+        }
+      ]
+    },
+    {
+      "id": "tatoeba-ja-ru",
+      "name": "Aurelex Tatoeba Ja-Ru",
+      "names": {
+        "ru": "Aurelex Tatoeba яп/рус",
+        "ja": "Aurelex Tatoeba 日露"
+      },
+      "langFrom": "ja",
+      "langTo": "ru",
+      "attribution": "Tatoeba contributors, CC BY 2.0 FR",
+      "license": "CC-BY-2.0-FR",
+      "files": [
+        {
+          "role": "dictionary",
+          "required": true,
+          "name": "au_tatoeba_ja-ru.dsl.dz",
+          "url": "https://github.com/rg-software/aurelex/releases/download/catalog-data/au_tatoeba_ja-ru.dsl.dz",
+          "sizeBytes": 1557698,
+          "sha256": "770e11fd698f3e5be896c948075637f8e6145eecaad55cfe12cc42cac0ec42e6"
+        }
+      ]
+    },
+    {
+      "id": "tatoeba-ru-ja",
+      "name": "Aurelex Tatoeba Ru-Ja",
+      "names": {
+        "ru": "Aurelex Tatoeba рус/яп",
+        "ja": "Aurelex Tatoeba 露日"
+      },
+      "langFrom": "ru",
+      "langTo": "ja",
+      "attribution": "Tatoeba contributors, CC BY 2.0 FR",
+      "license": "CC-BY-2.0-FR",
+      "files": [
+        {
+          "role": "dictionary",
+          "required": true,
+          "name": "au_tatoeba_ru-ja.dsl.dz",
+          "url": "https://github.com/rg-software/aurelex/releases/download/catalog-data/au_tatoeba_ru-ja.dsl.dz",
+          "sizeBytes": 970522,
+          "sha256": "0e4912d1570e9eb4e2113e2fbaafe68a40fe0122dec54576e90ca56184154f54"
+        }
+      ]
+    },
+    {
+      "id": "wordnet-en-ja",
+      "name": "Aurelex WordNet En-Ja",
+      "names": {
+        "ru": "Aurelex WordNet англ/яп",
+        "ja": "Aurelex WordNet 英和"
+      },
+      "langFrom": "en",
+      "langTo": "ja",
+      "attribution": "Princeton WordNet, Japanese WordNet, Tatoeba (CC BY 2.0 FR), Wiktionary audio (CC BY-SA 4.0)",
+      "license": "Free to use with attribution",
+      "files": [
+        {
+          "role": "dictionary",
+          "required": true,
+          "name": "au_wordnet_en-ja.dsl.dz",
+          "url": "https://github.com/rg-software/aurelex/releases/download/catalog-data/au_wordnet_en-ja.dsl.dz",
+          "sizeBytes": 10026361,
+          "sha256": "f74a9377feac658f8afe8710a8c0936007d15e8d40663f2343deb05490070de2"
+        },
+        {
+          "role": "resources",
+          "required": false,
+          "name": "au_wordnet_en-ja.dsl.files.zip",
+          "url": "https://github.com/rg-software/aurelex/releases/download/catalog-data/au_wordnet_en-ja.dsl.files.zip",
+          "sizeBytes": 649066840,
+          "sha256": "09e67aad7557734881da4e23d658e10f9d9d281358168d47305df7442c92840b"
+        }
+      ]
+    },
+    {
+      "id": "wordnet-ja-en",
+      "name": "Aurelex WordNet Ja-En",
+      "names": {
+        "ru": "Aurelex WordNet яп/англ",
+        "ja": "Aurelex WordNet 和英"
+      },
+      "langFrom": "ja",
+      "langTo": "en",
+      "attribution": "Princeton WordNet, Japanese WordNet, Tatoeba (CC BY 2.0 FR), Wiktionary audio (CC BY-SA 4.0)",
+      "license": "Free to use with attribution",
+      "files": [
+        {
+          "role": "dictionary",
+          "required": true,
+          "name": "au_wordnet_ja-en.dsl.dz",
+          "url": "https://github.com/rg-software/aurelex/releases/download/catalog-data/au_wordnet_ja-en.dsl.dz",
+          "sizeBytes": 8483334,
+          "sha256": "3de652b7e7a66072396446a51bb8ca7a6cdb1e590428f8090ef414e46a20abe7"
+        },
+        {
+          "role": "resources",
+          "required": false,
+          "name": "au_wordnet_ja-en.dsl.files.zip",
+          "url": "https://github.com/rg-software/aurelex/releases/download/catalog-data/au_wordnet_ja-en.dsl.files.zip",
+          "sizeBytes": 1146197,
+          "sha256": "bd315a06ab3db396178304d3484d1332c921ff26ebcd45eaabc3b4f37773100c"
+        }
+      ]
+    },
+    {
+      "id": "wordnet-ja-ru",
+      "name": "Aurelex WordNet Ja-Ru",
+      "names": {
+        "ru": "Aurelex WordNet яп/рус",
+        "ja": "Aurelex WordNet 和露"
+      },
+      "langFrom": "ja",
+      "langTo": "ru",
+      "attribution": "Princeton WordNet, RuWordNet, Japanese WordNet, Tatoeba (CC BY 2.0 FR), Wiktionary audio (CC BY-SA 4.0)",
+      "license": "Non-commercial use and distribution only",
+      "files": [
+        {
+          "role": "dictionary",
+          "required": true,
+          "name": "au_wordnet_ja-ru.dsl.dz",
+          "url": "https://github.com/rg-software/aurelex/releases/download/catalog-data/au_wordnet_ja-ru.dsl.dz",
+          "sizeBytes": 4948663,
+          "sha256": "a5dedfdf58d31c3f36bd17da6d931e74e305ccb69841863080f6a06c6e47b5cc"
+        },
+        {
+          "role": "resources",
+          "required": false,
+          "name": "au_wordnet_ja-ru.dsl.files.zip",
+          "url": "https://github.com/rg-software/aurelex/releases/download/catalog-data/au_wordnet_ja-ru.dsl.files.zip",
+          "sizeBytes": 798363,
+          "sha256": "292df03f22a5b71336703eb0e56c29aa59cd886e7e84ee42123cd3791b7da40c"
+        }
+      ]
+    },
+    {
+      "id": "wordnet-ru-ja",
+      "name": "Aurelex WordNet Ru-Ja",
+      "names": {
+        "ru": "Aurelex WordNet рус/яп",
+        "ja": "Aurelex WordNet 露和"
+      },
+      "langFrom": "ru",
+      "langTo": "ja",
+      "attribution": "Princeton WordNet, RuWordNet, Japanese WordNet, Tatoeba (CC BY 2.0 FR), Wiktionary audio (CC BY-SA 4.0)",
+      "license": "Non-commercial use and distribution only",
+      "files": [
+        {
+          "role": "dictionary",
+          "required": true,
+          "name": "au_wordnet_ru-ja.dsl.dz",
+          "url": "https://github.com/rg-software/aurelex/releases/download/catalog-data/au_wordnet_ru-ja.dsl.dz",
+          "sizeBytes": 3088520,
+          "sha256": "7133db29599ca773b8e01a35e934a09de0d33f5a357e3797d6387a2bc247d2fb"
+        },
+        {
+          "role": "resources",
+          "required": false,
+          "name": "au_wordnet_ru-ja.dsl.files.zip",
+          "url": "https://github.com/rg-software/aurelex/releases/download/catalog-data/au_wordnet_ru-ja.dsl.files.zip",
+          "sizeBytes": 168494001,
+          "sha256": "e934ce4e30e6612cdd7713a07e8422e980d2b4719d2e519c1870e23317d8834d"
         }
       ]
     }
