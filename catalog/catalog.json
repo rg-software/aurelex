@@ -357,8 +357,8 @@
           "required": true,
           "name": "au_wordnet_ja-ru.dsl.dz",
           "url": "https://github.com/rg-software/aurelex/releases/download/catalog-data/au_wordnet_ja-ru.dsl.dz",
-          "sizeBytes": 4948663,
-          "sha256": "a5dedfdf58d31c3f36bd17da6d931e74e305ccb69841863080f6a06c6e47b5cc"
+          "sizeBytes": 4949080,
+          "sha256": "1879f453935f2a3eb6de0b194527b9478b267d57393113546fe0efb1f2b7ae0a"
         },
         {
           "role": "resources",
