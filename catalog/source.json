@@ -76,9 +76,9 @@
     },
     {
       "id": "tatoeba-en-ru",
-      "name": "Aurelex Tatoeba En-Ru",
+      "name": "Aurelex Tatoeba En → Ru",
       "names": {
-        "ru": "Aurelex Tatoeba англ/рус"
+        "ru": "Aurelex Tatoeba англ → рус"
       },
       "langFrom": "en",
       "langTo": "ru",
@@ -94,9 +94,9 @@
     },
     {
       "id": "tatoeba-ru-en",
-      "name": "Aurelex Tatoeba Ru-En",
+      "name": "Aurelex Tatoeba Ru → En",
       "names": {
-        "ru": "Aurelex Tatoeba рус/англ"
+        "ru": "Aurelex Tatoeba рус → англ"
       },
       "langFrom": "ru",
       "langTo": "en",
@@ -112,9 +112,9 @@
     },
     {
       "id": "wordnet-en-ru",
-      "name": "Aurelex WordNet En-Ru",
+      "name": "Aurelex WordNet En → Ru",
       "names": {
-        "ru": "Aurelex WordNet англ/рус"
+        "ru": "Aurelex WordNet англ → рус"
       },
       "langFrom": "en",
       "langTo": "ru",
@@ -135,9 +135,9 @@
     },
     {
       "id": "wordnet-ru-en",
-      "name": "Aurelex WordNet Ru-En",
+      "name": "Aurelex WordNet Ru → En",
       "names": {
-        "ru": "Aurelex WordNet рус/англ"
+        "ru": "Aurelex WordNet рус → англ"
       },
       "langFrom": "ru",
       "langTo": "en",
@@ -158,9 +158,9 @@
     },
     {
       "id": "tatoeba-en-ja",
-      "name": "Aurelex Tatoeba En-Ja",
+      "name": "Aurelex Tatoeba En → Ja",
       "names": {
-        "ru": "Aurelex Tatoeba англ/яп",
+        "ru": "Aurelex Tatoeba англ → яп",
         "ja": "Aurelex Tatoeba 英日"
       },
       "langFrom": "en",
@@ -177,9 +177,9 @@
     },
     {
       "id": "tatoeba-ja-en",
-      "name": "Aurelex Tatoeba Ja-En",
+      "name": "Aurelex Tatoeba Ja → En",
       "names": {
-        "ru": "Aurelex Tatoeba яп/англ",
+        "ru": "Aurelex Tatoeba яп → англ",
         "ja": "Aurelex Tatoeba 日英"
       },
       "langFrom": "ja",
@@ -196,9 +196,9 @@
     },
     {
       "id": "tatoeba-ja-ru",
-      "name": "Aurelex Tatoeba Ja-Ru",
+      "name": "Aurelex Tatoeba Ja → Ru",
       "names": {
-        "ru": "Aurelex Tatoeba яп/рус",
+        "ru": "Aurelex Tatoeba яп → рус",
         "ja": "Aurelex Tatoeba 日露"
       },
       "langFrom": "ja",
@@ -215,9 +215,9 @@
     },
     {
       "id": "tatoeba-ru-ja",
-      "name": "Aurelex Tatoeba Ru-Ja",
+      "name": "Aurelex Tatoeba Ru → Ja",
       "names": {
-        "ru": "Aurelex Tatoeba рус/яп",
+        "ru": "Aurelex Tatoeba рус → яп",
         "ja": "Aurelex Tatoeba 露日"
       },
       "langFrom": "ru",
@@ -234,9 +234,9 @@
     },
     {
       "id": "wordnet-en-ja",
-      "name": "Aurelex WordNet En-Ja",
+      "name": "Aurelex WordNet En → Ja",
       "names": {
-        "ru": "Aurelex WordNet англ/яп",
+        "ru": "Aurelex WordNet англ → яп",
         "ja": "Aurelex WordNet 英和"
       },
       "langFrom": "en",
@@ -258,9 +258,9 @@
     },
     {
       "id": "wordnet-ja-en",
-      "name": "Aurelex WordNet Ja-En",
+      "name": "Aurelex WordNet Ja → En",
       "names": {
-        "ru": "Aurelex WordNet яп/англ",
+        "ru": "Aurelex WordNet яп → англ",
         "ja": "Aurelex WordNet 和英"
       },
       "langFrom": "ja",
@@ -282,9 +282,9 @@
     },
     {
       "id": "wordnet-ja-ru",
-      "name": "Aurelex WordNet Ja-Ru",
+      "name": "Aurelex WordNet Ja → Ru",
       "names": {
-        "ru": "Aurelex WordNet яп/рус",
+        "ru": "Aurelex WordNet яп → рус",
         "ja": "Aurelex WordNet 和露"
       },
       "langFrom": "ja",
@@ -306,9 +306,9 @@
     },
     {
       "id": "wordnet-ru-ja",
-      "name": "Aurelex WordNet Ru-Ja",
+      "name": "Aurelex WordNet Ru → Ja",
       "names": {
-        "ru": "Aurelex WordNet рус/яп",
+        "ru": "Aurelex WordNet рус → яп",
         "ja": "Aurelex WordNet 露和"
       },
       "langFrom": "ru",
