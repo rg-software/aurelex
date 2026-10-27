@@ -91,19 +91,20 @@ def description_lines(title: str, sources: Sources, card_count: int) -> list:
             f"Wiktionary / kaikki.org audio, snapshot {sources.kaikki_dump_date}",
             "",
         ]
+        credit = "Princeton WordNet"
+        if sources.ruwordnet in thesaurus_lines:
+            credit += ", RuWordNet"
+        if sources.wnja in thesaurus_lines:
+            credit += ", Japanese WordNet (https://bond-lab.github.io/wnja/)"
+        credit += ", and Tatoeba (CC BY 2.0 FR)"
         if noncommercial:
             lines.append(
-                "Non-commercial use and distribution only, with attribution to "
-                "Princeton WordNet, RuWordNet, and Tatoeba (CC BY 2.0 FR)."
+                f"Non-commercial use and distribution only, with attribution to {credit}."
             )
         else:
             # No non-commercial thesaurus involved (PWN + JaWN + Tatoeba are
             # all permissive): attribution only, no distribution restriction.
-            lines.append(
-                "Free to use and distribute, with attribution to "
-                "Princeton WordNet, Japanese WordNet "
-                "(https://bond-lab.github.io/wnja/), and Tatoeba (CC BY 2.0 FR)."
-            )
+            lines.append(f"Free to use and distribute, with attribution to {credit}.")
     else:
         _kind, pair_label = _pair_kind(sources)
         lines = [

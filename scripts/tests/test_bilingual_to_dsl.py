@@ -926,6 +926,26 @@ class JapaneseBackendTest(unittest.TestCase):
         self.assertEqual(counts["飼い犬"], 1)
         self.assertEqual(counts["不存在"], 0)
 
+    def test_emit_japanese_target_card(self):
+        # Japanese-target card: Japanese POS labels, equivalents lead,
+        # definition follows, numbering restarts per POS, lone sense bare.
+        card = _dsl.Card(headword="犬", senses=[
+            _dsl.Sense(definition="d1", equivalents=["e1"],
+                       synonyms=["s1"], pos="名詞",
+                       example=("a", "b")),
+            _dsl.Sense(definition="d2", equivalents=["e2"],
+                       synonyms=["s2"], pos="名詞"),
+            _dsl.Sense(definition="d3", equivalents=["e3"],
+                       synonyms=["s3"], pos="動詞"),
+        ])
+        text = "\n".join(_dsl.emit_card(card))
+        self.assertEqual(text.count("[p]名詞[/p]"), 1)
+        self.assertEqual(text.count("[p]動詞[/p]"), 1)
+        self.assertIn("[m1]1.[/m]", text)
+        self.assertIn("[m1]2.[/m]", text)
+        self.assertNotIn("[m1]3.[/m]", text)
+        self.assertLess(text.index("[trn]e1[/trn]"), text.index("[i]d1[/i]"))
+
     def test_cli_direction_ja(self):
         from bilingual import cli as _cli
         args = _cli.build_parser().parse_args(
@@ -934,6 +954,36 @@ class JapaneseBackendTest(unittest.TestCase):
         args = _cli.build_parser().parse_args(
             ["--source-lang", "ru", "--target-lang", "ja"])
         self.assertEqual(_cli._resolve_direction(args), "ru-ja")
+
+    def test_help_covers_documented_options(self):
+        # Every --flag named in docs/BILINGUAL-BUILDER.md must exist in
+        # --help, so the option table cannot drift from the CLI.
+        import pathlib as _pathlib
+        import re as _re
+        from bilingual import cli as _cli
+        text = _cli.build_parser().format_help()
+        doc = (_pathlib.Path(__file__).resolve().parent.parent.parent
+               / "docs" / "BILINGUAL-BUILDER.md").read_text(encoding="utf-8")
+        for flag in sorted(set(_re.findall(r"--[a-zA-Z][\w-]*", doc))):
+            self.assertIn(flag, text, f"{flag} documented but missing from --help")
+
+    def test_provenance_all_four_japanese_directions(self):
+        from bilingual import provenance as _prov
+        cases = {
+            "en-ja": ("an English-Japanese translation dictionary", "eng-jpn", False),
+            "ja-en": ("a Japanese-English translation dictionary", "jpn-eng", False),
+            "ja-ru": ("a Japanese-Russian translation dictionary", "jpn-rus", True),
+            "ru-ja": ("a Russian-Japanese translation dictionary", "rus-jpn", True),
+        }
+        for direction, (kind, pair_label, noncommercial) in cases.items():
+            sources = _prov.Sources(tatoeba_date="D", equivalents=True,
+                                    direction=direction)
+            text = "\n".join(_prov.description_lines("T", sources, 5))
+            self.assertIn(kind, text, direction)
+            self.assertIn(f"Tatoeba {pair_label} pairs", text, direction)
+            self.assertEqual("Non-commercial use and distribution only" in text,
+                             noncommercial, direction)
+            self.assertIn("https://bond-lab.github.io/wnja/", text, direction)
 
     def test_build_sample_ja_en_readings_line(self):
         import json as _json
@@ -957,6 +1007,68 @@ class JapaneseBackendTest(unittest.TestCase):
             self.assertEqual(summary["cards"], 1)
             text = _package.read(summary["dz_path"])
             self.assertIn("[com]音: ケン　訓: いぬ[/com]", text)
+
+    def test_ja_audio_and_transcription_end_to_end(self):
+        import json as _json
+        import tarfile as _tarfile
+        import zipfile as _zipfile
+        from bilingual import audio as _aud
+        from bilingual import build as _build
+        from bilingual import equivalents as _eq
+        from bilingual import provenance as _prov
+        with tempfile.TemporaryDirectory() as tmp:
+            snap = os.path.join(tmp, "ja-av.jsonl")
+            recs = [
+                {"word": "inu", "lang_code": "ja", "lang": "Japanese",
+                 "pos": "noun", "senses": [{"glosses": ["dog"]}],
+                 "forms": [{"form": "いぬ", "tags": ["transliteration"]}],
+                 "sounds": [{"audio": "Ja-inu.ogg",
+                             "ogg_url": "https://x/Ja-inu.ogg",
+                             "ipa": "いぬ"}]},
+                {"word": "silent", "lang_code": "ja", "lang": "Japanese",
+                 "pos": "noun", "senses": [{"glosses": ["quiet"]}],
+                 "forms": [], "sounds": []},
+            ]
+            with open(snap, "w", encoding="utf-8") as f:
+                for r in recs:
+                    f.write(_json.dumps(r) + "\n")
+            tar = os.path.join(tmp, "aud.tar")
+            with _tarfile.open(tar, "w") as t:
+                blob = b"fake-audio"
+                info = _tarfile.TarInfo("Ja-inu.ogg")
+                info.size = len(blob)
+                import io as _io
+                t.addfile(info, _io.BytesIO(blob))
+
+            class JaBackend:
+                def ja_synsets(self, word):
+                    if word != "inu":
+                        return []
+                    return [_eq.EnSynset(
+                        pos="noun", lemmas=["inu"],
+                        groups=[_eq.RuGroup(
+                            title="", definition="a domestic animal",
+                            lemmas=["dog"])])]
+
+            out = os.path.join(tmp, "out")
+            summary = _build.build_sample(
+                ["inu", "silent", "zzz"], out, "ja-en-av", "JAAV",
+                sources=_prov.Sources(tatoeba_date="2026-10-24",
+                                      equivalents=True, direction="ja-en"),
+                snapshot_path=snap, archive_path=tar,
+                download_dir=os.path.join(tmp, "cache"),
+                backend=JaBackend(), audio_lang_code="ja",
+                direction="ja-en")
+            self.assertEqual(summary["cards"], 1)
+            self.assertEqual(summary["unresolved"], [])
+            text = _package.read(summary["dz_path"])
+            self.assertIn("[s]Ja-inu.ogg[/s]", text)
+            self.assertIn("[t]いぬ[/t]", text)
+            names = _zipfile.ZipFile(summary["bundle_path"]).namelist()
+            self.assertEqual(names, ["Ja-inu.ogg"])
+            # transcription is absent, not empty, where the snapshot has none
+            self.assertEqual(
+                _aud.transcribe_words(["silent"], snap, lang="ja"), {})
 
     def test_reading_aliases_translation(self):
         import json as _json
@@ -1616,6 +1728,62 @@ class AudioTest(unittest.TestCase):
             snap = self._fixture(tmp)
             self.assertEqual(
                 _aud.reading_lines(["bread", "silent"], snap, lang="en"), {})
+
+    def test_ja_audio_and_transcription_end_to_end(self):
+        import json as _json
+        import tarfile as _tarfile
+        import zipfile as _zipfile
+        from bilingual import audio as _aud
+        from bilingual import build as _build
+        from bilingual import equivalents as _eq
+        from bilingual import provenance as _prov
+        with tempfile.TemporaryDirectory() as tmp:
+            snap = os.path.join(tmp, "ja-av.jsonl")
+            rec = {"word": "inu", "lang_code": "ja", "lang": "Japanese",
+                   "pos": "noun", "senses": [{"glosses": ["dog"]}],
+                   "forms": [{"form": "いぬ", "tags": ["transliteration", "kun"]}],
+                   "sounds": [{"audio": "Ja-inu.ogg",
+                               "ogg_url": "https://x/Ja-inu.ogg",
+                               "ipa": "いぬ"}]}
+            with open(snap, "w", encoding="utf-8") as f:
+                f.write(_json.dumps(rec) + "\n")
+            tar = os.path.join(tmp, "aud.tar")
+            with _tarfile.open(tar, "w") as t:
+                blob = b"fake-audio"
+                info = _tarfile.TarInfo("Ja-inu.ogg")
+                info.size = len(blob)
+                import io as _io
+                t.addfile(info, _io.BytesIO(blob))
+
+            class JaBackend:
+                def ja_synsets(self, word):
+                    if word != "inu":
+                        return []
+                    return [_eq.EnSynset(
+                        pos="noun", lemmas=["inu"],
+                        groups=[_eq.RuGroup(
+                            title="", definition="a domestic animal",
+                            lemmas=["dog"])])]
+
+            out = os.path.join(tmp, "out")
+            summary = _build.build_sample(
+                ["inu", "zzz"], out, "ja-en-av", "JAAV",
+                sources=_prov.Sources(tatoeba_date="2026-10-24",
+                                      equivalents=True, direction="ja-en"),
+                snapshot_path=snap, archive_path=tar,
+                download_dir=os.path.join(tmp, "cache"),
+                backend=JaBackend(), audio_lang_code="ja",
+                direction="ja-en")
+            self.assertEqual(summary["cards"], 1)
+            self.assertEqual(summary["unresolved"], [])
+            text = _package.read(summary["dz_path"])
+            self.assertIn("[s]Ja-inu.ogg[/s]", text)
+            self.assertIn("[t]いぬ[/t]", text)
+            names = _zipfile.ZipFile(summary["bundle_path"]).namelist()
+            self.assertEqual(names, ["Ja-inu.ogg"])
+            # transcription is absent, not empty, where the snapshot has none
+            self.assertEqual(
+                _aud.transcribe_words(["zzz"], snap, lang="ja"), {})
 
     def test_skipped_headword_bundles_no_audio(self):
         # "ghost" has recordings in the snapshot but resolves to no card:

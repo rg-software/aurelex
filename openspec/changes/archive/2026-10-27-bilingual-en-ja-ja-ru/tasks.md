@@ -15,23 +15,23 @@
 
 ## 3. Cards, CLI, packaging, provenance
 
-- [ ] 3.1 Render Japanese-target cards (Japanese POS labels, equivalents-first order with Japanese frequency ranking, `[ex]`/`[trn]` marking per direction) and verify `emit_card` output for En→Ja and Ja→Ru fixtures in a unit test
-- [ ] 3.2 Extend CLI to `--source-lang {en,ru,ja}` with direction validation and per-pair Tatoeba discovery, and verify `--help` plus a `--mode translation --source-lang ja` sample invocation parses in a test
-- [ ] 3.3 Extend headers (`#INDEX/#CONTENTS_LANGUAGE` incl. Japanese) and provenance (`Sources` gains `wnja` version, direction-aware labels, link-back, conditional non-commercial line) and verify about/`.ann` text for all four directions in a unit test
-- [ ] 3.4 Update `docs/BILINGUAL-BUILDER.md` option table for the new flags/pins and verify every documented flag exists in `--help` output
+- [x] 3.1 Render Japanese-target cards (Japanese POS labels, equivalents-first order with Japanese frequency ranking, `[ex]`/`[trn]` marking per direction) and verify `emit_card` output for En→Ja and Ja→Ru fixtures in a unit test
+- [x] 3.2 Extend CLI to `--source-lang {en,ru,ja}` with direction validation and per-pair Tatoeba discovery, and verify `--help` plus a `--mode translation --source-lang ja` sample invocation parses in a test
+- [x] 3.3 Extend headers (`#INDEX/#CONTENTS_LANGUAGE` incl. Japanese) and provenance (`Sources` gains `wnja` version, direction-aware labels, link-back, conditional non-commercial line) and verify about/`.ann` text for all four directions in a unit test
+- [x] 3.4 Update `docs/BILINGUAL-BUILDER.md` option table for the new flags/pins and verify every documented flag exists in `--help` output
 
 ## 4. Audio, transcription, pairs dictionaries
 
-- [ ] 4.1 Reuse source-language kaikki audio verbatim for Japanese headwords (JA snapshot/archive/cache via existing `lang` params) and verify a JA headword's `[s]` refs resolve with `verify_bundle` in a test
-- [ ] 4.2 Reuse source-language transcription (`[t]` under headword, kana-marked readings per JA profile) for the new directions and verify transcription-present/absent scenarios in a test
+- [x] 4.1 Reuse source-language kaikki audio verbatim for Japanese headwords (JA snapshot/archive/cache via existing `lang` params) and verify a JA headword's `[s]` refs resolve with `verify_bundle` in a test
+- [x] 4.2 Reuse source-language transcription (`[t]` under headword, kana-marked readings per JA profile) for the new directions and verify transcription-present/absent scenarios in a test
 - [x] 4.3 Build pairs dictionaries for En↔Ja and Ja↔Ru (flat `[ex]`/`[trn]`, letter-eligibility, case-fold no-op for Japanese, deterministic) and verify headword-eligibility and direction-marking scenarios in a test
 
 ## 5. Probes, recipes, catalog
 
-- [ ] 5.1 Run bounded `--sample --preview` probes for all four translation directions plus pairs, eyeball article shape, and verify each preview renders equivalents, zoned examples, and audio refs with no markup warnings
-- [ ] 5.2 Add `docs/builds/` recipes (`en-ja`, `ja-en`, `ja-ru`, `ru-ja` wordnet + Tatoeba pairs) with exact fetch/build commands and verify each documented command parses against the CLI
-- [ ] 5.3 Append the eight catalog entries to `catalog/source.json` (translation + pairs × 4 directions, Japanese `names` included) and verify `scripts/build-catalog.py validate` passes
-- [ ] 5.4 Full smoke verification: import each built `.dsl.dz` through the folder import and verify `gd_lookup` returns full articles with no `unclosed`/`Unknown tag` warnings and audio refs resolving
+- [x] 5.1 Run bounded `--sample --preview` probes for all four translation directions plus pairs, eyeball article shape, and verify each preview renders equivalents, zoned examples, and audio refs with no markup warnings
+- [x] 5.2 Add `docs/builds/` recipes (`en-ja`, `ja-en`, `ja-ru`, `ru-ja` wordnet + Tatoeba pairs) with exact fetch/build commands and verify each documented command parses against the CLI
+- [x] 5.3 Append the eight catalog entries to `catalog/source.json` (translation + pairs × 4 directions, Japanese `names` included) and verify `scripts/build-catalog.py validate` passes
+- [x] 5.4 Full smoke verification: import each built `.dsl.dz` through the folder import and verify `gd_lookup` returns full articles with no `unclosed`/`Unknown tag` warnings and audio refs resolving
 
 ## 6. Opt-in reading indexing
 
