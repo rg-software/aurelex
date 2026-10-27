@@ -129,6 +129,23 @@ Known anchoring limits (accepted, review of the built sample dictionaries):
   one-letter token in running text is overwhelmingly the article, so any
   hit would illustrate the article, not the headword.
 
+Measured anchor recall (2026-10-25, 300 random headwords per direction,
+keep the funnel as built): en-ja 75/417 senses anchored (18.0%),
+en-ru 82/429 (19.1%); 87% of en-ja and 81% of en-ru headwords have no
+anchored example on any sense. The concordance fallback is not garnish —
+it carries ~80% of cards, including the published dictionaries. Dropping
+it would strip examples from ~8 in 10 cards, so it stays (repeat-free
+since the bilingual-en-ja-ja-ru change: no source sentence or translation
+repeats within a card).
+
+Tech debt (proper fix, not this change): anchors are whole-word and
+unlemmatized, so inflected forms are invisible (`уровня` never matches
+`уровень`), and Japanese matching is orthography-exact, so kana and
+okurigana variants never match (`お婆ん` vs colloquial `おばあさん`).
+Doing this properly needs lemmatization plus kana normalization, which
+needs a morphological dictionary and breaks the stdlib-only runtime
+contract — a separate change with its own coverage gate.
+
 Audio is inherited from kaikki, not rebuilt: Dict A headwords are English
 lemmas, so the kaikki EN build already resolved and bundled their pronunciation
 recordings (`[s]name[/s]` + sibling resource bundle). A Dict A build reuses that
@@ -241,3 +258,29 @@ is not a kaikki headword at all.
 Note: this contradicts the archived `bilingual-dictionary` spec's
 "single collapsible zone" requirement for examples-only cards — it needs a
 delta in the next change.
+
+## Appendix: Japanese thesaurus (En↔Ja, Ja↔Ru)
+
+Dated 2026-10-25. Probe: `wn` library + `wnja:2.1` (bond-lab, WN-LMF,
+requires `omw-en:2.0`), implemented in `scripts/bilingual/equivalents.py`
+(`JapaneseWordNetBackend`).
+
+JaWN shares Princeton WordNet synset ids (same offset + POS letter,
+`omw-en-02084071-n` ↔ `wnja-02084071-n`), so En↔Ja joins on the id suffix
+directly — no `ili` table needed. Ja↔Ru pivots through RuWordNet's
+`interlingual_index_relation` (`ruwn_id` → PWN `wn_id`): a Japanese synset
+and a RuWordNet synset sharing one PWN id are one sense.
+
+Coverage (measured): 67,509 JaWN synsets, 56,758 shared with PWN (84%).
+En→Ja links 56,758/117,659 en synsets (48% — vs ~18% `ili` for En→Ru);
+Ja→En 56,758/67,509 (84%). English headword universe with a Ja counterpart:
+79,166 lemmas (vs 35,676 en-ru). JaWN definitions are Japanese (translated);
+senses without one show no definition line (JaWN has no synset titles).
+Frequency ranking for Japanese uses phrase-containment counts over the
+Tatoeba target side, narrowed through the character index — common-first
+(犬 before ドッグ), ties shorter-first.
+
+License: JaWN is BSD-like (PWN-style) with a site link-back, recorded in
+the about article and `.ann`. En→Ja / Ja→En dictionaries carry no
+non-commercial restriction (PWN + JaWN + Tatoeba CC BY 2.0 FR are all
+permissive); Ja↔Ru keep it through RuWordNet.

@@ -24,6 +24,7 @@ class Sources:
 
     pwn: str = "Princeton WordNet 3.0"
     ruwordnet: str = "RuWordNet 2.0 (2021)"
+    wnja: str = "Japanese WordNet 2.1"
     tatoeba_date: str = "unknown"
     kaikki_dump_date: str = "unknown"
     equivalents: bool = True
@@ -32,9 +33,15 @@ class Sources:
 
 def _pair_kind(sources: Sources) -> Tuple[str, str]:
     """(kind phrase, pair label) for the build direction."""
-    if sources.direction == "ru-en":
-        return ("a Russian-English example-sentences dictionary",
-                "Tatoeba rus-eng pairs")
+    kinds = {
+        "ru-en": ("a Russian-English example-sentences dictionary", "Tatoeba rus-eng pairs"),
+        "en-ja": ("an English-Japanese example-sentences dictionary", "Tatoeba eng-jpn pairs"),
+        "ja-en": ("a Japanese-English example-sentences dictionary", "Tatoeba jpn-eng pairs"),
+        "ja-ru": ("a Japanese-Russian example-sentences dictionary", "Tatoeba jpn-rus pairs"),
+        "ru-ja": ("a Russian-Japanese example-sentences dictionary", "Tatoeba rus-jpn pairs"),
+    }
+    if sources.direction in kinds:
+        return kinds[sources.direction]
     return ("an English-Russian example-sentences dictionary",
             "Tatoeba eng-rus pairs")
 
@@ -50,24 +57,53 @@ def description_lines(title: str, sources: Sources, card_count: int) -> list:
     """
     if sources.equivalents and sources.direction == "ru-en":
         kind = "a Russian-English translation dictionary"
+    elif sources.equivalents and sources.direction in ("en-ja", "ja-en", "ja-ru", "ru-ja"):
+        names = {"en-ja": "an English-Japanese translation dictionary",
+                 "ja-en": "a Japanese-English translation dictionary",
+                 "ja-ru": "a Japanese-Russian translation dictionary",
+                 "ru-ja": "a Russian-Japanese translation dictionary"}
+        kind = names[sources.direction]
     elif sources.equivalents:
         kind = "an English-Russian translation dictionary"
     else:
         kind = _pair_kind(sources)[0]
-    pair_label = "rus-eng" if sources.direction == "ru-en" else "eng-rus"
+    pair_labels = {"ru-en": "rus-eng", "en-ru": "eng-rus",
+                   "en-ja": "eng-jpn", "ja-en": "jpn-eng",
+                   "ja-ru": "jpn-rus", "ru-ja": "rus-jpn"}
+    pair_label = pair_labels.get(sources.direction, "eng-rus")
+    thesaurus_lines = {
+        "en-ru": [sources.pwn, sources.ruwordnet],
+        "ru-en": [sources.pwn, sources.ruwordnet],
+        "en-ja": [sources.pwn, sources.wnja],
+        "ja-en": [sources.pwn, sources.wnja],
+        # Pivot builds use all three thesauri.
+        "ja-ru": [sources.pwn, sources.wnja, sources.ruwordnet],
+        "ru-ja": [sources.pwn, sources.wnja, sources.ruwordnet],
+    }.get(sources.direction, [sources.pwn, sources.ruwordnet])
+    noncommercial = sources.ruwordnet in thesaurus_lines
     if sources.equivalents:
         lines = [
             f"{title}: {kind}",
             "",
             "This is a derivative work, based on:",
-            sources.pwn,
-            sources.ruwordnet,
+            *thesaurus_lines,
             f"Tatoeba {pair_label} pairs, snapshot {sources.tatoeba_date}",
             f"Wiktionary / kaikki.org audio, snapshot {sources.kaikki_dump_date}",
             "",
-            "Non-commercial use and distribution only, with attribution to "
-            "Princeton WordNet, RuWordNet, and Tatoeba (CC BY 2.0 FR).",
         ]
+        if noncommercial:
+            lines.append(
+                "Non-commercial use and distribution only, with attribution to "
+                "Princeton WordNet, RuWordNet, and Tatoeba (CC BY 2.0 FR)."
+            )
+        else:
+            # No non-commercial thesaurus involved (PWN + JaWN + Tatoeba are
+            # all permissive): attribution only, no distribution restriction.
+            lines.append(
+                "Free to use and distribute, with attribution to "
+                "Princeton WordNet, Japanese WordNet "
+                "(https://bond-lab.github.io/wnja/), and Tatoeba (CC BY 2.0 FR)."
+            )
     else:
         _kind, pair_label = _pair_kind(sources)
         lines = [

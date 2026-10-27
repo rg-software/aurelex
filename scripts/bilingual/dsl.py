@@ -95,6 +95,8 @@ class Card:
     audio: List[str] = field(default_factory=list)
     comments: List[str] = field(default_factory=list)
     pairs: List[Tuple[str, str]] = field(default_factory=list)
+    readings: str = ""
+    title: str = ""
 
 
 def emit_sense(sense: Sense, number: int) -> List[str]:
@@ -135,12 +137,21 @@ def emit_card(card: Card) -> List[str]:
     card-level POS line for backward compatibility.
     """
     lines = [clean_headword(card.headword)]
+    if card.title:
+        # Alias card (opt-in reading indexing): name the article after its
+        # primary headword, so a lookup that arrived through a reading knows
+        # which word it defines — same convention as the monolingual card.
+        lines.append(f"    [b]{escape_dsl(card.title)}[/b]")
     if card.transcription:
         lines.append(f"    [t]{escape_dsl(card.transcription)}[/t]")
     if card.pos:
         lines.append(f"    [p]{escape_dsl(card.pos)}[/p]")
     for name in card.audio:
         lines.append(f"    [s]{escape_dsl(name)}[/s]")
+    if card.readings:
+        # Kana readings (Japanese on/kun groupings), same [com] line the
+        # monolingual card renders — a pronunciation aid, not a definition.
+        lines.append(f"    [com]{escape_dsl(card.readings)}[/com]")
     for comment in card.comments:
         lines.append(f"    [com]{escape_dsl(comment)}[/com]")
     if card.pairs:

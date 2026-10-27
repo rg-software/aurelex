@@ -155,6 +155,178 @@
           "name": "au_wordnet_ru-en.dsl.files.zip"
         }
       ]
+    },
+    {
+      "id": "tatoeba-en-ja",
+      "name": "Aurelex Tatoeba En-Ja",
+      "names": {
+        "ru": "Aurelex Tatoeba англ/яп",
+        "ja": "Aurelex Tatoeba 英日"
+      },
+      "langFrom": "en",
+      "langTo": "ja",
+      "attribution": "Tatoeba contributors, CC BY 2.0 FR",
+      "license": "CC-BY-2.0-FR",
+      "files": [
+        {
+          "role": "dictionary",
+          "required": true,
+          "name": "au_tatoeba_en-ja.dsl.dz"
+        }
+      ]
+    },
+    {
+      "id": "tatoeba-ja-en",
+      "name": "Aurelex Tatoeba Ja-En",
+      "names": {
+        "ru": "Aurelex Tatoeba яп/англ",
+        "ja": "Aurelex Tatoeba 日英"
+      },
+      "langFrom": "ja",
+      "langTo": "en",
+      "attribution": "Tatoeba contributors, CC BY 2.0 FR",
+      "license": "CC-BY-2.0-FR",
+      "files": [
+        {
+          "role": "dictionary",
+          "required": true,
+          "name": "au_tatoeba_ja-en.dsl.dz"
+        }
+      ]
+    },
+    {
+      "id": "tatoeba-ja-ru",
+      "name": "Aurelex Tatoeba Ja-Ru",
+      "names": {
+        "ru": "Aurelex Tatoeba яп/рус",
+        "ja": "Aurelex Tatoeba 日露"
+      },
+      "langFrom": "ja",
+      "langTo": "ru",
+      "attribution": "Tatoeba contributors, CC BY 2.0 FR",
+      "license": "CC-BY-2.0-FR",
+      "files": [
+        {
+          "role": "dictionary",
+          "required": true,
+          "name": "au_tatoeba_ja-ru.dsl.dz"
+        }
+      ]
+    },
+    {
+      "id": "tatoeba-ru-ja",
+      "name": "Aurelex Tatoeba Ru-Ja",
+      "names": {
+        "ru": "Aurelex Tatoeba рус/яп",
+        "ja": "Aurelex Tatoeba 露日"
+      },
+      "langFrom": "ru",
+      "langTo": "ja",
+      "attribution": "Tatoeba contributors, CC BY 2.0 FR",
+      "license": "CC-BY-2.0-FR",
+      "files": [
+        {
+          "role": "dictionary",
+          "required": true,
+          "name": "au_tatoeba_ru-ja.dsl.dz"
+        }
+      ]
+    },
+    {
+      "id": "wordnet-en-ja",
+      "name": "Aurelex WordNet En-Ja",
+      "names": {
+        "ru": "Aurelex WordNet англ/яп",
+        "ja": "Aurelex WordNet 英和"
+      },
+      "langFrom": "en",
+      "langTo": "ja",
+      "attribution": "Princeton WordNet, Japanese WordNet, Tatoeba (CC BY 2.0 FR), Wiktionary audio (CC BY-SA 4.0)",
+      "license": "Free to use with attribution",
+      "files": [
+        {
+          "role": "dictionary",
+          "required": true,
+          "name": "au_wordnet_en-ja.dsl.dz"
+        },
+        {
+          "role": "resources",
+          "required": false,
+          "name": "au_wordnet_en-ja.dsl.files.zip"
+        }
+      ]
+    },
+    {
+      "id": "wordnet-ja-en",
+      "name": "Aurelex WordNet Ja-En",
+      "names": {
+        "ru": "Aurelex WordNet яп/англ",
+        "ja": "Aurelex WordNet 和英"
+      },
+      "langFrom": "ja",
+      "langTo": "en",
+      "attribution": "Princeton WordNet, Japanese WordNet, Tatoeba (CC BY 2.0 FR), Wiktionary audio (CC BY-SA 4.0)",
+      "license": "Free to use with attribution",
+      "files": [
+        {
+          "role": "dictionary",
+          "required": true,
+          "name": "au_wordnet_ja-en.dsl.dz"
+        },
+        {
+          "role": "resources",
+          "required": false,
+          "name": "au_wordnet_ja-en.dsl.files.zip"
+        }
+      ]
+    },
+    {
+      "id": "wordnet-ja-ru",
+      "name": "Aurelex WordNet Ja-Ru",
+      "names": {
+        "ru": "Aurelex WordNet яп/рус",
+        "ja": "Aurelex WordNet 和露"
+      },
+      "langFrom": "ja",
+      "langTo": "ru",
+      "attribution": "Princeton WordNet, RuWordNet, Japanese WordNet, Tatoeba (CC BY 2.0 FR), Wiktionary audio (CC BY-SA 4.0)",
+      "license": "Non-commercial use and distribution only",
+      "files": [
+        {
+          "role": "dictionary",
+          "required": true,
+          "name": "au_wordnet_ja-ru.dsl.dz"
+        },
+        {
+          "role": "resources",
+          "required": false,
+          "name": "au_wordnet_ja-ru.dsl.files.zip"
+        }
+      ]
+    },
+    {
+      "id": "wordnet-ru-ja",
+      "name": "Aurelex WordNet Ru-Ja",
+      "names": {
+        "ru": "Aurelex WordNet рус/яп",
+        "ja": "Aurelex WordNet 露和"
+      },
+      "langFrom": "ru",
+      "langTo": "ja",
+      "attribution": "Princeton WordNet, RuWordNet, Japanese WordNet, Tatoeba (CC BY 2.0 FR), Wiktionary audio (CC BY-SA 4.0)",
+      "license": "Non-commercial use and distribution only",
+      "files": [
+        {
+          "role": "dictionary",
+          "required": true,
+          "name": "au_wordnet_ru-ja.dsl.dz"
+        },
+        {
+          "role": "resources",
+          "required": false,
+          "name": "au_wordnet_ru-ja.dsl.files.zip"
+        }
+      ]
     }
   ]
 }

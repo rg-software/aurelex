@@ -53,18 +53,28 @@ Aurelex online catalog features a selection of dictionaries derived from [Wiktio
 | English (Explanatory) |  883,403 | 9.89% |
 | Japanese (Explanatory) | 111,320 | 0.08% |
 | Russian (Explanatory) | 454,310 | 4.19% |
-| English-Russian (Bilingual) | 35,676 | 61.12% |
-| Russian-English (Bilingual) | 66,690 | 20.34% |
-| English-Russian (Examples) | 40,022 | — |
+| English-Russian (Bilingual) | 35,664 | 61.14% |
+| Russian-English (Bilingual) | 34,733 | 31.72% |
+| English-Japanese (Bilingual) | 79,069 | 40.57% |
+| Japanese-English (Bilingual) | 39,706 | 0.17% |
+| Japanese-Russian (Bilingual) | 27,169 | 0.19% |
+| Russian-Japanese (Bilingual) | 27,735 | 33.65% |
+| English-Russian (Examples) | 39,996 | — |
 | Russian-English (Examples) | 27,631 | — |
+| English-Japanese (Examples) | 32,358 | — |
+| Japanese-English (Examples) | 28,639 | — |
+| Japanese-Russian (Examples) | 12,196 | — |
+| Russian-Japanese (Examples) | 7,606 | — |
 
-The bilingual dictionaries pair English and Russian: a WordNet-based
-translation dictionary (equivalents, definitions, one anchored example per
-sense, pronunciations) and two Tatoeba example-sentence dictionaries (up
-to five sentence pairs per headword, no audio). The translation dictionary
-is built from Princeton WordNet and RuWordNet data and is for
-non-commercial use; the example dictionaries quote Tatoeba sentences
-(CC BY 2.0 FR).
+The bilingual dictionaries cover English↔Russian, English↔Japanese and
+Japanese↔Russian: a WordNet-based translation dictionary (equivalents,
+definitions, one anchored example per sense, pronunciations) and
+Tatoeba example-sentence dictionaries (up to five sentence pairs per
+headword, no audio). The Russian translation dictionaries are built from
+Princeton WordNet and RuWordNet data and are for non-commercial use; the
+Japanese translations add Japanese WordNet data and are free to use with
+attribution where RuWordNet is not involved (English↔Japanese); the
+example dictionaries quote Tatoeba sentences (CC BY 2.0 FR).
 
 Other languages and language pairs as well as additional sound sources are planned.
 
@@ -118,5 +128,5 @@ See full instructions in [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md). Most func
 
 Aurelex is free software under the GNU GPL v3, see [`LICENSE`](LICENSE) and [`NOTICES.md`](NOTICES.md). Aurelex reuses the [goldendict-ng](https://github.com/xiaoyifang/goldendict-ng) dictionary engine, which is itself derived from the original GoldenDict by K.&nbsp;Isakov. The pinned version of the engine and our patches are recorded in [`docs/ENGINE.md`](docs/ENGINE.md). Aurelex is largely inspired by the discontinued [GoldenDict Mobile](http://goldendict.mobi). The dictionaries offered in the built-in catalog are distributed under the
 licenses of their sources: the Wiktionary-derived dictionaries under
-CC BY-SA 4.0, the Tatoeba example dictionaries under CC BY 2.0 FR, and the
-WordNet translation dictionary for non-commercial use only (RuWordNet terms).
+CC BY-SA 4.0, the Tatoeba example dictionaries under CC BY 2.0 FR, and the RuWordNet-based translation dictionaries for non-commercial use only
+(RuWordNet terms); the Japanese↔English translations are free to use with attribution.

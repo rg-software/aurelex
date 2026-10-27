@@ -25,6 +25,15 @@ def _ru_pos_labels() -> Dict[str, str]:
     return _RU_POS_LABELS
 
 
+def _ja_pos_labels() -> Dict[str, str]:
+    scripts = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    if scripts not in sys.path:
+        sys.path.insert(0, scripts)
+    from kaikki.profiles import _JA_POS_LABELS
+
+    return _JA_POS_LABELS
+
+
 # PWN synset POS letter (as in WNSynset ids like ``07679356-n``) to card POS.
 _EN_POS = {"n": "noun", "v": "verb", "a": "adjective", "s": "adjective", "r": "adverb"}
 POS_ORDER = ["noun", "verb", "adjective", "adverb"]
@@ -156,6 +165,13 @@ def _save_cached(
 def russian_pos(en_pos: str) -> str:
     """Map an English POS name to the Russian card label."""
     labels = _ru_pos_labels()
+    short = {"noun": "noun", "verb": "verb", "adjective": "adj", "adverb": "adv"}
+    return labels.get(short.get(en_pos, en_pos), en_pos)
+
+
+def japanese_pos(en_pos: str) -> str:
+    """Map an English POS name to the Japanese card label."""
+    labels = _ja_pos_labels()
     short = {"noun": "noun", "verb": "verb", "adjective": "adj", "adverb": "adv"}
     return labels.get(short.get(en_pos, en_pos), en_pos)
 
@@ -316,6 +332,237 @@ class RuWordNetBackend:
         return found
 
 
+_JA_DIRECTIONS = ("en-ja", "ja-en", "ja-ru", "ru-ja")
+
+# RuWordNet synset part_of_speech (uppercase) to card POS value.
+_RU_POS_TO_EN = {"N": "noun", "V": "verb", "Adj": "adjective"}
+
+
+def _ru_pos_from_ili(wn_ids: Sequence[str], ru_pos: str) -> str:
+    """Card POS value for a RU synset: PWN-id letter wins, else RU part of speech.
+
+    ``wn_ids`` are the synset's `ili` PWN ids (possibly empty — an `ili`-less
+    synset resolves unlinked but still needs a POS value); ``ru_pos`` is the
+    raw `part_of_speech` column (`N`/`V`/`Adj`).
+    """
+    letter = (list(wn_ids) or ["?-?"])[0].rsplit("-", 1)[-1]
+    return _EN_POS.get(letter, _RU_POS_TO_EN.get(ru_pos, "?"))
+
+
+class JapaneseWordNetBackend:
+    """Live backend over Japanese WordNet (`wn` package) + RuWordNet pivot.
+
+    JaWN shares Princeton WordNet synset ids (same offset + POS letter,
+    different lexicon prefix), so En↔Ja joins on the id suffix directly.
+    Ja↔Ru pivots through the RuWordNet `interlingual_index_relation` table:
+    a Japanese synset and a RuWordNet synset sharing one PWN id are one
+    sense. Record shapes reuse :class:`EnSynset`/:class:`RuGroup` (the
+    "RU" side is whatever target thesaurus a group came from); ``pos`` is
+    always the English value, mapped to target labels at render time.
+    """
+
+    EN_LEXICON = "omw-en:2.0"
+    JA_LEXICON = "wnja:2.1"
+
+    def __init__(self) -> None:
+        try:
+            import wn as _wn
+        except ImportError as exc:
+            raise RuntimeError(
+                "Japanese dictionaries need the `wn` package with data: "
+                "`pip install wn`, then download `wnja:2.1` and `omw-en:2.0`"
+            ) from exc
+        self._wn = _wn
+        try:
+            self._en = _wn.Wordnet(self.EN_LEXICON)
+            self._ja = _wn.Wordnet(self.JA_LEXICON)
+        except Exception as exc:
+            raise RuntimeError(
+                f"Japanese dictionaries need `wn` data ({self.JA_LEXICON} + "
+                f"{self.EN_LEXICON}); download them with the `wn` package"
+            ) from exc
+        self._suffixes: Optional[set] = None
+        self._pivot = None
+
+    def db_identity(self) -> str:
+        """Fingerprint the thesaurus data for the resolve cache."""
+        try:
+            versions = {lex.id: lex.version for lex in self._wn.lexicons()}
+        except Exception:
+            versions = {}
+        try:
+            st = os.stat(_ruwordnet_db_path())
+            ru = f"ruwordnet.db|{st.st_size}|{int(st.st_mtime)}"
+        except RuntimeError:
+            ru = "ruwordnet:missing"
+        return (f"wnja:{versions.get('wnja', '?')}"
+                f"+omw-en:{versions.get('omw-en', '?')}|{ru}")
+
+    @staticmethod
+    def _suffix(synset_id: str) -> str:
+        """Shared PWN key: ``wnja-02084071-n`` -> ``02084071-n``."""
+        return "-".join(synset_id.split("-")[-2:])
+
+    def ja_suffixes(self) -> set:
+        """All PWN suffixes with a Japanese entry (cached)."""
+        if self._suffixes is None:
+            self._suffixes = {self._suffix(s.id) for s in self._ja.synsets()}
+        return self._suffixes
+
+    def iter_en_synsets(self):
+        """Every omw-en synset (for headword-universe collection)."""
+        return self._en.synsets()
+
+    def en_synsets_ja(self, word: str) -> List[EnSynset]:
+        """English synsets with Japanese groups (En→Ja walk)."""
+        out = []
+        for syn in self._en.synsets(word):
+            try:
+                jsyn = self._ja.synset("wnja-" + self._suffix(syn.id))
+            except Exception:
+                jsyn = None
+            groups = []
+            if jsyn is not None:
+                groups = [RuGroup(
+                    title="",
+                    definition=(jsyn.definition() or "").strip(),
+                    lemmas=sorted(set(jsyn.lemmas())),
+                )]
+            out.append(EnSynset(
+                pos=_EN_POS.get(syn.id.rsplit("-", 1)[-1], "?"),
+                lemmas=sorted({l.replace("_", " ") for l in syn.lemmas()}),
+                groups=groups,
+            ))
+        return out
+
+    def ja_synsets(self, word: str) -> List[EnSynset]:
+        """Japanese synsets with English groups (Ja→En walk)."""
+        out = []
+        for jsyn in self._ja.synsets(word):
+            suf = self._suffix(jsyn.id)
+            try:
+                esyn = self._en.synset("omw-en-" + suf)
+            except Exception:
+                esyn = None
+            if esyn is None:
+                pos = _EN_POS.get(jsyn.pos, "?")
+                groups = []
+            else:
+                pos = _EN_POS.get(esyn.id.rsplit("-", 1)[-1], "?")
+                groups = [RuGroup(
+                    title="",
+                    definition=(esyn.definition() or "").strip(),
+                    lemmas=sorted({l.replace("_", " ") for l in esyn.lemmas()}),
+                )]
+            out.append(EnSynset(
+                pos=pos,
+                lemmas=sorted(set(jsyn.lemmas())),
+                groups=groups,
+            ))
+        return out
+
+    def _pivot_index(self) -> Dict[str, List[RuGroup]]:
+        """PWN suffix -> RuWordNet groups (one per linked RU synset)."""
+        if self._pivot is None:
+            import sqlite3
+
+            con = sqlite3.connect(_ruwordnet_db_path())
+            try:
+                rows = con.execute(
+                    "SELECT wn_id, ruwn_id FROM interlingual_index_relation"
+                ).fetchall()
+                wanted = {ru for _, ru in rows}
+                info = {}
+                for sid, title, definition in con.execute(
+                    "SELECT id, title, definition FROM synset"
+                ).fetchall():
+                    if sid in wanted:
+                        info[sid] = (title or "", (definition or "").strip())
+                lemmas: Dict[str, set] = {}
+                for sid, name in con.execute(
+                    "SELECT synset_id, name FROM sense"
+                ).fetchall():
+                    if sid in wanted and name:
+                        lemmas.setdefault(sid, set()).add(name.lower())
+                pivot: Dict[str, List[RuGroup]] = {}
+                for wn_id, ru_id in rows:
+                    title, definition = info.get(ru_id, ("", ""))
+                    pivot.setdefault(wn_id, []).append(RuGroup(
+                        title=title,
+                        definition=definition,
+                        lemmas=sorted(lemmas.get(ru_id, ())),
+                    ))
+                for groups in pivot.values():
+                    groups.sort(key=lambda g: (g.title, g.definition, g.lemmas))
+                self._pivot = pivot
+            finally:
+                con.close()
+        return self._pivot
+
+    def ja_to_ru(self, word: str) -> List[EnSynset]:
+        """Japanese synsets with Russian groups through the PWN pivot."""
+        pivot = self._pivot_index()
+        out = []
+        for jsyn in self._ja.synsets(word):
+            suf = self._suffix(jsyn.id)
+            out.append(EnSynset(
+                pos=_EN_POS.get(suf.rsplit("-", 1)[-1], "?"),
+                lemmas=sorted(set(jsyn.lemmas())),
+                groups=list(pivot.get(suf, [])),
+            ))
+        return out
+
+    def ru_to_ja(self, word: str) -> List[EnSynset]:
+        """Russian synsets (from the RuWordNet sqlite) with Japanese groups."""
+        import sqlite3
+
+        key = word.strip().upper()  # stored names are uppercase
+        con = sqlite3.connect(_ruwordnet_db_path())
+        try:
+            sids = sorted({r[0] for r in con.execute(
+                "SELECT DISTINCT synset_id FROM sense WHERE name = ?", (key,)
+            ).fetchall()})
+            if not sids:
+                return []
+            pos_of = {}
+            for row in con.execute("SELECT id, part_of_speech FROM synset").fetchall():
+                if row[0] in set(sids):
+                    pos_of[row[0]] = row[1]
+            ili: Dict[str, List[str]] = {}
+            for sid in sids:
+                ili[sid] = sorted({r[0] for r in con.execute(
+                    "SELECT wn_id FROM interlingual_index_relation WHERE ruwn_id = ?",
+                    (sid,),
+                ).fetchall()})
+            lemmas: Dict[str, set] = {}
+            for sid, name in con.execute("SELECT synset_id, name FROM sense").fetchall():
+                if sid in set(sids) and name:
+                    lemmas.setdefault(sid, set()).add(name.lower())
+        finally:
+            con.close()
+        out = []
+        for sid in sids:
+            groups = []
+            for wid in ili.get(sid, []):
+                try:
+                    jsyn = self._ja.synset("wnja-" + wid)
+                except Exception:
+                    continue  # no Japanese entry: unlinked for this bridge id
+                groups.append(RuGroup(
+                    title="",
+                    definition=(jsyn.definition() or "").strip(),
+                    lemmas=sorted(set(jsyn.lemmas())),
+                ))
+            groups.sort(key=lambda g: (g.definition, g.lemmas))
+            pos = _ru_pos_from_ili(ili.get(sid, []), pos_of.get(sid, ""))
+            out.append(EnSynset(
+                pos=pos,
+                lemmas=sorted(lemmas.get(sid, ())),
+                groups=groups,
+            ))
+        return out
+
+
 def _ruwordnet_db_path() -> str:
     """Locate the installed RuWordNet sqlite (2021 db preferred)."""
     try:
@@ -352,6 +599,24 @@ def english_lemma_universe(db_path: Optional[str] = None) -> List[str]:
     return sorted({str(name).replace("_", " ") for (name,) in rows if name})
 
 
+def english_ja_universe(backend=None) -> List[str]:
+    """Every English lemma with a Japanese WordNet counterpart.
+
+    The max-coverage headwords for the En→Ja translation dictionary: an
+    English lemma whose synset shares no PWN id with JaWN can never resolve,
+    so it is excluded up front (like the RuWordNet EN subset above).
+    ``backend`` is injectable for tests; the default opens the `wn` data.
+    """
+    backend = backend or JapaneseWordNetBackend()
+    shared = backend.ja_suffixes()
+    uni = set()
+    for syn in backend.iter_en_synsets():
+        if JapaneseWordNetBackend._suffix(syn.id) in shared:  # noqa: SLF001
+            for lemma in syn.lemmas():
+                uni.add(lemma.replace("_", " "))
+    return sorted(uni)
+
+
 def kaikki_headwords(snapshot_path: str, lang: str = "en") -> List[str]:
     """Every lexical, non-inflected headword in a kaikki snapshot.
 
@@ -382,17 +647,21 @@ def kaikki_headwords(snapshot_path: str, lang: str = "en") -> List[str]:
     return sorted(found)
 
 
-def rank_equivalents(equivalents: Sequence[str], freq: Dict[str, int]) -> List[str]:
-    """Order equivalents common-first using Russian corpus frequencies.
+def rank_equivalents(equivalents: Sequence[str], freq: Dict[str, int],
+                     target_lang: str = "ru") -> List[str]:
+    """Order equivalents common-first using corpus frequencies.
 
-    Within one RU synset the members share the meaning, so the ranking only
-    decides what the eye hits first: everyday words before rare ones
-    (``парламент`` before ``высший законодательный орган государства``).
+    Within one synset the members share the meaning, so the ranking only
+    decides what the eye hits first: everyday words before rare ones.
     Unknown words sink to the end; ties break shorter-first, then
     alphabetically, so the order is deterministic. Pure ranking — nothing is
     dropped; collapsing near-synonyms would need semantic judgment.
+    Japanese scores each equivalent by its phrase count (see
+    :func:`count_phrases`); other languages score whole words.
     """
     def score(e: str) -> tuple:
+        if target_lang == "ja":
+            return (-freq.get(e, 0), len(e), e)
         words = [w.lower() for w in re.findall(r"[а-яёa-z]+", e)]
         known = [freq.get(w, 0) for w in words] or [0]
         return (-min(known), len(e), e)
@@ -402,20 +671,51 @@ def rank_equivalents(equivalents: Sequence[str], freq: Dict[str, int]) -> List[s
     return sorted(unique, key=score)
 
 
-def resolve_word(word: str, backend: Optional[RuWordNetBackend] = None,
+def _default_backend(direction: str):
+    """Backend for a direction (Japanese directions need JaWN + pivot)."""
+    if direction in _JA_DIRECTIONS:
+        return JapaneseWordNetBackend()
+    return RuWordNetBackend()
+
+
+def _synsets_for(backend, word: str, direction: str) -> List[EnSynset]:
+    """Direction walk over one headword (shared by resolve_word/words)."""
+    if direction == "ru-en":
+        return backend.ru_synsets(word)
+    if direction == "en-ja":
+        return backend.en_synsets_ja(word)
+    if direction == "ja-en":
+        return backend.ja_synsets(word)
+    if direction == "ja-ru":
+        return backend.ja_to_ru(word)
+    if direction == "ru-ja":
+        return backend.ru_to_ja(word)
+    return backend.en_synsets(word)
+
+
+def _define_for(direction: str):
+    """Target-language definition picker (PWN gloss verbatim for EN targets)."""
+    if direction in ("ru-en", "ja-en"):
+        return _gloss_definition
+    return _sense_definition
+
+
+def resolve_word(word: str, backend=None,
                  direction: str = "en-ru") -> List[ResolvedSense]:
     """Resolve one headword to card senses, grouped per target synset.
 
     ``direction`` picks the walk: ``"en-ru"`` (each linked RU synset is one
-    sense with a RU definition) or ``"ru-en"`` (each linked EN synset is one
-    sense with the verbatim PWN gloss). POS labels are always the target
-    language's (the backend sets them).
+    sense with a RU definition), ``"ru-en"`` (each linked EN synset is one
+    sense with the verbatim PWN gloss), ``"en-ja"``/``"ja-ru"``/``"ru-ja"``
+    (Japanese/Russian counterparts with target-language definitions) and
+    ``"ja-en"`` (English counterparts with the verbatim PWN gloss).
+    POS values are always English (the backend sets them); build maps them
+    to target-language labels.
     """
-    backend = backend or RuWordNetBackend()
+    backend = backend or _default_backend(direction)
     senses: List[ResolvedSense] = []
-    synsets = (backend.ru_synsets(word) if direction == "ru-en"
-               else backend.en_synsets(word))
-    define = _gloss_definition if direction == "ru-en" else _sense_definition
+    synsets = _synsets_for(backend, word, direction)
+    define = _define_for(direction)
     for syn in synsets:
         if not syn.groups:
             senses.append(
@@ -443,7 +743,7 @@ def resolve_word(word: str, backend: Optional[RuWordNetBackend] = None,
 
 
 def resolve_words(
-    words: Sequence[str], backend: Optional[RuWordNetBackend] = None,
+    words: Sequence[str], backend=None,
     progress: Optional[Callable[[int, int], None]] = None,
     cache_path: Optional[str] = None,
     cache_id: Optional[str] = None,
@@ -456,24 +756,23 @@ def resolve_words(
     (e.g. the RuWordNet sqlite identity), a completed resolution is stored as
     JSON and reused verbatim on later runs over the same headwords — the
     thesaurus is pinned, so the result is deterministic and never recomputed.
-    ``direction`` (``"en-ru"`` or ``"ru-en"``) picks which way the `ili`
-    bridge is walked; POS labels are always the target language's.
+    ``direction`` picks which way the bridge is walked (RuWordNet `ili` or
+    the JaWN PWN-id join/pivot); POS values are always English.
     """
     if cache_path is not None and cache_id is not None and os.path.isfile(cache_path):
         hit = _load_cached(words, cache_path, cache_id, progress)
         if hit is not None:
             return hit
-    backend = backend or RuWordNetBackend()
+    backend = backend or _default_backend(direction)
     report = ResolutionReport()
     cards: Dict[str, List[ResolvedSense]] = {}
     total = len(words)
-    define = _gloss_definition if direction == "ru-en" else _sense_definition
+    define = _define_for(direction)
     for word in words:
         report.words += 1
         if progress is not None and report.words % 1000 == 0:
             progress(report.words, total)
-        synsets = (backend.ru_synsets(word) if direction == "ru-en"
-                   else backend.en_synsets(word))
+        synsets = _synsets_for(backend, word, direction)
         if not synsets:
             report.words_no_en += 1
             cards[word] = []

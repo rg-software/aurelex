@@ -56,14 +56,11 @@ def collect_records(snapshot_path: str, words: Sequence[str],
                     lang: str = "en") -> Dict[str, List[dict]]:
     """Gather candidate (lexical, non-inflected) records per headword.
 
-    One streaming pass over the snapshot; the filter mirrors the records the
-    kaikki build itself indexes and renders. Prints a coarse line count to
-    stderr — a full snapshot scan takes minutes. ``lang`` selects the
-    snapshot language (the reverse dictionary reuses the RU stage verbatim).
-    Results memoize per snapshot path + language in-process, so the audio
-    planner and the transcription picker share the single pass.
+    One streaming pass over the snapshot; results memoize per snapshot path
+    + language + headword list in-process, so the audio planner and the
+    transcription picker share the single pass.
     """
-    key = f"{snapshot_path}\x00{lang}"
+    key = f"{snapshot_path}\x00{lang}\x00{hash(tuple(words))}"
     if key in _records_cache:
         return _records_cache[key]
     _, ksource = _kaikki()
@@ -127,6 +124,72 @@ def transcribe_words(words: Sequence[str], snapshot_path: str,
             counts[text] += 1
         if order:
             out[word] = max(order, key=lambda t: (counts[t], -order.index(t)))
+    return out
+
+
+def reading_lines(words: Sequence[str], snapshot_path: str,
+                  lang: str = "en") -> Dict[str, str]:
+    """One readings line per headword, from the kaikki snapshot.
+
+    Reuses the memoized snapshot scan: no second pass. Per-record text
+    comes from kaikki's own profile grouping (readings the source records
+    as transliteration forms, e.g. Japanese on/kun readings); across a
+    headword's records the most common line wins, first-seen breaking ties,
+    so the choice is deterministic for a pinned snapshot. Headwords with
+    no reading record are absent. Only a profile that declares readings
+    (Japanese) ever yields a line. Values are raw text; the DSL emitter
+    escapes at render time.
+    """
+    scripts = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    if scripts not in sys.path:
+        sys.path.insert(0, scripts)
+    from kaikki.profiles import collect_profile_readings
+
+    profile = _profile(lang)
+    out: Dict[str, str] = {}
+    for word, records in collect_records(snapshot_path, words, lang).items():
+        counts: Dict[str, int] = {}
+        order: List[str] = []
+        for record in records:
+            text = collect_profile_readings(record, profile)
+            if not text:
+                continue
+            if text not in counts:
+                counts[text] = 0
+                order.append(text)
+            counts[text] += 1
+        if order:
+            out[word] = max(order, key=lambda t: (counts[t], -order.index(t)))
+    return out
+
+
+def reading_keys(words: Sequence[str], snapshot_path: str,
+                 lang: str = "en") -> Dict[str, List[str]]:
+    """Hiragana lookup keys per headword, for opt-in reading indexing.
+
+    Uses the same transliteration forms as :func:`reading_lines`, but as
+    individual lookup words (katakana folded to hiragana, separators
+    removed — the form a kana lookup is typed in), deduplicated in
+    first-seen order. Only a language whose profile declares readings
+    (Japanese) yields any keys.
+    """
+    scripts = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    if scripts not in sys.path:
+        sys.path.insert(0, scripts)
+    from kaikki.profiles import reading_words
+
+    profile = _profile(lang)
+    out: Dict[str, List[str]] = {}
+    for word, records in collect_records(snapshot_path, words, lang).items():
+        seen: Set[str] = set()
+        keys: List[str] = []
+        for record in records:
+            for key in reading_words(record, profile):
+                if key and key not in seen:
+                    seen.add(key)
+                    keys.append(key)
+        if keys:
+            out[word] = keys
     return out
 
 
@@ -200,6 +263,7 @@ def attach_audio(
                 transcription=card.transcription,
                 senses=card.senses,
                 audio=list(names),
+                readings=card.readings,
             )
         )
     return out
