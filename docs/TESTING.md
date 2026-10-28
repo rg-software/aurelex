@@ -619,6 +619,28 @@ refresh button. Nothing is fetched at app start, so an install that never opens
 the pane makes no catalog request. Format, manifest and hosting rules:
 `docs/REMOTE-CATALOG.md`.
 
+### Offline phone: reverse-tether through the PC
+
+The lab phones have no direct internet (no SIM / rejected Wi-Fi). Route the
+phone through the PC with a local `CONNECT` proxy over `adb reverse` —
+end-to-end TLS to the catalog host, no interception, no CA install. The proxy
+is `scripts/dev-connect-proxy.py` (stdlib only):
+
+```powershell
+python scripts/dev-connect-proxy.py 8888          # shell 1: PC-side proxy
+adb reverse tcp:8888 tcp:8888                     # shell 2: expose it to the phone
+adb shell settings put global http_proxy 127.0.0.1:8888
+# ... open "Add from remote" on the phone ...
+adb shell settings put global http_proxy :0       # restore afterwards (mandatory)
+adb reverse --remove tcp:8888
+```
+
+Notes: the port is arbitrary (earlier passes used `8888`/`8899`). A stale
+proxy with nothing listening fails every fetch at TCP connect with `Proxy
+connection refused` — before any TLS handshake — so that error says nothing
+about the app; always clear `http_proxy` back to `:0` when done. Keep the
+phone's Wi-Fi/mobile data enabled even with no route.
+
 | # | How to test | Expected | Status |
 | --- | --- | --- | --- |
 | 56 | Dictionaries toolbar → "Add from remote" | The catalog pane opens with the title "Dictionary catalog" and a Back arrow; the manifest is fetched | ✅ (2026-10-03, motorola ThinkPhone, Android 15: fetched `rg-software.github.io/aurelex/catalog/catalog.json`) |
