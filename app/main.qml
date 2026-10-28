@@ -28,6 +28,26 @@ ApplicationWindow {
     Material.accent: Material.Purple
     Material.theme: engine.darkMode ? Material.Dark : Material.Light
 
+    // System Back arrives as a window close event on Android. Dismissing the
+    // candidate surface (suggestions/history shown after typing or focus
+    // concealed the article) restores that article instead of exiting: reject
+    // the close and re-show the retained article with no new lookup, history
+    // or nav-stack change. Rejected only while an article is concealed and no
+    // lookup is in flight (the reply owns the surface then) and never under
+    // a modal picker; in every other state Back keeps its previous behavior
+    // (first press still dismisses the keyboard via the IME, later presses
+    // exit). A Java onBackPressed override cannot do this: the platform
+    // back dispatcher finishes the activity without calling it (verified
+    // on-device), and this Qt kit ships no BackHandler type while a
+    // Shortcut on StandardKey.Back never fires.
+    onClosing: (close) => {
+        if (root.state === 0 && !root._pickerOpen && !root.inlineArticle
+            && root.currentHtml.length > 0 && root._requestedWord.length === 0) {
+            close.accepted = false
+            root._cancelCandidates()
+        }
+    }
+
     // The window paints the app background edge to edge. Everything that is not
     // a pane (the inset strips beside a side-mounted camera, the area under a
     // dialog) shows this, so an inset never exposes the window's clear colour as
@@ -389,13 +409,30 @@ ApplicationWindow {
     // destroying the article nav history: currentWord/currentHtml and the
     // back/forward stacks are retained, so a subsequent lookup still pushes the
     // previous article and Back/Forward can re-open it. Used when the user types
-    // over a shown article. _clearInlineArticle() remains the full reset
-    // (leaving the tab / exiting to search).
+    // over (or focuses the field above) a shown article. _clearInlineArticle()
+    // remains the full reset (leaving the tab / exiting to search).
     function _hideInlineArticle() {
         root.inlineArticle = false
         root._resetFind()
         root._hideSuggestOverlay()
         root._blankInline()
+    }
+    // Cancel the candidate surface and re-show the concealed article WITHOUT
+    // a new lookup: currentWord/currentHtml/navStack were retained by
+    // _hideInlineArticle, so this just flips the surface back, restores the
+    // box text, and re-renders. No history or nav-stack change.
+    // Only valid when no lookup is in flight (see onClosing above).
+    function _cancelCandidates() {
+        if (root.inlineArticle || root.currentHtml.length === 0) return
+        if (root._requestedWord.length > 0) return
+        root._hideSuggestOverlay()
+        root._suppressSuggest = true
+        input.text = root.currentWord
+        root._suppressSuggest = false
+        root._resetFind()
+        root.inlineArticle = true
+        _blurActive()
+        articleLoadTimer.restart()
     }
     // The article surface is a NATIVE view painted over the QML panes, so a bare
     // document shows the WebView's own white canvas behind it — a white flash or
@@ -1232,6 +1269,13 @@ ColumnLayout {
                     // 2026-10-01-control-state-and-fts-whole-words change.
                     onDisplayTextChanged: searchPane._doSuggest()
                     onAccepted: searchPane._submitSearch()
+                    // EXPERIMENT: re-query on focus-gain so tapping the field
+                    // with an article shown conceals it and re-shows
+                    // suggestions for the text still in the box (same path as
+                    // typing). Suppressed during programmatic box updates.
+                    onActiveFocusChanged: {
+                        if (activeFocus && !root._suppressSuggest) searchPane._doSuggest()
+                    }
                     Component.onCompleted: {
                         // Focus the field + show the keyboard only AFTER
                         // onboarding — on first run the keyboard must not pop

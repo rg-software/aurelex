@@ -9,6 +9,7 @@ The system SHALL offer headword suggestions as the user types, matching dictiona
 Submitting a suggestion or the typed text SHALL trigger a full article lookup. A query submitted from the keyboard (the IME action) SHALL open the top (most relevant) suggestion when the query has suggestions, and SHALL look up the literal typed text when it has none.
 When the search field is empty, or when a typed query matches no dictionary headwords, the candidate surface SHALL show the recent lookup history instead of suggestions.
 A suggestion response SHALL NOT paint the candidate surface over an article that is being loaded, or has loaded, for the submitted query: an in-flight or completed article lookup takes precedence over suggestions for the same query.
+Focusing the search field SHALL re-query suggestions for the text still in the box through the same path as typing. Dismissing the candidate surface without submitting (system Back) while it conceals a previous article SHALL restore that article with no new lookup, history, or nav-stack change; this applies only when no lookup is in flight.
 
 #### Scenario: Typing produces suggestions
 - **WHEN** the user enters text in the search field
@@ -45,6 +46,14 @@ A suggestion response SHALL NOT paint the candidate surface over an article that
 #### Scenario: A late suggestion response does not cover the article
 - **WHEN** a suggestion query is still in flight when the article for the submitted text starts loading or finishes rendering
 - **THEN** the article is what remains shown, and the arriving suggestions do not repaint over it
+
+#### Scenario: Focusing the field re-queries suggestions
+- **WHEN** the user focuses the search field while it holds text and an article is shown
+- **THEN** the app conceals the article and shows headword suggestions for that text, the same as if it had been typed
+
+#### Scenario: Dismissing candidates restores the concealed article
+- **WHEN** the user dismisses the candidate surface without submitting (system Back) while it conceals a previous article and no lookup is in flight
+- **THEN** the app re-shows that article with its query restored in the search field, with no new lookup, history, or nav-stack change
 
 ### Requirement: Article rendering
 The system SHALL render a lookup as HTML built from the dictionaries of the active group that contain the headword, presented in the on-screen web view with the dictionaries ordered per the active group, whether the lookup is initiated by typing in the search field, selecting a suggestion, or an external entry point (share action, clipboard, history, favorites, or full-text search). Every article SHALL be presented in the Search tab's inline article surface; there SHALL NOT be a separate full-pane article view.
