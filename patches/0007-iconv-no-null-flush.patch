@@ -1,0 +1,34 @@
+diff --git a/src/common/iconv.cc b/src/common/iconv.cc
+--- a/src/common/iconv.cc
++++ b/src/common/iconv.cc
+@@ -141,24 +141,7 @@ QString Iconv::convert( const void *& inBuf, size_t & inBytesLeft )
+-  //flush output
+-  if ( result != (size_t)( -1 ) ) {
+-    /* flush the shift-out sequences */
+-    size_t flushIterations = 0;
+-    for ( ;; ) {
+-      result = iconv( state, NULL, NULL, (char **)&outBufPtr, &outBufLeft );
+-
+-      if ( result != (size_t)( -1 ) ) {
+-        break;
+-      }
+-
+-      if ( errno == E2BIG && ++flushIterations <= kMaxConversionIterations ) {
+-        size_t offset = (char *)outBufPtr - &outBuf.front();
+-        outBuf.resize( outBuf.size() + 256 );
+-        outBufPtr = &outBuf.front() + offset;
+-        outBufLeft += 256;
+-      }
+-      else {
+-        break;
+-      }
+-    }
+-  }
+-
++  // No shift-state flush: the conversion target is always UTF-8 (see the Iconv
++  // constructor), which is stateless, so there is nothing to flush. The POSIX
++  // reset call iconv(state, NULL, NULL, ...) segfaults on some Android Bionic
++  // versions (observed SIGSEGV fault addr 0x0 in iconv+40 on Android 10), so it
++  // must not be issued here even though glibc tolerates it.
++
+   size_t datasize = outBuf.size() - outBufLeft;
