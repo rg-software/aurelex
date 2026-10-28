@@ -53,7 +53,7 @@ applied to its working tree:
 
 `git -C engine checkout -- .` reverts the working tree back to the pinned tag.
 
-The set is deliberately short — six patches, applied in numeric order:
+The set is deliberately short — seven patches, applied in numeric order:
 
 | # | Patch | Change | Why |
 | --- | --- | --- | --- |
@@ -63,6 +63,7 @@ The set is deliberately short — six patches, applied in numeric order:
 | 0004 | `fts-sliced-build` | `fts: build in slices, commit periodically, publish atomically` | The engine holds its lock for a whole index build, so lookups over other dictionaries block until it finishes. Slices the build, commits periodically (resume after a kill) and publishes by atomic rename instead of a second `compact()` pass. |
 | 0005 | `iconv-bound-conversion-retries` | `iconv: bound conversion retries, bail on non-progress` | Upstream retries the `iconv()` call with a grown output buffer whenever it reports `E2BIG`, assuming a retry with more room makes progress. That is not guaranteed: a charset the converter cannot represent makes `iconv` fail identically every time, so the loop never terminated and the indexer hung on a bad-charset DSL. Adds a no-progress guard plus a retry cap. Load-bearing — it is the difference between "the import finishes" and "the import wedges". |
 | 0006 | `stardict-bword-cross-references` | `stardict: rewrite `bword:` cross-references into resolvable links` | StarDict dictionaries reference other entries with the internal `bword://word` / `bword:word` scheme, which the desktop engine resolves but the carve emitted verbatim — so a cross-reference in a staged StarDict article was dead text. Rewrites it into a URL the article's link poller routes back through `gd_lookup`. Load-bearing for StarDict link navigation. |
+| 0007 | `iconv-no-null-flush` | `iconv: drop the NULL shift-state flush` | `Iconv::convert` ended every conversion with `iconv(state, NULL, NULL, …)` to flush shift sequences. The target is always UTF-8 (stateless), so the flush is a no-op — but Bionic on some Android versions dereferences the NULL instead of treating it as a reset (SIGSEGV in `iconv+40` on Android 10, crashing the scan for any dictionary). Load-bearing on those devices: without it the app crash-loops at startup. |
 
 0003 and 0004 are the two FTS changes the user-visible behaviour in
 `docs/TESTING.md` (§ Full-text search, #32a–#32c) depends on, so treat both as
