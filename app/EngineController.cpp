@@ -2298,6 +2298,18 @@ int EngineController::systemInsetRight() const
 #endif
 }
 
+int EngineController::visibleBottom() const
+{
+#if defined(Q_OS_ANDROID)
+    return QJniObject::callStaticMethod<jint>(
+        "org/aurelex/pocket/dictionary/AurelexActivity",
+        "getVisibleBottom",
+        "()I");
+#else
+    return 0;
+#endif
+}
+
 void EngineController::playAudio(const QString &url) {
 #if defined(Q_OS_ANDROID)
     // JNI passthrough to AurelexActivity.playAudio(String) — Android's
@@ -3014,20 +3026,23 @@ void EngineController::applySystemBarAppearance()
 // the window either.
 //
 // The compare-and-emit shape matches updateSystemDark on the same tick: read, diff,
-// notify. Costs four JNI int reads per 500ms tick, and the emit only fires on an
+// notify. Costs five JNI int reads per 500ms tick, and the emit only fires on an
 // actual change.
 void EngineController::pollInsets()
 {
-    const int now[4] = { systemInsetTop(), systemInsetBottom(),
-                         systemInsetLeft(), systemInsetRight() };
+    const int now[5] = { systemInsetTop(), systemInsetBottom(),
+                         systemInsetLeft(), systemInsetRight(),
+                         visibleBottom() };
     if (now[0] == m_insets[0] && now[1] == m_insets[1] &&
-        now[2] == m_insets[2] && now[3] == m_insets[3]) {
+        now[2] == m_insets[2] && now[3] == m_insets[3] &&
+        now[4] == m_insets[4]) {
         return;
     }
     m_insets[0] = now[0];
     m_insets[1] = now[1];
     m_insets[2] = now[2];
     m_insets[3] = now[3];
+    m_insets[4] = now[4];
     emit insetsChanged();
 }
 

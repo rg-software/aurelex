@@ -96,6 +96,20 @@ public class AurelexActivity extends QtActivity {
         super.onCreate(savedInstanceState);
         sActivity = this;
 
+        // Keyboard resize mode, chosen per API level. The window must NOT
+        // resize for the keyboard on API 28-29: this era's WindowManager
+        // destroys and recreates the main EGL surface on every IME-driven
+        // resize (whole-screen black blink, EGL_BAD_NATIVE_WINDOW in logcat),
+        // and only sometimes shrinks the content frame at all (which is also
+        // what made the dock position flap between identical states).
+        // ADJUST_PAN leaves the window alone; the QML dock lift (visible-frame
+        // pad) keeps navigation above the keyboard instead. API 30+ keeps the
+        // default resize path the Android 15 verification rows were measured on.
+        if (android.os.Build.VERSION.SDK_INT <= 29) {
+            getWindow().setSoftInputMode(
+                android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_PAN);
+        }
+
         // Workaround for QTBUG-122886 (Qt 6.6): QtActivityDelegate's display
         // listener fires setActivityDisplayRotation on a null mLayout when a
         // display change races with activity teardown. The NPE is harmless but
@@ -265,6 +279,12 @@ public class AurelexActivity extends QtActivity {
      * navigation-bar inset and the display cutout's safe inset. Same
      * edge-to-edge rationale and same union rule as {@link #getSystemInsetTop}:
      * the bottom chrome must sit above the gesture/3-button nav area.
+     *
+     * The open keyboard MUST NOT count here. The window already shrinks for it
+     * (adjust=resize), so folding it into this inset inflates the dock and
+     * strands the tab row mid-screen. On API 30+ systemBars() excludes the
+     * IME; below that getSystemWindowInsetBottom() folds it in whenever the
+     * keyboard is shown, so the stable inset (nav bar only) is used instead.
      */
     public static int getSystemInsetBottom() {
         try {
@@ -272,8 +292,16 @@ public class AurelexActivity extends QtActivity {
             android.app.Activity activity = sActivity;
             if (activity != null) {
                 android.view.WindowInsets wi = activity.getWindow().getDecorView().getRootWindowInsets();
-                if (wi != null && wi.getSystemWindowInsetBottom() > 0)
-                    return Math.max(wi.getSystemWindowInsetBottom(), cutout);
+                if (wi != null) {
+                    final int bars;
+                    if (android.os.Build.VERSION.SDK_INT >= 30) {
+                        bars = wi.getInsets(android.view.WindowInsets.Type.systemBars()).bottom;
+                    } else {
+                        bars = wi.getStableInsetBottom();
+                    }
+                    if (bars > 0)
+                        return Math.max(bars, cutout);
+                }
             }
             int id = activity.getResources().getIdentifier("navigation_bar_height", "dimen", "android");
             int fallback = id > 0 ? activity.getResources().getDimensionPixelSize(id) : 0;
@@ -328,6 +356,31 @@ public class AurelexActivity extends QtActivity {
             android.util.Log.w(TAG, "getSystemInsetRight failed: " + e);
         }
         return cutout;
+    }
+
+    /**
+     * Bottom (px, window coordinates) of the visible display frame — the line
+     * above which the keyboard (or split-screen divider) does not reach. -1
+     * when it cannot be read; QML treats that as "no occlusion".
+     *
+     * This is the backstop for keyboards the window resize misses: on some
+     * devices the content frame does not shrink when the keyboard opens (only
+     * the visible frame does), so the Qt height stays full and the dock would
+     * end up behind the keyboard. QML pads the dock up by the occluded part.
+     * When the resize does happen the pad computes to zero, so the two paths
+     * never double-apply.
+     */
+    public static int getVisibleBottom() {
+        try {
+            android.app.Activity activity = sActivity;
+            if (activity == null) return -1;
+            android.graphics.Rect r = new android.graphics.Rect();
+            activity.getWindow().getDecorView().getWindowVisibleDisplayFrame(r);
+            return r.bottom;
+        } catch (Exception e) {
+            android.util.Log.w(TAG, "getVisibleBottom failed: " + e);
+            return -1;
+        }
     }
 
     /**

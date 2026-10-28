@@ -120,6 +120,11 @@ ApplicationWindow {
     property int _insetBottom: 0
     property int _insetLeft: 0
     property int _insetRight: 0
+    // Lift (dp) applied under the dock when the keyboard covers part of the
+    // window the resize missed: window height minus the visible-frame bottom.
+    // Zero whenever the resize already shrank for the keyboard (or nothing
+    // covers the window), so the two paths never double-apply.
+    property int _kbdPad: 0
     property real _insetDpr: Screen.devicePixelRatio > 0 ? Screen.devicePixelRatio : 1
     function _refreshInsets() {
         root._insetDpr = Screen.devicePixelRatio > 0 ? Screen.devicePixelRatio : 1
@@ -127,6 +132,8 @@ ApplicationWindow {
         root._insetBottom = Math.round(engine.systemInsetBottom() / root._insetDpr)
         root._insetLeft = Math.round(engine.systemInsetLeft() / root._insetDpr)
         root._insetRight = Math.round(engine.systemInsetRight() / root._insetDpr)
+        const visPx = engine.visibleBottom()
+        root._kbdPad = visPx <= 0 ? 0 : Math.max(0, Math.round(root.height - visPx / root._insetDpr))
     }
     // The resize hooks below are a FAST PATH for the common cases (a real
     // portrait<->landscape flip, the IME, split screen). They are not the
@@ -360,34 +367,36 @@ ApplicationWindow {
     }
     onStateChanged: {
         if (root.state !== 0) {
-            // Leaving the Search tab: mark that a return should restore the
-            // field's focus and re-trigger suggestions (the inline WebView and
-            // its suggestion overlay are destroyed on leaving). An inline
-            // article is PRESERVED (currentHtml); returning re-renders it.
+            // Leaving the Search tab: the WebView stays alive, parked
+            // offscreen (see _articleParked) with its document intact, so a
+            // return restores the article and the typed query's suggestions
+            // need no re-render - only a refocus/re-query when no article is
+            // showing (below). An inline article is PRESERVED (currentHtml).
             root._returningToSearch = true
-            root.inlineWebReady = false
-            inlineWebTimer.stop()
         } else if (root._returningToSearch) {
             root._returningToSearch = false
             if (root.inlineArticle) {
-                // An article was showing when we left; the loader re-creates
-                // the WebView and re-renders currentHtml on its own (onLoaded
-                // restarts articleLoadTimer). Don't force-suggest or refocus so
-                // the article (and its field text) survives the round trip.
+                // An article was showing when we left; its document persisted
+                // while parked, so it is simply still there. Don't force-suggest
+                // or refocus so the article (and its field text) survives the
+                // round trip.
                 return
             }
             // No article: refocus the field (so Enter works again) and
             // re-populate candidates for the text that's still typed. The
-            // fresh inline WebView is (re)created by inlineWebTimer shortly
-            // after; the pending suggestions are flushed once it's ready.
+            // persisted document takes the re-injected overlay live.
             //
-            // Focus is granted on the next turn, once the pane is actually
-            // visible: the field's frame repaints on focus and on text, while
-            // its floating label settles on its own schedule, so granting focus
-            // mid-switch can leave the frame redrawn through the label.
+            // Focus is granted synchronously so a keyboard left open on the
+            // other tab transfers without a hide/show cycle (each cycle resizes
+            // the window and reallocates the native article surface: black
+            // blink). The candidate refresh stays on the next turn, once the
+            // pane is actually visible: the field's frame repaints on focus and
+            // on text, while its floating label settles on its own schedule, so
+            // granting focus mid-switch can leave the frame redrawn through
+            // the label.
+            input.forceActiveFocus()
             Qt.callLater(function() {
                 if (root.state !== 0) return
-                input.forceActiveFocus()
                 if (input.displayText.trim().length > 0) searchPane._doSuggest()
             })
         }
@@ -881,6 +890,11 @@ ApplicationWindow {
         state = 3
     }
     function _openFts() {
+        // Keep an open keyboard across the switch: blurring and re-tapping
+        // would hide and re-show the IME, and every window resize reallocates
+        // the native article surface (black blink). Focusing the query field
+        // directly transfers the IME with no gap. When closed, leave it closed.
+        const keepKbd = input.activeFocus
         _blurActive()
         // Don't clear ftsResults here: switching tabs must be idempotent, so
         // the last search results survive a round trip (the field keeps its
@@ -889,6 +903,7 @@ ApplicationWindow {
         // a stale query, so the control cannot stay disabled across a re-entry.
         root.ftsSearching = false
         state = 4
+        if (keepKbd) ftsInput.forceActiveFocus()
     }
     function _openFavorites() {
         _blurActive()
@@ -1006,7 +1021,7 @@ ApplicationWindow {
     // strip below repaints the nav-bar region in our background color.
     Rectangle {
         id: navDock
-        anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
+        anchors { left: parent.left; right: parent.right; bottom: parent.bottom; bottomMargin: root._kbdPad }
         height: 56 + root._insetBottom
         z: 5
         color: root.uiBg
@@ -1367,11 +1382,13 @@ ColumnLayout {
             }
 
             // Inline article area: a permanent browser pane filling the Search
-            // tab below the search row. It is always present while on this tab
-            // (never hidden while a WebView is alive — a hidden-but-alive native
-            // WebView overlays the whole screen on Android), and is destroyed on
-            // leaving the tab so it never covers the other panes. The warm
-            // WebView gives near-instant re-renders. Search suggestions render as
+            // tab below the search row. The WebView is created once and then
+            // kept alive across tab switches and picker sessions - parked
+            // offscreen (see _articleParked) while another pane or the modal
+            // dialog is up, so it never covers them and never pays a
+            // destroy/create black flash on return. The already-loaded
+            // document is simply still there, so returning runs zero
+            // navigations. Search suggestions render as
             // an <a> dropdown INSIDE this WebView (main.qml _renderSuggestOverlay):
             // QML controls cannot draw over Android's native WebView surface, so
             // the dropdown lives in the same HTML document as the article.
@@ -1594,20 +1611,37 @@ ColumnLayout {
                     // native surface to a wrong (full-window) size that then
                     // overtakes the whole screen. inlineWebReady is set by a
                     // short timer once the Search tab is actually visible.
-                    active: root.state === 0 && root.inlineWebReady && !root._pickerOpen
+                    // Creation happens ONCE: after that the loader stays active
+                    // and tab switches / the picker only park the view (see
+                    // _articleParked) instead of destroying it.
+                    active: root.inlineWebReady
                     onLoaded: {
                         root.inlineWv = item
                         // Give the fresh WebView a document to run JS against.
                         root._ensureInlineBlank()
-                        // Re-render an already-loaded article when returning to
-                        // the tab (the WebView was just recreated).
+                        // First creation racing a lookup reply: _showArticle's
+                        // timer fires into a null inlineWv and is skipped, so
+                        // render here if an article is already waiting.
+                        // Returns from other tabs need nothing - the document
+                        // persisted while parked.
                         if (root.currentHtml.length > 0) articleLoadTimer.restart()
                     }
                     onActiveChanged: { root._blankPending = false; if (!active) root.inlineWv = null }
                     sourceComponent: Component {
                         WebView {
                             id: searchArticleView
-                            anchors.fill: parent
+                            // Normal geometry fills the loader (which already
+                            // sits below the toolbar). Parked (another tab, or
+                            // the modal picker): slide the whole native view
+                            // offscreen-left. It is then clipped by the window -
+                            // draws nothing, takes no taps - while visible:false
+                            // would leave it covering the screen and destroying
+                            // it would black-flash on return. The height stays
+                            // full so unparking never re-lays-out the page.
+                            x: root._articleParked ? -(width + 10) : 0
+                            y: 0
+                            width: parent.width
+                            height: parent.height
                             Accessible.name: "Dictionary article"
                             Accessible.role: Accessible.WebDocument
                             onUrlChanged: {
@@ -3960,11 +3994,19 @@ text: root._stagingActive
     }
 
     // --- group picker dialog ---
-    // True while the modal group picker is open: the inline WebView is torn
-    // down (its native surface sits above ANY Qt item, so it would cover the
-    // dialog). When this flips back to false, the loader re-creates the WebView
-    // and the suggestion/history overlay is re-applied via onLoadingChanged.
+    // True while the modal group picker is open. The inline WebView is NOT
+    // torn down for it (or for tab switches): its native surface sits above ANY
+    // Qt item, so instead of destroying it the view parks offscreen (see
+    // _articleParked) while the dialog is up. When this flips back to false
+    // the view slides back with its document intact — no re-navigation, no
+    // overlay re-apply needed beyond the usual scope refresh below.
     property bool _pickerOpen: false
+    // The native view ignores QML visibility (hiding it leaves it covering the
+    // screen), but geometry reaches it. So instead of destroying the WebView on
+    // tab leave / picker open, park it fully offscreen-left: clipped by the
+    // window, it draws nothing and receives no taps, and keeps its document —
+    // returning is instant with zero navigations.
+    property bool _articleParked: root.state !== 0 || root._pickerOpen
     // Which scope the modal picker was opened for: "search" or "fts". Decides
     // which group button to update on selection and whether the Search WebView
     // needs the teardown/restore dance (only the Search tab has an inline WebView).
@@ -3990,12 +4032,11 @@ text: root._stagingActive
             root._pickerTarget = target !== undefined ? target : "search"
             root._pickerStartedLookup = false
             if (root._pickerTarget === "search") {
-                // Tear down the inline WebView so its native surface can't sit
-                // above the modal dialog. Its document/history survive in
-                // currentHtml; the loader recreates it when _pickerOpen goes
-                // back to false. The FTS tab has no WebView, so skip.
+                // Park the inline WebView (via _articleParked) so its native
+                // surface can't sit above the modal dialog. Its document and JS
+                // state survive; closing slides it back with zero navigations.
+                // The FTS tab has no WebView, so skip.
                 root._pickerOpen = true
-                root.inlineWv = null
                 input.focus = false
             }
             groupPicker.open()
@@ -4005,14 +4046,11 @@ text: root._stagingActive
             root._pickerTarget = "search"
             if (!wasSearch) return // FTS: no WebView teardown happened
             root._pickerOpen = false
-            // Loader binding re-evaluates to create the WebView (state 0 &&
-            // inlineWebReady && !_pickerOpen). If inlineWebReady was toggled off
-            // while away, the inlineWebTimer re-arms on the Search state.
-            root.inlineWebReady = true
-            // Re-populate the candidate surface for whatever is in the box now
-            // (suggestions for a typed query, or history when empty). The
-            // _suggWords/_suggMode state survives, but re-querying ensures the
-            // results are fresh after the WebView destruction + group change.
+            // The WebView slides back with its document intact (it was parked,
+            // not destroyed). Re-populate the candidate surface for whatever is
+            // in the box now (suggestions for a typed query, or history when
+            // empty): the _suggWords/_suggMode state survives, but re-querying
+            // ensures the results are fresh after a possible group change.
             // Exception: a Search-scope selection that started a lookup owns the
             // surface — do not re-query suggestions over the incoming article.
             if (root._pickerStartedLookup) {

@@ -428,6 +428,11 @@ public:
     Q_INVOKABLE int systemInsetBottom() const;
     Q_INVOKABLE int systemInsetLeft() const;
     Q_INVOKABLE int systemInsetRight() const;
+    // Bottom of the visible display frame (physical px, -1 when unreadable):
+    // the line the keyboard does not reach. QML pads the dock up by the part
+    // of the window below it, which is a no-op whenever the window resize
+    // already shrank for the keyboard. 0 off-Android.
+    Q_INVOKABLE int visibleBottom() const;
 
 signals:
     void dictCountChanged();
@@ -472,7 +477,7 @@ signals:
     // LANDSCAPE orientations keeps the window at identical dimensions, so no
     // resize signal fires even though the display cutout has moved from one side
     // edge to the other — polling the values is what catches that, and QML
-    // re-reads all four insets on this.
+    // re-reads all four insets plus the visible bottom on this.
     void insetsChanged();
     void themeModeChanged();
     void articleZoomChanged();
@@ -720,8 +725,8 @@ private:
     // Periodic self-heal: the WM/Qt can reset the bar icons to the device-theme
     // default; this reapplies our desired appearance when it drifted (cheap, ~2Hz).
     void syncSystemBarAppearance();
-    // Re-reads the four safe-area insets and emits insetsChanged() when any of
-    // them moved. Driven from the same ~2Hz poll as the dark-mode sample rather
+    // Re-reads the four safe-area insets plus the visible-frame bottom and emits
+    // insetsChanged() when any of them moved. Driven from the same ~2Hz poll as the dark-mode sample rather
     // than from a window-resize hook: a landscape flip between the two landscape
     // orientations (rotation 1 <-> 3) keeps the window at identical dimensions,
     // so NO resize signal fires, yet the display cutout moves from one side edge
@@ -778,10 +783,11 @@ private:
     bool m_darkMode = false;
     bool m_systemDark = false;
     // Last physical-px safe-area insets seen by pollInsets(), so a change can be
-    // detected by comparing against the previous tick. {-1, -1, -1, -1} forces
+    // detected by comparing against the previous tick. {-1, ...} forces
     // the first tick to emit, which is what makes the initial layout land on the
-    // correct values rather than the QML defaults of 0.
-    int m_insets[4] = {-1, -1, -1, -1};
+    // correct values rather than the QML defaults of 0. Index 4 is the visible
+    // display-frame bottom (keyboard tracking), not a safe-area inset.
+    int m_insets[5] = {-1, -1, -1, -1, -1};
     // Persisted theme setting. Stored as the int itself so settings.json carries
     // no serialize step; the values are the on-disk representation.
     int m_themeMode = kThemeFollowSystem;
