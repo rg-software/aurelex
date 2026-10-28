@@ -8,6 +8,7 @@ Switching away from Search and back (or opening/closing the group picker) destro
 
 - Keep the inline WebView alive across tab switches and picker sessions: instead of deactivating the loader, park the native view offscreen-left (`x = -(width + 10)`) whenever Search is not the visible tab or the picker is open. Geometry reaches the native view (unlike `visible: false`, which leaves it covering the screen); offscreen it draws nothing and receives no taps.
 - The document persists, so returning needs zero navigations: the article/suggestions/history are simply still there. Remove the re-render-on-return paths; keep the first-creation blank document (JS context) and the height-reflow reloads (rotation reflow + scroll reset).
+- Focus follows the tab: entering FTS always focuses the query field (like the Search return path focuses its field), and both directions transfer focus synchronously so an open keyboard survives the switch instead of hide/show cycling it (each cycle resizes the window and reallocates the native surface).
 - No spec change: article rendering, suggestions, history and find behavior are unchanged — only the teardown policy goes away.
 
 ## Capabilities

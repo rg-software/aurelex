@@ -132,8 +132,17 @@ ApplicationWindow {
         root._insetBottom = Math.round(engine.systemInsetBottom() / root._insetDpr)
         root._insetLeft = Math.round(engine.systemInsetLeft() / root._insetDpr)
         root._insetRight = Math.round(engine.systemInsetRight() / root._insetDpr)
-        const visPx = engine.visibleBottom()
-        root._kbdPad = visPx <= 0 ? 0 : Math.max(0, Math.round(root.height - visPx / root._insetDpr))
+        // Lift the dock only for a real keyboard. The visible frame also
+        // shrinks for the translucent system nav bar and for pre-resize
+        // animation frames, neither of which may move the dock: the strip
+        // repaints the nav area instead of vacating it, and a transient sample
+        // must never stick. So the pad follows the occluded height with a dead
+        // zone — system bars stay under ~130px even on high-density screens,
+        // while even compact keyboards take 400px+. The poll below re-emits on
+        // every tick (not only on change) so a transient can only survive one
+        // interval before the steady value replaces it.
+        const occlPx = Math.round(root.height * root._insetDpr - engine.visibleBottom())
+        root._kbdPad = occlPx > 150 ? Math.round(occlPx / root._insetDpr) : 0
     }
     // The resize hooks below are a FAST PATH for the common cases (a real
     // portrait<->landscape flip, the IME, split screen). They are not the
@@ -368,10 +377,8 @@ ApplicationWindow {
     onStateChanged: {
         if (root.state !== 0) {
             // Leaving the Search tab: the WebView stays alive, parked
-            // offscreen (see _articleParked) with its document intact, so a
-            // return restores the article and the typed query's suggestions
-            // need no re-render - only a refocus/re-query when no article is
-            // showing (below). An inline article is PRESERVED (currentHtml).
+            // offscreen (see _articleParked) with its document intact. An
+            // inline article is PRESERVED (currentHtml).
             root._returningToSearch = true
         } else if (root._returningToSearch) {
             root._returningToSearch = false
@@ -382,27 +389,20 @@ ApplicationWindow {
                 // round trip.
                 return
             }
-            // No article: refocus the field (so Enter works again) and
-            // re-populate candidates for the text that's still typed. The
-            // persisted document takes the re-injected overlay live.
-            //
-            // Focus is granted synchronously so a keyboard left open on the
-            // other tab transfers without a hide/show cycle (each cycle resizes
-            // the window and reallocates the native article surface: black
-            // blink). The candidate refresh stays on the next turn, once the
-            // pane is actually visible: the field's frame repaints on focus and
-            // on text, while its floating label settles on its own schedule, so
-            // granting focus mid-switch can leave the frame redrawn through
-            // the label.
-            input.forceActiveFocus()
+            // No article: re-populate candidates for the text that's still typed.
+            // The persisted document takes the re-injected overlay live. Focus
+            // was already transferred on the way in (_navTo); this only refreshes
+            // the candidates, deferred a turn so the pane is settled — and never
+            // when an article owns the surface (e.g. a lookup from another tab
+            // racing here), where a suggest would be wasted work.
             Qt.callLater(function() {
-                if (root.state !== 0) return
+                if (root.state !== 0 || root.inlineArticle) return
                 if (input.displayText.trim().length > 0) searchPane._doSuggest()
             })
         }
     }
-    // Guards the onStateChanged re-focus/re-suggest so it only runs on an
-    // actual return to Search, not on first show.
+    // Guards the onStateChanged re-suggest so it only runs on an actual return
+    // to Search, not on first show.
     property bool _returningToSearch: false
     function _clearInlineArticle() {
         root.inlineArticle = false
@@ -871,13 +871,13 @@ ApplicationWindow {
         }
         return false
     }
-    function _blurActive() {
+    function _blurActive(except) {
         if (root.activeFocusItem && root.activeFocusItem.forceActiveFocus === undefined) return
-        if (input.activeFocus) input.focus = false
-        if (renameGroupInput.activeFocus) renameGroupInput.focus = false
-        if (createGroupNameInput.activeFocus) createGroupNameInput.focus = false
-        if (ftsInput.activeFocus) ftsInput.focus = false
-        if (findInput.activeFocus) findInput.focus = false
+        if (except !== input && input.activeFocus) input.focus = false
+        if (except !== renameGroupInput && renameGroupInput.activeFocus) renameGroupInput.focus = false
+        if (except !== createGroupNameInput && createGroupNameInput.activeFocus) createGroupNameInput.focus = false
+        if (except !== ftsInput && ftsInput.activeFocus) ftsInput.focus = false
+        if (except !== findInput && findInput.activeFocus) findInput.focus = false
     }
     function _openDicts() {
         _blurActive()
@@ -890,20 +890,23 @@ ApplicationWindow {
         state = 3
     }
     function _openFts() {
-        // Keep an open keyboard across the switch: blurring and re-tapping
-        // would hide and re-show the IME, and every window resize reallocates
-        // the native article surface (black blink). Focusing the query field
-        // directly transfers the IME with no gap. When closed, leave it closed.
-        const keepKbd = input.activeFocus
-        _blurActive()
+        // Focus the query field on every entry, like the Search return path
+        // focuses its field: the tab is a query surface. State first (the pane
+        // must be visible for focus to take), then focus, then blur the rest:
+        // a direct input->ftsInput transfer never leaves focus empty, so the
+        // IME never gets the hide that a blur-then-focus gap turns into a
+        // flicker (each cycle resizes the window and reallocates the native
+        // article surface: black blink). _blurActive(ftsInput) only clears
+        // whatever else might hold focus.
+        state = 4
+        ftsInput.forceActiveFocus()
+        _blurActive(ftsInput)
         // Don't clear ftsResults here: switching tabs must be idempotent, so
         // the last search results survive a round trip (the field keeps its
         // query and the results stay valid). A new search replaces them.
         // Also clear any busy flag left by a submit whose reply was dropped for
         // a stale query, so the control cannot stay disabled across a re-entry.
         root.ftsSearching = false
-        state = 4
-        if (keepKbd) ftsInput.forceActiveFocus()
     }
     function _openFavorites() {
         _blurActive()
@@ -963,24 +966,30 @@ ApplicationWindow {
     }
     function _navTo(idx) {
         if (idx === 0) {
-            _blurActive()
             // An article left over from another pane (full-pane article opened
-            // from Favs/FTS) must not carry into a fresh Search — a stale
+            // from Favs/FTS) must not carry into a fresh Search: a stale
             // article would steal the WebView and the typed query's suggestions
-            // would never show. Inline articles (opened IN Search) are kept:
-            // leaving the tab only hides the WebView (the loader tears it down),
-            // and returning re-renders currentHtml, so the article reappears.
+            // would never show. Inline articles (opened IN Search) are kept.
             if (root.currentHtml.length > 0 && !root.inlineArticle) {
                 root.currentWord = ""
                 root.currentHtml = ""
             }
             state = 0
+            if (!root.inlineArticle) {
+                // Focus the field on the way in (so Enter works), then clear
+                // anything else still holding focus. Doing it in this order —
+                // never via an unfocused gap — keeps a keyboard left open on
+                // the other tab open instead of hide/show cycling it.
+                input.forceActiveFocus()
+                _blurActive(input)
+            } else {
+                _blurActive()
+            }
             return
         }
         // Leaving the search tab: keep any inline article state (currentWord /
         // currentHtml / navStack) so a return restores the shown article. The
-        // inline WebView itself is destroyed by the loader, not here — no
-        // need to wipe anything; returning re-renders from currentHtml.
+        // inline WebView itself is parked offscreen by the loader, not here.
         if (idx === 1) { _openDicts(); return }
         if (idx === 3) { _openGroups(); return }
         if (idx === 4) { _openFts(); return }
@@ -1063,6 +1072,13 @@ ApplicationWindow {
                         // Five equal nav cells across the TabBar.
                         width: navBar.width / 5
                         height: parent.height
+                        // Never take keyboard focus: tapping a tab would move
+                        // active focus off the search/FTS field, hiding the
+                        // keyboard, and the tab's own onClicked path refocuses
+                        // a text field right after — a hide/show flicker on
+                        // every tab switch (same reason the group/clipboard
+                        // buttons are NoFocus). A tap needs no focus.
+                        focusPolicy: Qt.NoFocus
                         // icon glyph + label in the theme font (a single-font
                         // `text` would render the icon glyphs as broken Latin).
                         contentItem: Column {
