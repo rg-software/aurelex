@@ -3853,7 +3853,14 @@ void EngineController::setOnboarded(bool v)
 void EngineController::loadSettings()
 {
     QFile f(m_appDir + "/settings.json");
-    if (!f.open(QIODevice::ReadOnly)) return;
+    if (!f.open(QIODevice::ReadOnly)) {
+        // Fresh install: no settings file yet. The defaults already hold
+        // (m_onboarded=false), but QML boot routing waits for this signal —
+        // without it the app stays on Search with the onboarding overlay only
+        // appearing after a manual switch to Dicts.
+        emit onboardedChanged();
+        return;
+    }
     const QJsonDocument doc = QJsonDocument::fromJson(f.readAll());
     const QJsonObject obj = doc.object();
     m_onboarded = obj.value("onboarded").toBool(false);
