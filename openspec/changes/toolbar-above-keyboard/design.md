@@ -13,9 +13,10 @@ settled-state IME probe is deliberately NOT included (that is the later
 ## Goals / Non-Goals
 
 **Goals:**
-- Dock stays visible and tappable above the keyboard on API <= 29 (`adjust=pan`).
-- Dock sits flush against the keyboard on API 30+ (no residual gap), including
-  Motorola.
+- Dock stays visible and tappable above the keyboard on every device.
+- The lift must work whether or not the window resizes: measured occlusion
+  where the platform reports IME insets (Xiaomi, Motorola), focus-based
+  estimate where it does not (Huawei/EMUI).
 
 **Non-Goals:**
 - No IME show/hide changes.
@@ -26,12 +27,15 @@ settled-state IME probe is deliberately NOT included (that is the later
 
 1. **Re-introduce the instantaneous dock lift from `b2dbc06`**: `navDock` gains
    `bottomMargin: root._kbdPad`, and `_refreshInsets()` computes `_kbdPad` from
-   `visibleBottom()`/`displayHeight()`/`imeActuallyVisible()`.
-2. **API <= 29 keeps `adjust=pan`** (resize destroys the EGL surface). The manual
-   pad is the only lift there.
-3. **API 30+ keeps resize** as the primary path; `_kbdPad` becomes a corrective
-   pad only when resize leaves a gap (Motorola). The pad is a no-op when resize
-   already cleared the keyboard.
+   `visibleBottom()`/`displayHeight()`/`imeActuallyVisible()`. Verified on Qt
+   6.10.3 (2026-10-29) that NO device resizes the window for the keyboard when
+   no `windowSoftInputMode` is set — not even API 35/36 — so the manual pad is
+   the lift everywhere, not just on API <= 29. The "no double-application"
+   guard (pad computes to ~0 when a resize did shrink the window) stays as a
+   safety net.
+2. **No `windowSoftInputMode` override.** The manifest sets none; Qt's default
+   applies on all API levels. Do NOT set `adjust=resize` (EMUI ignores it) or
+   `adjust=pan` (nothing needs it while the pad does the work).
 4. **Instantaneous visibility only.** `imeActuallyVisible()` (not the settled
    probe) gates the lift, since the probe is not yet available. A later change
    swaps in the settled probe.
