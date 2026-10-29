@@ -126,12 +126,17 @@ ApplicationWindow {
     // double-apply.
     property int _kbdPad: 0
     property real _insetDpr: Screen.devicePixelRatio > 0 ? Screen.devicePixelRatio : 1
-    // Settle-then-rekick for the fake IME state (Qt 6.9.3: first tap focuses
-    // but the show is cancelled post-layout and nothing paints). Armed on
-    // every focus gain; fires once after layout settles. The blur+refocus is
-    // synchronous (same frame) so a healthy show is undisturbed, while a
-    // wedged one gets a fresh post-layout show request.
+    // Settle-then-rekick for the fake IME state (Qt 6.9.3: first tap's show is
+    // cancelled post-layout and nothing paints). Armed ONLY by user taps
+    // (see the focus connections): programmatic gains (tab-return refocus,
+    // the re-kick itself) must not arm, or a healthy auto-show gets blurred
+    // away and re-shown ~400 ms later — the visible appear/disappear/reappear
+    // flicker. Fires once after layout settles.
     property bool _imeBackstopArmed: false
+    // Set when focus is granted programmatically (tab-return refocus below).
+    // Such gains must not arm the backstop: their auto-show already went out
+    // post-layout-settle, so a re-kick would only churn a healthy keyboard.
+    property bool _programmaticFocus: false
     // Timestamp (ms) of the last query-field focus gain. Lets the settled-hide
     // clearing below distinguish a fresh tap (don't touch) from a focus left
     // over after the keyboard was dismissed (safe to clear).
@@ -220,11 +225,14 @@ ApplicationWindow {
         function onActiveFocusChanged() {
             if (input.activeFocus) {
                 root._lastFocusGainMs = Date.now()
-                // Skip arming for gains caused by our own re-kick below.
-                if (Date.now() - root._lastRekickMs > 1500) {
+                // Arm only on user taps: skip programmatic gains (tab-return
+                // refocus) and gains caused by our own re-kick.
+                if (!root._programmaticFocus
+                    && Date.now() - root._lastRekickMs > 1500) {
                     root._imeBackstopArmed = true
                     imeBackstopTimer.restart()
                 }
+                root._programmaticFocus = false
             } else {
                 root._imeBackstopArmed = false
             }
@@ -236,11 +244,14 @@ ApplicationWindow {
         function onActiveFocusChanged() {
             if (ftsInput.activeFocus) {
                 root._lastFocusGainMs = Date.now()
-                // Skip arming for gains caused by our own re-kick below.
-                if (Date.now() - root._lastRekickMs > 1500) {
+                // Arm only on user taps: skip programmatic gains (tab-return
+                // refocus) and gains caused by our own re-kick.
+                if (!root._programmaticFocus
+                    && Date.now() - root._lastRekickMs > 1500) {
                     root._imeBackstopArmed = true
                     imeBackstopTimer.restart()
                 }
+                root._programmaticFocus = false
             } else {
                 root._imeBackstopArmed = false
             }
@@ -496,6 +507,7 @@ ApplicationWindow {
             // return restores the article and the typed query's suggestions
             // need no re-render. An inline article is PRESERVED (currentHtml).
             root._returningToSearch = true
+            root._programmaticFocus = false
             // inlineWebReady stays true so the loader (and its WebView) is not
             // destroyed; the timer stops on its own (running: state === 0).
         } else if (root._returningToSearch) {
@@ -511,20 +523,31 @@ ApplicationWindow {
             // re-populate candidates for the text that's still typed. The
             // persisted document takes the re-injected overlay live.
             //
-            // Focus is granted on the next turn, once the pane is actually
-            // visible: the field's frame repaints on focus and on text, while
-            // its floating label settles on its own schedule, so granting focus
-            // mid-switch can leave the frame redrawn through the label.
-            Qt.callLater(function() {
-                if (root.state !== 0) return
-                input.forceActiveFocus()
-                if (input.displayText.trim().length > 0) searchPane._doSuggest()
-            })
+            // Focus is granted by returnFocusTimer, once the tab switch layout
+            // has settled, so its auto-show goes out post-layout instead of
+            // being cancelled mid-transition. The gain is marked programmatic
+            // so it does not arm the keyboard backstop.
+            root._programmaticFocus = true
+            returnFocusTimer.restart()
         }
     }
     // Guards the onStateChanged re-focus/re-suggest so it only runs on an
     // actual return to Search, not on first show.
     property bool _returningToSearch: false
+    // Deferred return-to-Search focus: fires once the tab-switch layout has
+    // settled, so the auto-show it triggers goes out post-layout instead of
+    // being cancelled mid-transition (no backstop needed on this path).
+    Timer {
+        id: returnFocusTimer
+        interval: 150
+        repeat: false
+        onTriggered: {
+            if (root.state !== 0) return
+            if (input.activeFocus) return
+            input.forceActiveFocus()
+            if (input.displayText.trim().length > 0) searchPane._doSuggest()
+        }
+    }
     // True while the inline WebView must be parked offscreen (clipped by the
     // window) so its native surface cannot cover other panes or the modal
     // picker. The WebView stays alive with its document intact instead of
