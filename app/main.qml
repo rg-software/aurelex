@@ -129,9 +129,11 @@ ApplicationWindow {
     // Settle-then-rekick for the fake IME state (Qt 6.9.3: first tap's show is
     // cancelled post-layout and nothing paints). Armed ONLY by user taps
     // (see the focus connections): programmatic gains (tab-return refocus,
-    // the re-kick itself) must not arm, or a healthy auto-show gets blurred
-    // away and re-shown ~400 ms later — the visible appear/disappear/reappear
-    // flicker. Fires once after layout settles.
+    // the re-kick itself) must not arm. Fires early (~150 ms: after layout
+    // settles, usually before anything paints), so the blur+refocus replaces
+    // the in-flight show request invisibly instead of visibly killing an
+    // already-painted keyboard (a late re-kick is what caused the
+    // appear/disappear/reappear flicker). Fires once.
     property bool _imeBackstopArmed: false
     // Set when focus is granted programmatically (tab-return refocus below).
     // Such gains must not arm the backstop: their auto-show already went out
@@ -147,7 +149,7 @@ ApplicationWindow {
     property double _lastRekickMs: 0
     Timer {
         id: imeBackstopTimer
-        interval: 400
+        interval: 150
         repeat: false
         onTriggered: {
             if (!root._imeBackstopArmed) return
