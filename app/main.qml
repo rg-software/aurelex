@@ -120,16 +120,6 @@ ApplicationWindow {
     property int _insetBottom: 0
     property int _insetLeft: 0
     property int _insetRight: 0
-    // Lift (dp) applied under the dock when the keyboard covers part of the
-    // window the resize missed. Zero whenever the resize already shrank for the
-    // keyboard (or nothing covers the window), so the two paths never
-    // double-apply.
-    property int _kbdPad: 0
-    // True once an OEM has been observed reporting IME visibility via insets.
-    // On such OEMs the focus-based fallback is disabled (it would only cause
-    // midair lifts and jumps). On OEMs that never report (Huawei/EMUI) it
-    // stays false and the fallback remains active.
-    property bool _oemReportsIme: false
     property real _insetDpr: Screen.devicePixelRatio > 0 ? Screen.devicePixelRatio : 1
     function _refreshInsets() {
         root._insetDpr = Screen.devicePixelRatio > 0 ? Screen.devicePixelRatio : 1
@@ -137,37 +127,6 @@ ApplicationWindow {
         root._insetBottom = Math.round(engine.systemInsetBottom() / root._insetDpr)
         root._insetLeft = Math.round(engine.systemInsetLeft() / root._insetDpr)
         root._insetRight = Math.round(engine.systemInsetRight() / root._insetDpr)
-        // Only reposition the toolbar for the Search and FTS tabs. Modal
-        // dialogs (e.g. group name input) may open the keyboard but must not
-        // move the dock.
-        const onQueryTab = root.state === 0 || root.state === 4
-        if (!onQueryTab) {
-            root._kbdPad = 0
-            return
-        }
-        // Lift the dock above the keyboard. On OEMs that report IME insets
-        // (Motorola, Xiaomi) use the measured occlusion. On OEMs that do not
-        // (Huawei/EMUI), fall back to a focus-based heuristic — but only on
-        // OEMs that have never been observed reporting, so reporting OEMs never
-        // get a spurious midair lift.
-        if (engine.imeActuallyVisible()) {
-            root._oemReportsIme = true
-            const visBottom = engine.visibleBottom()
-            if (visBottom >= 0) {
-                const displayPx = engine.displayHeight() > 0
-                    ? engine.displayHeight() : root.height * root._insetDpr
-                const sysBottomPx = engine.systemInsetBottom()
-                const occludedPx = displayPx - visBottom - sysBottomPx
-                root._kbdPad = Math.max(0, Math.round(occludedPx / root._insetDpr))
-            } else {
-                root._kbdPad = 0
-            }
-        } else if (!root._oemReportsIme && (input.activeFocus || ftsInput.activeFocus) && Qt.inputMethod.visible) {
-            // Focus-based fallback for non-reporting OEMs only.
-            root._kbdPad = Math.round(root.height * 0.4)
-        } else {
-            root._kbdPad = 0
-        }
     }
     // The resize hooks below are a FAST PATH for the common cases (a real
     // portrait<->landscape flip, the IME, split screen). They are not the
@@ -185,37 +144,6 @@ ApplicationWindow {
         target: engine
         function onInsetsChanged() { root._refreshInsets() }
     }
-    // Re-evaluate the dock lift when focus changes, so the focus-based
-    // fallback (for OEMs that don't report IME insets) lifts/drops the dock
-    // even when no inset signal fires.
-    Connections {
-        target: input
-        function onActiveFocusChanged() { root._refreshInsets() }
-    }
-    Connections {
-        target: ftsInput
-        function onActiveFocusChanged() { root._refreshInsets() }
-    }
-    Connections {
-        target: Qt.inputMethod
-        function onVisibleChanged() { root._refreshInsets() }
-    }
-    // Belt-and-suspenders poll for OEMs (Huawei/EMUI) where insets and
-    // Qt.inputMethod.visible do not fire reliably: while a field has focus,
-    // re-evaluate the dock lift periodically so a show/hide that missed its
-    // signal still lands within one interval.
-    Timer {
-        interval: 250
-        repeat: true
-        running: true
-        onTriggered: root._refreshInsets()
-    }
-
-    // (Removed: gated re-show experiment. Qt.inputMethod.show() is rejected at
-    // PHASE_CLIENT_REPORT_REQUESTED_VISIBLE_TYPES on Xiaomi API 36 because the
-    // client's requested visible types exclude IME — a Qt 6.9 platform issue.
-    // The system's CONTROLS_CHANGED re-request is the only path that works,
-    // and it takes ~440 ms or fails to paint. See docs/TESTING.md.)
     Component.onCompleted: root._refreshInsets()
     // First-launch tab routing happens on onOnboardedChanged (not here):
     // engine.onboarded is only final after EngineController's ASYNC gd_init +
@@ -945,8 +873,6 @@ ApplicationWindow {
         if (createGroupNameInput.activeFocus) createGroupNameInput.focus = false
         if (ftsInput.activeFocus) ftsInput.focus = false
         if (findInput.activeFocus) findInput.focus = false
-        // Re-evaluate the dock lift after the IME has had time to hide.
-        Qt.callLater(function() { Qt.callLater(function() { root._refreshInsets() }) })
     }
     function _openDicts() {
         _blurActive()
@@ -1084,7 +1010,7 @@ ApplicationWindow {
     // strip below repaints the nav-bar region in our background color.
     Rectangle {
         id: navDock
-        anchors { left: parent.left; right: parent.right; bottom: parent.bottom; bottomMargin: root._kbdPad }
+        anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
         height: 56 + root._insetBottom
         z: 5
         color: root.uiBg
@@ -1105,7 +1031,6 @@ ApplicationWindow {
                 // Five nav tabs take 5/6 of the dock; the theme cell (a sibling
                 // below) takes the last 1/6. As a sibling - not a TabBar child -
                 // it can never become the "active tab".
-                focusPolicy: Qt.NoFocus
                 width: navRow.width - Math.round(navRow.width / 6)
                 height: navRow.height
                 // TabBar tabs tile the bar exactly (spacing 0 + exact-fill
@@ -1124,7 +1049,6 @@ ApplicationWindow {
                     model: root.navItems
                     delegate: TabButton {
                         id: tabBtn
-                        focusPolicy: Qt.NoFocus
                         // Five equal nav cells across the TabBar.
                         width: navBar.width / 5
                         height: parent.height

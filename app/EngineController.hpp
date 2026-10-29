@@ -428,14 +428,6 @@ public:
     Q_INVOKABLE int systemInsetBottom() const;
     Q_INVOKABLE int systemInsetLeft() const;
     Q_INVOKABLE int systemInsetRight() const;
-    // Bottom of the visible display frame (physical px, -1 when unreadable):
-    // the line the keyboard does not reach.
-    Q_INVOKABLE int visibleBottom() const;
-    // Real display height (physical px) — reference line for keyboard occlusion.
-    Q_INVOKABLE int displayHeight() const;
-    // Actual system IME visibility (instantaneous, no probe).
-    Q_INVOKABLE bool imeActuallyVisible() const;
-    Q_INVOKABLE int sdkInt() const;
 
 signals:
     void dictCountChanged();
