@@ -331,6 +331,99 @@ public class AurelexActivity extends QtActivity {
     }
 
     /**
+     * Bottom (px, window coordinates) of the visible display frame — the line
+     * above which the keyboard does not reach. -1 when unreadable.
+     */
+    public static int getVisibleBottom() {
+        try {
+            android.app.Activity activity = sActivity;
+            if (activity == null) return -1;
+            android.graphics.Rect r = new android.graphics.Rect();
+            activity.getWindow().getDecorView().getWindowVisibleDisplayFrame(r);
+            return r.bottom;
+        } catch (Exception e) {
+            android.util.Log.w(TAG, "getVisibleBottom failed: " + e);
+            return -1;
+        }
+    }
+
+    /**
+     * Real display height in physical px.
+     */
+    public static int getDisplayHeight() {
+        try {
+            android.app.Activity activity = sActivity;
+            if (activity == null) return 0;
+            android.view.WindowManager wm = activity.getWindowManager();
+            if (android.os.Build.VERSION.SDK_INT >= 30)
+                return wm.getMaximumWindowMetrics().getBounds().height();
+            android.util.DisplayMetrics dm = new android.util.DisplayMetrics();
+            wm.getDefaultDisplay().getRealMetrics(dm);
+            return dm.heightPixels;
+        } catch (Exception e) {
+            android.util.Log.w(TAG, "getDisplayHeight failed: " + e);
+            return 0;
+        }
+    }
+
+    /**
+     * Actual system IME visibility. On API 30+ WindowInsets reports the IME
+     * source directly. On API 28-29, compare the visible display frame with the
+     * decor window bottom after subtracting the stable navigation inset.
+     */
+    public static boolean isImeActuallyVisible() {
+        try {
+            android.app.Activity activity = sActivity;
+            if (activity == null) return false;
+            android.view.View decor = activity.getWindow().getDecorView();
+            android.view.WindowInsets wi = decor.getRootWindowInsets();
+            if (android.os.Build.VERSION.SDK_INT >= 30 && wi != null)
+                return wi.isVisible(android.view.WindowInsets.Type.ime());
+
+            // API 28-29: the visible-display-frame comparison is unreliable on
+            // some OEMs (Huawei/EMUI) under adjust=pan. Try (1) system-vs-stable
+            // inset, then (2) reflection on InputMethodManager.mInputShown.
+            if (wi != null) {
+                int sysBottom = wi.getSystemWindowInsetBottom();
+                int stableBottom = wi.getStableInsetBottom();
+                if (sysBottom > stableBottom) {
+                    return true;
+                }
+            }
+            // Reflection fallback: read IMM.mInputShown (field name varies by
+            // Android version; try the common ones).
+            try {
+                android.view.inputmethod.InputMethodManager imm =
+                        (android.view.inputmethod.InputMethodManager)
+                                activity.getSystemService(android.content.Context.INPUT_METHOD_SERVICE);
+                for (String fieldName : new String[]{"mInputShown", "mServedInputConnection"}) {
+                    try {
+                        java.lang.reflect.Field f = android.view.inputmethod.InputMethodManager.class
+                                .getDeclaredField(fieldName);
+                        f.setAccessible(true);
+                        Object v = f.get(imm);
+                        if (v instanceof Boolean) {
+                            return (Boolean) v;
+                        }
+                    } catch (NoSuchFieldException ignored) {
+                    }
+                }
+            } catch (Exception ignored) {
+            }
+            // Last resort: visible display frame.
+            android.graphics.Rect vis2 = new android.graphics.Rect();
+            decor.getWindowVisibleDisplayFrame(vis2);
+            int[] loc2 = new int[2];
+            decor.getLocationOnScreen(loc2);
+            int fullBottom2 = loc2[1] + decor.getHeight();
+            return vis2.bottom < fullBottom2;
+        } catch (Exception e) {
+            android.util.Log.w(TAG, "isImeActuallyVisible failed: " + e);
+            return false;
+        }
+    }
+
+    /**
      * Tells the system whether our chrome (status strip at top, nav strip at
      * bottom) is LIGHT or DARK, so the system icons (clock, signals, gesture
      * bar) are drawn with the right contrast. The Qt window is edge-to-edge and
