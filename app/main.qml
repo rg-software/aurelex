@@ -132,9 +132,11 @@ ApplicationWindow {
         root._insetBottom = Math.round(engine.systemInsetBottom() / root._insetDpr)
         root._insetLeft = Math.round(engine.systemInsetLeft() / root._insetDpr)
         root._insetRight = Math.round(engine.systemInsetRight() / root._insetDpr)
-        // Lift the dock above the keyboard when the window did not resize for it
-        // (adjust=pan on API <= 29). Use the instantaneous IME visibility; the
-        // settled probe is not available yet on this branch.
+        // Lift the dock above the keyboard. On OEMs that report IME insets
+        // (Motorola, Xiaomi) use the measured occlusion. On OEMs that do not
+        // (Huawei/EMUI, where neither the visible frame nor the system inset
+        // changes), fall back to a focus-based heuristic: lift while a query
+        // field has focus, using a fixed estimate for the keyboard height.
         if (engine.imeActuallyVisible()) {
             const visBottom = engine.visibleBottom()
             if (visBottom >= 0) {
@@ -146,6 +148,9 @@ ApplicationWindow {
             } else {
                 root._kbdPad = 0
             }
+        } else if (input.activeFocus) {
+            // Focus-based fallback for OEMs that don't report IME insets.
+            root._kbdPad = Math.round(root.height * 0.4)
         } else {
             root._kbdPad = 0
         }

@@ -606,7 +606,7 @@ table above.
 ### Notes on device-specific behaviour
 
 - **Motorola (API 35)**: visible gap between lifted toolbar and keyboard (possibly Motorola-specific). Needs a measurement (px) and a device-specific pad tweak if it reproduces on Huawei too. (Dock lifts automatically because API 35 uses `adjust=resize`.)
-- **Huawei (API 29)**: **toolbar is under the keyboard** (obscured) — expected on this branch, because the dock-lift code (`_kbdPad`, from `b2dbc06`) is deliberately NOT part of `webview-smooth-navigation`. The lift is the next change. FTS tab does not auto-focus/show keyboard on entry (also a pre-existing baseline behaviour, not part of this change). This is the API-29 `adjust=pan` path.
+- **Huawei (API 29)**: toolbar is under the keyboard. EMUI ignores `adjust=resize` (set explicitly) and does not report IME visibility via any standard API (visible frame, system/stable insets, `InputMethodManager.mInputShown` reflection all fail). The focus-based fallback (`_kbdPad = 40% of height` while a field has focus) is implemented but could not be verified by automated tap (the field did not take focus from the synthetic tap). Needs manual verification. FTS tab does not auto-focus/show keyboard on entry (pre-existing baseline behaviour).
 - **Xiaomi (API 36)**: `policy showing=false` is unreliable (IME inset `visible=true` is the truth). SwiftKey logs `onStartInput aborted` and post-layout aborts; Gboard does not. Both reject `Qt.inputMethod.show()` at `PHASE_CLIENT_REPORT_REQUESTED_VISIBLE_TYPES`. On this branch (no shared editor, no dock lift, no focus-on-entry): two taps needed to open the keyboard, toolbar behind keyboard, no auto-focus on Search entry. Consistent across Gboard and SwiftKey.
 
 ## Localization (app language)

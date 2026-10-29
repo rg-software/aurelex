@@ -96,6 +96,27 @@ public class AurelexActivity extends QtActivity {
         super.onCreate(savedInstanceState);
         sActivity = this;
 
+        // EXPERIMENT (toolbar-above-keyboard): force adjust=resize on every API
+        // level so the window shrinks for the keyboard and the dock lifts
+        // automatically (instead of relying on the OEM's adjustUnspecified
+        // default, which on Huawei/EMUI leaves the dock behind the keyboard).
+        // Previously API 28-29 used adjust=pan to avoid an EGL-surface
+        // recreation black blink; testing whether that is still necessary.
+        getWindow().setSoftInputMode(
+            android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
+        // Also re-apply after the window is created, in case Qt or the WM
+        // overrode the mode during super.onCreate().
+        new android.os.Handler(android.os.Looper.getMainLooper()).post(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    getWindow().setSoftInputMode(
+                        android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
+                } catch (Exception ignored) {
+                }
+            }
+        });
+
         // Workaround for QTBUG-122886 (Qt 6.6): QtActivityDelegate's display
         // listener fires setActivityDisplayRotation on a null mLayout when a
         // display change races with activity teardown. The NPE is harmless but
@@ -380,13 +401,43 @@ public class AurelexActivity extends QtActivity {
             if (android.os.Build.VERSION.SDK_INT >= 30 && wi != null)
                 return wi.isVisible(android.view.WindowInsets.Type.ime());
 
-            android.graphics.Rect visible = new android.graphics.Rect();
-            decor.getWindowVisibleDisplayFrame(visible);
-            int[] location = new int[2];
-            decor.getLocationOnScreen(location);
-            int stableBottom = wi != null ? wi.getStableInsetBottom() : 0;
-            int fullBottom = location[1] + decor.getHeight();
-            return visible.bottom < fullBottom - stableBottom;
+            // API 28-29: the visible-display-frame comparison is unreliable on
+            // some OEMs (Huawei/EMUI) under adjust=pan. Try (1) system-vs-stable
+            // inset, then (2) reflection on InputMethodManager.mInputShown.
+            if (wi != null) {
+                int sysBottom = wi.getSystemWindowInsetBottom();
+                int stableBottom = wi.getStableInsetBottom();
+                if (sysBottom > stableBottom) {
+                    return true;
+                }
+            }
+            // Reflection fallback: read IMM.mInputShown (field name varies by
+            // Android version; try the common ones).
+            try {
+                android.view.inputmethod.InputMethodManager imm =
+                        (android.view.inputmethod.InputMethodManager)
+                                activity.getSystemService(android.content.Context.INPUT_METHOD_SERVICE);
+                for (String fieldName : new String[]{"mInputShown", "mServedInputConnection"}) {
+                    try {
+                        java.lang.reflect.Field f = android.view.inputmethod.InputMethodManager.class
+                                .getDeclaredField(fieldName);
+                        f.setAccessible(true);
+                        Object v = f.get(imm);
+                        if (v instanceof Boolean) {
+                            return (Boolean) v;
+                        }
+                    } catch (NoSuchFieldException ignored) {
+                    }
+                }
+            } catch (Exception ignored) {
+            }
+            // Last resort: visible display frame.
+            android.graphics.Rect vis2 = new android.graphics.Rect();
+            decor.getWindowVisibleDisplayFrame(vis2);
+            int[] loc2 = new int[2];
+            decor.getLocationOnScreen(loc2);
+            int fullBottom2 = loc2[1] + decor.getHeight();
+            return vis2.bottom < fullBottom2;
         } catch (Exception e) {
             android.util.Log.w(TAG, "isImeActuallyVisible failed: " + e);
             return false;
