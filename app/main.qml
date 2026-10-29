@@ -171,6 +171,13 @@ ApplicationWindow {
         target: engine
         function onInsetsChanged() { root._refreshInsets() }
     }
+    // Re-evaluate the dock lift when focus changes, so the focus-based
+    // fallback (for OEMs that don't report IME insets) lifts/drops the dock
+    // even when no inset signal fires.
+    Connections {
+        target: input
+        function onActiveFocusChanged() { root._refreshInsets() }
+    }
     Component.onCompleted: root._refreshInsets()
     // First-launch tab routing happens on onOnboardedChanged (not here):
     // engine.onboarded is only final after EngineController's ASYNC gd_init +
