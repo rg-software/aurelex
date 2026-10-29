@@ -274,6 +274,15 @@ ApplicationWindow {
         repeat: true
         running: true
         onTriggered: {
+            if (root._imeDiag) {
+                const sig = root.state + "|" + input.activeFocus + ftsInput.activeFocus
+                    + "|" + Qt.inputMethod.visible + "|" + engine.imeActuallyVisible()
+                    + "|" + root._kbdPad + "|" + root._pickerOpen
+                if (sig !== root._imeLastState) {
+                    root._imeLastState = sig
+                    console.warn("[ime] state=" + sig)
+                }
+            }
             if (Qt.inputMethod.visible) root._imeWasVisibleSinceGain = true
             // Clear a focus left over after the keyboard was dismissed
             // (Back hides the IME but Qt keeps field focus, so the next tap
@@ -1035,15 +1044,30 @@ ApplicationWindow {
         }
         return false
     }
-    function _blurActive() {
+    // Clears keyboard focus. With keepQuery, the two query fields are left
+    // alone so focus can transfer directly between them (Search<->FTS) with
+    // the keyboard riding through instead of hiding and re-showing.
+    function _blurActive(keepQuery) {
         if (root.activeFocusItem && root.activeFocusItem.forceActiveFocus === undefined) return
-        if (input.activeFocus) input.focus = false
+        if (!keepQuery) {
+            if (input.activeFocus) input.focus = false
+            if (ftsInput.activeFocus) ftsInput.focus = false
+        }
         if (renameGroupInput.activeFocus) renameGroupInput.focus = false
         if (createGroupNameInput.activeFocus) createGroupNameInput.focus = false
-        if (ftsInput.activeFocus) ftsInput.focus = false
         if (findInput.activeFocus) findInput.focus = false
         // Re-evaluate the dock lift after the IME has had time to hide.
         Qt.callLater(function() { Qt.callLater(function() { root._refreshInsets() }) })
+    }
+    // Moves keyboard focus directly to a query field (synchronous transfer).
+    // When the keyboard is already up it rides through with no hide/show
+    // cycle; when down, the gain arms the backstop like a tap. Backed by
+    // entryFocusTimer below in case the grant lands mid-transition.
+    function _transferQueryFocus(target) {
+        if (target.activeFocus) return
+        target.forceActiveFocus()
+        entryFocusTarget = target
+        entryFocusTimer.restart()
     }
     function _openDicts() {
         _blurActive()
@@ -1056,7 +1080,10 @@ ApplicationWindow {
         state = 3
     }
     function _openFts() {
-        _blurActive()
+        const fromSearch = (root.state === 0)
+        // Query-to-query: keep focus (transferred below) so a shown keyboard
+        // rides through. Otherwise blur fully.
+        _blurActive(fromSearch && root.ftsResults.length === 0)
         // Don't clear ftsResults here: switching tabs must be idempotent, so
         // the last search results survive a round trip (the field keeps its
         // query and the results stay valid). A new search replaces them.
@@ -1066,12 +1093,15 @@ ApplicationWindow {
         state = 4
         // Enter with the field focused (and the keyboard up) unless there are
         // results to view: the invariant is focus+keyboard on empty content,
-        // hands off the content otherwise. Deferred past the tab-switch layout
-        // like the Search return path.
+        // hands off the content otherwise. Transfer directly from Search;
+        // from elsewhere the entry timer below focuses it once layout settles.
         if (root._imeDiag) console.warn("[ime] _openFts results=" + root.ftsResults.length)
         if (root.ftsResults.length === 0) {
-            entryFocusTarget = ftsInput
-            entryFocusTimer.restart()
+            if (fromSearch) _transferQueryFocus(ftsInput)
+            else {
+                entryFocusTarget = ftsInput
+                entryFocusTimer.restart()
+            }
         }
     }
     function _openFavorites() {
@@ -1132,18 +1162,22 @@ ApplicationWindow {
     }
     function _navTo(idx) {
         if (idx === 0) {
-            _blurActive()
             // An article left over from another pane (full-pane article opened
-            // from Favs/FTS) must not carry into a fresh Search — a stale
+            // from Favs/FTS) must not carry into a fresh Search: a stale
             // article would steal the WebView and the typed query's suggestions
-            // would never show. Inline articles (opened IN Search) are kept:
-            // leaving the tab only hides the WebView (the loader tears it down),
-            // and returning re-renders currentHtml, so the article reappears.
+            // would never show. Inline articles (opened IN Search) are kept.
             if (root.currentHtml.length > 0 && !root.inlineArticle) {
                 root.currentWord = ""
                 root.currentHtml = ""
             }
+            // Query-to-query (FTS -> Search): transfer focus directly so a
+            // shown keyboard rides through with no hide/show cycle. From
+            // elsewhere, or with an article to view, blur fully instead.
+            const viewing = root.inlineArticle
+            const fromFts = (root.state === 4)
+            _blurActive(fromFts && !viewing)
             state = 0
+            if (!viewing && fromFts) _transferQueryFocus(input)
             return
         }
         // Leaving the search tab: keep any inline article state (currentWord /
@@ -4161,6 +4195,7 @@ text: root._stagingActive
     // TMP-DIAG-IME: single switch for all IME/focus diagnostics below.
     // Remove the flag and every [ime] line before commit.
     property bool _imeDiag: true
+    property string _imeLastState: ""
     // True while the modal group picker is open: the inline WebView is torn
     // down (its native surface sits above ANY Qt item, so it would cover the
     // dialog). When this flips back to false, the loader re-creates the WebView
