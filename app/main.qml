@@ -126,23 +126,23 @@ ApplicationWindow {
     // double-apply.
     property int _kbdPad: 0
     property real _insetDpr: Screen.devicePixelRatio > 0 ? Screen.devicePixelRatio : 1
-    // Settle-then-rekick for the fake IME state (Qt 6.9.3: first tap's show is
-    // cancelled post-layout and nothing paints). Armed ONLY by user taps
-    // (see the focus connections): programmatic gains (tab-return refocus,
-    // the re-kick itself) must not arm. Fires early (~150 ms: after layout
-    // settles, usually before anything paints), so the blur+refocus replaces
-    // the in-flight show request invisibly instead of visibly killing an
-    // already-painted keyboard (a late re-kick is what caused the
-    // appear/disappear/reappear flicker). Fires once.
+    // Settle-then-rekick for the fake IME state (Qt 6.9.3: a show issued
+    // during layout is cancelled post-layout and nothing paints). Armed on
+    // EVERY query-field focus gain (tap or programmatic return) and firing
+    // early (~150 ms: after layout settles, usually before anything paints),
+    // so the blur+refocus replaces the in-flight show request invisibly.
+    // One-shot per gain (see _lastRekickMs): exactly one extra show request
+    // per focus gain, never a loop.
     property bool _imeBackstopArmed: false
-    // Set when focus is granted programmatically (tab-return refocus below).
-    // Such gains must not arm the backstop: their auto-show already went out
-    // post-layout-settle, so a re-kick would only churn a healthy keyboard.
-    property bool _programmaticFocus: false
     // Timestamp (ms) of the last query-field focus gain. Lets the settled-hide
     // clearing below distinguish a fresh tap (don't touch) from a focus left
     // over after the keyboard was dismissed (safe to clear).
     property double _lastFocusGainMs: 0
+    // True once the IME has reported visible since the last focus gain.
+    // The settled-hide clearing below only fires for a keyboard that was
+    // actually up and then dismissed — never for a slow first show (which
+    // would otherwise lose its focus while still waiting to paint).
+    property bool _imeWasVisibleSinceGain: false
     // Timestamp (ms) of the last backstop re-kick. Gains within the window
     // after a re-kick are the re-kick's own doing — they must not re-arm,
     // or the backstop loops forever (re-kick, regain, re-kick...).
@@ -155,6 +155,7 @@ ApplicationWindow {
             if (!root._imeBackstopArmed) return
             root._imeBackstopArmed = false
             root._lastRekickMs = Date.now()
+            if (root._imeDiag) console.warn("[ime] rekick fire")
             if (!input.activeFocus && !ftsInput.activeFocus) return
             if (input.activeFocus) {
                 input.focus = false
@@ -225,16 +226,16 @@ ApplicationWindow {
     Connections {
         target: input
         function onActiveFocusChanged() {
+            if (root._imeDiag) console.warn("[ime] input focus=" + input.activeFocus
+                + " item=" + (root.activeFocusItem ? root.activeFocusItem.toString().slice(0, 60) : "null"))
             if (input.activeFocus) {
                 root._lastFocusGainMs = Date.now()
-                // Arm only on user taps: skip programmatic gains (tab-return
-                // refocus) and gains caused by our own re-kick.
-                if (!root._programmaticFocus
-                    && Date.now() - root._lastRekickMs > 1500) {
+                root._imeWasVisibleSinceGain = false
+                // Arm on every gain; skip only gains caused by our own re-kick.
+                if (Date.now() - root._lastRekickMs > 1500) {
                     root._imeBackstopArmed = true
                     imeBackstopTimer.restart()
                 }
-                root._programmaticFocus = false
             } else {
                 root._imeBackstopArmed = false
             }
@@ -244,16 +245,16 @@ ApplicationWindow {
     Connections {
         target: ftsInput
         function onActiveFocusChanged() {
+            if (root._imeDiag) console.warn("[ime] ftsInput focus=" + ftsInput.activeFocus
+                + " item=" + (root.activeFocusItem ? root.activeFocusItem.toString().slice(0, 60) : "null"))
             if (ftsInput.activeFocus) {
                 root._lastFocusGainMs = Date.now()
-                // Arm only on user taps: skip programmatic gains (tab-return
-                // refocus) and gains caused by our own re-kick.
-                if (!root._programmaticFocus
-                    && Date.now() - root._lastRekickMs > 1500) {
+                root._imeWasVisibleSinceGain = false
+                // Arm on every gain; skip only gains caused by our own re-kick.
+                if (Date.now() - root._lastRekickMs > 1500) {
                     root._imeBackstopArmed = true
                     imeBackstopTimer.restart()
                 }
-                root._programmaticFocus = false
             } else {
                 root._imeBackstopArmed = false
             }
@@ -273,13 +274,16 @@ ApplicationWindow {
         repeat: true
         running: true
         onTriggered: {
+            if (Qt.inputMethod.visible) root._imeWasVisibleSinceGain = true
             // Clear a focus left over after the keyboard was dismissed
             // (Back hides the IME but Qt keeps field focus, so the next tap
             // would be a no-op and the backstop would never arm). Only fires
-            // well after the last focus gain, so it can never kill a tap or
-            // a show still in flight.
+            // for a keyboard that was actually up (never for a slow first
+            // show) and well after the last focus gain, so it can never kill
+            // a tap or a show still in flight.
             if ((root.state === 0 || root.state === 4) && !root._pickerOpen
                 && !Qt.inputMethod.visible
+                && root._imeWasVisibleSinceGain
                 && (input.activeFocus || ftsInput.activeFocus)
                 && (Date.now() - root._lastFocusGainMs > 1000)) {
                 if (input.activeFocus) input.focus = false
@@ -509,7 +513,6 @@ ApplicationWindow {
             // return restores the article and the typed query's suggestions
             // need no re-render. An inline article is PRESERVED (currentHtml).
             root._returningToSearch = true
-            root._programmaticFocus = false
             // inlineWebReady stays true so the loader (and its WebView) is not
             // destroyed; the timer stops on its own (running: state === 0).
         } else if (root._returningToSearch) {
@@ -525,29 +528,39 @@ ApplicationWindow {
             // re-populate candidates for the text that's still typed. The
             // persisted document takes the re-injected overlay live.
             //
-            // Focus is granted by returnFocusTimer, once the tab switch layout
-            // has settled, so its auto-show goes out post-layout instead of
-            // being cancelled mid-transition. The gain is marked programmatic
-            // so it does not arm the keyboard backstop.
-            root._programmaticFocus = true
-            returnFocusTimer.restart()
+            // Focus is granted by entryFocusTimer once the tab-switch layout
+            // has settled, so its auto-show goes out post-layout. The gain
+            // arms the backstop like any other gain (its early re-kick lands
+            // pre-paint and stays invisible).
+            entryFocusTarget = input
+            entryFocusTimer.restart()
         }
     }
     // Guards the onStateChanged re-focus/re-suggest so it only runs on an
     // actual return to Search, not on first show.
     property bool _returningToSearch: false
-    // Deferred return-to-Search focus: fires once the tab-switch layout has
-    // settled, so the auto-show it triggers goes out post-layout instead of
-    // being cancelled mid-transition (no backstop needed on this path).
+    // Target of the deferred tab-entry focus (the Search or FTS field).
+    property var entryFocusTarget: null
+    // Deferred tab-entry focus: fires once the tab-switch layout has settled,
+    // so the auto-show it triggers goes out post-layout instead of being
+    // cancelled mid-transition. Used for Search return and FTS entry alike.
     Timer {
-        id: returnFocusTimer
-        interval: 150
+        id: entryFocusTimer
+        interval: 300
         repeat: false
         onTriggered: {
-            if (root.state !== 0) return
-            if (input.activeFocus) return
-            input.forceActiveFocus()
-            if (input.displayText.trim().length > 0) searchPane._doSuggest()
+            const target = root.entryFocusTarget
+            root.entryFocusTarget = null
+            if (root._imeDiag) console.warn("[ime] entry fire target="
+                + (target ? target.toString().slice(0, 40) : "null")
+                + " state=" + root.state
+                + " alreadyFocused=" + (target ? target.activeFocus : "-"))
+            if (!target) return
+            if (root.state !== 0 && root.state !== 4) return
+            if (target.activeFocus) return
+            target.forceActiveFocus()
+            if (root.state === 0 && input.displayText.trim().length > 0)
+                searchPane._doSuggest()
         }
     }
     // True while the inline WebView must be parked offscreen (clipped by the
@@ -1051,6 +1064,15 @@ ApplicationWindow {
         // a stale query, so the control cannot stay disabled across a re-entry.
         root.ftsSearching = false
         state = 4
+        // Enter with the field focused (and the keyboard up) unless there are
+        // results to view: the invariant is focus+keyboard on empty content,
+        // hands off the content otherwise. Deferred past the tab-switch layout
+        // like the Search return path.
+        if (root._imeDiag) console.warn("[ime] _openFts results=" + root.ftsResults.length)
+        if (root.ftsResults.length === 0) {
+            entryFocusTarget = ftsInput
+            entryFocusTimer.restart()
+        }
     }
     function _openFavorites() {
         _blurActive()
@@ -4136,6 +4158,9 @@ text: root._stagingActive
     }
 
     // --- group picker dialog ---
+    // TMP-DIAG-IME: single switch for all IME/focus diagnostics below.
+    // Remove the flag and every [ime] line before commit.
+    property bool _imeDiag: true
     // True while the modal group picker is open: the inline WebView is torn
     // down (its native surface sits above ANY Qt item, so it would cover the
     // dialog). When this flips back to false, the loader re-creates the WebView
