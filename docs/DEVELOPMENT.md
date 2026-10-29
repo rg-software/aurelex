@@ -45,10 +45,16 @@ The repository rules for agents and contributors live in `AGENTS.md`. Key rules:
 ## Building the app
 
 The app is a Qt Quick/WebView Android app built from `app/`.
-Requirements: JDK 17, Android SDK + NDK r30, Qt 6.9.3 android + desktop kits, vcpkg deps
-(`zlib bzip2 liblzma lzo fmt xapian`), and **PowerShell 7 (`pwsh`)** — the script
+Requirements: JDK 17, Android SDK + NDK r30, Qt 6.10.3 android + desktop kits, vcpkg deps
+(`zlib bzip2 liblzma lzo fmt xapian`), and **PowerShell 7 (`pwsh`)** - the script
 uses PS7-only syntax and UTF-8 characters; running it under the legacy
-`powershell` 5.1 misdecodes the UTF-8 and fails to parse. On a fresh clone,
+`powershell` 5.1 misdecodes the UTF-8 and fails to parse. Qt 6.10.2+ is required:
+6.9.3 is affected by QTBUG-140897 (QML TextField on Android 16 doesn't show the
+keyboard on first tap). Install via aqt, e.g.
+`aqt install-qt windows desktop 6.10.3 win64_msvc2022_64` and
+`aqt install-qt windows android 6.10.3 android_arm64_v8a` into `C:\Qt\6.10.3`
+(modules: `qtwebview qtshadertools qt5compat`; QML/Quick/Tools ship in the base).
+`app/build.ps1` defaults to `C:\Qt\6.10.3` and honors `$env:AURELEX_QT_BASE`. On a fresh clone,
 populate the engine submodule first (`git submodule update --init`, or clone
 with `--recursive`), apply the engine patches, then run the one-shot build
 script:
@@ -111,7 +117,7 @@ code, plus `RemoteCatalog.cpp` for `catalog_test`) — so these build and run in
 seconds on a desktop Qt.
 
 ```powershell
-cmake -S app/tests -B build-app-tests -DCMAKE_PREFIX_PATH=C:/Qt/6.9.3/msvc2022_64 -G Ninja
+cmake -S app/tests -B build-app-tests -DCMAKE_PREFIX_PATH=C:/Qt/6.10.3/msvc2022_64 -G Ninja
 cmake --build build-app-tests --config Release
 foreach ($t in @('article_server_test','index_migration_test','index_cleanup_test','dictionary_index_test','staged_cleanup_test','staging_rules_test','catalog_test')) {
   & "build-app-tests/$t.exe"; if ($LASTEXITCODE -ne 0) { throw "$t failed" }
@@ -398,9 +404,9 @@ the Qt surface only; the Android strings are the separate, already key-based
 `app/android/res/values*/strings.xml` (see "Android-managed strings").
 
 **Finding a string.** Grep the two files above, or — for "does this text already
-exist, and where?" — read the catalog: `app/i18n/aurelex.ru.ts` lists every
+exist, and where?" - read the catalog: `app/i18n/aurelex.ru.ts` lists every
 source string with its `filename`/`line` and context, and `linguist.exe`
-(`C:\Qt\6.9.3\msvc2022_64\bin`) opens it as a searchable table. The `.ts` is a
+(`C:\Qt\6.10.3\msvc2022_64\bin`) opens it as a searchable table. The `.ts` is a
 generated inventory, not an editing surface (see the rules below).
 
 1. Write or edit the string in the file for its context, above. Keep `%1`-style
