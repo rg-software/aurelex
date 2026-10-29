@@ -392,6 +392,10 @@ public class AurelexActivity extends QtActivity {
      * source directly. On API 28-29, compare the visible display frame with the
      * decor window bottom after subtracting the stable navigation inset.
      */
+    public static int getSdkInt() {
+        return android.os.Build.VERSION.SDK_INT;
+    }
+
     public static boolean isImeActuallyVisible() {
         try {
             android.app.Activity activity = sActivity;

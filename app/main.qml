@@ -210,6 +210,12 @@ ApplicationWindow {
         running: true
         onTriggered: root._refreshInsets()
     }
+
+    // (Removed: gated re-show experiment. Qt.inputMethod.show() is rejected at
+    // PHASE_CLIENT_REPORT_REQUESTED_VISIBLE_TYPES on Xiaomi API 36 because the
+    // client's requested visible types exclude IME — a Qt 6.9 platform issue.
+    // The system's CONTROLS_CHANGED re-request is the only path that works,
+    // and it takes ~440 ms or fails to paint. See docs/TESTING.md.)
     Component.onCompleted: root._refreshInsets()
     // First-launch tab routing happens on onOnboardedChanged (not here):
     // engine.onboarded is only final after EngineController's ASYNC gd_init +

@@ -46,3 +46,13 @@ settled-state IME probe is deliberately NOT included (that is the later
   `max(0, occluded)` and computes to ~0 when resize already shrank the window.
 - [Trade-off] Instantaneous flag can lie in the fake state; accepted until the
   IME probe lands.
+- [Risk] Platform desync on Xiaomi API 36: the three visibility signals
+  (inset state, `mInputShown`, actual IME window paint) transiently disagree
+  and can wedge. A single tap triggers a show cancelled at
+  `PHASE_WM_POST_LAYOUT_NOTIFY_CONTROLS_CHANGED`, then a system
+  `CONTROLS_CHANGED` re-request that takes ~440 ms or fails to paint. The
+  keyboard paints on the second tap. Attribution unknown (device desync, not Qt
+  timing). Tracker IDs: `PHASE_WM_POST_LAYOUT_NOTIFY_CONTROLS_CHANGED`,
+  `PHASE_CLIENT_REPORT_REQUESTED_VISIBLE_TYPES`, `PHASE_CLIENT_ANIMATION_CANCEL`,
+  `PHASE_WM_GET_CONTROL_WITH_LEASH`/`STATUS_TIMEOUT`. Next experiment: gated
+  re-show ~300 ms after focus gain.
