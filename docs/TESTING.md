@@ -553,6 +553,62 @@ empty symbols list means the NDK went unfound again (`ndkPath` in the generated
 crash cannot be provoked on demand, so this artifact-level check is the proxy for
 "a crash report would be readable".
 
+## Keyboard & WebView smoothness (cross-device matrix)
+
+Living record of observations across commits, devices and keyboards. Add a row
+whenever a run on a new device/keyboard/commit produces a new finding. The
+checklist below is the recipe to repeat on each device so the matrix stays
+comparable.
+
+### Observations
+
+| Commit | Device | Keyboard | Observation | Status |
+| --- | --- | --- | --- | --- |
+| `webview-smoothness` (uncommitted) | Motorola ThinkPhone, Android 15 (API 35) | Gboard | Mild black flash on cold launch (acceptable) | 🔶 |
+| `webview-smoothness` (uncommitted) | Motorola ThinkPhone, Android 15 (API 35) | Gboard | Search tab opens with no autofocus / no keyboard by default | ✅ |
+| `webview-smoothness` (uncommitted) | Motorola ThinkPhone, Android 15 (API 35) | Gboard | Tap search box → keyboard opens; toolbar lifts but a visible gap remains between keyboard and toolbar (Motorola-specific?) | 🔶 |
+| `webview-smoothness` (uncommitted) | Motorola ThinkPhone, Android 15 (API 35) | Gboard | Hide/resume keyboard via system works | ✅ |
+| `webview-smoothness` (uncommitted) | Motorola ThinkPhone, Android 15 (API 35) | Gboard | Search → Dicts hides keyboard; Search → back resumes | ✅ |
+| `webview-smoothness` (uncommitted) | Motorola ThinkPhone, Android 15 (API 35) | Gboard | Search ↔ FTS closes/reopens keyboard (acceptable) | ✅ |
+| `webview-smoothness` (uncommitted) | Motorola ThinkPhone, Android 15 (API 35) | Gboard | Repeated taps on the search box reopen the keyboard | ✅ |
+| `webview-smoothness` (uncommitted) | Motorola ThinkPhone, Android 15 (API 35) | Gboard | Dicts → Search / Dicts → FTS focuses the input and shows the keyboard | ✅ |
+| `webview-smoothness` (uncommitted) | Motorola ThinkPhone, Android 15 (API 35) | Gboard | No wedge observed across tab switches | ✅ |
+| `webview-smoothness` (uncommitted) | Xiaomi 24129PN74G, Android 16 (API 36) | SwiftKey | Cold launch: no wedge; tap opens keyboard; dismiss + tap reopens; Search↔FTS no churn; FTS→Dicts hides; dock lift uses settled probe (no phantom lift) | ✅ |
+| `webview-smoothness` (uncommitted) | Xiaomi 24129PN74G, Android 16 (API 36) | Gboard | Same as SwiftKey but fewer rejections (no post-layout abort, no `onStartInput aborted`) | ✅ |
+| `webview-smoothness` (uncommitted) | Xiaomi 24129PN74G, Android 16 (API 36) | Gboard | Two taps on the search box needed to bring up the keyboard; toolbar behind keyboard; switching to Search does not bring keyboard (counts as one tap) | 🔶 |
+| `webview-smoothness` (uncommitted) | Xiaomi 24129PN74G, Android 16 (API 36) | SwiftKey | Same as Gboard (two taps, toolbar behind keyboard, no auto-focus on Search entry) | 🔶 |
+| `webview-smoothness` (uncommitted) | Motorola ThinkPhone, Android 15 (API 35) | SwiftKey | No visible differences vs Gboard on the same device | ✅ |
+| `webview-smoothness` (uncommitted) | Huawei (DUM0219B15000653), Android 10 (API 29) | Gboard | Toolbar is **under** the keyboard (obscured, invisible) — dock lift not working on API 29 / adjust=pan path | 🔶 |
+| `webview-smoothness` (uncommitted) | Huawei (DUM0219B15000653), Android 10 (API 29) | Gboard | FTS tab does not auto-focus/show keyboard on entry (manual tap needed); Search tab does | 🔶 |
+| `webview-smoothness` (uncommitted) | Huawei (DUM0219B15000653), Android 10 (API 29) | SwiftKey | Same as Gboard on this device (toolbar under keyboard, FTS no auto-focus) | 🔶 |
+
+### Checklist for a new device / keyboard
+
+Run in order. Record the result (✅ / 🔶 / ❌) plus any device-specific notes in the
+table above.
+
+1. **Cold launch** — force-stop, launch, wait 10 s. Note whether a black flash appears, whether the keyboard is visible, and whether the app is wedged (`adb shell dumpsys input_method` → `mInputShown`).
+2. **Tap the search box** — keyboard opens? Toolbar lifts? Gap between toolbar and keyboard? Note the gap size/device.
+3. **Type a query** — suggestions appear; article not disturbed.
+4. **Dismiss keyboard** (Back) — keyboard hides; toolbar returns to bottom; no phantom lift.
+5. **Tap search box again** — keyboard reopens (tap-after-dismiss).
+6. **Search → Dicts → Search** — keyboard hides on Dicts, resumes on Search; no wedge.
+7. **Search → FTS → Search** — keyboard close/reopen acceptable; no wedge.
+8. **Dicts → Search** — input focused, keyboard shown.
+9. **Dicts → FTS** — input focused, keyboard shown.
+10. **Repeated taps on the search box** — keyboard reopens each time.
+11. **Rapid tab switching** (Search↔FTS 5×) — no wedge; keyboard state consistent.
+12. **Lookup + tab round trip with an article open** — article survives, scroll position preserved, no flash.
+13. **Group picker open/close with an article open** — article persists, no flash.
+14. **Rotate (portrait ⇄ landscape) with article open** — dock visible, article survives, scroll resets to top (expected).
+15. **Capture evidence** — screen recording of launch; `adb logcat` grep for `PHASE_*`, `STATUS_TIMEOUT`, `onStartInput event aborted`, `ime probe`.
+
+### Notes on device-specific behaviour
+
+- **Motorola (API 35)**: visible gap between lifted toolbar and keyboard (possibly Motorola-specific). Needs a measurement (px) and a device-specific pad tweak if it reproduces on Huawei too. (Dock lifts automatically because API 35 uses `adjust=resize`.)
+- **Huawei (API 29)**: **toolbar is under the keyboard** (obscured) — expected on this branch, because the dock-lift code (`_kbdPad`, from `b2dbc06`) is deliberately NOT part of `webview-smooth-navigation`. The lift is the next change. FTS tab does not auto-focus/show keyboard on entry (also a pre-existing baseline behaviour, not part of this change). This is the API-29 `adjust=pan` path.
+- **Xiaomi (API 36)**: `policy showing=false` is unreliable (IME inset `visible=true` is the truth). SwiftKey logs `onStartInput aborted` and post-layout aborts; Gboard does not. Both reject `Qt.inputMethod.show()` at `PHASE_CLIENT_REPORT_REQUESTED_VISIBLE_TYPES`. On this branch (no shared editor, no dock lift, no focus-on-entry): two taps needed to open the keyboard, toolbar behind keyboard, no auto-focus on Search entry. Consistent across Gboard and SwiftKey.
+
 ## Localization (app language)
 
 The app defaults its display language to the UI language of its process, trying
