@@ -155,7 +155,6 @@ ApplicationWindow {
             if (!root._imeBackstopArmed) return
             root._imeBackstopArmed = false
             root._lastRekickMs = Date.now()
-            if (root._imeDiag) console.warn("[ime] rekick fire")
             if (!input.activeFocus && !ftsInput.activeFocus) return
             if (input.activeFocus) {
                 input.focus = false
@@ -226,8 +225,6 @@ ApplicationWindow {
     Connections {
         target: input
         function onActiveFocusChanged() {
-            if (root._imeDiag) console.warn("[ime] input focus=" + input.activeFocus
-                + " item=" + (root.activeFocusItem ? root.activeFocusItem.toString().slice(0, 60) : "null"))
             if (input.activeFocus) {
                 root._lastFocusGainMs = Date.now()
                 root._imeWasVisibleSinceGain = false
@@ -245,8 +242,6 @@ ApplicationWindow {
     Connections {
         target: ftsInput
         function onActiveFocusChanged() {
-            if (root._imeDiag) console.warn("[ime] ftsInput focus=" + ftsInput.activeFocus
-                + " item=" + (root.activeFocusItem ? root.activeFocusItem.toString().slice(0, 60) : "null"))
             if (ftsInput.activeFocus) {
                 root._lastFocusGainMs = Date.now()
                 root._imeWasVisibleSinceGain = false
@@ -274,15 +269,6 @@ ApplicationWindow {
         repeat: true
         running: true
         onTriggered: {
-            if (root._imeDiag) {
-                const sig = root.state + "|" + input.activeFocus + ftsInput.activeFocus
-                    + "|" + Qt.inputMethod.visible + "|" + engine.imeActuallyVisible()
-                    + "|" + root._kbdPad + "|" + root._pickerOpen
-                if (sig !== root._imeLastState) {
-                    root._imeLastState = sig
-                    console.warn("[ime] state=" + sig)
-                }
-            }
             if (Qt.inputMethod.visible) root._imeWasVisibleSinceGain = true
             // Clear a focus left over after the keyboard was dismissed
             // (Back hides the IME but Qt keeps field focus, so the next tap
@@ -560,10 +546,6 @@ ApplicationWindow {
         onTriggered: {
             const target = root.entryFocusTarget
             root.entryFocusTarget = null
-            if (root._imeDiag) console.warn("[ime] entry fire target="
-                + (target ? target.toString().slice(0, 40) : "null")
-                + " state=" + root.state
-                + " alreadyFocused=" + (target ? target.activeFocus : "-"))
             if (!target) return
             if (root.state !== 0 && root.state !== 4) return
             if (target.activeFocus) return
@@ -1095,7 +1077,6 @@ ApplicationWindow {
         // results to view: the invariant is focus+keyboard on empty content,
         // hands off the content otherwise. Transfer directly from Search;
         // from elsewhere the entry timer below focuses it once layout settles.
-        if (root._imeDiag) console.warn("[ime] _openFts results=" + root.ftsResults.length)
         if (root.ftsResults.length === 0) {
             if (fromSearch) _transferQueryFocus(ftsInput)
             else {
@@ -4192,10 +4173,6 @@ text: root._stagingActive
     }
 
     // --- group picker dialog ---
-    // TMP-DIAG-IME: single switch for all IME/focus diagnostics below.
-    // Remove the flag and every [ime] line before commit.
-    property bool _imeDiag: true
-    property string _imeLastState: ""
     // True while the modal group picker is open: the inline WebView is torn
     // down (its native surface sits above ANY Qt item, so it would cover the
     // dialog). When this flips back to false, the loader re-creates the WebView
