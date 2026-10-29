@@ -125,12 +125,39 @@ ApplicationWindow {
     // keyboard (or nothing covers the window), so the two paths never
     // double-apply.
     property int _kbdPad: 0
-    // True once an OEM has been observed reporting IME visibility via insets.
-    // On such OEMs the focus-based fallback is disabled (it would only cause
-    // midair lifts and jumps). On OEMs that never report (Huawei/EMUI) it
-    // stays false and the fallback remains active.
-    property bool _oemReportsIme: false
     property real _insetDpr: Screen.devicePixelRatio > 0 ? Screen.devicePixelRatio : 1
+    // Settle-then-rekick for the fake IME state (Qt 6.9.3: first tap focuses
+    // but the show is cancelled post-layout and nothing paints). Armed on
+    // every focus gain; fires once after layout settles. The blur+refocus is
+    // synchronous (same frame) so a healthy show is undisturbed, while a
+    // wedged one gets a fresh post-layout show request.
+    property bool _imeBackstopArmed: false
+    // Timestamp (ms) of the last query-field focus gain. Lets the settled-hide
+    // clearing below distinguish a fresh tap (don't touch) from a focus left
+    // over after the keyboard was dismissed (safe to clear).
+    property double _lastFocusGainMs: 0
+    // Timestamp (ms) of the last backstop re-kick. Gains within the window
+    // after a re-kick are the re-kick's own doing — they must not re-arm,
+    // or the backstop loops forever (re-kick, regain, re-kick...).
+    property double _lastRekickMs: 0
+    Timer {
+        id: imeBackstopTimer
+        interval: 400
+        repeat: false
+        onTriggered: {
+            if (!root._imeBackstopArmed) return
+            root._imeBackstopArmed = false
+            root._lastRekickMs = Date.now()
+            if (!input.activeFocus && !ftsInput.activeFocus) return
+            if (input.activeFocus) {
+                input.focus = false
+                input.forceActiveFocus()
+            } else {
+                ftsInput.focus = false
+                ftsInput.forceActiveFocus()
+            }
+        }
+    }
     function _refreshInsets() {
         root._insetDpr = Screen.devicePixelRatio > 0 ? Screen.devicePixelRatio : 1
         root._insetTop = Math.round(engine.systemInsetTop() / root._insetDpr)
@@ -147,11 +174,11 @@ ApplicationWindow {
         }
         // Lift the dock above the keyboard. On OEMs that report IME insets
         // (Motorola, Xiaomi) use the measured occlusion. On OEMs that do not
-        // (Huawei/EMUI), fall back to a focus-based heuristic — but only on
-        // OEMs that have never been observed reporting, so reporting OEMs never
-        // get a spurious midair lift.
+        // (Huawei/EMUI), fall back to a focus-based heuristic whenever a
+        // query field is focused and Qt reports the IME visible. No latch:
+        // the backstop below makes shows reliable, so a focused field with
+        // a reported-visible IME means a real keyboard is (about to be) up.
         if (engine.imeActuallyVisible()) {
-            root._oemReportsIme = true
             const visBottom = engine.visibleBottom()
             if (visBottom >= 0) {
                 const displayPx = engine.displayHeight() > 0
@@ -162,8 +189,8 @@ ApplicationWindow {
             } else {
                 root._kbdPad = 0
             }
-        } else if (!root._oemReportsIme && (input.activeFocus || ftsInput.activeFocus) && Qt.inputMethod.visible) {
-            // Focus-based fallback for non-reporting OEMs only.
+        } else if ((input.activeFocus || ftsInput.activeFocus) && Qt.inputMethod.visible) {
+            // Focus-based fallback for non-reporting OEMs (Huawei/EMUI).
             root._kbdPad = Math.round(root.height * 0.4)
         } else {
             root._kbdPad = 0
@@ -190,11 +217,35 @@ ApplicationWindow {
     // even when no inset signal fires.
     Connections {
         target: input
-        function onActiveFocusChanged() { root._refreshInsets() }
+        function onActiveFocusChanged() {
+            if (input.activeFocus) {
+                root._lastFocusGainMs = Date.now()
+                // Skip arming for gains caused by our own re-kick below.
+                if (Date.now() - root._lastRekickMs > 1500) {
+                    root._imeBackstopArmed = true
+                    imeBackstopTimer.restart()
+                }
+            } else {
+                root._imeBackstopArmed = false
+            }
+            root._refreshInsets()
+        }
     }
     Connections {
         target: ftsInput
-        function onActiveFocusChanged() { root._refreshInsets() }
+        function onActiveFocusChanged() {
+            if (ftsInput.activeFocus) {
+                root._lastFocusGainMs = Date.now()
+                // Skip arming for gains caused by our own re-kick below.
+                if (Date.now() - root._lastRekickMs > 1500) {
+                    root._imeBackstopArmed = true
+                    imeBackstopTimer.restart()
+                }
+            } else {
+                root._imeBackstopArmed = false
+            }
+            root._refreshInsets()
+        }
     }
     Connections {
         target: Qt.inputMethod
@@ -208,7 +259,21 @@ ApplicationWindow {
         interval: 250
         repeat: true
         running: true
-        onTriggered: root._refreshInsets()
+        onTriggered: {
+            // Clear a focus left over after the keyboard was dismissed
+            // (Back hides the IME but Qt keeps field focus, so the next tap
+            // would be a no-op and the backstop would never arm). Only fires
+            // well after the last focus gain, so it can never kill a tap or
+            // a show still in flight.
+            if ((root.state === 0 || root.state === 4) && !root._pickerOpen
+                && !Qt.inputMethod.visible
+                && (input.activeFocus || ftsInput.activeFocus)
+                && (Date.now() - root._lastFocusGainMs > 1000)) {
+                if (input.activeFocus) input.focus = false
+                if (ftsInput.activeFocus) ftsInput.focus = false
+            }
+            root._refreshInsets()
+        }
     }
     Component.onCompleted: root._refreshInsets()
     // First-launch tab routing happens on onOnboardedChanged (not here):
