@@ -1142,6 +1142,10 @@ ApplicationWindow {
         return -1
     }
     function _navTo(idx) {
+        // Same-tab re-tap is a no-op: it must not blur the field, hide the
+        // keyboard, or refocus. (Search used to blur-and-stay while FTS
+        // blurred-and-refocused via the entry timer — neither is right.)
+        if (root.state === idx) return
         if (idx === 0) {
             // An article left over from another pane (full-pane article opened
             // from Favs/FTS) must not carry into a fresh Search: a stale
