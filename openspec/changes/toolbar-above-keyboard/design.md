@@ -36,6 +36,29 @@ settled-state IME probe is deliberately NOT included (that is the later
    probe) gates the lift, since the probe is not yet available. A later change
    swaps in the settled probe.
 
+## Huawei fallback (verified 2026-10-29, reverted in 6e764c1 — re-apply after Qt upgrade)
+
+On Huawei/EMUI (API 29) no IME-visibility signal works: `adjust=resize` is
+ignored, the visible frame never shrinks, system/stable insets stay 0, and
+`InputMethodManager.mInputShown` reflection fails (`NoSuchFieldException`).
+The fallback that was verified working (uiautomator: nav row y=2055→y=1149):
+
+1. `_refreshInsets()` gains the pad computation: if `imeActuallyVisible()`,
+   measured occlusion (`displayHeight − visibleBottom − systemInsetBottom`);
+   else if the field (`input`/`ftsInput`) has focus AND `Qt.inputMethod.visible`,
+   fixed pad `round(root.height * 0.4)`; else 0. Gate the whole block on
+   `root.state === 0 || root.state === 4` (Search/FTS tabs only — modal dialogs
+   must not move the dock); otherwise pad = 0.
+2. Triggers: `Connections` on `input.activeFocusChanged`,
+   `ftsInput.activeFocusChanged`, `Qt.inputMethod.visibleChanged`, plus an
+   unconditional 250 ms `Timer` calling `_refreshInsets()` (catches show/hide
+   that missed every signal), plus a double-`callLater` refresh in `_blurActive()`.
+3. `navDock`: `bottomMargin: root._kbdPad`.
+4. `_oemReportsIme` latch (set once `imeActuallyVisible()` is ever true) to
+   disable the fallback on reporting OEMs — prevents midair lifts on
+   Motorola/Xiaomi. (With the Qt 6.10 upgrade the Xiaomi fake state should be
+   gone, so re-evaluate whether the latch is still needed.)
+
 ## Risks / Trade-offs
 
 - [Risk] On API <= 29 the visible-frame comparison may be unreliable on some
