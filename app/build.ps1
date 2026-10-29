@@ -4,7 +4,9 @@
 #
 # Toolchain facts (proven 2026-09-02, see openspec/changes/qt-quick-frontend/design.md;
 # 16 KB refresh: openspec/changes/support-16kb-pages/design.md):
-# - Qt android kits: C:\Qt\6.9.3\android_arm64_v8a (+ android_x86_64, host msvc2022_64)
+# - Qt android kits: C:\Qt\6.10.3\android_arm64_v8a (+ host msvc2022_64).
+#   Qt 6.10.2+ fixes QTBUG-140897 (QML TextField on Android 16 doesn't show
+#   keyboard on first tap); 6.9.3 is in the broken range.
 # - ANDROID_PLATFORM=android-30 (carve needs iconv >= 28,
 #   pthread_cond_clockwait >= 30; still present in NDK r30 sysroots)
 # - NDK r30 LTS (16 KB ELF alignment by default) — Play's 16 KB page-size requirement
@@ -15,7 +17,7 @@
 #   its "not supported" warning. AGP's default aapt2 cannot link
 #   against SDK 36's android.jar, so gradle.properties pins
 #   android.aapt2FromMavenOverride to the aapt2 from build-tools 36.0.0.
-# - minSdk is 28 (Android 9.0): Qt 6.9 supports API 28+ only (16 KB change).
+# - minSdk is 28 (Android 9.0): Qt 6.9+ supports API 28+ only (16 KB change).
 # - androiddeployqt regenerates local.properties/gradle.properties -> re-apply overrides
 # - Qt has no qt_add_apk_target in the aqt carve subset -> package via androiddeployqt
 
@@ -39,7 +41,7 @@ $BuildDir   = Join-Path $RepoRoot "build-qtquick"
 $ApkDir     = Join-Path $BuildDir "apk"
 
 # Local defaults assume the Unity-2025 install layout; CI overrides via env.
-$QtBase     = if ($env:AURELEX_QT_BASE)     { $env:AURELEX_QT_BASE }     else { "C:\Qt\6.9.3" }
+$QtBase     = if ($env:AURELEX_QT_BASE)     { $env:AURELEX_QT_BASE }     else { "C:\Qt\6.10.3" }
 $QtHost     = if ($env:AURELEX_QT_HOST)     { $env:AURELEX_QT_HOST }     else { "$QtBase\msvc2022_64" }
 $VcpkgBase  = if ($env:AURELEX_VCPKG_BASE)  { $env:AURELEX_VCPKG_BASE }  else { "C:\vcpkg" }
 $NdkRoot    = if ($env:AURELEX_NDK_ROOT)    { $env:AURELEX_NDK_ROOT }    else { "C:\Program Files (x86)\Android\AndroidNDK\android-ndk-r30" }
@@ -425,7 +427,7 @@ $ndkPathGroovy = ($NdkRoot -replace '\\', '/')
 # a fresh tree (it exists locally only because a prior run left it behind). If
 # absent, write one with our pinned values; otherwise patch the existing file.
 if (-not (Test-Path $gpPath)) {
-    $qtAndroidDir = if ($env:AURELEX_QT_BASE) { "$($env:AURELEX_QT_BASE)/android_arm64_v8a/./src/android/java" } else { "C:/Qt/6.9.3/android_arm64_v8a/./src/android/java" }
+    $qtAndroidDir = if ($env:AURELEX_QT_BASE) { "$($env:AURELEX_QT_BASE)/android_arm64_v8a/./src/android/java" } else { "C:/Qt/6.10.3/android_arm64_v8a/./src/android/java" }
     # .properties treats \x sequences as escapes; use forward slashes only.
     $qtAndroidDir = $qtAndroidDir -replace '\\', '/'
     @"
