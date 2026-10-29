@@ -15,6 +15,6 @@
 ## 2. Huawei fallback + validation
 
 - [x] 2.0 Re-apply the Huawei fallback per design.md ("Huawei fallback (verified)"): focus-based 40% pad, `onQueryTab` gating, focus-change + `Qt.inputMethod.visible` triggers, unconditional 250 ms poll; verify nav row lifts on Huawei again
-- [ ] 2.1 Measure the gap on Motorola (API 35) and Huawei (API 29); apply a device-tested correction if needed. Xiaomi (API 36) verified 2026-10-29: dock flush above Gboard, single tap, clean `onShown` (screenshot). Return-to-Search verified: focused + keyboard + lifted dock.
+- [ ] 2.1 Measure the gap on Motorola (API 35) and Huawei (API 29); apply a device-tested correction if needed. Xiaomi (API 36) verified 2026-10-29/30: dock flush above Gboard, single tap, clean `onShown` (screenshot). Return-to-Search verified: focused + keyboard + lifted dock. Query-tab transfer verified: Search->FTS keeps keyboard up with a brief dip, ends focused+painted+lifted; entry timer stands down when transfer worked.
 - [ ] 2.2 Run the device matrix (Motorola API 35, Huawei API 29, Xiaomi API 36): keyboard open/hide, tab switches, rotation; confirm dock visible and tappable above the keyboard
 - [x] 2.3 Confirm `openspec validate toolbar-above-keyboard` passes
