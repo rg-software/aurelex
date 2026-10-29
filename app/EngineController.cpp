@@ -2298,6 +2298,42 @@ int EngineController::systemInsetRight() const
 #endif
 }
 
+int EngineController::visibleBottom() const
+{
+#if defined(Q_OS_ANDROID)
+    return QJniObject::callStaticMethod<jint>(
+        "org/aurelex/pocket/dictionary/AurelexActivity",
+        "getVisibleBottom",
+        "()I");
+#else
+    return 0;
+#endif
+}
+
+int EngineController::displayHeight() const
+{
+#if defined(Q_OS_ANDROID)
+    return QJniObject::callStaticMethod<jint>(
+        "org/aurelex/pocket/dictionary/AurelexActivity",
+        "getDisplayHeight",
+        "()I");
+#else
+    return 0;
+#endif
+}
+
+bool EngineController::imeActuallyVisible() const
+{
+#if defined(Q_OS_ANDROID)
+    return QJniObject::callStaticMethod<jboolean>(
+        "org/aurelex/pocket/dictionary/AurelexActivity",
+        "isImeActuallyVisible",
+        "()Z");
+#else
+    return false;
+#endif
+}
+
 void EngineController::playAudio(const QString &url) {
 #if defined(Q_OS_ANDROID)
     // JNI passthrough to AurelexActivity.playAudio(String) — Android's

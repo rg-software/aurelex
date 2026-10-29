@@ -120,6 +120,11 @@ ApplicationWindow {
     property int _insetBottom: 0
     property int _insetLeft: 0
     property int _insetRight: 0
+    // Lift (dp) applied under the dock when the keyboard covers part of the
+    // window the resize missed. Zero whenever the resize already shrank for the
+    // keyboard (or nothing covers the window), so the two paths never
+    // double-apply.
+    property int _kbdPad: 0
     property real _insetDpr: Screen.devicePixelRatio > 0 ? Screen.devicePixelRatio : 1
     function _refreshInsets() {
         root._insetDpr = Screen.devicePixelRatio > 0 ? Screen.devicePixelRatio : 1
@@ -127,6 +132,23 @@ ApplicationWindow {
         root._insetBottom = Math.round(engine.systemInsetBottom() / root._insetDpr)
         root._insetLeft = Math.round(engine.systemInsetLeft() / root._insetDpr)
         root._insetRight = Math.round(engine.systemInsetRight() / root._insetDpr)
+        // Lift the dock above the keyboard when the window did not resize for it
+        // (adjust=pan on API <= 29). Use the instantaneous IME visibility; the
+        // settled probe is not available yet on this branch.
+        if (engine.imeActuallyVisible()) {
+            const visBottom = engine.visibleBottom()
+            if (visBottom >= 0) {
+                const displayPx = engine.displayHeight() > 0
+                    ? engine.displayHeight() : root.height * root._insetDpr
+                const sysBottomPx = engine.systemInsetBottom()
+                const occludedPx = displayPx - visBottom - sysBottomPx
+                root._kbdPad = Math.max(0, Math.round(occludedPx / root._insetDpr))
+            } else {
+                root._kbdPad = 0
+            }
+        } else {
+            root._kbdPad = 0
+        }
     }
     // The resize hooks below are a FAST PATH for the common cases (a real
     // portrait<->landscape flip, the IME, split screen). They are not the
@@ -1006,7 +1028,7 @@ ApplicationWindow {
     // strip below repaints the nav-bar region in our background color.
     Rectangle {
         id: navDock
-        anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
+        anchors { left: parent.left; right: parent.right; bottom: parent.bottom; bottomMargin: root._kbdPad }
         height: 56 + root._insetBottom
         z: 5
         color: root.uiBg
