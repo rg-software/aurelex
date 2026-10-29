@@ -892,14 +892,15 @@ ApplicationWindow {
     function _openFts() {
         // Focus the query field on every entry, like the Search return path
         // focuses its field: the tab is a query surface. State first (the pane
-        // must be visible for focus to take), then focus, then blur the rest:
+        // must be visible for focus to take), then focus, then clear the rest:
         // a direct input->ftsInput transfer never leaves focus empty, so the
-        // IME never gets the hide that a blur-then-focus gap turns into a
-        // flicker (each cycle resizes the window and reallocates the native
-        // article surface: black blink). _blurActive(ftsInput) only clears
-        // whatever else might hold focus.
+        // IME has nothing to hide. If the synchronous grab misses (pane not
+        // ready yet), the callLater below retries once it is.
         state = 4
         ftsInput.forceActiveFocus()
+        Qt.callLater(function() {
+            if (root.state === 4 && !ftsInput.activeFocus) ftsInput.forceActiveFocus()
+        })
         _blurActive(ftsInput)
         // Don't clear ftsResults here: switching tabs must be idempotent, so
         // the last search results survive a round trip (the field keeps its
@@ -977,10 +978,15 @@ ApplicationWindow {
             state = 0
             if (!root.inlineArticle) {
                 // Focus the field on the way in (so Enter works), then clear
-                // anything else still holding focus. Doing it in this order —
-                // never via an unfocused gap — keeps a keyboard left open on
-                // the other tab open instead of hide/show cycling it.
+                // anything else still holding focus. Doing it in this order -
+                // never via an unfocused gap - keeps a keyboard left open on
+                // the other tab open instead of hide/show cycling it. The
+                // callLater retries once if the pane wasn't ready yet.
                 input.forceActiveFocus()
+                Qt.callLater(function() {
+                    if (root.state === 0 && !root.inlineArticle && !input.activeFocus)
+                        input.forceActiveFocus()
+                })
                 _blurActive(input)
             } else {
                 _blurActive()
