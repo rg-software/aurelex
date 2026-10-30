@@ -237,6 +237,17 @@ public class AurelexActivity extends QtActivity {
         }
     }
 
+    /**
+     * Whether the activity is in the foreground (between onResume and onPause).
+     * QML's own signals (Qt.application state, Window.active) do not observe
+     * minimize on this stack, so the poll reads this instead for resume edges.
+     */
+    private static volatile boolean sForeground = true;
+
+    public static boolean isAppForeground() {
+        return sForeground;
+    }
+
     public static void stopAudio() {
         try {
             if (sAudioPlayer != null) {
@@ -1329,11 +1340,18 @@ public class AurelexActivity extends QtActivity {
     @Override
     protected void onResume() {
         super.onResume();
+        sForeground = true;
         // Qt 6.6 on Android 14+: the QtEditText InputConnection can bind
         // INACTIVE ("getExtractedText on inactive InputConnection"); IME
         // composing then gets swallowed/reset by the keyboard (text appears
         // and instantly vanishes). Force a re-bind shortly after resume.
         new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(this::restartQtInput, 400);
+    }
+
+    @Override
+    protected void onPause() {
+        sForeground = false;
+        super.onPause();
     }
 
     private void restartQtInput() {

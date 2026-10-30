@@ -2368,6 +2368,18 @@ bool EngineController::isImeAnimationOpen() const
 #endif
 }
 
+bool EngineController::isAppForeground() const
+{
+#if defined(Q_OS_ANDROID)
+    return QJniObject::callStaticMethod<jboolean>(
+        "org/aurelex/pocket/dictionary/AurelexActivity",
+        "isAppForeground",
+        "()Z");
+#else
+    return true;
+#endif
+}
+
 void EngineController::playAudio(const QString &url) {
 #if defined(Q_OS_ANDROID)
     // JNI passthrough to AurelexActivity.playAudio(String) — Android's

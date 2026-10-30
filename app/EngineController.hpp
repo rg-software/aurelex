@@ -441,6 +441,8 @@ public:
     Q_INVOKABLE void hideLaunchSplash() const;
     // True while an IME inset animation is open (started, not ended).
     Q_INVOKABLE bool isImeAnimationOpen() const;
+    // False between the activity's onPause and onResume.
+    Q_INVOKABLE bool isAppForeground() const;
 
 signals:
     void dictCountChanged();

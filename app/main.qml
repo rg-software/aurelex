@@ -263,6 +263,14 @@ ApplicationWindow {
         target: engine
         function onInsetsChanged() { root._refreshInsets() }
     }
+    // Query field that held focus when the app was backgrounded (minimize /
+    // switch-away): window deactivation clears Qt focus and nothing re-grants
+    // it, so the field is restored on resume. Stashed on every gain; cleared
+    // only where focus is moved ON PURPOSE (_blurActive, settled poll-clear).
+    // Deliberately NOT cleared in the loss handler: on suspend the loss fires
+    // while the app still reports Active (ordering), which would wipe the
+    // stash exactly when it is needed.
+    property var _suspendedQueryFocus: null
     // Re-evaluate the dock lift when focus changes, so the focus-based
     // fallback (for OEMs that don't report IME insets) lifts/drops the dock
     // even when no inset signal fires.
@@ -270,6 +278,7 @@ ApplicationWindow {
         target: input
         function onActiveFocusChanged() {
             if (input.activeFocus) {
+                root._suspendedQueryFocus = input
                 root._lastFocusGainMs = Date.now()
                 root._insetSeenSinceGain = false
                 root._insetVisibleStreak = 0
@@ -290,6 +299,7 @@ ApplicationWindow {
         target: ftsInput
         function onActiveFocusChanged() {
             if (ftsInput.activeFocus) {
+                root._suspendedQueryFocus = ftsInput
                 root._lastFocusGainMs = Date.now()
                 root._insetSeenSinceGain = false
                 root._insetVisibleStreak = 0
@@ -310,6 +320,27 @@ ApplicationWindow {
         target: Qt.inputMethod
         function onVisibleChanged() { root._refreshInsets() }
     }
+    // Restore query focus on resume after minimize/switch-away (platform
+    // convention: a focused field keeps its focus across the round trip).
+    // Re-asserted on EVERY foreground tick until focused (not edge-triggered
+    // and not via the entry timer: the foreground read flaps true/false
+    // across the resume transition, which starved edge detection and
+    // perpetually postponed the timer). Converges by brute force; stops the
+    // tick focus lands. Only onto the stash field's own tab, never into a
+    // modal picker, and never over a rendered article.
+    property bool _wasForeground: true
+    // One-shot per resume for the keyboard-restore show below: reset on
+    // suspend and once the keyboard paints, so flapping foreground reads
+    // can't stack redundant requests.
+    property bool _resumeKbRequested: false
+    // Whether the keyboard was up at suspend time (frozen while backgrounded:
+    // only foreground ticks write it). Decides keyboard-restore on resume
+    // independently of focus-restore: a Back-dismissed keyboard stays down.
+    property bool _kbUpAtSuspend: false
+    // Last resume-edge timestamp: the settled poll-clear stays out of the
+    // way briefly after a resume so it can't strip a focus the restore is
+    // (re)establishing.
+    property double _lastResumeMs: 0
     // Belt-and-suspenders poll for OEMs (Huawei/EMUI) where insets and
     // Qt.inputMethod.visible do not fire reliably: re-evaluate the dock lift
     // periodically so a show/hide that missed its signal still lands within
@@ -319,12 +350,57 @@ ApplicationWindow {
         repeat: true
         running: true
         onTriggered: {
+            // App resume: re-assert a stashed query focus until it lands.
+            const fg = engine.isAppForeground()
+            if (fg && !root._wasForeground) root._lastResumeMs = Date.now()
+            // Freeze the keyboard-up snapshot while backgrounded (only
+            // foreground ticks write it): at resume it tells a suspended
+            // keyboard apart from a Back-dismissed one. STICKY-SET ONLY —
+            // never un-write here: the first post-return tick reads insets
+            // hidden (keyboard down after suspend) and would wipe the very
+            // fact the show block below needs (self-defeating order bug).
+            // Cleared where dismissal is certain: _blurActive, poll-clear.
+            if (fg && engine.imeActuallyVisible()) root._kbUpAtSuspend = true
+            if (fg) {
+                const target = root._suspendedQueryFocus
+                if (target && !target.activeFocus
+                    && ((target === input && root.state === 0)
+                        || (target === ftsInput && root.state === 4))
+                    && !root._pickerOpen && !root.inlineArticle) {
+                    target.forceActiveFocus()
+                }
+                // Keyboard restore (independent of focus): the keyboard hides
+                // on suspend but Qt issues no new gain on resume, so nothing
+                // re-shows it. Request once per resume when it was up at
+                // suspend; the backstop (armed below) heals a stubborn show.
+                if (root._kbUpAtSuspend && !engine.imeActuallyVisible()
+                    && root._suspendedQueryFocus
+                    && ((root._suspendedQueryFocus === input && root.state === 0)
+                        || (root._suspendedQueryFocus === ftsInput && root.state === 4))
+                    && !root._pickerOpen && !root.inlineArticle
+                    && !root._resumeKbRequested) {
+                    root._resumeKbRequested = true
+                    root._insetSeenSinceGain = false
+                    root._insetVisibleStreak = 0
+                    if (root._imeReshowEnabled) {
+                        root._imeBackstopArmed = true
+                        imeBackstopTimer.restart()
+                    }
+                    Qt.inputMethod.show()
+                }
+            }
+            root._wasForeground = fg
+            // Foreground-only below: while backgrounded the window is hidden
+            // and inset reads are meaningless — neither the latch, nor the
+            // one-shot reset, nor the clear may run off them.
+            if (!fg) return
             // Inset visibility latch (see _insetSeenSinceGain): the only
             // was-visible signal trusted anywhere. Qt.inputMethod.visible is
             // never latched — its levels fake-flap through aborts.
             if (engine.imeActuallyVisible()) {
                 root._insetVisibleStreak++
                 if (root._insetVisibleStreak >= 2) root._insetSeenSinceGain = true
+                root._resumeKbRequested = false
             } else {
                 root._insetVisibleStreak = 0
             }
@@ -337,11 +413,23 @@ ApplicationWindow {
             // NOTE: on OEMs without inset reports (Huawei) the latch never
             // sets, so this never clears there — harmless: a tap on the
             // still-focused field re-requests the IME natively.
-            if ((root.state === 0 || root.state === 4) && !root._pickerOpen
+            // NOTE: foreground-gated — while backgrounded the system hides
+            // the keyboard but Qt keeps field focus; clearing here would
+            // wipe both the focus and the suspend-restore stash (minimize
+            // loses focus with no restore). A suspended app needs no hygiene.
+            // NOTE 2: suppressed briefly after a resume edge so the restore
+            // above (focus + keyboard) establishes itself before hygiene runs.
+            if (engine.isAppForeground()
+                && (Date.now() - root._lastResumeMs > 2500)
+                && (root.state === 0 || root.state === 4) && !root._pickerOpen
                 && !engine.imeActuallyVisible()
                 && root._insetSeenSinceGain
                 && (input.activeFocus || ftsInput.activeFocus)
                 && (Date.now() - root._lastFocusGainMs > 1000)) {
+                // Deliberate post-dismiss clear: drop the suspend stash too —
+                // the user put the keyboard away on purpose.
+                root._suspendedQueryFocus = null
+                root._kbUpAtSuspend = false
                 if (input.activeFocus) input.focus = false
                 if (ftsInput.activeFocus) ftsInput.focus = false
             }
@@ -1115,6 +1203,10 @@ ApplicationWindow {
     // the keyboard riding through instead of hiding and re-showing.
     function _blurActive(keepQuery) {
         if (root.activeFocusItem && root.activeFocusItem.forceActiveFocus === undefined) return
+        // Focus is being moved on purpose (never a suspend): drop any
+        // suspend-restore stash. Transfers re-stash on the gain half.
+        root._suspendedQueryFocus = null
+        root._kbUpAtSuspend = false
         if (!keepQuery) {
             if (input.activeFocus) input.focus = false
             if (ftsInput.activeFocus) ftsInput.focus = false
