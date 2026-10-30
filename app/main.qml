@@ -130,12 +130,14 @@ ApplicationWindow {
     // during layout is cancelled post-layout and nothing paints). Armed on
     // EVERY query-field focus gain (tap or programmatic return) and firing
     // LATE (~1000 ms: past the slowest healthy paint — measured 563-601 ms
-    // over 10 Xiaomi/SwiftKey taps — so a healthy show is always done and a
-    // redundant show() over it is a system no-op). The reshow is a bare
-    // Qt.inputMethod.show() — NOT a blur+refocus: 6.9.3's
-    // hasValidFocusObject() visibility gate guards only the Java->Qt JNI
-    // callbacks, never the show path. One-shot per gain (see _lastRekickMs):
-    // exactly one extra show request per focus gain, never a loop.
+    // over 10 Xiaomi/SwiftKey taps — so a healthy show is always done) and
+    // CONDITIONAL: a settled inset check stands the fire down over a live
+    // keyboard (a bare show() over painted SwiftKey visibly re-opens — not a
+    // safe no-op). The reshow is a bare Qt.inputMethod.show() — NOT a
+    // blur+refocus: 6.9.3's hasValidFocusObject() visibility gate guards only
+    // the Java->Qt JNI callbacks, never the show path. One-shot per gain (see
+    // _lastRekickMs): exactly one extra show request per focus gain, never a
+    // loop.
     // The fire is skipped when the keyboard was dismissed after the gain
     // (_imeDismissedAfterGain: a real visible→hidden transition, the reliable
     // half of Qt.inputMethod.visible — levels lie, edges don't), so a late
@@ -182,8 +184,13 @@ ApplicationWindow {
             root._lastRekickMs = Date.now()
             if (!input.activeFocus && !ftsInput.activeFocus) return
             if (root._imeDismissedAfterGain) return
-            // Past the slowest healthy paint and never dismissed since the
-            // gain: the first show died — heal it. No-op over a live keyboard.
+            // Settled visibility check (insets are truthful this late — the
+            // cold-abort screenshot proves it: dock stays down while nothing
+            // paints). A bare show() over a live keyboard is NOT a reliable
+            // no-op (SwiftKey visibly re-opens), so never fire into one.
+            if (engine.imeActuallyVisible()) return
+            // Past the slowest healthy paint and nothing visible and never
+            // dismissed since the gain: the first show died — heal it.
             Qt.inputMethod.show()
         }
     }
