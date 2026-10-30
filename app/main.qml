@@ -150,13 +150,14 @@ ApplicationWindow {
     // in the window after a reshow never re-arm (belt-and-suspenders: the
     // show() itself changes no focus, so normally no regain follows).
     property double _lastRekickMs: 0
-    // Whether the IME reshow backstop may arm. Proven NEEDED where first
-    // shows abort (API 36+: post-layout abort). Proven HARMFUL on API 30-35:
-    // first shows paint cleanly and the reshow's redundant request races the
-    // live animation into a visible kill+reshow (measured: no-reshow build
-    // paints with a single onShown). API <30 starts DISARMED pending Huawei
-    // abort-rate data (same reasoning: don't ship a racer before an abort is
-    // observed); re-arm to `sdk < 30 ||` if Huawei aborts.
+    // Whether the IME reshow backstop may arm. NEEDED on API 36+: cold-start
+    // first shows abort post-layout with nothing painted (verified: no-reshow
+    // probe leaves mInputShown=true with no onShown ever); the +150 ms
+    // show-only re-request heals it (6.9.3 gates only Java->Qt callbacks, so
+    // a redundant show is safe). HARMFUL on API 30-35 and unneeded below 30
+    // (first shows paint cleanly; the redundant request races the live
+    // animation into visible churn — measured on Motorola, clean 5/5 without).
+    // Huawei (API 29): first tap paints with no abort — stays disarmed.
     property bool _imeReshowEnabled: {
         const sdk = engine.androidSdkInt()
         return sdk >= 36
