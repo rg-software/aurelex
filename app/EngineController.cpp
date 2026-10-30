@@ -2356,6 +2356,18 @@ void EngineController::hideLaunchSplash() const
 #endif
 }
 
+bool EngineController::isImeAnimationOpen() const
+{
+#if defined(Q_OS_ANDROID)
+    return QJniObject::callStaticMethod<jboolean>(
+        "org/aurelex/pocket/dictionary/AurelexActivity",
+        "isImeAnimationOpen",
+        "()Z");
+#else
+    return false;
+#endif
+}
+
 void EngineController::playAudio(const QString &url) {
 #if defined(Q_OS_ANDROID)
     // JNI passthrough to AurelexActivity.playAudio(String) — Android's

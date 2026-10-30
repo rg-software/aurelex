@@ -189,10 +189,16 @@ ApplicationWindow {
             // Dismissed since the gain (was inset-visible, now hidden): hands
             // off to the poll-clear below, never resurrects.
             if (root._insetSeenSinceGain) return
-            // Settled visibility check (insets are truthful this late).
-            if (engine.imeActuallyVisible()) return
-            // Focused, never inset-visible, never dismissed: the first show
-            // died — heal it.
+            // Settled visibility check. Stand down ONLY over a settled live
+            // keyboard: insets visible with no open animation. A stuck cancel
+            // keeps its animation open (WM leash lingers) with nothing
+            // painted — heal that with a fresh request (a re-tap proves it
+            // paints). A healthy show always finishes its animation long
+            // before this fire (slowest measured paint ~600 ms vs +1000 ms),
+            // so an open animation here is stuck by physics, not tuning.
+            if (engine.imeActuallyVisible() && !engine.isImeAnimationOpen()) return
+            // Focused, no settled live keyboard: the first show died (or its
+            // animation wedged) — heal it.
             Qt.inputMethod.show()
         }
     }

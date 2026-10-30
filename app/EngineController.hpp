@@ -439,6 +439,8 @@ public:
     Q_INVOKABLE int androidSdkInt() const;
     // Remove the cold-launch splash overlay (no-op off Android).
     Q_INVOKABLE void hideLaunchSplash() const;
+    // True while an IME inset animation is open (started, not ended).
+    Q_INVOKABLE bool isImeAnimationOpen() const;
 
 signals:
     void dictCountChanged();

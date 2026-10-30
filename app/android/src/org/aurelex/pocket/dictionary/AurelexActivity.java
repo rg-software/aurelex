@@ -176,6 +176,67 @@ public class AurelexActivity extends QtActivity {
         }
     }
 
+    /**
+     * IME inset-animation liveness (cold-abort strand fix). A cancelled show
+     * can leave the WM believing the keyboard is up: insets stay visible,
+     * the frame stays shrunk (floating dock), nothing paints — and no app
+     * signal separates that from a live keyboard. EXCEPT the animation
+     * itself: a healthy show's inset animation always finishes; a stuck one
+     * stays open. Tracked here (API 30+; below that the reshow this feeds is
+     * disarmed anyway). Counts starts/ends (floored at zero) so overlapping
+     * cancel/retry pairs can't wedge it true.
+     */
+    private int mImeAnimOpen = 0;
+
+    // DISPATCH_MODE_CONTINUE_ON_SUBTREE (observe only): STOP would consume
+    // the animations for the hierarchy below and starve Qt's own inset
+    // handling (dock lift, imeActuallyVisible) that this feature only
+    // supplements. NOTE: on API 35+ the start callback is onStart (returning
+    // Bounds), not the old onStarted — verified via javap against
+    // android-36 (which also renamed CONTINUE to CONTINUE_ON_SUBTREE).
+    private final android.view.WindowInsetsAnimation.Callback mImeAnimCallback =
+            new android.view.WindowInsetsAnimation.Callback(
+                    android.view.WindowInsetsAnimation.Callback.DISPATCH_MODE_CONTINUE_ON_SUBTREE) {
+                @Override
+                public android.view.WindowInsetsAnimation.Bounds onStart(
+                        android.view.WindowInsetsAnimation animation,
+                        android.view.WindowInsetsAnimation.Bounds bounds) {
+                    if ((animation.getTypeMask()
+                            & android.view.WindowInsets.Type.ime()) != 0) {
+                        mImeAnimOpen++;
+                    }
+                    return bounds;
+                }
+
+                @Override
+                public void onEnd(android.view.WindowInsetsAnimation animation) {
+                    if ((animation.getTypeMask()
+                            & android.view.WindowInsets.Type.ime()) != 0) {
+                        mImeAnimOpen = Math.max(0, mImeAnimOpen - 1);
+                    }
+                }
+
+                @Override
+                public android.view.WindowInsets onProgress(
+                        android.view.WindowInsets insets,
+                        java.util.List<android.view.WindowInsetsAnimation> running) {
+                    return insets;
+                }
+            };
+
+    /** True while an IME inset animation is still open (started, not ended). */
+    public static boolean isImeAnimationOpen() {
+        try {
+            android.app.Activity activity = sActivity;
+            if (activity instanceof AurelexActivity) {
+                return ((AurelexActivity) activity).mImeAnimOpen > 0;
+            }
+            return false;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
     public static void stopAudio() {
         try {
             if (sAudioPlayer != null) {
@@ -200,6 +261,17 @@ public class AurelexActivity extends QtActivity {
         super.onCreate(savedInstanceState);
         sActivity = this;
         showLaunchSplash();
+        // IME animation liveness (see isImeAnimationOpen): API 30+ only, and
+        // only consulted where the reshow is armed (API 36+), so older OEMs
+        // never depend on it.
+        try {
+            if (android.os.Build.VERSION.SDK_INT >= 30) {
+                getWindow().getDecorView()
+                        .setWindowInsetsAnimationCallback(mImeAnimCallback);
+            }
+        } catch (Exception e) {
+            android.util.Log.w(TAG, "ime anim callback failed: " + e);
+        }
         try {
             getWindow().getDecorView().getViewTreeObserver()
                     .addOnGlobalLayoutListener(mWebViewBgListener);
