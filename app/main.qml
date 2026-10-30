@@ -341,6 +341,12 @@ ApplicationWindow {
     // way briefly after a resume so it can't strip a focus the restore is
     // (re)establishing.
     property double _lastResumeMs: 0
+    // How long the keyboard has been continuously hidden while focused
+    // (foreground ticks only; reset on visible, on gain, and on resume).
+    // Minimize races onPause (kb hides before sForeground flips), so a
+    // single hidden reading is indistinguishable from a Back-dismiss — only
+    // SUSTAINED hidden clears. Gated the same way below.
+    property double _kbHiddenSinceMs: 0
     // Belt-and-suspenders poll for OEMs (Huawei/EMUI) where insets and
     // Qt.inputMethod.visible do not fire reliably: re-evaluate the dock lift
     // periodically so a show/hide that missed its signal still lands within
@@ -352,7 +358,21 @@ ApplicationWindow {
         onTriggered: {
             // App resume: re-assert a stashed query focus until it lands.
             const fg = engine.isAppForeground()
-            if (fg && !root._wasForeground) root._lastResumeMs = Date.now()
+            // Suspend breaks hidden-accumulation (a minimize hides the
+            // keyboard just before onPause lands: indistinguishable from a
+            // Back-dismiss in a single sample, so only SUSTAINED hidden
+            // clears — and the clock resets here on every background tick).
+            if (!fg) {
+                root._kbHiddenSinceMs = 0
+                root._wasForeground = false
+                return
+            }
+            // Stable foreground = this tick AND the previous one both fg.
+            // Flap-true blips during suspend never satisfy it, so neither
+            // the clear below nor its stash wipe can fire off a blip.
+            const fgStable = root._wasForeground
+            if (!fgStable) root._lastResumeMs = Date.now()
+            root._wasForeground = true
             // Freeze the keyboard-up snapshot while backgrounded (only
             // foreground ticks write it): at resume it tells a suspended
             // keyboard apart from a Back-dismissed one. STICKY-SET ONLY —
@@ -366,7 +386,7 @@ ApplicationWindow {
                 if (target && !target.activeFocus
                     && ((target === input && root.state === 0)
                         || (target === ftsInput && root.state === 4))
-                    && !root._pickerOpen && !root.inlineArticle) {
+                    && !root._pickerOpen && !(root.inlineArticle && root.state === 0)) {
                     target.forceActiveFocus()
                 }
                 // Keyboard restore (independent of focus): the keyboard hides
@@ -377,15 +397,17 @@ ApplicationWindow {
                     && root._suspendedQueryFocus
                     && ((root._suspendedQueryFocus === input && root.state === 0)
                         || (root._suspendedQueryFocus === ftsInput && root.state === 4))
-                    && !root._pickerOpen && !root.inlineArticle
+                    && !root._pickerOpen && !(root.inlineArticle && root.state === 0)
                     && !root._resumeKbRequested) {
                     root._resumeKbRequested = true
                     root._insetSeenSinceGain = false
                     root._insetVisibleStreak = 0
-                    if (root._imeReshowEnabled) {
-                        root._imeBackstopArmed = true
-                        imeBackstopTimer.restart()
-                    }
+                    // Always armed (unlike tap/entry gains, NOT API-gated):
+                    // a show into a just-resumed window is exactly what
+                    // aborts; the fire re-checks focus, visibility, latch
+                    // and animation state before touching anything.
+                    root._imeBackstopArmed = true
+                    imeBackstopTimer.restart()
                     Qt.inputMethod.show()
                 }
             }
@@ -401,8 +423,12 @@ ApplicationWindow {
                 root._insetVisibleStreak++
                 if (root._insetVisibleStreak >= 2) root._insetSeenSinceGain = true
                 root._resumeKbRequested = false
+                root._kbHiddenSinceMs = 0
             } else {
                 root._insetVisibleStreak = 0
+                if ((input.activeFocus || ftsInput.activeFocus)
+                    && root._kbHiddenSinceMs === 0)
+                    root._kbHiddenSinceMs = Date.now()
             }
             // Clear a focus left over after the keyboard was dismissed
             // (Back hides the IME but Qt keeps field focus, so the next tap
@@ -419,8 +445,16 @@ ApplicationWindow {
             // loses focus with no restore). A suspended app needs no hygiene.
             // NOTE 2: suppressed briefly after a resume edge so the restore
             // above (focus + keyboard) establishes itself before hygiene runs.
+            // NOTE 3: hidden must be SUSTAINED (not one racy pre-pause tick):
+            // minimize hides the keyboard just before onPause lands, which is
+            // indistinguishable from a Back-dismiss in a single sample.
+            // NOTE 4: foreground must be STABLE (this tick and the previous
+            // one): flap-true blips during suspend never satisfy it, so the
+            // clear and its stash wipe can't fire off a blip.
             if (engine.isAppForeground()
+                && fgStable
                 && (Date.now() - root._lastResumeMs > 2500)
+                && (Date.now() - root._kbHiddenSinceMs > 1500)
                 && (root.state === 0 || root.state === 4) && !root._pickerOpen
                 && !engine.imeActuallyVisible()
                 && root._insetSeenSinceGain
