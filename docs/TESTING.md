@@ -590,6 +590,10 @@ comparable.
 | `fe90aae` | Motorola ThinkPhone, Android 15 (API 35) | Gboard | Same-tab re-tap is a no-op (focus, keyboard, dock undisturbed) | ✅ |
 | `fe90aae` | Motorola ThinkPhone, Android 15 (API 35) | Gboard | Rotation ⇄ with/without keyboard: layout correct, no corruption; rotation dismisses keyboard (system behavior), re-tap restores; landscape tap works | ✅ |
 | `fe90aae` | Motorola ThinkPhone, Android 15 (API 35) | Gboard | Frame scan (4 fps) of tap flow: keyboard up stable, no hide/show dip detected; dock flush in all kb-up states | ✅ |
+| `5201687` | Motorola ThinkPhone, Android 15 (API 35) | Gboard | Same-tab re-tap is a TRUE no-op: exact uiautomator bounds tap on Search tab → field keeps `focused=true`, `mInputShown=true` (the `fe90aae` "verified no-op" was a dock-background mistap) | ✅ |
+| `5201687` | Motorola ThinkPhone, Android 15 (API 35) | Gboard | Non-destructive reshow: 5/5 taps converge with identical 8-event signature (first show `onCancelled` pre-paint at `PHASE_CLIENT_ANIMATION_CANCEL` + system hide, reshow paints, exactly one `onShown`, zero `onFailed`) — no hide/show pair, no user-visible double-show | ✅ |
+| `5201687` | Motorola ThinkPhone, Android 15 (API 35) | Gboard | Reshow is LOAD-BEARING here too: the first show self-cancels systematically (dock-lift layout churn kills the in-flight animation), not a race — without the reshow Motorola would two-tap like Xiaomi | ✅ |
+| `5201687` | Motorola ThinkPhone, Android 15 (API 35) | Gboard | Search→FTS transfer with reshow: keyboard rides through, FTS focused, dock flush; return symmetric | ✅ |
 | `fe90aae` | Motorola ThinkPhone, Android 15 (API 35) | Gboard | Real typing works (typed text + suggestions); adb `input text` + submit path verified | ✅ |
 
 ### Checklist for a new device / keyboard
