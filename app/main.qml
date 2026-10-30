@@ -352,6 +352,17 @@ ApplicationWindow {
                 // fresh launch must start on Search.
                 root._bootRouted = true
                 root.state = engine.onboarded ? 0 : 1
+                // Launch autofocus belongs here, not in the field's
+                // onCompleted: onboarded is only final at this signal, so an
+                // onCompleted-time check races async init (focus flaked
+                // launch to launch). Granted synchronously — the deferred
+                // entry timer provably never fires this early (armed-but-dead
+                // on every traced launch; cause unknown, not chased: a sync
+                // grant has no moving parts). First run (Dicts + welcome
+                // overlay) and an already-focused field are left alone.
+                if (engine.onboarded && root.state === 0 && !input.activeFocus) {
+                    input.forceActiveFocus()
+                }
             }
         }
     }
