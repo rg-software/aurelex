@@ -570,10 +570,12 @@ match this section, not the other way around.
   explicit tap). Back always hides; re-tap always re-shows; same-tab re-tap is
   a no-op (dock buttons are `Qt.NoFocus`, `_navTo` early-returns).
 - First shows are fragile everywhere (our lift churn cancels them on API 30+,
-  WM aborts them on API 36): a blind non-destructive `Qt.inputMethod.show()`
-  reshow at +150 ms heals them. Armed on focus gains ONLY where needed —
-  API `<30` and `>=36` (`engine.androidSdkInt()` gate); API 30–35 paints
-  cleanly and the reshow was proven to *cause* the double-show there.
+  WM aborts them on API 36): a settled show-only reshow (+1000 ms, past the
+  slowest healthy paint) heals them. Armed on focus gains ONLY where needed —
+  API `>= 36` (`engine.androidSdkInt()` gate); API `<= 35` paints cleanly and
+  any redundant request races the live animation. The fire stands down over a
+  live keyboard (settled inset check) and after a real dismiss; was-visible
+  latches off WindowInsets only (2 consecutive ticks — Qt signals fake-flap).
 - Query↔query switches transfer focus directly (no blur); keyboard rides
   through in a single show cycle. FTS results route to Search via `_showArticle`
   with article state set BEFORE the tab switch (the reverse order armed entry
@@ -609,6 +611,7 @@ match this section, not the other way around.
 | show-only reshow (uncommitted) | Xiaomi 24129PN74G, Android 16 (API 36) | SwiftKey | Cold tap WITH reshow (`sdk >= 36` gate): abort + churn + recovery → onShown, keyboard painted, history rendered, dock flush. Reshow stays armed on API 36+. Warm-tap history with reshow shows mid-flow hide+recovery — needs an eye test for visible flicker | ✅ |
 | late settled reshow (uncommitted) | Xiaomi 24129PN74G, Android 16 (API 36) | SwiftKey | Healthy paint latency measured 10/10 at 563–601 ms — the +150 ms reshow always raced it (the double-reopen). Retimed to a single +1000 ms settled check with a visible→hidden dismiss-edge guard (race-free vs the poll-clear by construction). Warm: paints ~450–600 ms, reshow fires post-paint as no-op. Dismiss (Back at ~500 ms): stays hidden at +2 s, no resurrection. Cold abort: heals ~1.6 s | ✅ |
 | visibility-gated reshow (uncommitted) | Xiaomi 24129PN74G, Android 16 (API 36) | SwiftKey | The +1000 ms blind fire re-opened live SwiftKey (double-open with correct-interval delay). Added settled inset check at fire time (`engine.imeActuallyVisible()` — proven truthful: cold-abort screenshot showed dock down). Cold abort flavors observed: full-die (no reshow → never paints) and self-heal (system retry paints ~450 ms); the gate covers both (hidden → heal, painted → stand down). Verified 3/3 cold launches paint | ✅ |
+| inset-latched guards (uncommitted) | Xiaomi 24129PN74G, Android 16 (API 36) | SwiftKey | Cold launches started arriving dead (focused? no — UNfocused, kb down): fake `Qt.inputMethod.visible` flaps latched the dismiss-guard (reshow skipped) AND fed the poll-clear (focus stripped). Both guards rebuilt on a WindowInsets-only latch requiring 2 consecutive visible ticks (blips can't poison it). Verified 3/3 cold launches paint | ✅ |
 | launch autofocus race (uncommitted) | Xiaomi 24129PN74G, Android 16 (API 36) | SwiftKey | Field `onCompleted` checks `engine.onboarded` before async init finishes → focus flaked launch-to-launch (traced: `onboarded=false` at completion, `true` 2 ms later at `bootRouted`, nothing focused after). Fix: synchronous grant in `onOnboardedChanged` (entry-timer deferred grant provably never fires this early — armed-but-dead on every trace, cause not chased). Verified 3/3 cold launches focused + keyboard up | ✅ |
 | `webview-smoothness` (uncommitted) | Motorola ThinkPhone, Android 15 (API 35) | SwiftKey | No visible differences vs Gboard on the same device | ✅ |
 | `webview-smoothness` (uncommitted) | Huawei (DUM0219B15000653), Android 10 (API 29) | Gboard | Toolbar is **under** the keyboard (obscured, invisible) — dock lift not working on API 29 / adjust=pan path | 🔶 |

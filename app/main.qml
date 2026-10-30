@@ -138,26 +138,29 @@ ApplicationWindow {
     // the Java->Qt JNI callbacks, never the show path. One-shot per gain (see
     // _lastRekickMs): exactly one extra show request per focus gain, never a
     // loop.
-    // The fire is skipped when the keyboard was dismissed after the gain
-    // (_imeDismissedAfterGain: a real visible→hidden transition, the reliable
-    // half of Qt.inputMethod.visible — levels lie, edges don't), so a late
-    // fire can never resurrect a Back-dismissed keyboard; that path stays
-    // with the settled poll-clear below. Race-free by construction: either
-    // guard (unfocused / dismissed) independently stands the timer down.
+    // A Back-dismissed keyboard is never resurrected: dismissal means insets
+    // went visible→hidden, which latches _insetSeenSinceGain, which stands
+    // both this timer and the poll-clear down independently (race-free: either
+    // guard alone suffices). Never latch this off Qt.inputMethod.visible.
     property bool _imeBackstopArmed: false
-    // True once the IME was visibly up and then hidden since the last focus
-    // gain (tracks the visible→hidden EDGE, not the level).
-    property bool _imeDismissedAfterGain: false
-    property bool _imeVisiblePrev: false
+    // True once the IME was inset-visible since the last focus gain.
+    // Latched ONLY from WindowInsets (engine.imeActuallyVisible) — never from
+    // Qt.inputMethod.visible, whose levels fake-flap through aborts (a fake
+    // true→false edge both skipped the heal and let the poll-clear strip a
+    // live focus: cold-dead launches). Insets are settle-truthful (proven by
+    // the dock staying down through aborts) — but a single poll tick can
+    // catch a transient reservation blip mid-abort, so the latch needs TWO
+    // consecutive visible ticks (~500 ms of real paint). A blip never
+    // latches; a real keyboard always does. Where insets never report
+    // (Huawei) this stays false: the reshow is disarmed there anyway, and a
+    // tap on a still-focused field re-requests natively, so the clear is
+    // unneeded there too.
+    property bool _insetSeenSinceGain: false
+    property int _insetVisibleStreak: 0
     // Timestamp (ms) of the last query-field focus gain. Lets the settled-hide
     // clearing below distinguish a fresh tap (don't touch) from a focus left
     // over after the keyboard was dismissed (safe to clear).
     property double _lastFocusGainMs: 0
-    // True once the IME has reported visible since the last focus gain.
-    // The settled-hide clearing below only fires for a keyboard that was
-    // actually up and then dismissed — never for a slow first show (which
-    // would otherwise lose its focus while still waiting to paint).
-    property bool _imeWasVisibleSinceGain: false
     // Timestamp (ms) of the last backstop reshow. Kept as a guard so gains
     // in the window after a reshow never re-arm (belt-and-suspenders: the
     // show() itself changes no focus, so normally no regain follows).
@@ -183,14 +186,13 @@ ApplicationWindow {
             root._imeBackstopArmed = false
             root._lastRekickMs = Date.now()
             if (!input.activeFocus && !ftsInput.activeFocus) return
-            if (root._imeDismissedAfterGain) return
-            // Settled visibility check (insets are truthful this late — the
-            // cold-abort screenshot proves it: dock stays down while nothing
-            // paints). A bare show() over a live keyboard is NOT a reliable
-            // no-op (SwiftKey visibly re-opens), so never fire into one.
+            // Dismissed since the gain (was inset-visible, now hidden): hands
+            // off to the poll-clear below, never resurrects.
+            if (root._insetSeenSinceGain) return
+            // Settled visibility check (insets are truthful this late).
             if (engine.imeActuallyVisible()) return
-            // Past the slowest healthy paint and nothing visible and never
-            // dismissed since the gain: the first show died — heal it.
+            // Focused, never inset-visible, never dismissed: the first show
+            // died — heal it.
             Qt.inputMethod.show()
         }
     }
@@ -256,9 +258,8 @@ ApplicationWindow {
         function onActiveFocusChanged() {
             if (input.activeFocus) {
                 root._lastFocusGainMs = Date.now()
-                root._imeWasVisibleSinceGain = false
-                root._imeDismissedAfterGain = false
-                root._imeVisiblePrev = Qt.inputMethod.visible
+                root._insetSeenSinceGain = false
+                root._insetVisibleStreak = 0
                 // Arm on every gain; skip only gains right after our own
                 // reshow (which changes no focus, so normally none follow).
                 if (Date.now() - root._lastRekickMs > 1500
@@ -277,9 +278,8 @@ ApplicationWindow {
         function onActiveFocusChanged() {
             if (ftsInput.activeFocus) {
                 root._lastFocusGainMs = Date.now()
-                root._imeWasVisibleSinceGain = false
-                root._imeDismissedAfterGain = false
-                root._imeVisiblePrev = Qt.inputMethod.visible
+                root._insetSeenSinceGain = false
+                root._insetVisibleStreak = 0
                 // Arm on every gain; skip only gains right after our own
                 // reshow (which changes no focus, so normally none follow).
                 if (Date.now() - root._lastRekickMs > 1500
@@ -295,15 +295,7 @@ ApplicationWindow {
     }
     Connections {
         target: Qt.inputMethod
-        function onVisibleChanged() {
-            // Dismiss edge: was up, now down = the user (or system) hid a
-            // shown keyboard after the gain. Latches so the late reshow never
-            // resurrects it; the settled poll-clear owns this path instead.
-            if (root._imeVisiblePrev && !Qt.inputMethod.visible)
-                root._imeDismissedAfterGain = true
-            root._imeVisiblePrev = Qt.inputMethod.visible
-            root._refreshInsets()
-        }
+        function onVisibleChanged() { root._refreshInsets() }
     }
     // Belt-and-suspenders poll for OEMs (Huawei/EMUI) where insets and
     // Qt.inputMethod.visible do not fire reliably: re-evaluate the dock lift
@@ -314,16 +306,27 @@ ApplicationWindow {
         repeat: true
         running: true
         onTriggered: {
-            if (Qt.inputMethod.visible) root._imeWasVisibleSinceGain = true
+            // Inset visibility latch (see _insetSeenSinceGain): the only
+            // was-visible signal trusted anywhere. Qt.inputMethod.visible is
+            // never latched — its levels fake-flap through aborts.
+            if (engine.imeActuallyVisible()) {
+                root._insetVisibleStreak++
+                if (root._insetVisibleStreak >= 2) root._insetSeenSinceGain = true
+            } else {
+                root._insetVisibleStreak = 0
+            }
             // Clear a focus left over after the keyboard was dismissed
             // (Back hides the IME but Qt keeps field focus, so the next tap
             // would be a no-op and the backstop would never arm). Only fires
             // for a keyboard that was actually up (never for a slow first
             // show) and well after the last focus gain, so it can never kill
             // a tap or a show still in flight.
+            // NOTE: on OEMs without inset reports (Huawei) the latch never
+            // sets, so this never clears there — harmless: a tap on the
+            // still-focused field re-requests the IME natively.
             if ((root.state === 0 || root.state === 4) && !root._pickerOpen
-                && !Qt.inputMethod.visible
-                && root._imeWasVisibleSinceGain
+                && !engine.imeActuallyVisible()
+                && root._insetSeenSinceGain
                 && (input.activeFocus || ftsInput.activeFocus)
                 && (Date.now() - root._lastFocusGainMs > 1000)) {
                 if (input.activeFocus) input.focus = false
