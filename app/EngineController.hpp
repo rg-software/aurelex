@@ -437,6 +437,8 @@ public:
     Q_INVOKABLE bool imeActuallyVisible() const;
     // Raw Android API level (0 on desktop/unreadable).
     Q_INVOKABLE int androidSdkInt() const;
+    // Remove the cold-launch splash overlay (no-op off Android).
+    Q_INVOKABLE void hideLaunchSplash() const;
 
 signals:
     void dictCountChanged();

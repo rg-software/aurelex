@@ -599,6 +599,9 @@ comparable.
 | API-gated reshow (uncommitted) | Motorola ThinkPhone, Android 15 (API 35) | Gboard | `getSdkInt` → QML gate (`sdk==0‖<30‖>=36`): API 35 disarms, taps keep the clean 4-event signature — gate works | ✅ |
 | API-gated reshow (uncommitted) | Motorola ThinkPhone, Android 15 (API 35) | Gboard | Search→FTS transfer: single cycle (req,req,cancel,shown), keyboard rides through, FTS focused, dock flush — the transfer dip is gone with the reshow | ✅ |
 | API-gated reshow (uncommitted) | Motorola ThinkPhone, Android 15 (API 35) | Gboard | 6 rapid taps (~250 ms cadence): mid-history messy but converges `mInputShown=true` — last tap wins and paints, no dead state | ✅ |
+| cold-launch splash (uncommitted) | Motorola ThinkPhone, Android 15 (API 35) | Gboard | `android.app.splash_screen_drawable` is IGNORED by Qt 6.9 (no such key in kit sources) — the stock recipe is dead, meta-data reverted | ✅ |
+| cold-launch splash (uncommitted) | Motorola ThinkPhone, Android 15 (API 35) | Gboard | App-side overlay (`splash_surface` ImageView in onCreate, removed via JNI on first QML frame + 5 s failsafe): 3 launches, 0 full-black frames (baseline had 1) | ✅ |
+| 1px WebView growth (uncommitted) | Motorola ThinkPhone, Android 15 (API 35) | Gboard | Fresh native surface paints one black frame pre-document (caught: full-size black rect 1 frame, chrome intact). 1px-until-`!loading&&loadProgress===100` (progress gate needed: doc-less view fires spurious `!loading`): full create→blank→history lifecycle with 0 black frames | ✅ |
 
 ### Checklist for a new device / keyboard
 

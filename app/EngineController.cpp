@@ -2346,6 +2346,16 @@ int EngineController::androidSdkInt() const
 #endif
 }
 
+void EngineController::hideLaunchSplash() const
+{
+#if defined(Q_OS_ANDROID)
+    QJniObject::callStaticMethod<void>(
+        "org/aurelex/pocket/dictionary/AurelexActivity",
+        "hideLaunchSplash",
+        "()V");
+#endif
+}
+
 void EngineController::playAudio(const QString &url) {
 #if defined(Q_OS_ANDROID)
     // JNI passthrough to AurelexActivity.playAudio(String) — Android's

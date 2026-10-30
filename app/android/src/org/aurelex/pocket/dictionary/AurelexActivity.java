@@ -72,6 +72,60 @@ public class AurelexActivity extends QtActivity {
         }
     }
 
+    /**
+     * Cold-launch splash overlay (black-flash fix). Qt 6.9's QtActivity no
+     * longer honors the android.app.splash_screen_drawable meta-data (verified:
+     * no such key in the kit), so the native surface shows one black frame
+     * between the themed starting window and the first QML frame. Instead the
+     * activity covers itself with an app_background view in onCreate; QML
+     * removes it (hideLaunchSplash, via JNI) once its first frame is up. The
+     * overlay is the same color QML paints first, so even a late removal is
+     * invisible; a 5 s failsafe covers a missed signal (never stuck).
+     */
+    private static android.view.View sLaunchSplash = null;
+
+    private void showLaunchSplash() {
+        try {
+            android.app.Activity activity = this;
+            android.widget.ImageView v = new android.widget.ImageView(activity);
+            v.setImageResource(R.drawable.splash_surface);
+            v.setScaleType(android.widget.ImageView.ScaleType.CENTER_CROP);
+            android.view.ViewGroup.LayoutParams lp =
+                    new android.view.ViewGroup.LayoutParams(
+                            android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                            android.view.ViewGroup.LayoutParams.MATCH_PARENT);
+            activity.addContentView(v, lp);
+            sLaunchSplash = v;
+            // Failsafe: never trap the user behind the overlay.
+            v.postDelayed(new Runnable() {
+                @Override public void run() { hideLaunchSplash(); }
+            }, 5000);
+        } catch (Exception e) {
+            android.util.Log.w(TAG, "showLaunchSplash failed: " + e);
+        }
+    }
+
+    public static void hideLaunchSplash() {
+        try {
+            final android.view.View v = sLaunchSplash;
+            if (v == null) return;
+            sLaunchSplash = null;
+            v.post(new Runnable() {
+                @Override public void run() {
+                    try {
+                        android.view.ViewGroup parent =
+                                (android.view.ViewGroup) v.getParent();
+                        if (parent != null) parent.removeView(v);
+                    } catch (Exception e) {
+                        android.util.Log.w(TAG, "hideLaunchSplash remove failed: " + e);
+                    }
+                }
+            });
+        } catch (Exception e) {
+            android.util.Log.w(TAG, "hideLaunchSplash failed: " + e);
+        }
+    }
+
     public static void stopAudio() {
         try {
             if (sAudioPlayer != null) {
@@ -95,6 +149,7 @@ public class AurelexActivity extends QtActivity {
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         sActivity = this;
+        showLaunchSplash();
 
         // Workaround for QTBUG-122886 (Qt 6.6): QtActivityDelegate's display
         // listener fires setActivityDisplayRotation on a null mLayout when a

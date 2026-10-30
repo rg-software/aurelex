@@ -300,7 +300,14 @@ ApplicationWindow {
             root._refreshInsets()
         }
     }
-    Component.onCompleted: root._refreshInsets()
+    Component.onCompleted: {
+        root._refreshInsets()
+        // First QML frame is (about to be) up: drop the cold-launch splash
+        // overlay (same color as the first paint, so even a frame of overlap
+        // is invisible). Deferred past component completion so the frame is
+        // real, not just constructed.
+        Qt.callLater(function() { engine.hideLaunchSplash() })
+    }
     // First-launch tab routing happens on onOnboardedChanged (not here):
     // engine.onboarded is only final after EngineController's ASYNC gd_init +
     // loadSettings() completes, so at Component.onCompleted it is still the
@@ -1835,6 +1842,14 @@ ColumnLayout {
                     sourceComponent: Component {
                         WebView {
                             id: searchArticleView
+                            // A fresh native surface paints one black frame
+                            // before its first document renders (cold-launch
+                            // blink #2). Grow from 1px on the blank load's
+                            // settle: the black pixel is invisible, and only
+                            // the blank re-layouts. Loader recreations reset
+                            // this (fresh item each time), so teardown/rebuild
+                            // round trips are covered too, not just launch.
+                            property bool _grown: false
                             // Normal geometry fills the loader (which already sits
                             // below the toolbar). Parked (another tab, or the
                             // modal picker): slide the whole native view
@@ -1845,8 +1860,8 @@ ColumnLayout {
                             // full so unparking never re-lays-out the page.
                             x: root._articleParked ? -(width + 10) : 0
                             y: 0
-                            width: parent.width
-                            height: parent.height
+                            width: searchArticleView._grown ? parent.width : 1
+                            height: searchArticleView._grown ? parent.height : 1
                             Accessible.name: "Dictionary article"
                             Accessible.role: Accessible.WebDocument
                             onUrlChanged: {
@@ -1879,7 +1894,13 @@ ColumnLayout {
                                 }
                             }
                             onLoadingChanged: {
-                                if (!loading) {
+                                if (!loading && searchArticleView.loadProgress === 100) {
+                                    // Genuine settle (a document actually
+                                    // loaded — loadProgress stays 0 on the
+                                    // spurious !loading of a doc-less view):
+                                    // grow the surface (see _grown) now that
+                                    // there are real pixels, never onto black.
+                                    searchArticleView._grown = true
                                     // Blank base document settled: safe to inject
                                     // any suggestions that arrived meanwhile.
                                     root._blankPending = false
