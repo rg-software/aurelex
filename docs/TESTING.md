@@ -603,6 +603,7 @@ comparable.
 | cold-launch splash (uncommitted) | Motorola ThinkPhone, Android 15 (API 35) | Gboard | App-side overlay (`splash_surface` ImageView in onCreate, removed via JNI on first QML frame + 5 s failsafe): 3 launches, 0 full-black frames (baseline had 1) | ✅ |
 | 1px WebView growth (uncommitted) | Motorola ThinkPhone, Android 15 (API 35) | Gboard | Fresh native surface paints one black frame pre-document (caught: full-size black rect 1 frame, chrome intact). 1px-until-`!loading&&loadProgress===100` (progress gate needed: doc-less view fires spurious `!loading`): full create→blank→history lifecycle with 0 black frames | ✅ |
 | stale `_grown` line (own bug, fixed uncommitted) | Motorola ThinkPhone, Android 15 (API 35) | Gboard | The 1px revert left `searchArticleView._grown = true` in `onLoadingChanged` with the property gone → exception aborted the handler before `_blankPending = false` → suggestions/history permanently dead mid-session (engine results arrived fine; FTS unaffected). Lesson: diff-review reverts line by line. Fixed by deleting the stale line + diags | ✅ |
+| FTS-result-tap race (uncommitted) | Motorola ThinkPhone, Android 15 (API 35) | Gboard | `_showArticle` assigned `state = 0` before `inlineArticle = true`; the synchronous `onStateChanged` return-branch saw no article → armed entry focus + suggest, which then concealed the just-loaded article via `_doSuggest`. Fix: content + `inlineArticle` first, state last. Verified: FTS result → Search with article rendered, no suggestions | ✅ |
 
 ### Checklist for a new device / keyboard
 

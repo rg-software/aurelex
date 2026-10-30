@@ -924,8 +924,12 @@ ApplicationWindow {
             // so the Forward buttons' `enabled` binding re-evaluates to false.
             root.fwdStack = []
         }
-        // Route any lookup to the Search tab's inline surface.
-        if (root.state !== 0) state = 0
+        // Route any lookup to the Search tab's inline surface. State goes
+        // LAST: assigning state=0 runs onStateChanged synchronously, and the
+        // Search-return branch arms entry focus + suggestions when it sees no
+        // article — which then conceals this one via _doSuggest. Setting
+        // inlineArticle (and the content) first makes the handler take the
+        // preserve-article path instead (FTS-result-tap race).
         currentWord = word
         currentHtml = html
         // Show the looked-up term in the search box (users see the article +
@@ -935,6 +939,7 @@ ApplicationWindow {
         root._suppressSuggest = false
         _blurActive()
         inlineArticle = true
+        if (root.state !== 0) state = 0
         articleLoadTimer.restart()
     }
     function _backFromArticle() {
