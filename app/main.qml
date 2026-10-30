@@ -1842,14 +1842,6 @@ ColumnLayout {
                     sourceComponent: Component {
                         WebView {
                             id: searchArticleView
-                            // A fresh native surface paints one black frame
-                            // before its first document renders (cold-launch
-                            // blink #2). Grow from 1px on the blank load's
-                            // settle: the black pixel is invisible, and only
-                            // the blank re-layouts. Loader recreations reset
-                            // this (fresh item each time), so teardown/rebuild
-                            // round trips are covered too, not just launch.
-                            property bool _grown: false
                             // Normal geometry fills the loader (which already sits
                             // below the toolbar). Parked (another tab, or the
                             // modal picker): slide the whole native view
@@ -1858,10 +1850,15 @@ ColumnLayout {
                             // would leave it covering the screen and destroying
                             // it would black-flash on return. The height stays
                             // full so unparking never re-lays-out the page.
+                            // (The native surface's own canvas color — the
+                            // between-documents flash — is painted from Java,
+                            // see AurelexActivity.paintWebViewBackgrounds: QML
+                            // cannot reach it and resizing tricks just move
+                            // the flash.)
                             x: root._articleParked ? -(width + 10) : 0
                             y: 0
-                            width: searchArticleView._grown ? parent.width : 1
-                            height: searchArticleView._grown ? parent.height : 1
+                            width: parent.width
+                            height: parent.height
                             Accessible.name: "Dictionary article"
                             Accessible.role: Accessible.WebDocument
                             onUrlChanged: {
@@ -1894,13 +1891,7 @@ ColumnLayout {
                                 }
                             }
                             onLoadingChanged: {
-                                if (!loading && searchArticleView.loadProgress === 100) {
-                                    // Genuine settle (a document actually
-                                    // loaded — loadProgress stays 0 on the
-                                    // spurious !loading of a doc-less view):
-                                    // grow the surface (see _grown) now that
-                                    // there are real pixels, never onto black.
-                                    searchArticleView._grown = true
+                                if (!loading) {
                                     // Blank base document settled: safe to inject
                                     // any suggestions that arrived meanwhile.
                                     root._blankPending = false

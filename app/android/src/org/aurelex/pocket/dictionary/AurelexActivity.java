@@ -126,6 +126,56 @@ public class AurelexActivity extends QtActivity {
         }
     }
 
+    /**
+     * Paint every WebView canvas the app background (cold-launch blink #2
+     * fix). A fresh or reloaded native surface draws one black frame between
+     * documents; QML cannot reach that canvas (opacity/visible don't propagate
+     * to the native view, and resize tricks just move the flash), but
+     * WebView.setBackgroundColor() replaces black with the theme color, so
+     * creation and document swaps are invisible. Runs on every layout pass
+     * (views are created dynamically by QML loaders) and resolves the color
+     * fresh each time, so day/night flips are picked up on the next layout.
+     */
+    private final android.view.ViewTreeObserver.OnGlobalLayoutListener mWebViewBgListener =
+            new android.view.ViewTreeObserver.OnGlobalLayoutListener() {
+                @Override public void onGlobalLayout() {
+                    paintWebViewBackgrounds();
+                }
+            };
+
+    private void paintWebViewBackgrounds() {
+        try {
+            android.app.Activity activity = sActivity;
+            if (activity == null) return;
+            android.view.View decor = activity.getWindow().getDecorView();
+            if (decor == null) return;
+            int bg;
+            try {
+                bg = activity.getColor(R.color.app_background);
+            } catch (Exception e) {
+                bg = 0xFFFFFBFE;
+            }
+            paintWebViewBackgroundsRecursive(decor, bg);
+        } catch (Exception e) {
+            android.util.Log.w(TAG, "paintWebViewBackgrounds failed: " + e);
+        }
+    }
+
+    private void paintWebViewBackgroundsRecursive(android.view.View v, int bg) {
+        try {
+            if (v instanceof android.webkit.WebView) {
+                ((android.webkit.WebView) v).setBackgroundColor(bg);
+            }
+            if (v instanceof android.view.ViewGroup) {
+                android.view.ViewGroup g = (android.view.ViewGroup) v;
+                for (int i = 0; i < g.getChildCount(); i++) {
+                    paintWebViewBackgroundsRecursive(g.getChildAt(i), bg);
+                }
+            }
+        } catch (Exception ignored) {
+        }
+    }
+
     public static void stopAudio() {
         try {
             if (sAudioPlayer != null) {
@@ -150,6 +200,12 @@ public class AurelexActivity extends QtActivity {
         super.onCreate(savedInstanceState);
         sActivity = this;
         showLaunchSplash();
+        try {
+            getWindow().getDecorView().getViewTreeObserver()
+                    .addOnGlobalLayoutListener(mWebViewBgListener);
+        } catch (Exception e) {
+            android.util.Log.w(TAG, "webview bg listener failed: " + e);
+        }
 
         // Workaround for QTBUG-122886 (Qt 6.6): QtActivityDelegate's display
         // listener fires setActivityDisplayRotation on a null mLayout when a
