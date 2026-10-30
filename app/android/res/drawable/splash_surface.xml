@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Qt-surface splash: shown by QtActivity from native-surface creation until
+     the first QML frame, closing the black gap between the themed starting
+     window and first draw. Solid app_background only (no icon): the platform
+     splash already showed the launcher icon on top of the same color, so this
+     continues it seamlessly. The color is night-qualified (values-night), so
+     dark mode is handled with no extra drawable. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="@color/app_background" />
+</shape>

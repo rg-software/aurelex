@@ -72,6 +72,171 @@ public class AurelexActivity extends QtActivity {
         }
     }
 
+    /**
+     * Cold-launch splash overlay (black-flash fix). Qt 6.9's QtActivity no
+     * longer honors the android.app.splash_screen_drawable meta-data (verified:
+     * no such key in the kit), so the native surface shows one black frame
+     * between the themed starting window and the first QML frame. Instead the
+     * activity covers itself with an app_background view in onCreate; QML
+     * removes it (hideLaunchSplash, via JNI) once its first frame is up. The
+     * overlay is the same color QML paints first, so even a late removal is
+     * invisible; a 5 s failsafe covers a missed signal (never stuck).
+     */
+    private static android.view.View sLaunchSplash = null;
+
+    private void showLaunchSplash() {
+        try {
+            android.app.Activity activity = this;
+            android.widget.ImageView v = new android.widget.ImageView(activity);
+            v.setImageResource(R.drawable.splash_surface);
+            v.setScaleType(android.widget.ImageView.ScaleType.CENTER_CROP);
+            android.view.ViewGroup.LayoutParams lp =
+                    new android.view.ViewGroup.LayoutParams(
+                            android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                            android.view.ViewGroup.LayoutParams.MATCH_PARENT);
+            activity.addContentView(v, lp);
+            sLaunchSplash = v;
+            // Failsafe: never trap the user behind the overlay.
+            v.postDelayed(new Runnable() {
+                @Override public void run() { hideLaunchSplash(); }
+            }, 5000);
+        } catch (Exception e) {
+            android.util.Log.w(TAG, "showLaunchSplash failed: " + e);
+        }
+    }
+
+    public static void hideLaunchSplash() {
+        try {
+            final android.view.View v = sLaunchSplash;
+            if (v == null) return;
+            sLaunchSplash = null;
+            v.post(new Runnable() {
+                @Override public void run() {
+                    try {
+                        android.view.ViewGroup parent =
+                                (android.view.ViewGroup) v.getParent();
+                        if (parent != null) parent.removeView(v);
+                    } catch (Exception e) {
+                        android.util.Log.w(TAG, "hideLaunchSplash remove failed: " + e);
+                    }
+                }
+            });
+        } catch (Exception e) {
+            android.util.Log.w(TAG, "hideLaunchSplash failed: " + e);
+        }
+    }
+
+    /**
+     * Paint every WebView canvas the app background (cold-launch blink #2
+     * fix). A fresh or reloaded native surface draws one black frame between
+     * documents; QML cannot reach that canvas (opacity/visible don't propagate
+     * to the native view, and resize tricks just move the flash), but
+     * WebView.setBackgroundColor() replaces black with the theme color, so
+     * creation and document swaps are invisible. Runs on every layout pass
+     * (views are created dynamically by QML loaders) and resolves the color
+     * fresh each time, so day/night flips are picked up on the next layout.
+     */
+    private final android.view.ViewTreeObserver.OnGlobalLayoutListener mWebViewBgListener =
+            new android.view.ViewTreeObserver.OnGlobalLayoutListener() {
+                @Override public void onGlobalLayout() {
+                    paintWebViewBackgrounds();
+                }
+            };
+
+    private void paintWebViewBackgrounds() {
+        try {
+            android.app.Activity activity = sActivity;
+            if (activity == null) return;
+            android.view.View decor = activity.getWindow().getDecorView();
+            if (decor == null) return;
+            int bg;
+            try {
+                bg = activity.getColor(R.color.app_background);
+            } catch (Exception e) {
+                bg = 0xFFFFFBFE;
+            }
+            paintWebViewBackgroundsRecursive(decor, bg);
+        } catch (Exception e) {
+            android.util.Log.w(TAG, "paintWebViewBackgrounds failed: " + e);
+        }
+    }
+
+    private void paintWebViewBackgroundsRecursive(android.view.View v, int bg) {
+        try {
+            if (v instanceof android.webkit.WebView) {
+                ((android.webkit.WebView) v).setBackgroundColor(bg);
+            }
+            if (v instanceof android.view.ViewGroup) {
+                android.view.ViewGroup g = (android.view.ViewGroup) v;
+                for (int i = 0; i < g.getChildCount(); i++) {
+                    paintWebViewBackgroundsRecursive(g.getChildAt(i), bg);
+                }
+            }
+        } catch (Exception ignored) {
+        }
+    }
+
+    /**
+     * IME inset-animation liveness (cold-abort strand fix). A cancelled show
+     * can leave the WM believing the keyboard is up: insets stay visible,
+     * the frame stays shrunk (floating dock), nothing paints — and no app
+     * signal separates that from a live keyboard. EXCEPT the animation
+     * itself: a healthy show's inset animation always finishes; a stuck one
+     * stays open. Tracked here (API 30+; below that the reshow this feeds is
+     * disarmed anyway). Counts starts/ends (floored at zero) so overlapping
+     * cancel/retry pairs can't wedge it true.
+     */
+    private int mImeAnimOpen = 0;
+
+    // DISPATCH_MODE_CONTINUE_ON_SUBTREE (observe only): STOP would consume
+    // the animations for the hierarchy below and starve Qt's own inset
+    // handling (dock lift, imeActuallyVisible) that this feature only
+    // supplements. NOTE: on API 35+ the start callback is onStart (returning
+    // Bounds), not the old onStarted — verified via javap against
+    // android-36 (which also renamed CONTINUE to CONTINUE_ON_SUBTREE).
+    private final android.view.WindowInsetsAnimation.Callback mImeAnimCallback =
+            new android.view.WindowInsetsAnimation.Callback(
+                    android.view.WindowInsetsAnimation.Callback.DISPATCH_MODE_CONTINUE_ON_SUBTREE) {
+                @Override
+                public android.view.WindowInsetsAnimation.Bounds onStart(
+                        android.view.WindowInsetsAnimation animation,
+                        android.view.WindowInsetsAnimation.Bounds bounds) {
+                    if ((animation.getTypeMask()
+                            & android.view.WindowInsets.Type.ime()) != 0) {
+                        mImeAnimOpen++;
+                    }
+                    return bounds;
+                }
+
+                @Override
+                public void onEnd(android.view.WindowInsetsAnimation animation) {
+                    if ((animation.getTypeMask()
+                            & android.view.WindowInsets.Type.ime()) != 0) {
+                        mImeAnimOpen = Math.max(0, mImeAnimOpen - 1);
+                    }
+                }
+
+                @Override
+                public android.view.WindowInsets onProgress(
+                        android.view.WindowInsets insets,
+                        java.util.List<android.view.WindowInsetsAnimation> running) {
+                    return insets;
+                }
+            };
+
+    /** True while an IME inset animation is still open (started, not ended). */
+    public static boolean isImeAnimationOpen() {
+        try {
+            android.app.Activity activity = sActivity;
+            if (activity instanceof AurelexActivity) {
+                return ((AurelexActivity) activity).mImeAnimOpen > 0;
+            }
+            return false;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
     public static void stopAudio() {
         try {
             if (sAudioPlayer != null) {
@@ -96,18 +261,37 @@ public class AurelexActivity extends QtActivity {
         super.onCreate(savedInstanceState);
         sActivity = this;
 
-        // Keyboard resize mode, chosen per API level. The window must NOT
-        // resize for the keyboard on API 28-29: this era's WindowManager
-        // destroys and recreates the main EGL surface on every IME-driven
-        // resize (whole-screen black blink, EGL_BAD_NATIVE_WINDOW in logcat),
-        // and only sometimes shrinks the content frame at all (which is also
-        // what made the dock position flap between identical states).
-        // ADJUST_PAN leaves the window alone; the QML dock lift (visible-frame
-        // pad) keeps navigation above the keyboard instead. API 30+ keeps the
-        // default resize path the Android 15 verification rows were measured on.
+        // Keyboard resize mode, chosen per API level (kept from main across
+        // the webview-smoothness merge: our branch never re-applied it).
+        // The window must NOT resize for the keyboard on API 28-29: this
+        // era's WindowManager destroys and recreates the main EGL surface on
+        // every IME-driven resize (whole-screen black blink,
+        // EGL_BAD_NATIVE_WINDOW in logcat), and only sometimes shrinks the
+        // content frame at all. ADJUST_PAN leaves the window alone; the QML
+        // dock lift keeps navigation above the keyboard instead. API 30+
+        // keeps the default resize path the Android 15 verification rows
+        // were measured on.
         if (android.os.Build.VERSION.SDK_INT <= 29) {
             getWindow().setSoftInputMode(
                 android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_PAN);
+        }
+        showLaunchSplash();
+        // IME animation liveness (see isImeAnimationOpen): API 30+ only, and
+        // only consulted where the reshow is armed (API 36+), so older OEMs
+        // never depend on it.
+        try {
+            if (android.os.Build.VERSION.SDK_INT >= 30) {
+                getWindow().getDecorView()
+                        .setWindowInsetsAnimationCallback(mImeAnimCallback);
+            }
+        } catch (Exception e) {
+            android.util.Log.w(TAG, "ime anim callback failed: " + e);
+        }
+        try {
+            getWindow().getDecorView().getViewTreeObserver()
+                    .addOnGlobalLayoutListener(mWebViewBgListener);
+        } catch (Exception e) {
+            android.util.Log.w(TAG, "webview bg listener failed: " + e);
         }
 
         // Workaround for QTBUG-122886 (Qt 6.6): QtActivityDelegate's display
@@ -279,12 +463,6 @@ public class AurelexActivity extends QtActivity {
      * navigation-bar inset and the display cutout's safe inset. Same
      * edge-to-edge rationale and same union rule as {@link #getSystemInsetTop}:
      * the bottom chrome must sit above the gesture/3-button nav area.
-     *
-     * The open keyboard MUST NOT count here. The window already shrinks for it
-     * (adjust=resize), so folding it into this inset inflates the dock and
-     * strands the tab row mid-screen. On API 30+ systemBars() excludes the
-     * IME; below that getSystemWindowInsetBottom() folds it in whenever the
-     * keyboard is shown, so the stable inset (nav bar only) is used instead.
      */
     public static int getSystemInsetBottom() {
         try {
@@ -292,16 +470,8 @@ public class AurelexActivity extends QtActivity {
             android.app.Activity activity = sActivity;
             if (activity != null) {
                 android.view.WindowInsets wi = activity.getWindow().getDecorView().getRootWindowInsets();
-                if (wi != null) {
-                    final int bars;
-                    if (android.os.Build.VERSION.SDK_INT >= 30) {
-                        bars = wi.getInsets(android.view.WindowInsets.Type.systemBars()).bottom;
-                    } else {
-                        bars = wi.getStableInsetBottom();
-                    }
-                    if (bars > 0)
-                        return Math.max(bars, cutout);
-                }
+                if (wi != null && wi.getSystemWindowInsetBottom() > 0)
+                    return Math.max(wi.getSystemWindowInsetBottom(), cutout);
             }
             int id = activity.getResources().getIdentifier("navigation_bar_height", "dimen", "android");
             int fallback = id > 0 ? activity.getResources().getDimensionPixelSize(id) : 0;
@@ -359,16 +529,21 @@ public class AurelexActivity extends QtActivity {
     }
 
     /**
+     * Raw Android API level (Build.VERSION.SDK_INT), 0 when unreadable.
+     * Lets QML gate OEM/API-specific workarounds (e.g. the IME reshow is
+     * needed where first shows abort, harmful where they paint cleanly).
+     */
+    public static int getSdkInt() {
+        try {
+            return android.os.Build.VERSION.SDK_INT;
+        } catch (Exception e) {
+            return 0;
+        }
+    }
+
+    /**
      * Bottom (px, window coordinates) of the visible display frame — the line
-     * above which the keyboard (or split-screen divider) does not reach. -1
-     * when it cannot be read; QML treats that as "no occlusion".
-     *
-     * This is the backstop for keyboards the window resize misses: on some
-     * devices the content frame does not shrink when the keyboard opens (only
-     * the visible frame does), so the Qt height stays full and the dock would
-     * end up behind the keyboard. QML pads the dock up by the occluded part.
-     * When the resize does happen the pad computes to zero, so the two paths
-     * never double-apply.
+     * above which the keyboard does not reach. -1 when unreadable.
      */
     public static int getVisibleBottom() {
         try {
@@ -380,6 +555,82 @@ public class AurelexActivity extends QtActivity {
         } catch (Exception e) {
             android.util.Log.w(TAG, "getVisibleBottom failed: " + e);
             return -1;
+        }
+    }
+
+    /**
+     * Real display height in physical px.
+     */
+    public static int getDisplayHeight() {
+        try {
+            android.app.Activity activity = sActivity;
+            if (activity == null) return 0;
+            android.view.WindowManager wm = activity.getWindowManager();
+            if (android.os.Build.VERSION.SDK_INT >= 30)
+                return wm.getMaximumWindowMetrics().getBounds().height();
+            android.util.DisplayMetrics dm = new android.util.DisplayMetrics();
+            wm.getDefaultDisplay().getRealMetrics(dm);
+            return dm.heightPixels;
+        } catch (Exception e) {
+            android.util.Log.w(TAG, "getDisplayHeight failed: " + e);
+            return 0;
+        }
+    }
+
+    /**
+     * Actual system IME visibility. On API 30+ WindowInsets reports the IME
+     * source directly. On API 28-29, compare the visible display frame with the
+     * decor window bottom after subtracting the stable navigation inset.
+     */
+    public static boolean isImeActuallyVisible() {
+        try {
+            android.app.Activity activity = sActivity;
+            if (activity == null) return false;
+            android.view.View decor = activity.getWindow().getDecorView();
+            android.view.WindowInsets wi = decor.getRootWindowInsets();
+            if (android.os.Build.VERSION.SDK_INT >= 30 && wi != null)
+                return wi.isVisible(android.view.WindowInsets.Type.ime());
+
+            // API 28-29: the visible-display-frame comparison is unreliable on
+            // some OEMs (Huawei/EMUI) under adjust=pan. Try (1) system-vs-stable
+            // inset, then (2) reflection on InputMethodManager.mInputShown.
+            if (wi != null) {
+                int sysBottom = wi.getSystemWindowInsetBottom();
+                int stableBottom = wi.getStableInsetBottom();
+                if (sysBottom > stableBottom) {
+                    return true;
+                }
+            }
+            // Reflection fallback: read IMM.mInputShown (field name varies by
+            // Android version; try the common ones).
+            try {
+                android.view.inputmethod.InputMethodManager imm =
+                        (android.view.inputmethod.InputMethodManager)
+                                activity.getSystemService(android.content.Context.INPUT_METHOD_SERVICE);
+                for (String fieldName : new String[]{"mInputShown", "mServedInputConnection"}) {
+                    try {
+                        java.lang.reflect.Field f = android.view.inputmethod.InputMethodManager.class
+                                .getDeclaredField(fieldName);
+                        f.setAccessible(true);
+                        Object v = f.get(imm);
+                        if (v instanceof Boolean) {
+                            return (Boolean) v;
+                        }
+                    } catch (NoSuchFieldException ignored) {
+                    }
+                }
+            } catch (Exception ignored) {
+            }
+            // Last resort: visible display frame.
+            android.graphics.Rect vis2 = new android.graphics.Rect();
+            decor.getWindowVisibleDisplayFrame(vis2);
+            int[] loc2 = new int[2];
+            decor.getLocationOnScreen(loc2);
+            int fullBottom2 = loc2[1] + decor.getHeight();
+            return vis2.bottom < fullBottom2;
+        } catch (Exception e) {
+            android.util.Log.w(TAG, "isImeActuallyVisible failed: " + e);
+            return false;
         }
     }
 

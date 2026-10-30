@@ -4,7 +4,12 @@
 #
 # Toolchain facts (proven 2026-09-02, see openspec/changes/qt-quick-frontend/design.md;
 # 16 KB refresh: openspec/changes/support-16kb-pages/design.md):
-# - Qt android kits: C:\Qt\6.9.3\android_arm64_v8a (+ android_x86_64, host msvc2022_64)
+# - Qt android kits: C:\Qt\6.9.3\android_arm64_v8a (+ host msvc2022_64).
+#   Qt 6.10.2+ fixes QTBUG-140897 (first-tap keyboard on Android 16), but 6.10.x
+#   regresses input focus (press-granted focus revoked on release; programmatic
+#   forceActiveFocus silently fails) and the Android accessibility tree, so the
+#   working kit stays 6.9.3 until those are resolved upstream. Revisit 6.11/6.12
+#   when a release note indicates a fix (see docs/TESTING.md).
 # - ANDROID_PLATFORM=android-30 (carve needs iconv >= 28,
 #   pthread_cond_clockwait >= 30; still present in NDK r30 sysroots)
 # - NDK r30 LTS (16 KB ELF alignment by default) — Play's 16 KB page-size requirement
@@ -15,7 +20,7 @@
 #   its "not supported" warning. AGP's default aapt2 cannot link
 #   against SDK 36's android.jar, so gradle.properties pins
 #   android.aapt2FromMavenOverride to the aapt2 from build-tools 36.0.0.
-# - minSdk is 28 (Android 9.0): Qt 6.9 supports API 28+ only (16 KB change).
+# - minSdk is 28 (Android 9.0): Qt 6.9+ supports API 28+ only (16 KB change).
 # - androiddeployqt regenerates local.properties/gradle.properties -> re-apply overrides
 # - Qt has no qt_add_apk_target in the aqt carve subset -> package via androiddeployqt
 

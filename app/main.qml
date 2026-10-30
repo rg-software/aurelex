@@ -121,28 +121,131 @@ ApplicationWindow {
     property int _insetLeft: 0
     property int _insetRight: 0
     // Lift (dp) applied under the dock when the keyboard covers part of the
-    // window the resize missed: window height minus the visible-frame bottom.
-    // Zero whenever the resize already shrank for the keyboard (or nothing
-    // covers the window), so the two paths never double-apply.
+    // window the resize missed. Zero whenever the resize already shrank for the
+    // keyboard (or nothing covers the window), so the two paths never
+    // double-apply.
     property int _kbdPad: 0
     property real _insetDpr: Screen.devicePixelRatio > 0 ? Screen.devicePixelRatio : 1
+    // Settle-then-reshow for the fake IME state (Qt 6.9.3: a show issued
+    // during layout is cancelled post-layout and nothing paints). Armed on
+    // EVERY query-field focus gain (tap or programmatic return) and firing
+    // LATE (~1000 ms: past the slowest healthy paint — measured 563-601 ms
+    // over 10 Xiaomi/SwiftKey taps — so a healthy show is always done) and
+    // CONDITIONAL: a settled inset check stands the fire down over a live
+    // keyboard (a bare show() over painted SwiftKey visibly re-opens — not a
+    // safe no-op). The reshow is a bare Qt.inputMethod.show() — NOT a
+    // blur+refocus: 6.9.3's hasValidFocusObject() visibility gate guards only
+    // the Java->Qt JNI callbacks, never the show path. One-shot per gain (see
+    // _lastRekickMs): exactly one extra show request per focus gain, never a
+    // loop.
+    // A Back-dismissed keyboard is never resurrected: dismissal means insets
+    // went visible→hidden, which latches _insetSeenSinceGain, which stands
+    // both this timer and the poll-clear down independently (race-free: either
+    // guard alone suffices). Never latch this off Qt.inputMethod.visible.
+    property bool _imeBackstopArmed: false
+    // True once the IME was inset-visible since the last focus gain.
+    // Latched ONLY from WindowInsets (engine.imeActuallyVisible) — never from
+    // Qt.inputMethod.visible, whose levels fake-flap through aborts (a fake
+    // true→false edge both skipped the heal and let the poll-clear strip a
+    // live focus: cold-dead launches). Insets are settle-truthful (proven by
+    // the dock staying down through aborts) — but a single poll tick can
+    // catch a transient reservation blip mid-abort, so the latch needs TWO
+    // consecutive visible ticks (~500 ms of real paint). A blip never
+    // latches; a real keyboard always does. Where insets never report
+    // (Huawei) this stays false: the reshow is disarmed there anyway, and a
+    // tap on a still-focused field re-requests natively, so the clear is
+    // unneeded there too.
+    property bool _insetSeenSinceGain: false
+    property int _insetVisibleStreak: 0
+    // Timestamp (ms) of the last query-field focus gain. Lets the settled-hide
+    // clearing below distinguish a fresh tap (don't touch) from a focus left
+    // over after the keyboard was dismissed (safe to clear).
+    property double _lastFocusGainMs: 0
+    // Timestamp (ms) of the last backstop reshow. Kept as a guard so gains
+    // in the window after a reshow never re-arm (belt-and-suspenders: the
+    // show() itself changes no focus, so normally no regain follows).
+    property double _lastRekickMs: 0
+    // Whether the IME reshow backstop may arm. NEEDED on API 36+: cold-start
+    // first shows abort post-layout with nothing painted (verified: no-reshow
+    // probe leaves mInputShown=true with no onShown ever); the late, settled
+    // show-only re-request heals it (6.9.3 gates only Java->Qt callbacks, so
+    // a redundant show is safe). HARMFUL on API 30-35 and unneeded below 30
+    // (first shows paint cleanly; the redundant request races the live
+    // animation into visible churn — measured on Motorola, clean 5/5 without).
+    // Huawei (API 29): first tap paints with no abort — stays disarmed.
+    property bool _imeReshowEnabled: {
+        const sdk = engine.androidSdkInt()
+        return sdk >= 36
+    }
+    Timer {
+        id: imeBackstopTimer
+        interval: 1000
+        repeat: false
+        onTriggered: {
+            if (!root._imeBackstopArmed) return
+            root._imeBackstopArmed = false
+            root._lastRekickMs = Date.now()
+            if (!input.activeFocus && !ftsInput.activeFocus) return
+            // The latch below means "was inset-visible", NOT "dismissed" — a
+            // sustained fake reservation sets it too. So consult current
+            // visibility FIRST and the latch only inside the hidden branch:
+            // hidden + was-visible = genuinely dismissed (poll-clear owns it,
+            // never resurrect); hidden + never-visible = classic abort (heal).
+            if (engine.imeActuallyVisible()) {
+                // Settled visibility check. Stand down ONLY over a settled
+                // live keyboard: visible with no open animation. A stuck
+                // cancel keeps its animation open (WM leash lingers) with
+                // nothing painted — heal that with a fresh request (a re-tap
+                // proves it paints). A healthy show always finishes its
+                // animation long before this fire (slowest measured paint
+                // ~600 ms vs +1000 ms), so an open animation here is stuck
+                // by physics, not tuning.
+                if (!engine.isImeAnimationOpen()) return
+            } else if (root._insetSeenSinceGain) {
+                return
+            }
+            // Focused, no settled live keyboard: the first show died (or its
+            // animation wedged) — heal it.
+            Qt.inputMethod.show()
+        }
+    }
     function _refreshInsets() {
         root._insetDpr = Screen.devicePixelRatio > 0 ? Screen.devicePixelRatio : 1
         root._insetTop = Math.round(engine.systemInsetTop() / root._insetDpr)
         root._insetBottom = Math.round(engine.systemInsetBottom() / root._insetDpr)
         root._insetLeft = Math.round(engine.systemInsetLeft() / root._insetDpr)
         root._insetRight = Math.round(engine.systemInsetRight() / root._insetDpr)
-        // Lift the dock only for a real keyboard. The visible frame also
-        // shrinks for the translucent system nav bar and for pre-resize
-        // animation frames, neither of which may move the dock: the strip
-        // repaints the nav area instead of vacating it, and a transient sample
-        // must never stick. So the pad follows the occluded height with a dead
-        // zone — system bars stay under ~130px even on high-density screens,
-        // while even compact keyboards take 400px+. The poll below re-emits on
-        // every tick (not only on change) so a transient can only survive one
-        // interval before the steady value replaces it.
-        const occlPx = Math.round(root.height * root._insetDpr - engine.visibleBottom())
-        root._kbdPad = occlPx > 150 ? Math.round(occlPx / root._insetDpr) : 0
+        // Only reposition the toolbar for the Search and FTS tabs. Modal
+        // dialogs (e.g. group name input) may open the keyboard but must not
+        // move the dock.
+        const onQueryTab = root.state === 0 || root.state === 4
+        if (!onQueryTab) {
+            root._kbdPad = 0
+            return
+        }
+        // Lift the dock above the keyboard. On OEMs that report IME insets
+        // (Motorola, Xiaomi) use the measured occlusion. On OEMs that do not
+        // (Huawei/EMUI), fall back to a focus-based heuristic whenever a
+        // query field is focused and Qt reports the IME visible. No latch:
+        // the backstop below makes shows reliable, so a focused field with
+        // a reported-visible IME means a real keyboard is (about to be) up.
+        if (engine.imeActuallyVisible()) {
+            const visBottom = engine.visibleBottom()
+            if (visBottom >= 0) {
+                const displayPx = engine.displayHeight() > 0
+                    ? engine.displayHeight() : root.height * root._insetDpr
+                const sysBottomPx = engine.systemInsetBottom()
+                const occludedPx = displayPx - visBottom - sysBottomPx
+                root._kbdPad = Math.max(0, Math.round(occludedPx / root._insetDpr))
+            } else {
+                root._kbdPad = 0
+            }
+        } else if ((input.activeFocus || ftsInput.activeFocus) && Qt.inputMethod.visible) {
+            // Focus-based fallback for non-reporting OEMs (Huawei/EMUI).
+            root._kbdPad = Math.round(root.height * 0.4)
+        } else {
+            root._kbdPad = 0
+        }
     }
     // The resize hooks below are a FAST PATH for the common cases (a real
     // portrait<->landscape flip, the IME, split screen). They are not the
@@ -160,7 +263,99 @@ ApplicationWindow {
         target: engine
         function onInsetsChanged() { root._refreshInsets() }
     }
-    Component.onCompleted: root._refreshInsets()
+    // Re-evaluate the dock lift when focus changes, so the focus-based
+    // fallback (for OEMs that don't report IME insets) lifts/drops the dock
+    // even when no inset signal fires.
+    Connections {
+        target: input
+        function onActiveFocusChanged() {
+            if (input.activeFocus) {
+                root._lastFocusGainMs = Date.now()
+                root._insetSeenSinceGain = false
+                root._insetVisibleStreak = 0
+                // Arm on every gain; skip only gains right after our own
+                // reshow (which changes no focus, so normally none follow).
+                if (Date.now() - root._lastRekickMs > 1500
+                        && root._imeReshowEnabled) {
+                    root._imeBackstopArmed = true
+                    imeBackstopTimer.restart()
+                }
+            } else {
+                root._imeBackstopArmed = false
+            }
+            root._refreshInsets()
+        }
+    }
+    Connections {
+        target: ftsInput
+        function onActiveFocusChanged() {
+            if (ftsInput.activeFocus) {
+                root._lastFocusGainMs = Date.now()
+                root._insetSeenSinceGain = false
+                root._insetVisibleStreak = 0
+                // Arm on every gain; skip only gains right after our own
+                // reshow (which changes no focus, so normally none follow).
+                if (Date.now() - root._lastRekickMs > 1500
+                        && root._imeReshowEnabled) {
+                    root._imeBackstopArmed = true
+                    imeBackstopTimer.restart()
+                }
+            } else {
+                root._imeBackstopArmed = false
+            }
+            root._refreshInsets()
+        }
+    }
+    Connections {
+        target: Qt.inputMethod
+        function onVisibleChanged() { root._refreshInsets() }
+    }
+    // Belt-and-suspenders poll for OEMs (Huawei/EMUI) where insets and
+    // Qt.inputMethod.visible do not fire reliably: re-evaluate the dock lift
+    // periodically so a show/hide that missed its signal still lands within
+    // one interval.
+    Timer {
+        interval: 250
+        repeat: true
+        running: true
+        onTriggered: {
+            // Inset visibility latch (see _insetSeenSinceGain): the only
+            // was-visible signal trusted anywhere. Qt.inputMethod.visible is
+            // never latched — its levels fake-flap through aborts.
+            if (engine.imeActuallyVisible()) {
+                root._insetVisibleStreak++
+                if (root._insetVisibleStreak >= 2) root._insetSeenSinceGain = true
+            } else {
+                root._insetVisibleStreak = 0
+            }
+            // Clear a focus left over after the keyboard was dismissed
+            // (Back hides the IME but Qt keeps field focus, so the next tap
+            // would be a no-op and the backstop would never arm). Only fires
+            // for a keyboard that was actually up (never for a slow first
+            // show) and well after the last focus gain, so it can never kill
+            // a tap or a show still in flight.
+            // NOTE: on OEMs without inset reports (Huawei) the latch never
+            // sets, so this never clears there — harmless: a tap on the
+            // still-focused field re-requests the IME natively.
+            if ((root.state === 0 || root.state === 4) && !root._pickerOpen
+                && !engine.imeActuallyVisible()
+                && root._insetSeenSinceGain
+                && (input.activeFocus || ftsInput.activeFocus)
+                && (Date.now() - root._lastFocusGainMs > 1000)) {
+                if (input.activeFocus) input.focus = false
+                if (ftsInput.activeFocus) ftsInput.focus = false
+            }
+            root._refreshInsets()
+        }
+    }
+    Component.onCompleted: {
+        root._refreshInsets()
+        // First QML frame is (about to be) up: drop the cold-launch splash
+        // overlay (same color as the first paint, so even a frame of overlap
+        // is invisible). Deferred past component completion so the frame is
+        // real, not just constructed.
+        Qt.callLater(function() { engine.hideLaunchSplash() })
+    }
     // First-launch tab routing happens on onOnboardedChanged (not here):
     // engine.onboarded is only final after EngineController's ASYNC gd_init +
     // loadSettings() completes, so at Component.onCompleted it is still the
@@ -180,6 +375,17 @@ ApplicationWindow {
                 // fresh launch must start on Search.
                 root._bootRouted = true
                 root.state = engine.onboarded ? 0 : 1
+                // Launch autofocus belongs here, not in the field's
+                // onCompleted: onboarded is only final at this signal, so an
+                // onCompleted-time check races async init (focus flaked
+                // launch to launch). Granted synchronously — the deferred
+                // entry timer provably never fires this early (armed-but-dead
+                // on every traced launch; cause unknown, not chased: a sync
+                // grant has no moving parts). First run (Dicts + welcome
+                // overlay) and an already-focused field are left alone.
+                if (engine.onboarded && root.state === 0 && !input.activeFocus) {
+                    input.forceActiveFocus()
+                }
             }
         }
     }
@@ -376,10 +582,13 @@ ApplicationWindow {
     }
     onStateChanged: {
         if (root.state !== 0) {
-            // Leaving the Search tab: the WebView stays alive, parked
-            // offscreen (see _articleParked) with its document intact. An
-            // inline article is PRESERVED (currentHtml).
+            // Leaving the Search tab: keep the inline WebView alive, parked
+            // offscreen (see _articleParked) with its document intact, so a
+            // return restores the article and the typed query's suggestions
+            // need no re-render. An inline article is PRESERVED (currentHtml).
             root._returningToSearch = true
+            // inlineWebReady stays true so the loader (and its WebView) is not
+            // destroyed; the timer stops on its own (running: state === 0).
         } else if (root._returningToSearch) {
             root._returningToSearch = false
             if (root.inlineArticle) {
@@ -389,21 +598,46 @@ ApplicationWindow {
                 // round trip.
                 return
             }
-            // No article: re-populate candidates for the text that's still typed.
-            // The persisted document takes the re-injected overlay live. Focus
-            // was already transferred on the way in (_navTo); this only refreshes
-            // the candidates, deferred a turn so the pane is settled — and never
-            // when an article owns the surface (e.g. a lookup from another tab
-            // racing here), where a suggest would be wasted work.
-            Qt.callLater(function() {
-                if (root.state !== 0 || root.inlineArticle) return
-                if (input.displayText.trim().length > 0) searchPane._doSuggest()
-            })
+            // No article: refocus the field (so Enter works again) and
+            // re-populate candidates for the text that's still typed. The
+            // persisted document takes the re-injected overlay live.
+            //
+            // Focus is granted by entryFocusTimer once the tab-switch layout
+            // has settled, so its auto-show goes out post-layout. The gain
+            // arms the backstop like any other gain (a no-op reshow if the
+            // auto-show painted, a heal if it was cancelled).
+            entryFocusTarget = input
+            entryFocusTimer.restart()
         }
     }
-    // Guards the onStateChanged re-suggest so it only runs on an actual return
-    // to Search, not on first show.
+    // Guards the onStateChanged re-focus/re-suggest so it only runs on an
+    // actual return to Search, not on first show.
     property bool _returningToSearch: false
+    // Target of the deferred tab-entry focus (the Search or FTS field).
+    property var entryFocusTarget: null
+    // Deferred tab-entry focus: fires once the tab-switch layout has settled,
+    // so the auto-show it triggers goes out post-layout instead of being
+    // cancelled mid-transition. Used for Search return and FTS entry alike.
+    Timer {
+        id: entryFocusTimer
+        interval: 300
+        repeat: false
+        onTriggered: {
+            const target = root.entryFocusTarget
+            root.entryFocusTarget = null
+            if (!target) return
+            if (root.state !== 0 && root.state !== 4) return
+            if (target.activeFocus) return
+            target.forceActiveFocus()
+            if (root.state === 0 && input.displayText.trim().length > 0)
+                searchPane._doSuggest()
+        }
+    }
+    // True while the inline WebView must be parked offscreen (clipped by the
+    // window) so its native surface cannot cover other panes or the modal
+    // picker. The WebView stays alive with its document intact instead of
+    // being destroyed.
+    property bool _articleParked: root.state !== 0 || root._pickerOpen
     function _clearInlineArticle() {
         root.inlineArticle = false
         root.currentWord = ""
@@ -749,8 +983,12 @@ ApplicationWindow {
             // so the Forward buttons' `enabled` binding re-evaluates to false.
             root.fwdStack = []
         }
-        // Route any lookup to the Search tab's inline surface.
-        if (root.state !== 0) state = 0
+        // Route any lookup to the Search tab's inline surface. State goes
+        // LAST: assigning state=0 runs onStateChanged synchronously, and the
+        // Search-return branch arms entry focus + suggestions when it sees no
+        // article — which then conceals this one via _doSuggest. Setting
+        // inlineArticle (and the content) first makes the handler take the
+        // preserve-article path instead (FTS-result-tap race).
         currentWord = word
         currentHtml = html
         // Show the looked-up term in the search box (users see the article +
@@ -760,6 +998,7 @@ ApplicationWindow {
         root._suppressSuggest = false
         _blurActive()
         inlineArticle = true
+        if (root.state !== 0) state = 0
         articleLoadTimer.restart()
     }
     function _backFromArticle() {
@@ -871,13 +1110,30 @@ ApplicationWindow {
         }
         return false
     }
-    function _blurActive(except) {
+    // Clears keyboard focus. With keepQuery, the two query fields are left
+    // alone so focus can transfer directly between them (Search<->FTS) with
+    // the keyboard riding through instead of hiding and re-showing.
+    function _blurActive(keepQuery) {
         if (root.activeFocusItem && root.activeFocusItem.forceActiveFocus === undefined) return
-        if (except !== input && input.activeFocus) input.focus = false
-        if (except !== renameGroupInput && renameGroupInput.activeFocus) renameGroupInput.focus = false
-        if (except !== createGroupNameInput && createGroupNameInput.activeFocus) createGroupNameInput.focus = false
-        if (except !== ftsInput && ftsInput.activeFocus) ftsInput.focus = false
-        if (except !== findInput && findInput.activeFocus) findInput.focus = false
+        if (!keepQuery) {
+            if (input.activeFocus) input.focus = false
+            if (ftsInput.activeFocus) ftsInput.focus = false
+        }
+        if (renameGroupInput.activeFocus) renameGroupInput.focus = false
+        if (createGroupNameInput.activeFocus) createGroupNameInput.focus = false
+        if (findInput.activeFocus) findInput.focus = false
+        // Re-evaluate the dock lift after the IME has had time to hide.
+        Qt.callLater(function() { Qt.callLater(function() { root._refreshInsets() }) })
+    }
+    // Moves keyboard focus directly to a query field (synchronous transfer).
+    // When the keyboard is already up it rides through with no hide/show
+    // cycle; when down, the gain arms the backstop like a tap. Backed by
+    // entryFocusTimer below in case the grant lands mid-transition.
+    function _transferQueryFocus(target) {
+        if (target.activeFocus) return
+        target.forceActiveFocus()
+        entryFocusTarget = target
+        entryFocusTimer.restart()
     }
     function _openDicts() {
         _blurActive()
@@ -890,24 +1146,28 @@ ApplicationWindow {
         state = 3
     }
     function _openFts() {
-        // Focus the query field on every entry, like the Search return path
-        // focuses its field: the tab is a query surface. State first (the pane
-        // must be visible for focus to take), then focus, then clear the rest:
-        // a direct input->ftsInput transfer never leaves focus empty, so the
-        // IME has nothing to hide. If the synchronous grab misses (pane not
-        // ready yet), the callLater below retries once it is.
-        state = 4
-        ftsInput.forceActiveFocus()
-        Qt.callLater(function() {
-            if (root.state === 4 && !ftsInput.activeFocus) ftsInput.forceActiveFocus()
-        })
-        _blurActive(ftsInput)
+        const fromSearch = (root.state === 0)
+        // Query-to-query: keep focus (transferred below) so a shown keyboard
+        // rides through. Otherwise blur fully.
+        _blurActive(fromSearch && root.ftsResults.length === 0)
         // Don't clear ftsResults here: switching tabs must be idempotent, so
         // the last search results survive a round trip (the field keeps its
         // query and the results stay valid). A new search replaces them.
         // Also clear any busy flag left by a submit whose reply was dropped for
         // a stale query, so the control cannot stay disabled across a re-entry.
         root.ftsSearching = false
+        state = 4
+        // Enter with the field focused (and the keyboard up) unless there are
+        // results to view: the invariant is focus+keyboard on empty content,
+        // hands off the content otherwise. Transfer directly from Search;
+        // from elsewhere the entry timer below focuses it once layout settles.
+        if (root.ftsResults.length === 0) {
+            if (fromSearch) _transferQueryFocus(ftsInput)
+            else {
+                entryFocusTarget = ftsInput
+                entryFocusTimer.restart()
+            }
+        }
     }
     function _openFavorites() {
         _blurActive()
@@ -966,6 +1226,10 @@ ApplicationWindow {
         return -1
     }
     function _navTo(idx) {
+        // Same-tab re-tap is a no-op: it must not blur the field, hide the
+        // keyboard, or refocus. (Search used to blur-and-stay while FTS
+        // blurred-and-refocused via the entry timer — neither is right.)
+        if (root.state === idx) return
         if (idx === 0) {
             // An article left over from another pane (full-pane article opened
             // from Favs/FTS) must not carry into a fresh Search: a stale
@@ -975,27 +1239,20 @@ ApplicationWindow {
                 root.currentWord = ""
                 root.currentHtml = ""
             }
+            // Query-to-query (FTS -> Search): transfer focus directly so a
+            // shown keyboard rides through with no hide/show cycle. From
+            // elsewhere, or with an article to view, blur fully instead.
+            const viewing = root.inlineArticle
+            const fromFts = (root.state === 4)
+            _blurActive(fromFts && !viewing)
             state = 0
-            if (!root.inlineArticle) {
-                // Focus the field on the way in (so Enter works), then clear
-                // anything else still holding focus. Doing it in this order -
-                // never via an unfocused gap - keeps a keyboard left open on
-                // the other tab open instead of hide/show cycling it. The
-                // callLater retries once if the pane wasn't ready yet.
-                input.forceActiveFocus()
-                Qt.callLater(function() {
-                    if (root.state === 0 && !root.inlineArticle && !input.activeFocus)
-                        input.forceActiveFocus()
-                })
-                _blurActive(input)
-            } else {
-                _blurActive()
-            }
+            if (!viewing && fromFts) _transferQueryFocus(input)
             return
         }
         // Leaving the search tab: keep any inline article state (currentWord /
         // currentHtml / navStack) so a return restores the shown article. The
-        // inline WebView itself is parked offscreen by the loader, not here.
+        // inline WebView itself is destroyed by the loader, not here — no
+        // need to wipe anything; returning re-renders from currentHtml.
         if (idx === 1) { _openDicts(); return }
         if (idx === 3) { _openGroups(); return }
         if (idx === 4) { _openFts(); return }
@@ -1055,7 +1312,7 @@ ApplicationWindow {
             TabBar {
                 id: navBar
                 // Five nav tabs take 5/6 of the dock; the theme cell (a sibling
-                // below) takes the last 1/6. As a sibling — not a TabBar child —
+                // below) takes the last 1/6. As a sibling - not a TabBar child -
                 // it can never become the "active tab".
                 width: navRow.width - Math.round(navRow.width / 6)
                 height: navRow.height
@@ -1075,16 +1332,15 @@ ApplicationWindow {
                     model: root.navItems
                     delegate: TabButton {
                         id: tabBtn
+                        // Non-focusable: pressing a tab must never steal active
+                        // focus from the query field (same-tab re-tap blurred
+                        // the field, hid the keyboard, and nothing refocused
+                        // — the _navTo early-return only skips navigation).
+                        // Same precedent as the article toolbar buttons below.
+                        focusPolicy: Qt.NoFocus
                         // Five equal nav cells across the TabBar.
                         width: navBar.width / 5
                         height: parent.height
-                        // Never take keyboard focus: tapping a tab would move
-                        // active focus off the search/FTS field, hiding the
-                        // keyboard, and the tab's own onClicked path refocuses
-                        // a text field right after — a hide/show flicker on
-                        // every tab switch (same reason the group/clipboard
-                        // buttons are NoFocus). A tap needs no focus.
-                        focusPolicy: Qt.NoFocus
                         // icon glyph + label in the theme font (a single-font
                         // `text` would render the icon glyphs as broken Latin).
                         contentItem: Column {
@@ -1118,6 +1374,9 @@ ApplicationWindow {
             // system; does not navigate.
             Button {
                 id: themeBtn
+                // Non-focusable like the tabs: toggling the theme must not
+                // steal the query field's focus (and hide the keyboard).
+                focusPolicy: Qt.NoFocus
                 width: navRow.width - navBar.width
                 height: navRow.height
                 flat: true
@@ -1404,13 +1663,11 @@ ColumnLayout {
             }
 
             // Inline article area: a permanent browser pane filling the Search
-            // tab below the search row. The WebView is created once and then
-            // kept alive across tab switches and picker sessions - parked
-            // offscreen (see _articleParked) while another pane or the modal
-            // dialog is up, so it never covers them and never pays a
-            // destroy/create black flash on return. The already-loaded
-            // document is simply still there, so returning runs zero
-            // navigations. Search suggestions render as
+            // tab below the search row. It is always present while on this tab
+            // (never hidden while a WebView is alive — a hidden-but-alive native
+            // WebView overlays the whole screen on Android), and is destroyed on
+            // leaving the tab so it never covers the other panes. The warm
+            // WebView gives near-instant re-renders. Search suggestions render as
             // an <a> dropdown INSIDE this WebView (main.qml _renderSuggestOverlay):
             // QML controls cannot draw over Android's native WebView surface, so
             // the dropdown lives in the same HTML document as the article.
@@ -1641,25 +1898,27 @@ ColumnLayout {
                         root.inlineWv = item
                         // Give the fresh WebView a document to run JS against.
                         root._ensureInlineBlank()
-                        // First creation racing a lookup reply: _showArticle's
-                        // timer fires into a null inlineWv and is skipped, so
-                        // render here if an article is already waiting.
-                        // Returns from other tabs need nothing - the document
-                        // persisted while parked.
+                        // Re-render an already-loaded article when the WebView
+                        // is first created.
                         if (root.currentHtml.length > 0) articleLoadTimer.restart()
                     }
                     onActiveChanged: { root._blankPending = false; if (!active) root.inlineWv = null }
                     sourceComponent: Component {
                         WebView {
                             id: searchArticleView
-                            // Normal geometry fills the loader (which already
-                            // sits below the toolbar). Parked (another tab, or
-                            // the modal picker): slide the whole native view
+                            // Normal geometry fills the loader (which already sits
+                            // below the toolbar). Parked (another tab, or the
+                            // modal picker): slide the whole native view
                             // offscreen-left. It is then clipped by the window -
                             // draws nothing, takes no taps - while visible:false
                             // would leave it covering the screen and destroying
                             // it would black-flash on return. The height stays
                             // full so unparking never re-lays-out the page.
+                            // (The native surface's own canvas color — the
+                            // between-documents flash — is painted from Java,
+                            // see AurelexActivity.paintWebViewBackgrounds: QML
+                            // cannot reach it and resizing tricks just move
+                            // the flash.)
                             x: root._articleParked ? -(width + 10) : 0
                             y: 0
                             width: parent.width
@@ -4016,19 +4275,11 @@ text: root._stagingActive
     }
 
     // --- group picker dialog ---
-    // True while the modal group picker is open. The inline WebView is NOT
-    // torn down for it (or for tab switches): its native surface sits above ANY
-    // Qt item, so instead of destroying it the view parks offscreen (see
-    // _articleParked) while the dialog is up. When this flips back to false
-    // the view slides back with its document intact — no re-navigation, no
-    // overlay re-apply needed beyond the usual scope refresh below.
+    // True while the modal group picker is open: the inline WebView is torn
+    // down (its native surface sits above ANY Qt item, so it would cover the
+    // dialog). When this flips back to false, the loader re-creates the WebView
+    // and the suggestion/history overlay is re-applied via onLoadingChanged.
     property bool _pickerOpen: false
-    // The native view ignores QML visibility (hiding it leaves it covering the
-    // screen), but geometry reaches it. So instead of destroying the WebView on
-    // tab leave / picker open, park it fully offscreen-left: clipped by the
-    // window, it draws nothing and receives no taps, and keeps its document —
-    // returning is instant with zero navigations.
-    property bool _articleParked: root.state !== 0 || root._pickerOpen
     // Which scope the modal picker was opened for: "search" or "fts". Decides
     // which group button to update on selection and whether the Search WebView
     // needs the teardown/restore dance (only the Search tab has an inline WebView).
@@ -4057,7 +4308,6 @@ text: root._stagingActive
                 // Park the inline WebView (via _articleParked) so its native
                 // surface can't sit above the modal dialog. Its document and JS
                 // state survive; closing slides it back with zero navigations.
-                // The FTS tab has no WebView, so skip.
                 root._pickerOpen = true
                 input.focus = false
             }
@@ -4068,11 +4318,13 @@ text: root._stagingActive
             root._pickerTarget = "search"
             if (!wasSearch) return // FTS: no WebView teardown happened
             root._pickerOpen = false
-            // The WebView slides back with its document intact (it was parked,
-            // not destroyed). Re-populate the candidate surface for whatever is
-            // in the box now (suggestions for a typed query, or history when
-            // empty): the _suggWords/_suggMode state survives, but re-querying
-            // ensures the results are fresh after a possible group change.
+            // The WebView was parked, not destroyed, so its document is still
+            // there; just re-arm inlineWebReady in case it was toggled off.
+            root.inlineWebReady = true
+            // Re-populate the candidate surface for whatever is in the box now
+            // (suggestions for a typed query, or history when empty). The
+            // _suggWords/_suggMode state survives, but re-querying ensures the
+            // results are fresh after the picker round trip.
             // Exception: a Search-scope selection that started a lookup owns the
             // surface — do not re-query suggestions over the incoming article.
             if (root._pickerStartedLookup) {

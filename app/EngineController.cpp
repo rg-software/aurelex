@@ -2310,6 +2310,64 @@ int EngineController::visibleBottom() const
 #endif
 }
 
+int EngineController::displayHeight() const
+{
+#if defined(Q_OS_ANDROID)
+    return QJniObject::callStaticMethod<jint>(
+        "org/aurelex/pocket/dictionary/AurelexActivity",
+        "getDisplayHeight",
+        "()I");
+#else
+    return 0;
+#endif
+}
+
+bool EngineController::imeActuallyVisible() const
+{
+#if defined(Q_OS_ANDROID)
+    return QJniObject::callStaticMethod<jboolean>(
+        "org/aurelex/pocket/dictionary/AurelexActivity",
+        "isImeActuallyVisible",
+        "()Z");
+#else
+    return false;
+#endif
+}
+
+int EngineController::androidSdkInt() const
+{
+#if defined(Q_OS_ANDROID)
+    return QJniObject::callStaticMethod<jint>(
+        "org/aurelex/pocket/dictionary/AurelexActivity",
+        "getSdkInt",
+        "()I");
+#else
+    return 0;
+#endif
+}
+
+void EngineController::hideLaunchSplash() const
+{
+#if defined(Q_OS_ANDROID)
+    QJniObject::callStaticMethod<void>(
+        "org/aurelex/pocket/dictionary/AurelexActivity",
+        "hideLaunchSplash",
+        "()V");
+#endif
+}
+
+bool EngineController::isImeAnimationOpen() const
+{
+#if defined(Q_OS_ANDROID)
+    return QJniObject::callStaticMethod<jboolean>(
+        "org/aurelex/pocket/dictionary/AurelexActivity",
+        "isImeAnimationOpen",
+        "()Z");
+#else
+    return false;
+#endif
+}
+
 void EngineController::playAudio(const QString &url) {
 #if defined(Q_OS_ANDROID)
     // JNI passthrough to AurelexActivity.playAudio(String) — Android's
@@ -3025,25 +3083,21 @@ void EngineController::applySystemBarAppearance()
 // split screen and a foldable unfolding, none of which are guaranteed to resize
 // the window either.
 //
-// The emit is unconditional (unlike updateSystemDark's compare-and-emit on the
-// same tick): the pad QML derives from these values must converge even when a
-// poll sampled a mid-animation transient, so a stuck value survives at most one
-// 500ms interval. Five JNI int reads per tick; _refreshInsets is idempotent.
+// The compare-and-emit shape matches updateSystemDark on the same tick: read, diff,
+// notify. Costs four JNI int reads per 500ms tick, and the emit only fires on an
+// actual change.
 void EngineController::pollInsets()
 {
-    const int now[5] = { systemInsetTop(), systemInsetBottom(),
-                         systemInsetLeft(), systemInsetRight(),
-                         visibleBottom() };
-    // Deliberately no early-out: the pad QML derives from these values must
-    // converge even when a poll sampled a mid-animation transient (a resize
-    // or an IME transition in flight). Re-emitting every tick re-runs the
-    // idempotent _refreshInsets, so a stuck transient survives at most one
-    // interval. Five JNI int reads per 500ms tick.
+    const int now[4] = { systemInsetTop(), systemInsetBottom(),
+                         systemInsetLeft(), systemInsetRight() };
+    if (now[0] == m_insets[0] && now[1] == m_insets[1] &&
+        now[2] == m_insets[2] && now[3] == m_insets[3]) {
+        return;
+    }
     m_insets[0] = now[0];
     m_insets[1] = now[1];
     m_insets[2] = now[2];
     m_insets[3] = now[3];
-    m_insets[4] = now[4];
     emit insetsChanged();
 }
 

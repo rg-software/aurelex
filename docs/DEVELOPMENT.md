@@ -45,10 +45,18 @@ The repository rules for agents and contributors live in `AGENTS.md`. Key rules:
 ## Building the app
 
 The app is a Qt Quick/WebView Android app built from `app/`.
-Requirements: JDK 17, Android SDK + NDK r30, Qt 6.9.3 android + desktop kits, vcpkg deps
-(`zlib bzip2 liblzma lzo fmt xapian`), and **PowerShell 7 (`pwsh`)** — the script
+Requirements: JDK 17, Android SDK + NDK r30, Qt 6.9.3 android + desktop kits (6.10.x regresses input focus and the accessibility tree — see docs/TESTING.md), vcpkg deps
+(`zlib bzip2 liblzma lzo fmt xapian`), and **PowerShell 7 (`pwsh`)** - the script
 uses PS7-only syntax and UTF-8 characters; running it under the legacy
-`powershell` 5.1 misdecodes the UTF-8 and fails to parse. On a fresh clone,
+`powershell` 5.1 misdecodes the UTF-8 and fails to parse. Qt 6.9.3 is the
+working kit: 6.10.x fixes QTBUG-140897 (first-tap keyboard on Android 16) but
+regresses input focus and the Android accessibility tree (bisected; see
+docs/TESTING.md), and our tree carries an app-side reshow for the 140897
+abort instead. Install via aqt, e.g.
+`aqt install-qt windows desktop 6.9.3 win64_msvc2022_64` and
+`aqt install-qt windows android 6.9.3 android_arm64_v8a` into `C:\Qt\6.9.3`
+(modules: `qtwebview qtshadertools qt5compat`; QML/Quick/Tools ship in the base).
+`app/build.ps1` defaults to `C:\Qt\6.9.3` and honors `$env:AURELEX_QT_BASE`. On a fresh clone,
 populate the engine submodule first (`git submodule update --init`, or clone
 with `--recursive`), apply the engine patches, then run the one-shot build
 script:
@@ -398,7 +406,7 @@ the Qt surface only; the Android strings are the separate, already key-based
 `app/android/res/values*/strings.xml` (see "Android-managed strings").
 
 **Finding a string.** Grep the two files above, or — for "does this text already
-exist, and where?" — read the catalog: `app/i18n/aurelex.ru.ts` lists every
+exist, and where?" - read the catalog: `app/i18n/aurelex.ru.ts` lists every
 source string with its `filename`/`line` and context, and `linguist.exe`
 (`C:\Qt\6.9.3\msvc2022_64\bin`) opens it as a searchable table. The `.ts` is a
 generated inventory, not an editing surface (see the rules below).
