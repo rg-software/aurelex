@@ -126,13 +126,16 @@ ApplicationWindow {
     // double-apply.
     property int _kbdPad: 0
     property real _insetDpr: Screen.devicePixelRatio > 0 ? Screen.devicePixelRatio : 1
-    // Settle-then-rekick for the fake IME state (Qt 6.9.3: a show issued
+    // Settle-then-reshow for the fake IME state (Qt 6.9.3: a show issued
     // during layout is cancelled post-layout and nothing paints). Armed on
     // EVERY query-field focus gain (tap or programmatic return) and firing
-    // early (~150 ms: after layout settles, usually before anything paints),
-    // so the blur+refocus replaces the in-flight show request invisibly.
-    // One-shot per gain (see _lastRekickMs): exactly one extra show request
-    // per focus gain, never a loop.
+    // early (~150 ms: after layout settles). The reshow is a bare
+    // Qt.inputMethod.show() — NOT a blur+refocus: 6.9.3's
+    // hasValidFocusObject() visibility gate guards only the Java->Qt JNI
+    // callbacks, never the show path, so a redundant show on an already
+    // painted keyboard (fast OEMs) is a system no-op instead of a visible
+    // kill+reshow. One-shot per gain (see _lastRekickMs): exactly one extra
+    // show request per focus gain, never a loop.
     property bool _imeBackstopArmed: false
     // Timestamp (ms) of the last query-field focus gain. Lets the settled-hide
     // clearing below distinguish a fresh tap (don't touch) from a focus left
@@ -143,9 +146,9 @@ ApplicationWindow {
     // actually up and then dismissed — never for a slow first show (which
     // would otherwise lose its focus while still waiting to paint).
     property bool _imeWasVisibleSinceGain: false
-    // Timestamp (ms) of the last backstop re-kick. Gains within the window
-    // after a re-kick are the re-kick's own doing — they must not re-arm,
-    // or the backstop loops forever (re-kick, regain, re-kick...).
+    // Timestamp (ms) of the last backstop reshow. Kept as a guard so gains
+    // in the window after a reshow never re-arm (belt-and-suspenders: the
+    // show() itself changes no focus, so normally no regain follows).
     property double _lastRekickMs: 0
     Timer {
         id: imeBackstopTimer
@@ -156,13 +159,9 @@ ApplicationWindow {
             root._imeBackstopArmed = false
             root._lastRekickMs = Date.now()
             if (!input.activeFocus && !ftsInput.activeFocus) return
-            if (input.activeFocus) {
-                input.focus = false
-                input.forceActiveFocus()
-            } else {
-                ftsInput.focus = false
-                ftsInput.forceActiveFocus()
-            }
+            // Non-destructive reshow: heals a cancelled first show (the
+            // fresh request paints) and is a no-op over a live keyboard.
+            Qt.inputMethod.show()
         }
     }
     function _refreshInsets() {
@@ -228,7 +227,8 @@ ApplicationWindow {
             if (input.activeFocus) {
                 root._lastFocusGainMs = Date.now()
                 root._imeWasVisibleSinceGain = false
-                // Arm on every gain; skip only gains caused by our own re-kick.
+                // Arm on every gain; skip only gains right after our own
+                // reshow (which changes no focus, so normally none follow).
                 if (Date.now() - root._lastRekickMs > 1500) {
                     root._imeBackstopArmed = true
                     imeBackstopTimer.restart()
@@ -245,7 +245,8 @@ ApplicationWindow {
             if (ftsInput.activeFocus) {
                 root._lastFocusGainMs = Date.now()
                 root._imeWasVisibleSinceGain = false
-                // Arm on every gain; skip only gains caused by our own re-kick.
+                // Arm on every gain; skip only gains right after our own
+                // reshow (which changes no focus, so normally none follow).
                 if (Date.now() - root._lastRekickMs > 1500) {
                     root._imeBackstopArmed = true
                     imeBackstopTimer.restart()
@@ -525,8 +526,8 @@ ApplicationWindow {
             //
             // Focus is granted by entryFocusTimer once the tab-switch layout
             // has settled, so its auto-show goes out post-layout. The gain
-            // arms the backstop like any other gain (its early re-kick lands
-            // pre-paint and stays invisible).
+            // arms the backstop like any other gain (a no-op reshow if the
+            // auto-show painted, a heal if it was cancelled).
             entryFocusTarget = input
             entryFocusTimer.restart()
         }
@@ -1248,6 +1249,12 @@ ApplicationWindow {
                     model: root.navItems
                     delegate: TabButton {
                         id: tabBtn
+                        // Non-focusable: pressing a tab must never steal active
+                        // focus from the query field (same-tab re-tap blurred
+                        // the field, hid the keyboard, and nothing refocused
+                        // — the _navTo early-return only skips navigation).
+                        // Same precedent as the article toolbar buttons below.
+                        focusPolicy: Qt.NoFocus
                         // Five equal nav cells across the TabBar.
                         width: navBar.width / 5
                         height: parent.height
@@ -1284,6 +1291,9 @@ ApplicationWindow {
             // system; does not navigate.
             Button {
                 id: themeBtn
+                // Non-focusable like the tabs: toggling the theme must not
+                // steal the query field's focus (and hide the keyboard).
+                focusPolicy: Qt.NoFocus
                 width: navRow.width - navBar.width
                 height: navRow.height
                 flat: true
