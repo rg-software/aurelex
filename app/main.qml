@@ -129,14 +129,24 @@ ApplicationWindow {
     // Settle-then-reshow for the fake IME state (Qt 6.9.3: a show issued
     // during layout is cancelled post-layout and nothing paints). Armed on
     // EVERY query-field focus gain (tap or programmatic return) and firing
-    // early (~150 ms: after layout settles). The reshow is a bare
+    // LATE (~1000 ms: past the slowest healthy paint — measured 563-601 ms
+    // over 10 Xiaomi/SwiftKey taps — so a healthy show is always done and a
+    // redundant show() over it is a system no-op). The reshow is a bare
     // Qt.inputMethod.show() — NOT a blur+refocus: 6.9.3's
     // hasValidFocusObject() visibility gate guards only the Java->Qt JNI
-    // callbacks, never the show path, so a redundant show on an already
-    // painted keyboard (fast OEMs) is a system no-op instead of a visible
-    // kill+reshow. One-shot per gain (see _lastRekickMs): exactly one extra
-    // show request per focus gain, never a loop.
+    // callbacks, never the show path. One-shot per gain (see _lastRekickMs):
+    // exactly one extra show request per focus gain, never a loop.
+    // The fire is skipped when the keyboard was dismissed after the gain
+    // (_imeDismissedAfterGain: a real visible→hidden transition, the reliable
+    // half of Qt.inputMethod.visible — levels lie, edges don't), so a late
+    // fire can never resurrect a Back-dismissed keyboard; that path stays
+    // with the settled poll-clear below. Race-free by construction: either
+    // guard (unfocused / dismissed) independently stands the timer down.
     property bool _imeBackstopArmed: false
+    // True once the IME was visibly up and then hidden since the last focus
+    // gain (tracks the visible→hidden EDGE, not the level).
+    property bool _imeDismissedAfterGain: false
+    property bool _imeVisiblePrev: false
     // Timestamp (ms) of the last query-field focus gain. Lets the settled-hide
     // clearing below distinguish a fresh tap (don't touch) from a focus left
     // over after the keyboard was dismissed (safe to clear).
@@ -152,7 +162,7 @@ ApplicationWindow {
     property double _lastRekickMs: 0
     // Whether the IME reshow backstop may arm. NEEDED on API 36+: cold-start
     // first shows abort post-layout with nothing painted (verified: no-reshow
-    // probe leaves mInputShown=true with no onShown ever); the +150 ms
+    // probe leaves mInputShown=true with no onShown ever); the late, settled
     // show-only re-request heals it (6.9.3 gates only Java->Qt callbacks, so
     // a redundant show is safe). HARMFUL on API 30-35 and unneeded below 30
     // (first shows paint cleanly; the redundant request races the live
@@ -164,15 +174,16 @@ ApplicationWindow {
     }
     Timer {
         id: imeBackstopTimer
-        interval: 150
+        interval: 1000
         repeat: false
         onTriggered: {
             if (!root._imeBackstopArmed) return
             root._imeBackstopArmed = false
             root._lastRekickMs = Date.now()
             if (!input.activeFocus && !ftsInput.activeFocus) return
-            // Non-destructive reshow: heals a cancelled first show (the
-            // fresh request paints) and is a no-op over a live keyboard.
+            if (root._imeDismissedAfterGain) return
+            // Past the slowest healthy paint and never dismissed since the
+            // gain: the first show died — heal it. No-op over a live keyboard.
             Qt.inputMethod.show()
         }
     }
@@ -239,6 +250,8 @@ ApplicationWindow {
             if (input.activeFocus) {
                 root._lastFocusGainMs = Date.now()
                 root._imeWasVisibleSinceGain = false
+                root._imeDismissedAfterGain = false
+                root._imeVisiblePrev = Qt.inputMethod.visible
                 // Arm on every gain; skip only gains right after our own
                 // reshow (which changes no focus, so normally none follow).
                 if (Date.now() - root._lastRekickMs > 1500
@@ -258,6 +271,8 @@ ApplicationWindow {
             if (ftsInput.activeFocus) {
                 root._lastFocusGainMs = Date.now()
                 root._imeWasVisibleSinceGain = false
+                root._imeDismissedAfterGain = false
+                root._imeVisiblePrev = Qt.inputMethod.visible
                 // Arm on every gain; skip only gains right after our own
                 // reshow (which changes no focus, so normally none follow).
                 if (Date.now() - root._lastRekickMs > 1500
@@ -273,7 +288,15 @@ ApplicationWindow {
     }
     Connections {
         target: Qt.inputMethod
-        function onVisibleChanged() { root._refreshInsets() }
+        function onVisibleChanged() {
+            // Dismiss edge: was up, now down = the user (or system) hid a
+            // shown keyboard after the gain. Latches so the late reshow never
+            // resurrects it; the settled poll-clear owns this path instead.
+            if (root._imeVisiblePrev && !Qt.inputMethod.visible)
+                root._imeDismissedAfterGain = true
+            root._imeVisiblePrev = Qt.inputMethod.visible
+            root._refreshInsets()
+        }
     }
     // Belt-and-suspenders poll for OEMs (Huawei/EMUI) where insets and
     // Qt.inputMethod.visible do not fire reliably: re-evaluate the dock lift
