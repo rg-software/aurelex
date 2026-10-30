@@ -595,6 +595,10 @@ comparable.
 | `5201687` | Motorola ThinkPhone, Android 15 (API 35) | Gboard | Reshow is LOAD-BEARING here too: the first show self-cancels systematically (dock-lift layout churn kills the in-flight animation), not a race — without the reshow Motorola would two-tap like Xiaomi | ✅ |
 | `5201687` | Motorola ThinkPhone, Android 15 (API 35) | Gboard | Search→FTS transfer with reshow: keyboard rides through, FTS focused, dock flush; return symmetric | ✅ |
 | `fe90aae` | Motorola ThinkPhone, Android 15 (API 35) | Gboard | Real typing works (typed text + suggestions); adb `input text` + submit path verified | ✅ |
+| no-reshow probe (uncommitted) | Motorola ThinkPhone, Android 15 (API 35) | Gboard | H2 WINS: with the reshow disabled, 3/3 taps paint with a clean 4-event signature (req,req,cancel,shown — the cancel is benign request redundancy, one survivor paints). The reshow was the racer, not the healer | ✅ |
+| API-gated reshow (uncommitted) | Motorola ThinkPhone, Android 15 (API 35) | Gboard | `getSdkInt` → QML gate (`sdk==0‖<30‖>=36`): API 35 disarms, taps keep the clean 4-event signature — gate works | ✅ |
+| API-gated reshow (uncommitted) | Motorola ThinkPhone, Android 15 (API 35) | Gboard | Search→FTS transfer: single cycle (req,req,cancel,shown), keyboard rides through, FTS focused, dock flush — the transfer dip is gone with the reshow | ✅ |
+| API-gated reshow (uncommitted) | Motorola ThinkPhone, Android 15 (API 35) | Gboard | 6 rapid taps (~250 ms cadence): mid-history messy but converges `mInputShown=true` — last tap wins and paints, no dead state | ✅ |
 
 ### Checklist for a new device / keyboard
 

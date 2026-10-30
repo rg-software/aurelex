@@ -435,6 +435,8 @@ public:
     Q_INVOKABLE int displayHeight() const;
     // Actual system IME visibility (instantaneous, no probe).
     Q_INVOKABLE bool imeActuallyVisible() const;
+    // Raw Android API level (0 on desktop/unreadable).
+    Q_INVOKABLE int androidSdkInt() const;
 
 signals:
     void dictCountChanged();

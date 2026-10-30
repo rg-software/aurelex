@@ -331,6 +331,19 @@ public class AurelexActivity extends QtActivity {
     }
 
     /**
+     * Raw Android API level (Build.VERSION.SDK_INT), 0 when unreadable.
+     * Lets QML gate OEM/API-specific workarounds (e.g. the IME reshow is
+     * needed where first shows abort, harmful where they paint cleanly).
+     */
+    public static int getSdkInt() {
+        try {
+            return android.os.Build.VERSION.SDK_INT;
+        } catch (Exception e) {
+            return 0;
+        }
+    }
+
+    /**
      * Bottom (px, window coordinates) of the visible display frame — the line
      * above which the keyboard does not reach. -1 when unreadable.
      */
