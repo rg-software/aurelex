@@ -151,14 +151,15 @@ ApplicationWindow {
     // show() itself changes no focus, so normally no regain follows).
     property double _lastRekickMs: 0
     // Whether the IME reshow backstop may arm. Proven NEEDED where first
-    // shows abort (API 36+: post-layout abort; API <30: unknown, kept as the
-    // safe default since a redundant show is a no-op but a missing heal
-    // two-taps). Proven HARMFUL on API 30-35: first shows paint cleanly and
-    // the reshow's redundant request races the live animation into a visible
-    // kill+reshow (measured: no-reshow build paints with a single onShown).
+    // shows abort (API 36+: post-layout abort). Proven HARMFUL on API 30-35:
+    // first shows paint cleanly and the reshow's redundant request races the
+    // live animation into a visible kill+reshow (measured: no-reshow build
+    // paints with a single onShown). API <30 starts DISARMED pending Huawei
+    // abort-rate data (same reasoning: don't ship a racer before an abort is
+    // observed); re-arm to `sdk < 30 ||` if Huawei aborts.
     property bool _imeReshowEnabled: {
         const sdk = engine.androidSdkInt()
-        return sdk === 0 || sdk < 30 || sdk >= 36
+        return sdk >= 36
     }
     Timer {
         id: imeBackstopTimer
