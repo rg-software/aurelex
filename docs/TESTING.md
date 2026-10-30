@@ -581,6 +581,16 @@ comparable.
 | `webview-smoothness` (uncommitted) | Huawei (DUM0219B15000653), Android 10 (API 29) | Gboard | Toolbar is **under** the keyboard (obscured, invisible) — dock lift not working on API 29 / adjust=pan path | 🔶 |
 | `webview-smoothness` (uncommitted) | Huawei (DUM0219B15000653), Android 10 (API 29) | Gboard | FTS tab does not auto-focus/show keyboard on entry (manual tap needed); Search tab does | 🔶 |
 | `webview-smoothness` (uncommitted) | Huawei (DUM0219B15000653), Android 10 (API 29) | SwiftKey | Same as Gboard on this device (toolbar under keyboard, FTS no auto-focus) | 🔶 |
+| `fe90aae` | Motorola ThinkPhone, Android 15 (API 35) | Gboard | Cold launch: Search tab, no autofocus/keyboard, history intact | ✅ |
+| `fe90aae` | Motorola ThinkPhone, Android 15 (API 35) | Gboard | 10× tap→paint: 10/10 clean `onShown`, zero `PHASE_WM_ABORT_SHOW_IME_POST_LAYOUT` — backstop never needed on this device (re-kick fires blindly at +150 ms but harmless) | ✅ |
+| `fe90aae` | Motorola ThinkPhone, Android 15 (API 35) | Gboard | Tap → keyboard up, dock flush above keyboard, no gap (earlier gap report was pre-lift-code state — withdrawn) | ✅ |
+| `fe90aae` | Motorola ThinkPhone, Android 15 (API 35) | Gboard | Search→Dicts hides keyboard; return refocuses + keyboard up; Groups/Favs clean, keyboard down | ✅ |
+| `fe90aae` | Motorola ThinkPhone, Android 15 (API 35) | Gboard | Search→FTS: keyboard rides through (transfer, no dip); FTS field focused. FTS submit → results, keyboard hides | ✅ |
+| `fe90aae` | Motorola ThinkPhone, Android 15 (API 35) | Gboard | FTS result tap → Search lookup; suggestion tap → article renders (Лингво EN-RU), keyboard down, toolbar shown | ✅ |
+| `fe90aae` | Motorola ThinkPhone, Android 15 (API 35) | Gboard | Same-tab re-tap is a no-op (focus, keyboard, dock undisturbed) | ✅ |
+| `fe90aae` | Motorola ThinkPhone, Android 15 (API 35) | Gboard | Rotation ⇄ with/without keyboard: layout correct, no corruption; rotation dismisses keyboard (system behavior), re-tap restores; landscape tap works | ✅ |
+| `fe90aae` | Motorola ThinkPhone, Android 15 (API 35) | Gboard | Frame scan (4 fps) of tap flow: keyboard up stable, no hide/show dip detected; dock flush in all kb-up states | ✅ |
+| `fe90aae` | Motorola ThinkPhone, Android 15 (API 35) | Gboard | Real typing works (typed text + suggestions); adb `input text` + submit path verified | ✅ |
 
 ### Checklist for a new device / keyboard
 
@@ -602,10 +612,15 @@ table above.
 13. **Group picker open/close with an article open** — article persists, no flash.
 14. **Rotate (portrait ⇄ landscape) with article open** — dock visible, article survives, scroll resets to top (expected).
 15. **Capture evidence** — screen recording of launch; `adb logcat` grep for `PHASE_*`, `STATUS_TIMEOUT`, `onStartInput event aborted`, `ime probe`.
+16. **Abort-rate measurement** — 10× tap→Back cycles; count clean `onShown` vs `PHASE_WM_ABORT_SHOW_IME_POST_LAYOUT` per tap (cleared logcat each cycle). Decides per-device backstop necessity.
+17. **Blink eye test per flow** — tap, Search↔FTS, return; screenshot or frame-scan (4 fps) the dock/keyboard boundary for hide/show dips.
+18. **FTS-field flows** — empty-entry auto-focus, submit→results→keyboard hides, result→lookup→article.
+19. **Same-tab re-tap** — must be a no-op (focus, keyboard, dock undisturbed).
+20. **Dock-gap method** — screenshot; keyboard top edge vs dock bottom edge in px (e.g. pixel-column scan); report flush / gap px / overlap.
 
 ### Notes on device-specific behaviour
 
-- **Motorola (API 35)**: visible gap between lifted toolbar and keyboard (possibly Motorola-specific). Needs a measurement (px) and a device-specific pad tweak if it reproduces on Huawei too. (Dock lifts automatically because API 35 uses `adjust=resize`.)
+- **Motorola (API 35)**: dock verified flush above Gboard 2026-10-30 (`fe90aae`: tap flow, Search→FTS transfer, all kb-up states — screenshots). The earlier gap report was pre-lift-code state and is withdrawn. 10/10 taps paint clean (`onShown`, zero post-layout aborts) — the backstop never fires usefully here; per the decision tree this supports gating the re-kick to API 36+ (pending Huawei data). Device default IME is SwiftKey; the matrix run switched to Gboard (installed) for comparability with older rows.
 - **Huawei (API 29)**: focus-based fallback lifted the dock (nav row y=2055→y=1149, verified via uiautomator) but was reverted in 6e764c1 pending the Qt upgrade; re-apply per `openspec/changes/toolbar-above-keyboard` task 2.0. EMUI ignores `adjust=resize` and reports no IME insets, so the lift is focus-driven with a fixed 40% pad.
 - **Xiaomi (API 36) - platform desync (open investigation)**: three visibility signals transiently disagree: IME inset `visible=true` (truth per earlier runs) vs. `mInputShown` vs. actual IME window paint (`policy showing=false`). On a single tap the log shows Qt's show cancelled at `PHASE_WM_POST_LAYOUT_NOTIFY_CONTROLS_CHANGED`, then a system `CONTROLS_CHANGED` re-request that takes ~440 ms or fails to paint. The keyboard *does* paint on the second tap. Attribution unknown (device desync, not Qt timing - `policy showing=false` is unreliable per earlier runs; a bare `Qt.inputMethod.show()` was already seen dying at `PHASE_CLIENT_REPORT_REQUESTED_VISIBLE_TYPES`). Tracker IDs for the eventual bug report: `PHASE_WM_POST_LAYOUT_NOTIFY_CONTROLS_CHANGED`, `PHASE_CLIENT_REPORT_REQUESTED_VISIBLE_TYPES`, `PHASE_CLIENT_ANIMATION_CANCEL`, `PHASE_WM_GET_CONTROL_WITH_LEASH`/`STATUS_TIMEOUT`. Consistent across Gboard and SwiftKey.
 - **Xiaomi (API 36) - toolbar behind keyboard (confirmed 2026-10-29, Qt 6.10.3)**: with the lift code reverted, the dock does NOT rise — the manifest sets no `windowSoftInputMode` and Qt's default does not resize the window on any tested device (API 29/35/36). So the manual `_kbdPad` lift (`toolbar-above-keyboard`) is needed everywhere, not just on API ≤ 29. The earlier "dock lifts automatically via resize" belief is withdrawn — those observations were made with lift code present.
