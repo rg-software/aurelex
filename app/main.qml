@@ -186,17 +186,24 @@ ApplicationWindow {
             root._imeBackstopArmed = false
             root._lastRekickMs = Date.now()
             if (!input.activeFocus && !ftsInput.activeFocus) return
-            // Dismissed since the gain (was inset-visible, now hidden): hands
-            // off to the poll-clear below, never resurrects.
-            if (root._insetSeenSinceGain) return
-            // Settled visibility check. Stand down ONLY over a settled live
-            // keyboard: insets visible with no open animation. A stuck cancel
-            // keeps its animation open (WM leash lingers) with nothing
-            // painted — heal that with a fresh request (a re-tap proves it
-            // paints). A healthy show always finishes its animation long
-            // before this fire (slowest measured paint ~600 ms vs +1000 ms),
-            // so an open animation here is stuck by physics, not tuning.
-            if (engine.imeActuallyVisible() && !engine.isImeAnimationOpen()) return
+            // The latch below means "was inset-visible", NOT "dismissed" — a
+            // sustained fake reservation sets it too. So consult current
+            // visibility FIRST and the latch only inside the hidden branch:
+            // hidden + was-visible = genuinely dismissed (poll-clear owns it,
+            // never resurrect); hidden + never-visible = classic abort (heal).
+            if (engine.imeActuallyVisible()) {
+                // Settled visibility check. Stand down ONLY over a settled
+                // live keyboard: visible with no open animation. A stuck
+                // cancel keeps its animation open (WM leash lingers) with
+                // nothing painted — heal that with a fresh request (a re-tap
+                // proves it paints). A healthy show always finishes its
+                // animation long before this fire (slowest measured paint
+                // ~600 ms vs +1000 ms), so an open animation here is stuck
+                // by physics, not tuning.
+                if (!engine.isImeAnimationOpen()) return
+            } else if (root._insetSeenSinceGain) {
+                return
+            }
             // Focused, no settled live keyboard: the first show died (or its
             // animation wedged) — heal it.
             Qt.inputMethod.show()
