@@ -9,5 +9,5 @@
 
 ## 2. Validation on target devices
 
-- [ ] 2.1 Run the device matrix (Motorola API 35, Huawei API 29): launch, lookup, tab round trip, picker round trip; confirm no flash and no black blink
+- [ ] 2.1 Device matrix: Motorola API 35 DONE for launch, lookup, tab round trip (article survives, no re-render flash; launch black flashes fixed + frame-verified — splash overlay, WebView canvas paint). Group-picker round trip with article still to verify on device. Huawei API 29 fully pending.
 - [x] 2.2 Confirm `openspec validate webview-smooth-navigation` passes

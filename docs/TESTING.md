@@ -560,6 +560,33 @@ whenever a run on a new device/keyboard/commit produces a new finding. The
 checklist below is the recipe to repeat on each device so the matrix stays
 comparable.
 
+### Definitive behavior (declared 2026-10-30, `webview-smoothness@e408351`)
+
+The behavior below is verified on Motorola (API 35) and accepted as the
+spec for all devices; per-bucket deviations are noted. Correct the code to
+match this section, not the other way around.
+
+- Keyboard up ⟺ query tab active AND its field focused AND (content empty OR
+  explicit tap). Back always hides; re-tap always re-shows; same-tab re-tap is
+  a no-op (dock buttons are `Qt.NoFocus`, `_navTo` early-returns).
+- First shows are fragile everywhere (our lift churn cancels them on API 30+,
+  WM aborts them on API 36): a blind non-destructive `Qt.inputMethod.show()`
+  reshow at +150 ms heals them. Armed on focus gains ONLY where needed —
+  API `<30` and `>=36` (`engine.androidSdkInt()` gate); API 30–35 paints
+  cleanly and the reshow was proven to *cause* the double-show there.
+- Query↔query switches transfer focus directly (no blur); keyboard rides
+  through in a single show cycle. FTS results route to Search via `_showArticle`
+  with article state set BEFORE the tab switch (the reverse order armed entry
+  focus+suggest, which concealed the article).
+- Dock lifts by measured occlusion where insets report (flush), 40%
+  focus-estimate where they don't (Huawei — clears keyboard, exact flush not
+  achievable there by construction).
+- Cold launch shows no black frame (Java splash overlay to first QML frame;
+  WebView canvas painted the theme color from Java).
+- Query: Qt 6.9.3 stays. 6.10.x regresses focus + a11y tree (bisected);
+  6.8-open-source predates the 16 KB fix (D2); 6.12 deferred (no matching fix
+  in notes, AGP 9 migration).
+
 ### Observations
 
 | Commit | Device | Keyboard | Observation | Status |
@@ -582,7 +609,7 @@ comparable.
 | `webview-smoothness` (uncommitted) | Huawei (DUM0219B15000653), Android 10 (API 29) | Gboard | FTS tab does not auto-focus/show keyboard on entry (manual tap needed); Search tab does | 🔶 |
 | `webview-smoothness` (uncommitted) | Huawei (DUM0219B15000653), Android 10 (API 29) | SwiftKey | Same as Gboard on this device (toolbar under keyboard, FTS no auto-focus) | 🔶 |
 | `fe90aae` | Motorola ThinkPhone, Android 15 (API 35) | Gboard | Cold launch: Search tab, no autofocus/keyboard, history intact | ✅ |
-| `fe90aae` | Motorola ThinkPhone, Android 15 (API 35) | Gboard | 10× tap→paint: 10/10 clean `onShown`, zero `PHASE_WM_ABORT_SHOW_IME_POST_LAYOUT` — backstop never needed on this device (re-kick fires blindly at +150 ms but harmless) | ✅ |
+| `fe90aae` | Motorola ThinkPhone, Android 15 (API 35) | Gboard | 10× tap→paint: 10/10 clean `onShown`, zero `PHASE_WM_ABORT_SHOW_IME_POST_LAYOUT` — backstop never needed on this device (re-kick fires blindly at +150 ms but harmless) [SUPERSEDED: the no-reshow probe showed the re-kick *caused* the visible churn; reshow now gated off on API 30–35 — see API-gated rows] | ✅ |
 | `fe90aae` | Motorola ThinkPhone, Android 15 (API 35) | Gboard | Tap → keyboard up, dock flush above keyboard, no gap (earlier gap report was pre-lift-code state — withdrawn) | ✅ |
 | `fe90aae` | Motorola ThinkPhone, Android 15 (API 35) | Gboard | Search→Dicts hides keyboard; return refocuses + keyboard up; Groups/Favs clean, keyboard down | ✅ |
 | `fe90aae` | Motorola ThinkPhone, Android 15 (API 35) | Gboard | Search→FTS: keyboard rides through (transfer, no dip); FTS field focused. FTS submit → results, keyboard hides | ✅ |
@@ -616,7 +643,7 @@ table above.
 4. **Dismiss keyboard** (Back) — keyboard hides; toolbar returns to bottom; no phantom lift.
 5. **Tap search box again** — keyboard reopens (tap-after-dismiss).
 6. **Search → Dicts → Search** — keyboard hides on Dicts, resumes on Search; no wedge.
-7. **Search → FTS → Search** — keyboard close/reopen acceptable; no wedge.
+7. **Search → FTS → Search** — keyboard rides through (transfer, single cycle); no wedge. (Historical rows saying "close/reopen acceptable" describe the pre-transfer behavior.)
 8. **Dicts → Search** — input focused, keyboard shown.
 9. **Dicts → FTS** — input focused, keyboard shown.
 10. **Repeated taps on the search box** — keyboard reopens each time.
@@ -625,7 +652,7 @@ table above.
 13. **Group picker open/close with an article open** — article persists, no flash.
 14. **Rotate (portrait ⇄ landscape) with article open** — dock visible, article survives, scroll resets to top (expected).
 15. **Capture evidence** — screen recording of launch; `adb logcat` grep for `PHASE_*`, `STATUS_TIMEOUT`, `onStartInput event aborted`, `ime probe`.
-16. **Abort-rate measurement** — 10× tap→Back cycles; count clean `onShown` vs `PHASE_WM_ABORT_SHOW_IME_POST_LAYOUT` per tap (cleared logcat each cycle). Decides per-device backstop necessity.
+16. **Abort-rate measurement** — 10× tap→Back cycles; count clean `onShown` vs `PHASE_WM_ABORT_SHOW_IME_POST_LAYOUT` per tap (cleared logcat each cycle) plus FULL per-tap `ImeTracker` history (a last-N window hides pre-paint cancels). Decides per-device reshow necessity; on API 30–35 the reshow is disarmed by the `androidSdkInt` gate.
 17. **Blink eye test per flow** — tap, Search↔FTS, return; screenshot or frame-scan (4 fps) the dock/keyboard boundary for hide/show dips.
 18. **FTS-field flows** — empty-entry auto-focus, submit→results→keyboard hides, result→lookup→article.
 19. **Same-tab re-tap** — must be a no-op (focus, keyboard, dock undisturbed).
@@ -633,13 +660,13 @@ table above.
 
 ### Notes on device-specific behaviour
 
-- **Motorola (API 35)**: dock verified flush above Gboard 2026-10-30 (`fe90aae`: tap flow, Search→FTS transfer, all kb-up states — screenshots). The earlier gap report was pre-lift-code state and is withdrawn. 10/10 taps paint clean (`onShown`, zero post-layout aborts) — the backstop never fires usefully here; per the decision tree this supports gating the re-kick to API 36+ (pending Huawei data). Device default IME is SwiftKey; the matrix run switched to Gboard (installed) for comparability with older rows.
+- **Motorola (API 35)**: dock verified flush above Gboard 2026-10-30 (tap flow, Search→FTS transfer, all kb-up states — screenshots). The earlier gap report was pre-lift-code state and is withdrawn. Update 2026-10-30: the no-reshow probe proved first shows paint cleanly here and the reshow's redundant request *caused* the double-show + transfer dip (H2 wins). Reshow is now gated off on API 30–35 (`engine.androidSdkInt()`; `d0aaf83`); taps converge with a clean 4-event signature, transfer is a single cycle, rapid taps converge painted. Device default IME is SwiftKey; matrix runs used Gboard (installed) for comparability with older rows.
 - **Huawei (API 29)**: focus-based fallback lifted the dock (nav row y=2055→y=1149, verified via uiautomator) but was reverted in 6e764c1 pending the Qt upgrade; re-apply per `openspec/changes/toolbar-above-keyboard` task 2.0. EMUI ignores `adjust=resize` and reports no IME insets, so the lift is focus-driven with a fixed 40% pad.
 - **Xiaomi (API 36) - platform desync (open investigation)**: three visibility signals transiently disagree: IME inset `visible=true` (truth per earlier runs) vs. `mInputShown` vs. actual IME window paint (`policy showing=false`). On a single tap the log shows Qt's show cancelled at `PHASE_WM_POST_LAYOUT_NOTIFY_CONTROLS_CHANGED`, then a system `CONTROLS_CHANGED` re-request that takes ~440 ms or fails to paint. The keyboard *does* paint on the second tap. Attribution unknown (device desync, not Qt timing - `policy showing=false` is unreliable per earlier runs; a bare `Qt.inputMethod.show()` was already seen dying at `PHASE_CLIENT_REPORT_REQUESTED_VISIBLE_TYPES`). Tracker IDs for the eventual bug report: `PHASE_WM_POST_LAYOUT_NOTIFY_CONTROLS_CHANGED`, `PHASE_CLIENT_REPORT_REQUESTED_VISIBLE_TYPES`, `PHASE_CLIENT_ANIMATION_CANCEL`, `PHASE_WM_GET_CONTROL_WITH_LEASH`/`STATUS_TIMEOUT`. Consistent across Gboard and SwiftKey.
 - **Xiaomi (API 36) - toolbar behind keyboard (confirmed 2026-10-29, Qt 6.10.3)**: with the lift code reverted, the dock does NOT rise — the manifest sets no `windowSoftInputMode` and Qt's default does not resize the window on any tested device (API 29/35/36). So the manual `_kbdPad` lift (`toolbar-above-keyboard`) is needed everywhere, not just on API ≤ 29. The earlier "dock lifts automatically via resize" belief is withdrawn — those observations were made with lift code present.
 - **Xiaomi (API 36) - a11y tree: BISECTED 2026-10-29.** Qt 6.9.3 build (fresh rebuild, same device, same app code) returns the full tree (22 nodes, all Accessible.name IDs); Qt 6.10.3 build returns 10 native nodes, zero Qt nodes. The kit is the only variable: confirmed Qt 6.10 regression in the Android accessibility bridge. Next: file Qt bug with this comparison; check 6.11/6.12 notes for a fix before any further kit move. Until resolved, automated UI tests do not work on the 6.10.3 build.
 - **Qt 6.12 LTS evaluation (2026-10-30, deferred)**: checked 6.12.0 release notes for our two 6.10 regressions (a11y tree gone, focus stealing). Found only adjacent Android a11y work (`a11y Android: Listen to ACTION_SHOW_ON_SCREEN`, ListView viewport interface) — nothing matching our symptoms. 6.12 also brings migration risk: AGP 9.2.1/Gradle 9.5.1, CMake 3.25+, qtwebengine/qtpdf unbundled. Install not attempted: download.qt.io metadata downloads are flaking (even 6.10.3 queries fail; public mirrors are stale at ≤6.7.3). Revisit when (a) mirrors cooperate AND (b) a release note or bug-report response indicates a fix. Until then the working kit stays 6.10.3 (keyboard) with the a11y/focus regressions tracked separately.
-- **Xiaomi (API 36) - keyboard backstop (Qt 6.9.3, verified 2026-10-30)**: the first-tap show is cancelled post-layout (\PHASE_WM_ABORT_SHOW_IME_POST_LAYOUT\) and nothing paints (fake state). Fix: on focus gain, arm a 400 ms single-shot; on fire, synchronous blur+refocus gives a fresh post-layout show that paints. Single tap now opens the keyboard; re-taps after Back work because a settled-hide focus clear (poll, \!Qt.inputMethod.visible\ + 1 s since gain) drops the retained focus, making every tap a fresh gain. Re-arm suppression (\_lastRekickMs\, 1.5 s window) keeps the backstop one-shot — without it the re-kick re-arms itself into a 400 ms show-request loop. Latch (\_oemReportsIme\) removed: it made the fallback session-dependent (dead pad after the first visible report even when later reads go stale).
+- **Xiaomi (API 36) - keyboard backstop (Qt 6.9.3, verified 2026-10-30; mechanism updated 2026-10-30)**: the first-tap show is cancelled post-layout (\PHASE_WM_ABORT_SHOW_IME_POST_LAYOUT\) and nothing paints (fake state). Fix: on focus gain, arm a 150 ms single-shot; on fire, a bare `Qt.inputMethod.show()` re-request heals it (the 6.9.3 visibility gate guards only Java→Qt callbacks, never the show path, so a redundant show over a live keyboard is a system no-op). History of the mechanism: 400 ms blur+refocus first (worked on Xiaomi, flickered on fast painters) → 150 ms blur+refocus (pre-paint on Xiaomi, mid-paint collapse on Motorola) → 150 ms show-only (harmless everywhere) → API-gated (`<30‖>=36` arm, 30–35 disarmed after the H2 probe). Single tap opens the keyboard; re-taps after Back work because a settled-hide focus clear (poll, \!Qt.inputMethod.visible\ + 1 s since gain) drops the retained focus, making every tap a fresh gain. Re-arm suppression (\_lastRekickMs\, 1.5 s window) keeps the backstop one-shot. OPEN: the show-only variant is still unverified on Xiaomi (all Xiaomi verification used blur+refocus) — needs a 5-tap re-check.
 - **Xiaomi (API 36) - return flow + tap-heal (Qt 6.9.3, verified 2026-10-30) (Qt 6.9.3, verified 2026-10-30)**: backstop arms ONLY on user taps (a \_programmaticFocus\ flag marks tab-return gains, whose auto-show went out settled); return-to-Search uses a deferred 150 ms focus instead of callLater so it lands after the tab press/release cycle. Verified: FTS(no kb)->Search ends focused (occasionally no paint on a wedged auto-show); tapping the already-focused field re-requests the IME and the keyboard paints — no stuck state, every wedge heals within one tap. FTS entry verified 2026-10-30: empty results -> deferred focus paints keyboard, dock lifts. Query-tab transfer verified 2026-10-30: no blur between Search<->FTS (direct focus move, keyboard rides); entry timer stands down when transfer worked. A brief (~450 ms) hide/show dip remains on switches with keyboard up (Qt hides on the blur half before the gain show lands); the backstop rescues it. Full [ime] transition trace in tasks/design notes. Poll-clear narrowed to post-dismiss only (\_imeWasVisibleSinceGain\): it previously raced slow first shows and cleared legitimate pending focus. Early re-kick (400 ms -> 150 ms): the late backstop blurred an already-painted keyboard (appear/disappear/reappear flicker on tab switches); firing pre-paint replaces the in-flight request invisibly. Verified: single onShown, no churn loop. Dock lifts flush above Gboard on both paths.
 - **Xiaomi (API 36) - toolbar lift verified 2026-10-29 (Qt 6.10.3 + re-applied lift)**: single tap → keyboard paints, dock flush above Gboard, no gap, clean `onShown` with no `PHASE_*` cancellation. The measured-occlusion path works on insets-reporting OEMs.
 

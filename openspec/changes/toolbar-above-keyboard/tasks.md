@@ -15,6 +15,7 @@
 ## 2. Huawei fallback + validation
 
 - [x] 2.0 Re-apply the Huawei fallback per design.md ("Huawei fallback (verified)"): focus-based 40% pad, `onQueryTab` gating, focus-change + `Qt.inputMethod.visible` triggers, unconditional 250 ms poll; verify nav row lifts on Huawei again
-- [ ] 2.1 Measure the gap on Motorola (API 35) and Huawei (API 29); apply a device-tested correction if needed. Xiaomi (API 36) verified 2026-10-29/30: dock flush above Gboard, single tap, clean `onShown` (screenshot). Return-to-Search verified: focused + keyboard + lifted dock. Query-tab transfer verified: Search->FTS keeps keyboard up with a brief dip, ends focused+painted+lifted; entry timer stands down when transfer worked.
-- [ ] 2.2 Run the device matrix (Motorola API 35, Huawei API 29, Xiaomi API 36): keyboard open/hide, tab switches, rotation; confirm dock visible and tappable above the keyboard
+- [x] 2.1 Motorola half DONE 2026-10-30: dock flush above Gboard in all kb-up states (screenshots); the earlier gap report was pre-lift-code state — withdrawn, no correction needed. Huawei half still open (needs dock-gap measurement on device).
+- Historical (Xiaomi API 36, verified 2026-10-29/30, blur+refocus era): dock flush above Gboard, single tap, clean `onShown` (screenshot). Return-to-Search verified: focused + keyboard + lifted dock. Query-tab transfer verified: Search->FTS kept keyboard up; entry timer stood down when transfer worked. NOTE: show-only reshow + API gate landed after — Xiaomi needs a re-check.
+- [ ] 2.2 Device matrix: Motorola API 35 DONE (`bc80b9a`, `1a2df4c`, follow-ups through `e408351` — taps, transfers, re-tap no-op, rotation, FTS flows, launch flashes; see TESTING.md). Huawei API 29 + Xiaomi API 36 still pending (Xiaomi: show-only reshow re-check; Huawei: full matrix).
 - [x] 2.3 Confirm `openspec validate toolbar-above-keyboard` passes
