@@ -674,6 +674,22 @@ table above.
 19. **Same-tab re-tap** — must be a no-op (focus, keyboard, dock undisturbed).
 20. **Dock-gap method** — screenshot; keyboard top edge vs dock bottom edge in px (e.g. pixel-column scan); report flush / gap px / overlap.
 
+### Known issues (accepted, not scheduled)
+
+- **Huawei API ≤29, FTS→Search top-area flicker (2–3 frames, self-settling).**
+  FTS→Search only (Dicts/Groups→Search clean); keyboard state and tab content
+  don't matter; fresh-app correlated (restart returns it, later stops). Two
+  probes negative: transfer suppression (focus-move cycle innocent) and
+  WebView bg-paint listener disable (per-layout repaint innocent). Suspects
+  remaining are EMUI-composer mid-transition frames, uninstrumentable here
+  (no `screenrecord` binary, 0.5 s burst sampling, no ImeTracker on EMUI).
+  Cosmetic, no wedge, no data loss. Reopen at full priority if ever observed
+  on API 30+. See also the minSdk question below.
+- **minSdk 28 under question.** The only open items needing API ≤29 are the
+  fallback lift (works, approximate by construction) and the flicker above.
+  The 16 KB effort targets modern Play; keeping 28 costs matrix time on a
+  dying bucket. Product decision, not taken.
+
 ### Notes on device-specific behaviour
 
 - **Motorola (API 35)**: dock verified flush above Gboard 2026-10-30 (tap flow, Search→FTS transfer, all kb-up states — screenshots). The earlier gap report was pre-lift-code state and is withdrawn. Update 2026-10-30: the no-reshow probe proved first shows paint cleanly here and the reshow's redundant request *caused* the double-show + transfer dip (H2 wins). Reshow is now gated off on API 30–35 (`engine.androidSdkInt()`; `d0aaf83`); taps converge with a clean 4-event signature, transfer is a single cycle, rapid taps converge painted. Device default IME is SwiftKey; matrix runs used Gboard (installed) for comparability with older rows.
