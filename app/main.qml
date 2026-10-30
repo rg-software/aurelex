@@ -393,7 +393,14 @@ ApplicationWindow {
                 // on suspend but Qt issues no new gain on resume, so nothing
                 // re-shows it. Request once per resume when it was up at
                 // suspend; the backstop (armed below) heals a stubborn show.
+                // BOUNDED to shortly after a resume edge: without this the
+                // sticky snapshot resurrects Back-dismissed keyboards
+                // indefinitely (kbUp stays true until something un-writes it,
+                // and a dismissed keyboard looks identical to a suspended
+                // one). 3 s covers settle+paint with margin; afterwards the
+                // user is driving again (tap = fresh gain).
                 if (root._kbUpAtSuspend && !engine.imeActuallyVisible()
+                    && (Date.now() - root._lastResumeMs < 3000)
                     && root._suspendedQueryFocus
                     && ((root._suspendedQueryFocus === input && root.state === 0)
                         || (root._suspendedQueryFocus === ftsInput && root.state === 4))
