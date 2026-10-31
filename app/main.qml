@@ -4289,6 +4289,10 @@ text: root._stagingActive
 
                 Button {
                     id: ftsGroupButton
+                    // Never take keyboard focus (same as the Search tab's group
+                    // button): the press must not steal focus before openAt's
+                    // explicit blur, which would desync the field's frame.
+                    focusPolicy: Qt.NoFocus
                     Layout.fillWidth: true
                     Layout.preferredWidth: 3
                     Layout.minimumWidth: 0
@@ -4460,11 +4464,16 @@ text: root._stagingActive
         function openAt(index, target) {
             root._pickerTarget = target !== undefined ? target : "search"
             root._pickerStartedLookup = false
+            // Gate the poll's focus/keyboard restore (and the hygiene clear)
+            // for BOTH tabs while the modal is up: the keyboard must stay
+            // down under the dialog, and the stashed query focus restores on
+            // close. (The FTS path used to skip this, so the poll re-granted
+            // focus + keyboard over the open modal.)
+            root._pickerOpen = true
             if (root._pickerTarget === "search") {
                 // Park the inline WebView (via _articleParked) so its native
                 // surface can't sit above the modal dialog. Its document and JS
                 // state survive; closing slides it back with zero navigations.
-                root._pickerOpen = true
                 input.focus = false
             }
             groupPicker.open()
@@ -4472,8 +4481,8 @@ text: root._stagingActive
         onClosed: {
             const wasSearch = root._pickerTarget === "search"
             root._pickerTarget = "search"
-            if (!wasSearch) return // FTS: no WebView teardown happened
             root._pickerOpen = false
+            if (!wasSearch) return // FTS: no WebView teardown happened
             // The WebView was parked, not destroyed, so its document is still
             // there; just re-arm inlineWebReady in case it was toggled off.
             root.inlineWebReady = true
