@@ -472,8 +472,15 @@ ApplicationWindow {
                 // the user put the keyboard away on purpose.
                 root._suspendedQueryFocus = null
                 root._kbUpAtSuspend = false
-                if (input.activeFocus) input.focus = false
-                if (ftsInput.activeFocus) ftsInput.focus = false
+                // Forcing the focus cycle (so the next tap re-gains and
+                // re-arms) is only needed where re-taps must heal aborts
+                // (API 36+, same gate as the reshow): everywhere else a tap
+                // on the still-focused field re-requests natively, and
+                // clearing stole a focus the user never dismissed.
+                if (root._imeReshowEnabled) {
+                    if (input.activeFocus) input.focus = false
+                    if (ftsInput.activeFocus) ftsInput.focus = false
+                }
             }
             root._refreshInsets()
         }
@@ -1325,6 +1332,15 @@ ApplicationWindow {
         root.ftsAppliedWhole = root.ftsWholeWordsOn
         root.ftsSearching = true
         engine.ftsSearch(ftsInput.displayText, root.ftsWholeWordsOn ? 0 : 2, gid)
+        // A submitted query owns the surface (results, then an article):
+        // drop field focus like a Search lookup does, so the keyboard hides
+        // and the field doesn't keep it. Re-tapping re-gains natively.
+        // Null the suspend stash too (like _blurActive does): otherwise the
+        // poll's resume re-assert sees stash+unfocused and re-grants ~130 ms
+        // later, resurrecting focus+keyboard right after submit.
+        root._suspendedQueryFocus = null
+        root._kbUpAtSuspend = false
+        if (ftsInput.activeFocus) ftsInput.focus = false
     }
     // Clear the result list when an input differs from the one the shown results
     // were produced from, so the list never disagrees with the visible inputs.
@@ -4341,6 +4357,12 @@ text: root._stagingActive
 
                 Button {
                     id: ftsSearchButton
+                    // Non-focusable like the nav tabs: pressing it must not
+                    // steal field focus on press (which races _runFts' blur
+                    // below — the field keeps focus through the press, so
+                    // the blur lands deterministically and the keyboard
+                    // hides with the results).
+                    focusPolicy: Qt.NoFocus
                     Layout.preferredWidth: 48
                     leftPadding: 12
                     rightPadding: 12
