@@ -243,9 +243,14 @@ public class AurelexActivity extends QtActivity {
      * minimize on this stack, so the poll reads this instead for resume edges.
      */
     private static volatile boolean sForeground = true;
+    private static volatile int sSuspendCount = 0;
 
     public static boolean isAppForeground() {
         return sForeground;
+    }
+
+    public static int getSuspendCount() {
+        return sSuspendCount;
     }
 
     public static void stopAudio() {
@@ -1351,6 +1356,7 @@ public class AurelexActivity extends QtActivity {
     @Override
     protected void onPause() {
         sForeground = false;
+        sSuspendCount++;
         super.onPause();
     }
 

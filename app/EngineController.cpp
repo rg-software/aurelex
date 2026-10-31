@@ -2380,6 +2380,18 @@ bool EngineController::isAppForeground() const
 #endif
 }
 
+int EngineController::suspendCount() const
+{
+#if defined(Q_OS_ANDROID)
+    return QJniObject::callStaticMethod<jint>(
+        "org/aurelex/pocket/dictionary/AurelexActivity",
+        "getSuspendCount",
+        "()I");
+#else
+    return 0;
+#endif
+}
+
 void EngineController::playAudio(const QString &url) {
 #if defined(Q_OS_ANDROID)
     // JNI passthrough to AurelexActivity.playAudio(String) — Android's

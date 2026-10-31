@@ -443,6 +443,9 @@ public:
     Q_INVOKABLE bool isImeAnimationOpen() const;
     // False between the activity's onPause and onResume.
     Q_INVOKABLE bool isAppForeground() const;
+    // Incremented in onPause (even when no QML tick runs): the first tick
+    // after ANY suspend sees the change.
+    Q_INVOKABLE int suspendCount() const;
 
 signals:
     void dictCountChanged();

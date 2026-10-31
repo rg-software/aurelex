@@ -328,7 +328,6 @@ ApplicationWindow {
     // perpetually postponed the timer). Converges by brute force; stops the
     // tick focus lands. Only onto the stash field's own tab, never into a
     // modal picker, and never over a rendered article.
-    property bool _wasForeground: true
     // One-shot per resume for the keyboard-restore show below: reset on
     // suspend and once the keyboard paints, so flapping foreground reads
     // can't stack redundant requests.
@@ -337,9 +336,14 @@ ApplicationWindow {
     // only foreground ticks write it). Decides keyboard-restore on resume
     // independently of focus-restore: a Back-dismissed keyboard stays down.
     property bool _kbUpAtSuspend: false
-    // Last resume-edge timestamp: the settled poll-clear stays out of the
-    // way briefly after a resume so it can't strip a focus the restore is
-    // (re)establishing.
+    // Last suspend count seen: resume bookkeeping keys off this, NOT fg
+    // edges (the poll is dead while backgrounded, so a fg-based edge usually
+    // never fires — hygiene then runs on stale clocks and the poll-clear
+    // assassinates a survived focus ~1.5 s post-return).
+    property int _lastSuspendSeen: -1
+    // Last resume timestamp: the settled poll-clear stays out of the way
+    // briefly after a resume so it can't strip a focus the restore is
+    // (re)establishing. Set from the counter change below (same reason).
     property double _lastResumeMs: 0
     // How long the keyboard has been continuously hidden while focused
     // (foreground ticks only; reset on visible, on gain, and on resume).
@@ -364,15 +368,18 @@ ApplicationWindow {
             // clears — and the clock resets here on every background tick).
             if (!fg) {
                 root._kbHiddenSinceMs = 0
-                root._wasForeground = false
                 return
             }
-            // Stable foreground = this tick AND the previous one both fg.
-            // Flap-true blips during suspend never satisfy it, so neither
-            // the clear below nor its stash wipe can fire off a blip.
-            const fgStable = root._wasForeground
-            if (!fgStable) root._lastResumeMs = Date.now()
-            root._wasForeground = true
+            // Suspend/resume detection via the event counter. onPause
+            // increments even when no tick runs, so unlike a fg edge this
+            // cannot be missed: the first tick after ANY suspend sees it.
+            const sc = engine.suspendCount()
+            if (sc !== root._lastSuspendSeen) {
+                root._lastSuspendSeen = sc
+                root._lastResumeMs = Date.now()
+                root._kbHiddenSinceMs = 0
+                root._resumeKbRequested = false
+            }
             // Freeze the keyboard-up snapshot while backgrounded (only
             // foreground ticks write it): at resume it tells a suspended
             // keyboard apart from a Back-dismissed one. STICKY-SET ONLY —
@@ -418,11 +425,6 @@ ApplicationWindow {
                     Qt.inputMethod.show()
                 }
             }
-            root._wasForeground = fg
-            // Foreground-only below: while backgrounded the window is hidden
-            // and inset reads are meaningless — neither the latch, nor the
-            // one-shot reset, nor the clear may run off them.
-            if (!fg) return
             // Inset visibility latch (see _insetSeenSinceGain): the only
             // was-visible signal trusted anywhere. Qt.inputMethod.visible is
             // never latched — its levels fake-flap through aborts.
@@ -455,11 +457,11 @@ ApplicationWindow {
             // NOTE 3: hidden must be SUSTAINED (not one racy pre-pause tick):
             // minimize hides the keyboard just before onPause lands, which is
             // indistinguishable from a Back-dismiss in a single sample.
-            // NOTE 4: foreground must be STABLE (this tick and the previous
-            // one): flap-true blips during suspend never satisfy it, so the
-            // clear and its stash wipe can't fire off a blip.
+            // NOTE 4: resume is detected by suspend counter, not fg edges
+            // (the poll is dead while backgrounded, so edges usually never
+            // fire): the counter block above refreshes the grace clock on the
+            // first tick after ANY suspend, flap or not.
             if (engine.isAppForeground()
-                && fgStable
                 && (Date.now() - root._lastResumeMs > 2500)
                 && (Date.now() - root._kbHiddenSinceMs > 1500)
                 && (root.state === 0 || root.state === 4) && !root._pickerOpen
