@@ -431,7 +431,6 @@ ApplicationWindow {
             if (engine.imeActuallyVisible()) {
                 root._insetVisibleStreak++
                 if (root._insetVisibleStreak >= 2) root._insetSeenSinceGain = true
-                root._resumeKbRequested = false
                 root._kbHiddenSinceMs = 0
             } else {
                 root._insetVisibleStreak = 0
